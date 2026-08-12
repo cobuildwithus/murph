@@ -319,6 +319,88 @@ const VALID_DELETION_MODES = new Set([
   "local-reference-delete",
 ]);
 
+const HOSTED_ACCOUNT_DELETION_OWNER_ORDER = [
+  "dependents",
+  "intermediate",
+  "referrals-purchases",
+  "owners",
+  "member",
+] as const;
+
+const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
+  "prisma.hosted_vault_share",
+  "prisma.hosted_physical_note",
+  "prisma.hosted_mailbox_payload",
+  "prisma.hosted_ingress_latency_trace",
+  "prisma.hosted_usage_credit_grant",
+  "prisma.hosted_address_book_contact",
+  "prisma.hosted_computer_handoff",
+  "prisma.hosted_account_group_invite",
+  "prisma.hosted_account_group_membership",
+  "prisma.hosted_account_group_billing_ref",
+  "prisma.hosted_account_group_plan_capacity",
+  "prisma.hosted_group_disclosure_grant",
+  "prisma.hosted_thread_route",
+  "prisma.clinical_record_retrieval_request",
+  "prisma.device_webhook_trace",
+  "prisma.device_token_audit",
+  "prisma.device_sync_companion_capture_receipt",
+  "prisma.device_sync_dirty_payload",
+  "prisma.device_sync_dirty_connection",
+  "prisma.device_sync_signal",
+  "prisma.device_oauth_session",
+  "prisma.hosted_linq_invite_delivery",
+  "prisma.hosted_mailbox_item",
+  "prisma.hosted_usage_credit_entry",
+  "prisma.hosted_address_book_projection",
+  "prisma.hosted_computer_run",
+  "prisma.hosted_group_disclosure_permission",
+  "prisma.hosted_group_member",
+  "prisma.clinical_record_retrieval_run",
+  "prisma.device_connection",
+  "prisma.hosted_usage_referral",
+  "prisma.hosted_usage_credit_purchase",
+  "prisma.hosted_mailbox_lane_counter",
+  "prisma.hosted_user_crypto_audit",
+  "prisma.hosted_user_crypto_envelope",
+  "prisma.hosted_group_sponsorship_authorization",
+  "prisma.hosted_ai_usage",
+  "prisma.hosted_ai_usage_period",
+  "prisma.hosted_product_feedback",
+  "prisma.hosted_codex_auth_connection",
+  "prisma.hosted_inference_connection",
+  "prisma.hosted_linq_daily_state",
+  "prisma.hosted_invite",
+  "prisma.hosted_consent_event",
+  "prisma.hosted_consent_grant",
+  "prisma.hosted_workspace",
+  "prisma.hosted_phone_call",
+  "prisma.hosted_member_email_authorization",
+  "prisma.hosted_member_subscription_checkout",
+  "prisma.hosted_member_billing_ref",
+  "prisma.hosted_account_group",
+  "prisma.hosted_group",
+  "prisma.hosted_pending_group_setup",
+  "prisma.hosted_member_routing",
+  "prisma.hosted_sensitive_action_challenge",
+  "prisma.hosted_web_session",
+  "prisma.hosted_member_identity",
+  "prisma.hosted_thread_container",
+  "prisma.hosted_connected_app_connect_intent",
+  "prisma.hosted_connected_apps_session",
+  "prisma.clinical_record_oauth_session",
+  "prisma.clinical_record_connect_intent",
+  "prisma.clinical_record_connection",
+  "prisma.device_connect_intent",
+  "prisma.device_agent_session",
+  "prisma.device_browser_assertion_nonce",
+  "prisma.hosted_web_internal_request_nonce",
+  "prisma.device_provider_application",
+  "prisma.hosted_member",
+] as const;
+
+const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 14;
+
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
   serviceMocks.acquireHostedPrivyPhoneTransferPhoneLocksTx.mockReset();
@@ -1317,6 +1399,166 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
+  it("returns every exact deletion count from the fixed dependency owners", async () => {
+    const rawDeletionCounts = Object.fromEntries(
+      HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS.map((key, index) => [
+        key,
+        BigInt(index + 11),
+      ]),
+    );
+    const rawDeletionOwnerCalls: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
+    const operationOrder: string[] = [];
+    const projectionMemberId = "member_group_projection";
+    const groupJoinDeliveryRows = [{
+      sourceRef: buildHostedLinqInviteSignupEffectId({
+        memberId: projectionMemberId,
+        occurredAt: "2026-08-01T14:00:00.000Z",
+        sourceEventDigest: "a".repeat(32),
+      }),
+    }];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCountResults: {
+        hostedGroupJoinOutreach: 1_002,
+        hostedLinqDelivery: 1_001,
+      },
+      groupJoinDeliveryRows,
+      groupJoinOutreachOwnedGroupIds: ["hgrp_count_owner"],
+      groupJoinOutreachRows: [{ id: "hgrpjoa_count_owner" }],
+      liveSignupDeliveryRows: [],
+      onTransaction: () => undefined,
+      operationOrder,
+      rawDeletionCounts,
+      rawDeletionOwnerCalls,
+      rawDeletionQueries,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(rawDeletionOwnerCalls).toEqual(HOSTED_ACCOUNT_DELETION_OWNER_ORDER);
+    const actualRawCountKeys = rawDeletionQueries.flatMap((query) =>
+      readHostedAccountDeletionRawCountKeys(query.sql)
+    );
+    expect(actualRawCountKeys).toEqual(HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS);
+    expect(new Set(actualRawCountKeys).size).toBe(
+      HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS.length,
+    );
+    expect(result.deletedCounts).toEqual({
+      ...Object.fromEntries(
+        HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS.map((key, index) => [
+          key,
+          index + 11,
+        ]),
+      ),
+      "prisma.hosted_group_join_outreach": 1_002,
+      "prisma.hosted_group_join_outreach_delivery": 1_001,
+    });
+
+    const referralOwnerIndex = operationOrder.indexOf(
+      "delete-owner:referrals-purchases",
+    );
+    const outreachDeliveryIndex = operationOrder.findIndex(
+      (operation, index) =>
+        index > referralOwnerIndex && operation === "delete:hostedLinqDelivery",
+    );
+    const outreachIndex = operationOrder.indexOf("delete:hostedGroupJoinOutreach");
+    const ownersIndex = operationOrder.indexOf("delete-owner:owners");
+    expect(referralOwnerIndex).toBeGreaterThanOrEqual(0);
+    expect(outreachDeliveryIndex).toBeGreaterThan(referralOwnerIndex);
+    expect(outreachIndex).toBeGreaterThan(outreachDeliveryIndex);
+    expect(ownersIndex).toBeGreaterThan(outreachIndex);
+  });
+
+  it("keeps terminal erasure statement count constant at admitted member, computer, and device cardinality", async () => {
+    const getStoredConnectionAccountForUser = vi.fn().mockResolvedValue(null);
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: { getStoredConnectionAccountForUser },
+    });
+
+    const runDeletionShape = async (cardinality: number): Promise<string[]> => {
+      const ownedMemberIds = Array.from(
+        { length: cardinality },
+        (_value, index) => `member_owned_${index}`,
+      );
+      const deviceConnections = Array.from(
+        { length: cardinality },
+        (_value, index) => ({
+          id: `dsc_bound_${index}`,
+          provider: "junction",
+          providerAccountBlindIndex: `hbidx:device:v1:${index}`,
+          sources: [],
+        }),
+      );
+      const hostedComputerRunRows = Array.from(
+        { length: cardinality },
+        (_value, index) => makeHostedComputerRunRowForDeletionTest({
+          expiresAt: new Date("2025-01-01T00:00:00.000Z"),
+          id: `hcr_bound_${index}`,
+          kernelProfileName: null,
+          kernelSessionId: null,
+          status: "completed",
+        }),
+      );
+      const projectionMemberIds = ["member_123", ...ownedMemberIds];
+      const groupJoinDeliveryRows = projectionMemberIds.map((memberId, index) => ({
+        sourceRef: buildHostedLinqInviteSignupEffectId({
+          memberId,
+          occurredAt: "2026-08-02T14:00:00.000Z",
+          sourceEventDigest: index.toString(16).padStart(32, "0"),
+        }),
+      }));
+      const terminalStatementCalls: string[] = [];
+      const prisma = createHostedAccountDeletionPrismaForTest({
+        deviceConnections,
+        groupJoinDeliveryRows,
+        groupJoinOutreachOwnedGroupIds: ["hgrp_statement_bound"],
+        groupJoinOutreachRows: [{ id: "hgrpjoa_statement_bound" }],
+        hostedComputerRunRows,
+        liveSignupDeliveryRows: [],
+        onTransaction: () => undefined,
+        ownedThreadContainerMemberIds: ownedMemberIds,
+        terminalStatementCalls,
+        transactionDeviceConnections: deviceConnections,
+        transactionOwnedThreadContainerMemberIds: ownedMemberIds,
+      });
+
+      await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+      return terminalStatementCalls;
+    };
+
+    const single = await runDeletionShape(1);
+    const maximum = await runDeletionShape(32);
+
+    expect(single).toEqual(maximum);
+    expect(maximum).toEqual([
+      "queryRaw:dependents",
+      "queryRaw:intermediate",
+      "queryRaw:referrals-purchases",
+      "executeRaw",
+      "findMany:hostedMemberIdentity",
+      "findMany:hostedGroup",
+      "findMany:hostedGroupJoinOutreach",
+      "findMany:hostedLinqDelivery",
+      "deleteMany:hostedLinqDelivery",
+      "findMany:hostedLinqDelivery",
+      "updateMany:hostedLinqDailyState",
+      "deleteMany:hostedGroupJoinOutreach",
+      "queryRaw:owners",
+      "queryRaw:member",
+    ]);
+    expect(maximum).toHaveLength(
+      HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND,
+    );
+  });
+
   it("deletes the linked support marker while retaining its anonymous issue", async () => {
     const retainedIssue =
       "a relative named Rowan says their glucose sensor stopped syncing after a metformin change at the downtown clinic.";
@@ -1332,25 +1574,28 @@ describe("deleteHostedAccountData", () => {
         summary: retainedIssue,
       },
     ];
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
       productFeedbackRows,
+      rawDeletionQueries,
     });
 
-    await deleteHostedAccountData({
+    const result = await deleteHostedAccountData({
       memberId: "member_123",
       prisma,
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(deleteCalls).toContainEqual({
-      model: "hostedProductFeedback",
-      where: {
-        memberId: "member_123",
-      },
-    });
+    const owners = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "owners",
+    );
+    expect(owners.sql).toContain("DELETE FROM hosted_product_feedback AS feedback");
+    expect(owners.sql).toContain(
+      "feedback.member_id IN (SELECT id FROM target_members)",
+    );
+    expect(result.deletedCounts["prisma.hosted_product_feedback"]).toBe(1);
     expect(productFeedbackRows).toEqual([{
       id: "product_feedback_detail",
       memberId: null,
@@ -1489,6 +1734,7 @@ describe("deleteHostedAccountData", () => {
     // group cascade removed the outreach row first, the correlation would survive
     // both the group's deletion and the participant's later account deletion.
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       groupJoinOutreachOwnedGroupIds: ["hgrp_owned"],
@@ -1496,6 +1742,7 @@ describe("deleteHostedAccountData", () => {
         id: "hgrpjoa_owned",
       }],
       onTransaction: () => undefined,
+      operationOrder,
     });
 
     await deleteHostedAccountData({
@@ -1526,8 +1773,8 @@ describe("deleteHostedAccountData", () => {
     );
     expect(outreachDeliveryIndex)
       .toBeLessThan(models.indexOf("hostedGroupJoinOutreach"));
-    expect(models.indexOf("hostedGroupJoinOutreach"))
-      .toBeLessThan(models.indexOf("hostedGroup"));
+    expect(operationOrder.indexOf("delete:hostedGroupJoinOutreach"))
+      .toBeLessThan(operationOrder.indexOf("delete:hostedGroup"));
   });
 
   it("locks an affected participant before the drain and reprojects its daily signup marker", async () => {
@@ -1578,6 +1825,7 @@ describe("deleteHostedAccountData", () => {
     // participant's phone blind index, so the deletion promise is only true if it
     // resolves that identity before removing the identity rows.
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
@@ -1585,6 +1833,7 @@ describe("deleteHostedAccountData", () => {
         id: "hgrpjoa_opaque",
       }],
       onTransaction: () => undefined,
+      operationOrder,
     });
 
     await deleteHostedAccountData({
@@ -1606,9 +1855,8 @@ describe("deleteHostedAccountData", () => {
       },
     ]));
 
-    const models = deleteCalls.map((call) => call.model);
-    expect(models.indexOf("hostedGroupJoinOutreach"))
-      .toBeLessThan(models.indexOf("hostedMemberIdentity"));
+    expect(operationOrder.indexOf("delete:hostedGroupJoinOutreach"))
+      .toBeLessThan(operationOrder.indexOf("delete:hostedMemberIdentity"));
     // The registry must also declare the store, or the deletion report and the
     // Settings promise would omit data that was in fact removed.
     expect(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((store) => store.slug))
@@ -1619,10 +1867,12 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes disclosure grants and owned policies before their membership and group owners", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
+      operationOrder,
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -1631,30 +1881,32 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(deleteCalls).toEqual(expect.arrayContaining([
-      {
-        model: "hostedGroupDisclosureGrant",
-        where: { OR: [
-          { membership: { memberId: "member_123" } },
-          { membership: { group: { ownerMemberId: "member_123" } } },
-          { membership: { group: { runtimeMemberId: "member_123" } } },
-        ] },
-      },
-      {
-        model: "hostedGroupDisclosurePermission",
-        where: { group: { OR: [
-          { ownerMemberId: "member_123" },
-          { runtimeMemberId: "member_123" },
-        ] } },
-      },
-    ]));
-    const deletedModels = deleteCalls.map((call) => call.model);
-    expect(deletedModels.indexOf("hostedGroupDisclosureGrant")).toBeLessThan(
-      deletedModels.indexOf("hostedGroupDisclosurePermission"),
+    const dependents = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "dependents",
+    );
+    const intermediate = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "intermediate",
+    );
+    expect(dependents.sql).toContain(
+      "DELETE FROM hosted_group_disclosure_grant AS grant",
+    );
+    expect(dependents.sql).toContain(
+      "membership.member_id IN (SELECT id FROM target_members)",
+    );
+    expect(dependents.sql).toContain(
+      "membership.group_id IN (SELECT id FROM target_groups)",
+    );
+    expect(intermediate.sql).toContain(
+      "DELETE FROM hosted_group_disclosure_permission AS permission",
+    );
+    expect(operationOrder.indexOf("delete:hostedGroupDisclosureGrant")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedGroupDisclosurePermission"),
     );
     for (const owner of ["hostedGroupMember", "hostedGroup"]) {
-      expect(deletedModels.indexOf("hostedGroupDisclosurePermission"))
-        .toBeLessThan(deletedModels.indexOf(owner));
+      expect(operationOrder.indexOf("delete:hostedGroupDisclosurePermission"))
+        .toBeLessThan(operationOrder.indexOf(`delete:${owner}`));
     }
     expect(result.deletedCounts).toMatchObject({
       "prisma.hosted_group_disclosure_grant": 1,
@@ -1663,14 +1915,12 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes usage-credit entries and grants before source and member rows", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    const updateCalls: HostedAccountDeletionPrismaUpdateCall[] = [];
     const operationOrder: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => operationOrder.push("transaction"),
       operationOrder,
-      updateCalls,
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -1685,89 +1935,53 @@ describe("deleteHostedAccountData", () => {
       "prisma.hosted_usage_referral": 2,
       "prisma.hosted_usage_credit_purchase": 1,
     });
-    expect(deleteCalls).toEqual(expect.arrayContaining([
-      {
-        model: "hostedUsageCreditEntry",
-        where: {
-          OR: [
-            { beneficiaryMemberId: "member_123" },
-            { purchase: { beneficiaryMemberId: "member_123" } },
-          ],
-        },
-      },
-      {
-        model: "hostedUsageCreditGrant",
-        where: {
-          entry: {
-            OR: [
-              { beneficiaryMemberId: "member_123" },
-              {
-                purchase: {
-                  beneficiaryMemberId: "member_123",
-                },
-              },
-            ],
-          },
-        },
-      },
-      {
-        model: "hostedUsageReferral",
-        where: {
-          OR: [
-            { beneficiaryMemberId: "member_123" },
-            {
-              AND: [
-                {
-                  OR: [
-                    { beneficiaryMemberId: "member_123" },
-                    { introducedMemberId: "member_123" },
-                    { referrerMemberId: "member_123" },
-                    { targetContainerMemberId: "member_123" },
-                  ],
-                },
-                { status: { not: "rewarded" } },
-              ],
-            },
-          ],
-        },
-      },
-      {
-        model: "hostedUsageCreditPurchase",
-        where: {
-          beneficiaryMemberId: "member_123",
-        },
-      },
-    ]));
-    expect(updateCalls).toContainEqual({
-      data: {
-        firstHumanMessageAt: null,
-        humanMessageCount: 0,
-        introducedMemberId: null,
-        lastHumanMessageAt: null,
-        nonReferrerMessageCount: 0,
-        observedEventKeysJson: expect.anything(),
-        observedSpeakerKeysJson: expect.anything(),
-        referrerMemberId: null,
-        referrerSubjectKey: null,
-        sourceConversationJson: expect.anything(),
-        targetContainerMemberId: null,
-      },
-      model: "hostedUsageReferral",
-      where: {
-        AND: [
-          {
-            OR: [
-              { beneficiaryMemberId: "member_123" },
-              { introducedMemberId: "member_123" },
-              { referrerMemberId: "member_123" },
-              { targetContainerMemberId: "member_123" },
-            ],
-          },
-          { NOT: { beneficiaryMemberId: "member_123" } },
-        ],
-        status: "rewarded",
-      },
-    });
+    const dependents = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "dependents",
+    );
+    const intermediate = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "intermediate",
+    );
+    const referrals = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "referrals-purchases",
+    );
+    expect(dependents.sql).toContain("DELETE FROM hosted_usage_credit_grant AS grant");
+    expect(dependents.sql).toContain(
+      "entry.beneficiary_member_id IN (SELECT id FROM target_members)",
+    );
+    expect(dependents.sql).toContain(
+      "purchase.beneficiary_member_id IN (SELECT id FROM target_members)",
+    );
+    expect(intermediate.sql).toContain(
+      "DELETE FROM hosted_usage_credit_entry AS entry",
+    );
+    expect(referrals.sql).toContain("UPDATE hosted_usage_referral AS referral");
+    for (const assignment of [
+      "first_human_message_at = NULL",
+      "human_message_count = 0",
+      "introduced_member_id = NULL",
+      "last_human_message_at = NULL",
+      "non_referrer_message_count = 0",
+      "observed_event_keys_json = NULL",
+      "observed_speaker_keys_json = NULL",
+      "referrer_member_id = NULL",
+      "referrer_subject_key = NULL",
+      "source_conversation_json = NULL",
+      "target_container_member_id = NULL",
+    ]) {
+      expect(referrals.sql).toContain(assignment);
+    }
+    expect(referrals.sql).toContain("referral.status = 'rewarded'");
+    expect(referrals.sql).toContain(
+      "referral.beneficiary_member_id NOT IN (SELECT id FROM target_members)",
+    );
+    expect(referrals.sql).toContain("DELETE FROM hosted_usage_referral AS referral");
+    expect(referrals.sql).toContain("referral.status <> 'rewarded'");
+    expect(referrals.sql).toContain(
+      "DELETE FROM hosted_usage_credit_purchase AS purchase",
+    );
     expect(operationOrder.indexOf("delete:hostedUsageCreditGrant")).toBeLessThan(
       operationOrder.indexOf("delete:hostedUsageCreditEntry"),
     );
@@ -1877,11 +2091,13 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes owned external-thread container runtimes with the account owner", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => {},
+      operationOrder,
       ownedThreadContainerMemberIds: ["member_thread_container_123"],
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -1902,77 +2118,39 @@ describe("deleteHostedAccountData", () => {
       reason: "account-deleted",
       userId: "member_thread_container_123",
     });
-    expect(deleteCalls).toEqual(expect.arrayContaining([
-      {
-        model: "hostedLinqDelivery",
-        where: {
-          groupJoinOutreachId: null,
-          OR: [
-            {
-              sourceRef: {
-                startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(
-                  "member_123",
-                ),
-              },
-            },
-            {
-              sourceRef: {
-                startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(
-                  "member_thread_container_123",
-                ),
-              },
-            },
-          ],
-          template: {
-            in: ["invite_signup", "invite_signup_fallback"],
-          },
-        },
-      },
-      {
-        model: "hostedThreadRoute",
-        where: {
-          OR: [
-            {
-              containerMemberId: {
-                in: ["member_123", "member_thread_container_123"],
-              },
-            },
-            {
-              container: {
-                ownerMemberId: {
-                  in: ["member_123", "member_thread_container_123"],
-                },
-              },
-            },
-          ],
-        },
-      },
-      {
-        model: "hostedThreadContainer",
-        where: {
-          OR: [
-            {
-              memberId: {
-                in: ["member_123", "member_thread_container_123"],
-              },
-            },
-            {
-              ownerMemberId: {
-                in: ["member_123", "member_thread_container_123"],
-              },
-            },
-          ],
-        },
-      },
-      {
-        model: "hostedMember",
-        where: {
-          id: {
-            in: ["member_123", "member_thread_container_123"],
-          },
-        },
-      },
-    ]));
+    const dependents = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "dependents",
+    );
+    const owners = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "owners",
+    );
+    const member = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "member",
+    );
+    for (const memberId of ["member_123", "member_thread_container_123"]) {
+      expect(dependents.values).toContain(memberId);
+      expect(owners.values).toContain(memberId);
+      expect(member.values).toContain(memberId);
+      expect(dependents.values).toContain(
+        buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
+      );
+    }
+    expect(dependents.sql).toContain("delivery.group_join_outreach_id IS NULL");
+    expect(dependents.sql).toContain(
+      "DELETE FROM hosted_thread_route AS route",
+    );
+    expect(owners.sql).toContain(
+      "DELETE FROM hosted_thread_container AS container",
+    );
+    expect(operationOrder.indexOf("delete:hostedThreadRoute")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedThreadContainer"),
+    );
+    expect(operationOrder.indexOf("delete:hostedThreadContainer")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedMember"),
+    );
     expect(result.deletedCounts["prisma.hosted_linq_invite_delivery"]).toBe(1);
   });
 
@@ -2233,10 +2411,10 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes delivery-time consume stamps with hosted mailbox item rows", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => {},
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -2246,22 +2424,22 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.deletedCounts["prisma.hosted_mailbox_item"]).toBe(1);
-    expect(deleteCalls).toEqual(expect.arrayContaining([
-      {
-        model: "hostedMailboxItem",
-        where: {
-          userId: "member_123",
-        },
-      },
-    ]));
-    expect(deleteCalls.map((call) => call.model)).not.toContain("hostedMailboxItemConsume");
+    const intermediate = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "intermediate",
+    );
+    expect(intermediate.sql).toContain("DELETE FROM hosted_mailbox_item AS item");
+    expect(intermediate.sql).toContain(
+      "item.user_id IN (SELECT id FROM target_members)",
+    );
+    expect(intermediate.sql).not.toContain("hosted_mailbox_item_consume");
   });
 
   it("deletes referral invite claims owned by the introduced member", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => {},
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -2271,14 +2449,14 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.deletedCounts["prisma.hosted_invite"]).toBe(1);
-    expect(deleteCalls).toEqual(expect.arrayContaining([
-      {
-        model: "hostedInvite",
-        where: {
-          memberId: "member_123",
-        },
-      },
-    ]));
+    const owners = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "owners",
+    );
+    expect(owners.sql).toContain("DELETE FROM hosted_invite AS invite");
+    expect(owners.sql).toContain(
+      "invite.member_id IN (SELECT id FROM target_members)",
+    );
   });
 
   it("reports vault-share rows before member-row FK cascades delete them", async () => {
@@ -2819,10 +2997,10 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes sensitive-action challenges explicitly with account data", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -2832,17 +3010,15 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.deletedCounts["prisma.hosted_sensitive_action_challenge"]).toBe(1);
-    expect(deleteCalls).toContainEqual({
-      model: "hostedSensitiveActionChallenge",
-      where: { memberId: "member_123" },
-    });
+    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "owners").sql)
+      .toContain("DELETE FROM hosted_sensitive_action_challenge AS challenge");
   });
 
   it("deletes short-lived hosted device connect intents with account data", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -2852,17 +3028,17 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.deletedCounts["prisma.device_connect_intent"]).toBe(1);
-    expect(deleteCalls).toContainEqual({
-      model: "deviceConnectIntent",
-      where: { memberId: "member_123" },
-    });
+    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "owners").sql)
+      .toContain("DELETE FROM device_connect_intent AS intent");
   });
 
   it("deletes hosted computer-use rows explicitly with account data", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
+      operationOrder,
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -2873,21 +3049,20 @@ describe("deleteHostedAccountData", () => {
 
     expect(result.deletedCounts["prisma.hosted_computer_handoff"]).toBe(1);
     expect(result.deletedCounts["prisma.hosted_computer_run"]).toBe(1);
-    expect(deleteCalls).toContainEqual({
-      model: "hostedComputerHandoff",
-      where: { memberId: "member_123" },
-    });
-    expect(deleteCalls).toContainEqual({
-      model: "hostedComputerRun",
-      where: { memberId: "member_123" },
-    });
+    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "dependents").sql)
+      .toContain("DELETE FROM hosted_computer_handoff AS handoff");
+    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "intermediate").sql)
+      .toContain("DELETE FROM hosted_computer_run AS run");
+    expect(operationOrder.indexOf("delete:hostedComputerHandoff")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedComputerRun"),
+    );
   });
 
   it("deletes hosted phone-call rows explicitly with account data", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
+      rawDeletionQueries,
     });
 
     const result = await deleteHostedAccountData({
@@ -2897,10 +3072,8 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.deletedCounts["prisma.hosted_phone_call"]).toBe(1);
-    expect(deleteCalls).toContainEqual({
-      model: "hostedPhoneCall",
-      where: { memberId: "member_123" },
-    });
+    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "owners").sql)
+      .toContain("DELETE FROM hosted_phone_call AS phone_call");
   });
 
   it("records hosted physical-note rows before member deletion cascades them", async () => {
@@ -2930,10 +3103,10 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes computer-use handoffs before runs", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
+      operationOrder,
     });
 
     await deleteHostedAccountData({
@@ -2942,9 +3115,8 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    const deletedModels = deleteCalls.map((call) => call.model);
-    expect(deletedModels.indexOf("hostedComputerHandoff")).toBeLessThan(
-      deletedModels.indexOf("hostedComputerRun"),
+    expect(operationOrder.indexOf("delete:hostedComputerHandoff")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedComputerRun"),
     );
   });
 
@@ -3065,10 +3237,10 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes device dirty state before signals and connection rows to avoid cascade lock inversion", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       onTransaction: () => undefined,
+      operationOrder,
     });
 
     const result = await deleteHostedAccountData({
@@ -3077,13 +3249,16 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    const deletedModels = deleteCalls.map((call) => call.model);
-    const captureReceiptIndex = deletedModels.indexOf("deviceSyncCompanionCaptureReceipt");
-    const dirtyPayloadIndex = deletedModels.indexOf("deviceSyncDirtyPayload");
-    const dirtyStateIndex = deletedModels.indexOf("deviceSyncDirtyConnection");
-    const signalIndex = deletedModels.indexOf("deviceSyncSignal");
-    const connectionIndex = deletedModels.indexOf("deviceConnection");
-    const providerApplicationIndex = deletedModels.indexOf("deviceProviderApplication");
+    const captureReceiptIndex = operationOrder.indexOf(
+      "delete:deviceSyncCompanionCaptureReceipt",
+    );
+    const dirtyPayloadIndex = operationOrder.indexOf("delete:deviceSyncDirtyPayload");
+    const dirtyStateIndex = operationOrder.indexOf("delete:deviceSyncDirtyConnection");
+    const signalIndex = operationOrder.indexOf("delete:deviceSyncSignal");
+    const connectionIndex = operationOrder.indexOf("delete:deviceConnection");
+    const providerApplicationIndex = operationOrder.indexOf(
+      "delete:deviceProviderApplication",
+    );
 
     expect(result.deletedCounts["prisma.device_sync_companion_capture_receipt"]).toBe(1);
     expect(result.deletedCounts["prisma.device_sync_dirty_payload"]).toBe(1);
@@ -3100,15 +3275,14 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("deletes webhook traces for device connections visible inside the deletion transaction", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const operationOrder: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
       store: {
         getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
       deviceConnections: [
         {
           id: "dsc_before",
@@ -3118,6 +3292,7 @@ describe("deleteHostedAccountData", () => {
       ],
       onTransaction: () => undefined,
       operationOrder,
+      rawDeletionQueries,
       transactionDeviceConnections: [
         {
           id: "dsc_current",
@@ -3134,19 +3309,21 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.deletedCounts["prisma.device_webhook_trace"]).toBe(1);
-    expect(deleteCalls).toContainEqual({
-      model: "deviceWebhookTrace",
-      where: {
-        OR: [
-          {
-            provider: "oura",
-            providerAccountBlindIndex: "hbdi_current",
-          },
-        ],
-      },
-    });
-    expect(operationOrder.filter((entry) => entry.startsWith("executeRaw:")))
-      .toEqual([]);
+    const dependents = requireHostedAccountDeletionRawQuery(
+      rawDeletionQueries,
+      "dependents",
+    );
+    expect(dependents.sql).toContain("DELETE FROM device_webhook_trace AS trace");
+    expect(dependents.sql).toContain(
+      "trace.provider_account_blind_index = owner.provider_account_blind_index",
+    );
+    expect(dependents.values).toContain("oura");
+    expect(dependents.values).toContain("hbdi_current");
+    expect(dependents.values).not.toContain("hbdi_before");
+    expect(operationOrder.indexOf("executeRaw")).toBeGreaterThanOrEqual(0);
+    expect(operationOrder.indexOf("executeRaw")).toBeLessThan(
+      operationOrder.indexOf("delete:deviceWebhookTrace"),
+    );
   });
 
   it("does not acquire deletion-only webhook trace advisory locks", async () => {
@@ -3971,6 +4148,99 @@ describe("deleteHostedAccountData", () => {
   });
 });
 
+type HostedAccountDeletionRawQuery = {
+  owner: string;
+  sql: string;
+  values: readonly unknown[];
+};
+
+function readHostedAccountDeletionRawQueryText(args: readonly unknown[]): string {
+  const query = args[0];
+  if (typeof query === "string") {
+    return query;
+  }
+  if (Array.isArray(query)) {
+    return query.join("?");
+  }
+  if (!query || typeof query !== "object") {
+    return "";
+  }
+  for (const property of ["sql", "text"] as const) {
+    const value = Reflect.get(query, property);
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  const strings = Reflect.get(query, "strings");
+  return Array.isArray(strings) ? strings.join("?") : "";
+}
+
+function readHostedAccountDeletionRawQueryValues(
+  args: readonly unknown[],
+): readonly unknown[] {
+  const query = args[0];
+  if (query && typeof query === "object") {
+    const values = Reflect.get(query, "values");
+    if (Array.isArray(values)) {
+      return values;
+    }
+  }
+  return args.slice(1);
+}
+
+function requireHostedAccountDeletionRawQuery(
+  queries: readonly HostedAccountDeletionRawQuery[],
+  owner: string,
+): HostedAccountDeletionRawQuery {
+  const query = queries.find((candidate) => candidate.owner === owner);
+  expect(query, `missing hosted account deletion owner ${owner}`).toBeDefined();
+  return query!;
+}
+
+function readHostedAccountDeletionRawOwner(sql: string): string | null {
+  return /hosted-account-deletion:([a-z-]+)/.exec(sql)?.[1] ?? null;
+}
+
+function readHostedAccountDeletionRawCountKeys(sql: string): string[] {
+  return Array.from(sql.matchAll(/AS\s+"(prisma\.[^"]+)"/g), (match) => match[1]!);
+}
+
+function hostedAccountDeletionCountKeyToModel(key: string): string {
+  if (
+    key === "prisma.hosted_linq_invite_delivery"
+    || key === "prisma.hosted_group_join_outreach_delivery"
+  ) {
+    return "hostedLinqDelivery";
+  }
+  return key.slice("prisma.".length).replace(
+    /_([a-z])/g,
+    (_match, character: string) => character.toUpperCase(),
+  );
+}
+
+function recordHostedAccountDeletionRawLogicalOrder(input: {
+  countKeys: readonly string[];
+  operationOrder?: string[];
+  owner: string;
+}): void {
+  input.operationOrder?.push(`delete-owner:${input.owner}`);
+  for (const key of input.countKeys) {
+    const model = hostedAccountDeletionCountKeyToModel(key);
+    if (
+      key === "prisma.hosted_vault_share"
+      || key === "prisma.hosted_physical_note"
+    ) {
+      input.operationOrder?.push(`count:${model}`);
+      continue;
+    }
+    if (key === "prisma.hosted_usage_referral") {
+      input.operationOrder?.push("update:hostedUsageReferral");
+      input.operationOrder?.push("delete:hostedUsageReferral");
+      continue;
+    }
+    input.operationOrder?.push(`delete:${model}`);
+  }
+}
 
 function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
@@ -3982,6 +4252,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   connectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   connectedAppsSession?: boolean;
   countResults?: Record<string, number>;
+  deleteCountResults?: Record<string, number>;
   dailyStateUpdates?: unknown[];
   deleteCalls?: HostedAccountDeletionPrismaDeleteCall[];
   deviceConnections?: Array<{
@@ -4005,6 +4276,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
   liveSignupDeliveryRows?: readonly { sourceRef: string | null }[];
   onTransaction: () => void;
   operationOrder?: string[];
+  rawDeletionCounts?: Record<string, bigint | number>;
+  rawDeletionOwnerCalls?: string[];
+  rawDeletionQueries?: HostedAccountDeletionRawQuery[];
+  terminalStatementCalls?: string[];
   productFeedbackRows?: Array<{
     id: string;
     memberId: string | null;
@@ -4030,18 +4305,77 @@ function createHostedAccountDeletionPrismaForTest(input: {
   transactionOwnedThreadContainerMemberIds?: string[];
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
   let transactionCallCount = 0;
+  let terminalDeletionStarted = false;
+  const recordTerminalStatement = (statement: string) => {
+    if (terminalDeletionStarted) {
+      input.terminalStatementCalls?.push(statement);
+    }
+  };
+  const currentDeletionMemberIds = () => Array.from(new Set([
+    "member_123",
+    ...(
+      transactionCallCount >= 2
+        ? input.transactionOwnedThreadContainerMemberIds
+          ?? input.ownedThreadContainerMemberIds
+          ?? []
+        : input.ownedThreadContainerMemberIds ?? []
+    ),
+  ]));
+  const deleteLinkedProductFeedbackRows = (): number | null => {
+    if (!input.productFeedbackRows) {
+      return null;
+    }
+    const memberIds = currentDeletionMemberIds();
+    const retainedRows = input.productFeedbackRows.filter(
+      (row) => row.memberId === null || !memberIds.includes(row.memberId),
+    );
+    const deletedCount = input.productFeedbackRows.length - retainedRows.length;
+    input.productFeedbackRows.splice(
+      0,
+      input.productFeedbackRows.length,
+      ...retainedRows,
+    );
+    return deletedCount;
+  };
+  const readRawDeletionCount = (key: string): bigint | number => {
+    if (Object.hasOwn(input.rawDeletionCounts ?? {}, key)) {
+      return input.rawDeletionCounts![key]!;
+    }
+    const model = hostedAccountDeletionCountKeyToModel(key);
+    if (Object.hasOwn(input.countResults ?? {}, model)) {
+      return input.countResults![model]!;
+    }
+    if (key === "prisma.hosted_usage_referral") {
+      return 2;
+    }
+    if (key === "prisma.hosted_product_feedback") {
+      return deleteLinkedProductFeedbackRows() ?? 1;
+    }
+    if (key === "prisma.device_webhook_trace") {
+      const connections = input.transactionDeviceConnections
+        ?? input.deviceConnections
+        ?? [];
+      return connections.some(
+        (connection) => connection.providerAccountBlindIndex.length > 0,
+      ) ? 1 : 0;
+    }
+    return 1;
+  };
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     count: async () => {
+      recordTerminalStatement(`count:${model}`);
       input.operationOrder?.push(`count:${model}`);
       return input.countResults?.[model] ?? 1;
     },
     deleteMany: async (args) => {
+      recordTerminalStatement(`deleteMany:${model}`);
       input.operationOrder?.push(`delete:${model}`);
       input.deleteCalls?.push({ model, where: args.where });
-      return { count: 1 };
+      return { count: input.deleteCountResults?.[model] ?? 1 };
     },
-    findMany: async (args) => (
-      model === "hostedMemberIdentity"
+    findMany: async (args) => {
+      recordTerminalStatement(`findMany:${model}`);
+      return model === "hostedMemberIdentity"
         ? (input.groupJoinOutreachPhoneLookupKeys ?? []).map((phoneLookupKey) => ({
             phoneLookupKey,
           }))
@@ -4057,9 +4391,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
                 )
                 ? input.liveSignupDeliveryRows ?? []
                 : input.groupJoinDeliveryRows ?? []
-            : []
-    ),
+              : [];
+    },
     updateMany: async (args) => {
+      recordTerminalStatement(`updateMany:${model}`);
       input.operationOrder?.push(`update:${model}`);
       input.updateCalls?.push({
         data: args.data,
@@ -4071,6 +4406,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
     $executeRaw: async (...args: unknown[]) => {
+      recordTerminalStatement("executeRaw");
       input.operationOrder?.push("executeRaw");
       const lockOwner = args.slice(1).find((value): value is string =>
         typeof value === "string" && value.includes(":")
@@ -4081,8 +4417,38 @@ function createHostedAccountDeletionPrismaForTest(input: {
       return 1;
     },
     $queryRaw: async (...args: unknown[]) => {
+      const sql = readHostedAccountDeletionRawQueryText(args);
+      const owner = readHostedAccountDeletionRawOwner(sql);
+      if (owner) {
+        if (owner === "dependents") {
+          terminalDeletionStarted = true;
+        }
+        recordTerminalStatement(`queryRaw:${owner}`);
+        const countKeys = readHostedAccountDeletionRawCountKeys(sql);
+        input.rawDeletionOwnerCalls?.push(owner);
+        input.rawDeletionQueries?.push({
+          owner,
+          sql,
+          values: readHostedAccountDeletionRawQueryValues(args),
+        });
+        recordHostedAccountDeletionRawLogicalOrder({
+          countKeys,
+          operationOrder: input.operationOrder,
+          owner,
+        });
+        const row = Object.fromEntries(
+          countKeys.map((key) => [key, readRawDeletionCount(key)]),
+        );
+        if (owner === "member") {
+          terminalDeletionStarted = false;
+        }
+        return [row];
+      }
+
+      recordTerminalStatement("queryRaw");
       input.operationOrder?.push("queryRaw");
-      const memberIds = uniqueRawQueryStrings(args.slice(1))
+      const values = readHostedAccountDeletionRawQueryValues(args);
+      const memberIds = uniqueRawQueryStrings(values)
         .filter((value) => value.startsWith("member_"));
       for (const memberId of memberIds) {
         input.operationOrder?.push(`queryRaw:${memberId}`);
@@ -4148,6 +4514,8 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedLinqDailyState: {
       ...makeDeleteDelegate("hostedLinqDailyState"),
       updateMany: async (args: unknown) => {
+        recordTerminalStatement("updateMany:hostedLinqDailyState");
+        input.operationOrder?.push("update:hostedLinqDailyState");
         input.dailyStateUpdates?.push(args);
         return { count: 1 };
       },
@@ -4530,7 +4898,7 @@ type HostedAccountDeletionPrismaDeleteDelegate = {
 
 type HostedAccountDeletionPrismaTransactionFake = {
   $executeRaw: (...args: unknown[]) => Promise<number>;
-  $queryRaw: (...args: unknown[]) => Promise<Array<{ id: string }>>;
+  $queryRaw: (...args: unknown[]) => Promise<Array<Record<string, unknown>>>;
   deviceConnection: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<Array<{
       id: string;

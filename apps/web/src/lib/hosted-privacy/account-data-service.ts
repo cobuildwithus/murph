@@ -46,12 +46,7 @@ import {
   cancelHostedGroupSponsorshipsForPayerAccountDeletionTx,
 } from "../hosted-groups/group-sponsorship-authorization";
 import {
-  hasHostedLinqInviteSignupLiveDeliveryTx,
-} from "../hosted-onboarding/linq-delivery-store";
-import {
-  releaseHostedLinqOnboardingLinkNoticeClaim,
-} from "../hosted-onboarding/linq-daily-state";
-import {
+  buildHostedLinqInviteSignupEffectId,
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
   parseHostedLinqInviteSignupEffectId,
 } from "../hosted-onboarding/linq-invite-signup-effect-id";
@@ -1658,52 +1653,6 @@ function buildStringInFilter(values: readonly string[]): string | { in: string[]
   return { in: uniqueValues };
 }
 
-function buildHostedUsageCreditEntryDeletionWhere(
-  memberIdFilter: string | { in: string[] },
-): Prisma.HostedUsageCreditEntryWhereInput {
-  return {
-    OR: [
-      { beneficiaryMemberId: memberIdFilter },
-      { purchase: { beneficiaryMemberId: memberIdFilter } },
-    ],
-  };
-}
-
-function buildHostedUsageCreditPurchaseDeletionWhere(
-  memberIdFilter: string | { in: string[] },
-): Prisma.HostedUsageCreditPurchaseWhereInput {
-  return { beneficiaryMemberId: memberIdFilter };
-}
-
-function buildHostedUsageReferralInvolvementWhere(
-  memberIdFilter: string | { in: string[] },
-): Prisma.HostedUsageReferralWhereInput {
-  return {
-    OR: [
-      { beneficiaryMemberId: memberIdFilter },
-      { introducedMemberId: memberIdFilter },
-      { referrerMemberId: memberIdFilter },
-      { targetContainerMemberId: memberIdFilter },
-    ],
-  };
-}
-
-function buildHostedLinqInviteSignupDeliveryWhere(
-  memberIds: readonly string[],
-): Prisma.HostedLinqDeliveryWhereInput {
-  return {
-    groupJoinOutreachId: null,
-    OR: uniqueStrings(memberIds).map((memberId) => ({
-      sourceRef: {
-        startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
-      },
-    })),
-    template: {
-      in: ["invite_signup", "invite_signup_fallback"],
-    },
-  };
-}
-
 type HostedGroupJoinOutreachDeletionSnapshot = {
   deliveries: Array<{ sourceRef: string | null }>;
   deliveryWhere: Prisma.HostedLinqDeliveryWhereInput | null;
@@ -1822,17 +1771,45 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   const deliveries = await prisma.hostedLinqDelivery.deleteMany({
     where: snapshot.deliveryWhere,
   });
-  for (const identity of projectionIdentities) {
-    const hasLiveDelivery = await hasHostedLinqInviteSignupLiveDeliveryTx({
-      dayUtc: identity.dayUtc,
-      memberId: identity.memberId,
-      prisma,
+  if (projectionIdentities.length > 0) {
+    const liveDeliveries = await prisma.hostedLinqDelivery.findMany({
+      select: { sourceRef: true },
+      where: {
+        OR: projectionIdentities.map((identity) => ({
+          sourceRef: {
+            startsWith: buildHostedLinqInviteSignupEffectId({
+              memberId: identity.memberId,
+              occurredAt: identity.dayUtc,
+            }),
+          },
+        })),
+        status: {
+          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
+        },
+        template: {
+          in: ["invite_signup", "invite_signup_fallback"],
+        },
+      },
     });
-    if (!hasLiveDelivery) {
-      await releaseHostedLinqOnboardingLinkNoticeClaim({
+    const liveIdentityKeys = new Set(
+      readHostedLinqSignupProjectionIdentities(liveDeliveries).map(
+        (identity) => `${identity.memberId}\0${identity.dayUtc}`,
+      ),
+    );
+    const releasedIdentities = projectionIdentities.filter(
+      (identity) => !liveIdentityKeys.has(`${identity.memberId}\0${identity.dayUtc}`),
+    );
+    if (releasedIdentities.length > 0) {
+      const identityWhere = releasedIdentities.map((identity) => ({
+        dayUtc: new Date(identity.dayUtc),
         memberId: identity.memberId,
-        occurredAt: identity.dayUtc,
-        prisma,
+      }));
+      await prisma.hostedLinqDailyState.updateMany({
+        data: { onboardingLinkSentAt: null },
+        where: {
+          ...(identityWhere.length === 1 ? identityWhere[0] : { OR: identityWhere }),
+          onboardingLinkSentAt: { not: null },
+        },
       });
     }
   }
@@ -2214,102 +2191,441 @@ function isStripeResourceMissingError(error: unknown): boolean {
     && type.startsWith("Stripe");
 }
 
+type HostedAccountDeletionCountRow = Record<string, bigint | number>;
+
+function buildPostgresTextArray(values: readonly string[]): Prisma.Sql {
+  return values.length === 0
+    ? Prisma.sql`ARRAY[]::text[]`
+    : Prisma.sql`ARRAY[${Prisma.join(values)}]::text[]`;
+}
+
+async function readHostedAccountDeletionOwnerCounts(
+  prisma: Prisma.TransactionClient,
+  query: Prisma.Sql,
+): Promise<HostedAccountDeletionCountRow> {
+  const rows = await prisma.$queryRaw<HostedAccountDeletionCountRow[]>(query);
+  if (rows.length !== 1) {
+    throw new TypeError("Hosted account deletion owner did not return one count row.");
+  }
+  return rows[0]!;
+}
+
+function mergeHostedAccountDeletionOwnerCounts(
+  counts: HostedAccountDataCounts,
+  row: HostedAccountDeletionCountRow,
+): void {
+  for (const [key, value] of Object.entries(row)) {
+    const count = typeof value === "bigint" ? Number(value) : value;
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new TypeError(`Hosted account deletion returned an invalid count for ${key}.`);
+    }
+    counts[key] = count;
+  }
+}
+
 async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
   memberIds: readonly string[];
   prisma: Prisma.TransactionClient;
 }): Promise<HostedAccountDataCounts> {
-  const memberIdFilter = buildStringInFilter(input.memberIds);
+  const memberIds = uniqueStrings(input.memberIds);
+  const memberIdsSql = buildPostgresTextArray(memberIds);
+  const signupPrefixesSql = buildPostgresTextArray(
+    memberIds.map(buildHostedLinqInviteSignupEffectIdMemberPrefix),
+  );
+  const webhookTraceOwners = [
+    ...new Map(
+      input.connectionIdentities
+        .filter((connection) => connection.providerAccountBlindIndex.length > 0)
+        .map((connection) => [
+          JSON.stringify([
+            connection.provider,
+            connection.providerAccountBlindIndex,
+          ]),
+          {
+            provider: connection.provider,
+            providerAccountBlindIndex: connection.providerAccountBlindIndex,
+          },
+        ] as const),
+    ).values(),
+  ];
+  const webhookProvidersSql = buildPostgresTextArray(
+    webhookTraceOwners.map((owner) => owner.provider),
+  );
+  const webhookBlindIndexesSql = buildPostgresTextArray(
+    webhookTraceOwners.map((owner) => owner.providerAccountBlindIndex),
+  );
   const counts: HostedAccountDataCounts = {};
-  const record = (key: string, result: { count: number }) => {
-    counts[key] = result.count;
-  };
-  const recordCount = (key: string, count: number) => {
-    counts[key] = count;
-  };
-  recordCount("prisma.hosted_vault_share", await input.prisma.hostedVaultShare.count({
-    where: {
-      OR: [
-        { grantorMemberId: memberIdFilter },
-        { destinationMemberId: memberIdFilter },
-      ],
-    },
-  }));
 
-  record("prisma.hosted_mailbox_payload", await input.prisma.hostedMailboxPayload.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.hosted_ingress_latency_trace", await input.prisma.hostedIngressLatencyTrace.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.hosted_mailbox_item", await input.prisma.hostedMailboxItem.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.hosted_mailbox_lane_counter", await input.prisma.hostedMailboxLaneCounter.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.hosted_user_crypto_audit", await deleteHostedUserCryptoAuditRows(input.prisma, input.memberIds));
-  record("prisma.hosted_user_crypto_envelope", await deleteHostedUserCryptoEnvelopeRows(input.prisma, input.memberIds));
-  const usageCreditEntryDeletionWhere =
-    buildHostedUsageCreditEntryDeletionWhere(memberIdFilter);
-  record("prisma.hosted_usage_credit_grant", await input.prisma.hostedUsageCreditGrant.deleteMany({
-    where: { entry: usageCreditEntryDeletionWhere },
-  }));
-  record("prisma.hosted_usage_credit_entry", await input.prisma.hostedUsageCreditEntry.deleteMany({
-    where: usageCreditEntryDeletionWhere,
-  }));
-  const referralInvolvementWhere =
-    buildHostedUsageReferralInvolvementWhere(memberIdFilter);
-  const anonymizedRewardedReferrals =
-    await input.prisma.hostedUsageReferral.updateMany({
-      data: {
-        firstHumanMessageAt: null,
-        humanMessageCount: 0,
-        introducedMemberId: null,
-        lastHumanMessageAt: null,
-        nonReferrerMessageCount: 0,
-        observedEventKeysJson: Prisma.DbNull,
-        observedSpeakerKeysJson: Prisma.DbNull,
-        referrerMemberId: null,
-        referrerSubjectKey: null,
-        sourceConversationJson: Prisma.DbNull,
-        targetContainerMemberId: null,
-      },
-      where: {
-        AND: [
-          referralInvolvementWhere,
-          { NOT: { beneficiaryMemberId: memberIdFilter } },
-        ],
-        status: "rewarded",
-      },
-    });
-  const deletedUsageReferrals = await input.prisma.hostedUsageReferral.deleteMany({
-    where: {
-      OR: [
-        { beneficiaryMemberId: memberIdFilter },
-        {
-          AND: [
-            referralInvolvementWhere,
-            { status: { not: "rewarded" } },
-          ],
-        },
-      ],
-    },
-  });
-  recordCount(
-    "prisma.hosted_usage_referral",
-    anonymizedRewardedReferrals.count + deletedUsageReferrals.count,
+  // Each raw statement is one dependency layer and must remain awaited in this
+  // order. PostgreSQL executes sibling data-modifying CTEs without a defined order,
+  // so a layer may contain only tables without a restrictive parent/child edge.
+  mergeHostedAccountDeletionOwnerCounts(
+    counts,
+    await readHostedAccountDeletionOwnerCounts(
+      input.prisma,
+      Prisma.sql`
+        /* hosted-account-deletion:dependents */
+        WITH target_members(id) AS (
+          SELECT unnest(${memberIdsSql})
+        ),
+        signup_prefixes(prefix) AS (
+          SELECT unnest(${signupPrefixesSql})
+        ),
+        webhook_trace_owners(provider, provider_account_blind_index) AS (
+          SELECT *
+          FROM unnest(${webhookProvidersSql}, ${webhookBlindIndexesSql})
+        ),
+        target_account_groups(id) AS (
+          SELECT account_group.id
+          FROM hosted_account_group AS account_group
+          JOIN target_members AS target
+            ON target.id = account_group.owner_member_id
+        ),
+        target_groups(id) AS (
+          SELECT hosted_group.id
+          FROM hosted_group
+          WHERE hosted_group.owner_member_id IN (SELECT id FROM target_members)
+             OR hosted_group.runtime_member_id IN (SELECT id FROM target_members)
+        ),
+        counted_vault_shares AS (
+          SELECT 1
+          FROM hosted_vault_share AS share
+          WHERE share.grantor_member_id IN (SELECT id FROM target_members)
+             OR share.destination_member_id IN (SELECT id FROM target_members)
+        ),
+        counted_physical_notes AS (
+          SELECT 1
+          FROM hosted_physical_note AS note
+          WHERE note.member_id IN (SELECT id FROM target_members)
+        ),
+        deleted_mailbox_payloads AS (
+          DELETE FROM hosted_mailbox_payload AS payload
+          WHERE payload.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_ingress_traces AS (
+          DELETE FROM hosted_ingress_latency_trace AS trace
+          WHERE trace.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_usage_credit_grants AS (
+          DELETE FROM hosted_usage_credit_grant AS grant
+          WHERE EXISTS (
+            SELECT 1
+            FROM hosted_usage_credit_entry AS entry
+            LEFT JOIN hosted_usage_credit_purchase AS purchase
+              ON purchase.id = entry.purchase_id
+            WHERE entry.id = grant.entry_id
+              AND (
+                entry.beneficiary_member_id IN (SELECT id FROM target_members)
+                OR purchase.beneficiary_member_id IN (SELECT id FROM target_members)
+              )
+          )
+          RETURNING 1
+        ),
+        deleted_address_book_contacts AS (
+          DELETE FROM hosted_address_book_contact AS contact
+          WHERE contact.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_computer_handoffs AS (
+          DELETE FROM hosted_computer_handoff AS handoff
+          WHERE handoff.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_account_group_invites AS (
+          DELETE FROM hosted_account_group_invite AS invite
+          WHERE invite.accepted_by_member_id IN (SELECT id FROM target_members)
+             OR invite.invited_by_member_id IN (SELECT id FROM target_members)
+             OR invite.group_id IN (SELECT id FROM target_account_groups)
+          RETURNING 1
+        ),
+        deleted_account_group_memberships AS (
+          DELETE FROM hosted_account_group_membership AS membership
+          WHERE membership.member_id IN (SELECT id FROM target_members)
+             OR membership.group_id IN (SELECT id FROM target_account_groups)
+          RETURNING 1
+        ),
+        deleted_account_group_billing_refs AS (
+          DELETE FROM hosted_account_group_billing_ref AS billing_ref
+          WHERE billing_ref.group_id IN (SELECT id FROM target_account_groups)
+          RETURNING 1
+        ),
+        deleted_account_group_plan_capacity AS (
+          DELETE FROM hosted_account_group_plan_capacity AS capacity
+          WHERE capacity.group_id IN (SELECT id FROM target_account_groups)
+          RETURNING 1
+        ),
+        deleted_group_disclosure_grants AS (
+          DELETE FROM hosted_group_disclosure_grant AS grant
+          USING hosted_group_member AS membership
+          WHERE membership.id = grant.membership_id
+            AND (
+              membership.member_id IN (SELECT id FROM target_members)
+              OR membership.group_id IN (SELECT id FROM target_groups)
+            )
+          RETURNING 1
+        ),
+        deleted_thread_routes AS (
+          DELETE FROM hosted_thread_route AS route
+          WHERE route.container_member_id IN (SELECT id FROM target_members)
+             OR EXISTS (
+               SELECT 1
+               FROM hosted_thread_container AS container
+               WHERE container.member_id = route.container_member_id
+                 AND container.owner_member_id IN (SELECT id FROM target_members)
+             )
+          RETURNING 1
+        ),
+        deleted_clinical_retrieval_requests AS (
+          DELETE FROM clinical_record_retrieval_request AS request
+          WHERE request.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_webhook_traces AS (
+          DELETE FROM device_webhook_trace AS trace
+          USING webhook_trace_owners AS owner
+          WHERE trace.provider = owner.provider
+            AND trace.provider_account_blind_index = owner.provider_account_blind_index
+          RETURNING 1
+        ),
+        deleted_device_token_audits AS (
+          DELETE FROM device_token_audit AS audit
+          WHERE audit.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_capture_receipts AS (
+          DELETE FROM device_sync_companion_capture_receipt AS receipt
+          WHERE receipt.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_dirty_payloads AS (
+          DELETE FROM device_sync_dirty_payload AS payload
+          WHERE payload.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_dirty_connections AS (
+          DELETE FROM device_sync_dirty_connection AS dirty_connection
+          WHERE dirty_connection.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_sync_signals AS (
+          DELETE FROM device_sync_signal AS signal
+          WHERE signal.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_oauth_sessions AS (
+          DELETE FROM device_oauth_session AS session
+          WHERE session.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_linq_invite_deliveries AS (
+          DELETE FROM hosted_linq_delivery AS delivery
+          WHERE delivery.group_join_outreach_id IS NULL
+            AND delivery.template IN ('invite_signup', 'invite_signup_fallback')
+            AND EXISTS (
+              SELECT 1
+              FROM signup_prefixes
+              WHERE starts_with(delivery.source_ref, signup_prefixes.prefix)
+            )
+          RETURNING 1
+        )
+        SELECT
+          (SELECT count(*) FROM counted_vault_shares)
+            AS "prisma.hosted_vault_share",
+          (SELECT count(*) FROM counted_physical_notes)
+            AS "prisma.hosted_physical_note",
+          (SELECT count(*) FROM deleted_mailbox_payloads)
+            AS "prisma.hosted_mailbox_payload",
+          (SELECT count(*) FROM deleted_ingress_traces)
+            AS "prisma.hosted_ingress_latency_trace",
+          (SELECT count(*) FROM deleted_usage_credit_grants)
+            AS "prisma.hosted_usage_credit_grant",
+          (SELECT count(*) FROM deleted_address_book_contacts)
+            AS "prisma.hosted_address_book_contact",
+          (SELECT count(*) FROM deleted_computer_handoffs)
+            AS "prisma.hosted_computer_handoff",
+          (SELECT count(*) FROM deleted_account_group_invites)
+            AS "prisma.hosted_account_group_invite",
+          (SELECT count(*) FROM deleted_account_group_memberships)
+            AS "prisma.hosted_account_group_membership",
+          (SELECT count(*) FROM deleted_account_group_billing_refs)
+            AS "prisma.hosted_account_group_billing_ref",
+          (SELECT count(*) FROM deleted_account_group_plan_capacity)
+            AS "prisma.hosted_account_group_plan_capacity",
+          (SELECT count(*) FROM deleted_group_disclosure_grants)
+            AS "prisma.hosted_group_disclosure_grant",
+          (SELECT count(*) FROM deleted_thread_routes)
+            AS "prisma.hosted_thread_route",
+          (SELECT count(*) FROM deleted_clinical_retrieval_requests)
+            AS "prisma.clinical_record_retrieval_request",
+          (SELECT count(*) FROM deleted_device_webhook_traces)
+            AS "prisma.device_webhook_trace",
+          (SELECT count(*) FROM deleted_device_token_audits)
+            AS "prisma.device_token_audit",
+          (SELECT count(*) FROM deleted_device_capture_receipts)
+            AS "prisma.device_sync_companion_capture_receipt",
+          (SELECT count(*) FROM deleted_device_dirty_payloads)
+            AS "prisma.device_sync_dirty_payload",
+          (SELECT count(*) FROM deleted_device_dirty_connections)
+            AS "prisma.device_sync_dirty_connection",
+          (SELECT count(*) FROM deleted_device_sync_signals)
+            AS "prisma.device_sync_signal",
+          (SELECT count(*) FROM deleted_device_oauth_sessions)
+            AS "prisma.device_oauth_session",
+          (SELECT count(*) FROM deleted_linq_invite_deliveries)
+            AS "prisma.hosted_linq_invite_delivery"
+      `,
+    ),
   );
-  record("prisma.hosted_usage_credit_purchase", await input.prisma.hostedUsageCreditPurchase.deleteMany({
-    where: buildHostedUsageCreditPurchaseDeletionWhere(memberIdFilter),
-  }));
-  record(
-    "prisma.hosted_group_sponsorship_authorization",
-    await input.prisma.hostedGroupSponsorshipAuthorization.deleteMany({
-      where: { beneficiaryMemberId: memberIdFilter },
-    }),
+
+  mergeHostedAccountDeletionOwnerCounts(
+    counts,
+    await readHostedAccountDeletionOwnerCounts(
+      input.prisma,
+      Prisma.sql`
+        /* hosted-account-deletion:intermediate */
+        WITH target_members(id) AS (
+          SELECT unnest(${memberIdsSql})
+        ),
+        target_groups(id) AS (
+          SELECT hosted_group.id
+          FROM hosted_group
+          WHERE hosted_group.owner_member_id IN (SELECT id FROM target_members)
+             OR hosted_group.runtime_member_id IN (SELECT id FROM target_members)
+        ),
+        deleted_mailbox_items AS (
+          DELETE FROM hosted_mailbox_item AS item
+          WHERE item.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_usage_credit_entries AS (
+          DELETE FROM hosted_usage_credit_entry AS entry
+          WHERE entry.beneficiary_member_id IN (SELECT id FROM target_members)
+             OR EXISTS (
+               SELECT 1
+               FROM hosted_usage_credit_purchase AS purchase
+               WHERE purchase.id = entry.purchase_id
+                 AND purchase.beneficiary_member_id IN (SELECT id FROM target_members)
+             )
+          RETURNING 1
+        ),
+        deleted_address_book_projections AS (
+          DELETE FROM hosted_address_book_projection AS projection
+          WHERE projection.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_computer_runs AS (
+          DELETE FROM hosted_computer_run AS run
+          WHERE run.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_group_disclosure_permissions AS (
+          DELETE FROM hosted_group_disclosure_permission AS permission
+          WHERE permission.group_id IN (SELECT id FROM target_groups)
+          RETURNING 1
+        ),
+        deleted_group_members AS (
+          DELETE FROM hosted_group_member AS membership
+          WHERE membership.member_id IN (SELECT id FROM target_members)
+             OR membership.group_id IN (SELECT id FROM target_groups)
+          RETURNING 1
+        ),
+        deleted_clinical_retrieval_runs AS (
+          DELETE FROM clinical_record_retrieval_run AS run
+          WHERE run.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_connections AS (
+          DELETE FROM device_connection AS connection
+          WHERE connection.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        )
+        SELECT
+          (SELECT count(*) FROM deleted_mailbox_items)
+            AS "prisma.hosted_mailbox_item",
+          (SELECT count(*) FROM deleted_usage_credit_entries)
+            AS "prisma.hosted_usage_credit_entry",
+          (SELECT count(*) FROM deleted_address_book_projections)
+            AS "prisma.hosted_address_book_projection",
+          (SELECT count(*) FROM deleted_computer_runs)
+            AS "prisma.hosted_computer_run",
+          (SELECT count(*) FROM deleted_group_disclosure_permissions)
+            AS "prisma.hosted_group_disclosure_permission",
+          (SELECT count(*) FROM deleted_group_members)
+            AS "prisma.hosted_group_member",
+          (SELECT count(*) FROM deleted_clinical_retrieval_runs)
+            AS "prisma.clinical_record_retrieval_run",
+          (SELECT count(*) FROM deleted_device_connections)
+            AS "prisma.device_connection"
+      `,
+    ),
   );
-  record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_ai_usage_period", await input.prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_product_feedback", await input.prisma.hostedProductFeedback.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_codex_auth_connection", await input.prisma.hostedCodexAuthConnection.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_inference_connection", await input.prisma.hostedInferenceConnection.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
-    where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
-  }));
+
+  mergeHostedAccountDeletionOwnerCounts(
+    counts,
+    await readHostedAccountDeletionOwnerCounts(
+      input.prisma,
+      Prisma.sql`
+        /* hosted-account-deletion:referrals-purchases */
+        WITH target_members(id) AS (
+          SELECT unnest(${memberIdsSql})
+        ),
+        anonymized_rewarded_referrals AS (
+          UPDATE hosted_usage_referral AS referral
+          SET first_human_message_at = NULL,
+              human_message_count = 0,
+              introduced_member_id = NULL,
+              last_human_message_at = NULL,
+              non_referrer_message_count = 0,
+              observed_event_keys_json = NULL,
+              observed_speaker_keys_json = NULL,
+              referrer_member_id = NULL,
+              referrer_subject_key = NULL,
+              source_conversation_json = NULL,
+              target_container_member_id = NULL,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE referral.status = 'rewarded'
+            AND referral.beneficiary_member_id NOT IN (SELECT id FROM target_members)
+            AND (
+              referral.beneficiary_member_id IN (SELECT id FROM target_members)
+              OR referral.introduced_member_id IN (SELECT id FROM target_members)
+              OR referral.referrer_member_id IN (SELECT id FROM target_members)
+              OR referral.target_container_member_id IN (SELECT id FROM target_members)
+            )
+          RETURNING 1
+        ),
+        deleted_usage_referrals AS (
+          DELETE FROM hosted_usage_referral AS referral
+          WHERE referral.beneficiary_member_id IN (SELECT id FROM target_members)
+             OR (
+               referral.status <> 'rewarded'
+               AND (
+                 referral.beneficiary_member_id IN (SELECT id FROM target_members)
+                 OR referral.introduced_member_id IN (SELECT id FROM target_members)
+                 OR referral.referrer_member_id IN (SELECT id FROM target_members)
+                 OR referral.target_container_member_id IN (SELECT id FROM target_members)
+               )
+             )
+          RETURNING 1
+        ),
+        deleted_usage_credit_purchases AS (
+          DELETE FROM hosted_usage_credit_purchase AS purchase
+          WHERE purchase.beneficiary_member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        )
+        SELECT
+          (
+            (SELECT count(*) FROM anonymized_rewarded_referrals)
+            + (SELECT count(*) FROM deleted_usage_referrals)
+          ) AS "prisma.hosted_usage_referral",
+          (SELECT count(*) FROM deleted_usage_credit_purchases)
+            AS "prisma.hosted_usage_credit_purchase"
+      `,
+    ),
+  );
+
   // Pre-member group-join outreach is keyed by the participant's phone and by
   // the group, not by a member id, so it is resolved before the identity rows
   // and the owned groups are deleted below. Running after either one would strand
@@ -2318,165 +2634,314 @@ async function deleteHostedAccountPrismaRows(input: {
   const groupJoinOutreachDeletion =
     await deleteHostedGroupJoinOutreachRowsForMembers(
       input.prisma,
-      memberIdFilter,
+      buildStringInFilter(memberIds),
     );
-  recordCount(
-    "prisma.hosted_group_join_outreach",
-    groupJoinOutreachDeletion.outreachCount,
-  );
-  recordCount(
-    "prisma.hosted_group_join_outreach_delivery",
-    groupJoinOutreachDeletion.deliveryCount,
-  );
-  record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_address_book_contact", await input.prisma.hostedAddressBookContact.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_address_book_projection", await input.prisma.hostedAddressBookProjection.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({ where: { memberId: memberIdFilter } }));
-  recordCount("prisma.hosted_physical_note", await input.prisma.hostedPhysicalNote.count({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_member_subscription_checkout", await input.prisma.hostedMemberSubscriptionCheckout.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_account_group_invite", await input.prisma.hostedAccountGroupInvite.deleteMany({
-    where: {
-      OR: [
-        { acceptedByMemberId: memberIdFilter },
-        { group: { ownerMemberId: memberIdFilter } },
-        { invitedByMemberId: memberIdFilter },
-      ],
-    },
-  }));
-  record("prisma.hosted_account_group_membership", await input.prisma.hostedAccountGroupMembership.deleteMany({
-    where: {
-      OR: [
-        { memberId: memberIdFilter },
-        { group: { ownerMemberId: memberIdFilter } },
-      ],
-    },
-  }));
-  record("prisma.hosted_account_group_billing_ref", await input.prisma.hostedAccountGroupBillingRef.deleteMany({
-    where: {
-      group: {
-        ownerMemberId: memberIdFilter,
-      },
-    },
-  }));
-  record("prisma.hosted_account_group_plan_capacity", await input.prisma.hostedAccountGroupPlanCapacity.deleteMany({
-    where: { group: { ownerMemberId: memberIdFilter } },
-  }));
-  record("prisma.hosted_account_group", await input.prisma.hostedAccountGroup.deleteMany({ where: { ownerMemberId: memberIdFilter } }));
-  record("prisma.hosted_group_disclosure_grant", await input.prisma.hostedGroupDisclosureGrant.deleteMany({
-    where: {
-      OR: [
-        { membership: { memberId: memberIdFilter } },
-        { membership: { group: { ownerMemberId: memberIdFilter } } },
-        { membership: { group: { runtimeMemberId: memberIdFilter } } },
-      ],
-    },
-  }));
-  record("prisma.hosted_group_disclosure_permission", await input.prisma.hostedGroupDisclosurePermission.deleteMany({
-    where: {
-      group: {
-        OR: [
-          { ownerMemberId: memberIdFilter },
-          { runtimeMemberId: memberIdFilter },
-        ],
-      },
-    },
-  }));
-  record("prisma.hosted_group_member", await input.prisma.hostedGroupMember.deleteMany({
-    where: {
-      OR: [
-        { memberId: memberIdFilter },
-        { group: { ownerMemberId: memberIdFilter } },
-        { group: { runtimeMemberId: memberIdFilter } },
-      ],
-    },
-  }));
-  record("prisma.hosted_group", await input.prisma.hostedGroup.deleteMany({
-    where: {
-      OR: [
-        { ownerMemberId: memberIdFilter },
-        { runtimeMemberId: memberIdFilter },
-      ],
-    },
-  }));
-  record("prisma.hosted_pending_group_setup", await input.prisma.hostedPendingGroupSetup.deleteMany({
-    where: { ownerMemberId: memberIdFilter },
-  }));
-  record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_thread_route", await input.prisma.hostedThreadRoute.deleteMany({
-    where: {
-      OR: [
-        { containerMemberId: memberIdFilter },
-        { container: { ownerMemberId: memberIdFilter } },
-      ],
-    },
-  }));
-  record("prisma.hosted_thread_container", await input.prisma.hostedThreadContainer.deleteMany({
-    where: {
-      OR: [
-        { memberId: memberIdFilter },
-        { ownerMemberId: memberIdFilter },
-      ],
-    },
-  }));
-  record("prisma.hosted_connected_app_connect_intent", await input.prisma.hostedConnectedAppConnectIntent.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_connected_apps_session", await input.prisma.hostedConnectedAppsSession.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.clinical_record_retrieval_request", await input.prisma.clinicalRecordRetrievalRequest.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.clinical_record_retrieval_run", await input.prisma.clinicalRecordRetrievalRun.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.clinical_record_oauth_session", await input.prisma.clinicalRecordOauthSession.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.clinical_record_connect_intent", await input.prisma.clinicalRecordConnectIntent.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.clinical_record_connection", await input.prisma.clinicalRecordConnection.deleteMany({ where: { memberId: memberIdFilter } }));
+  counts["prisma.hosted_group_join_outreach"] =
+    groupJoinOutreachDeletion.outreachCount;
+  counts["prisma.hosted_group_join_outreach_delivery"] =
+    groupJoinOutreachDeletion.deliveryCount;
 
-  const webhookTraceWhere = buildDeviceWebhookTraceWhere(input.connectionIdentities);
-  counts["prisma.device_webhook_trace"] = webhookTraceWhere
-    ? (await input.prisma.deviceWebhookTrace.deleteMany({ where: webhookTraceWhere })).count
-    : 0;
-  record("prisma.device_token_audit", await input.prisma.deviceTokenAudit.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_sync_companion_capture_receipt", await input.prisma.deviceSyncCompanionCaptureReceipt.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_sync_dirty_payload", await input.prisma.deviceSyncDirtyPayload.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_sync_dirty_connection", await input.prisma.deviceSyncDirtyConnection.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_sync_signal", await input.prisma.deviceSyncSignal.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_oauth_session", await input.prisma.deviceOauthSession.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_connect_intent", await input.prisma.deviceConnectIntent.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.device_agent_session", await input.prisma.deviceAgentSession.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_browser_assertion_nonce", await input.prisma.deviceBrowserAssertionNonce.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.hosted_web_internal_request_nonce", await input.prisma.hostedWebInternalRequestNonce.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_connection", await input.prisma.deviceConnection.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.device_provider_application", await input.prisma.deviceProviderApplication.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_member", await input.prisma.hostedMember.deleteMany({ where: { id: memberIdFilter } }));
+  mergeHostedAccountDeletionOwnerCounts(
+    counts,
+    await readHostedAccountDeletionOwnerCounts(
+      input.prisma,
+      Prisma.sql`
+        /* hosted-account-deletion:owners */
+        WITH target_members(id) AS (
+          SELECT unnest(${memberIdsSql})
+        ),
+        target_account_groups(id) AS (
+          SELECT account_group.id
+          FROM hosted_account_group AS account_group
+          JOIN target_members AS target
+            ON target.id = account_group.owner_member_id
+        ),
+        target_groups(id) AS (
+          SELECT hosted_group.id
+          FROM hosted_group
+          WHERE hosted_group.owner_member_id IN (SELECT id FROM target_members)
+             OR hosted_group.runtime_member_id IN (SELECT id FROM target_members)
+        ),
+        deleted_mailbox_lane_counters AS (
+          DELETE FROM hosted_mailbox_lane_counter AS counter
+          WHERE counter.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_crypto_audits AS (
+          DELETE FROM hosted_user_crypto_audit AS audit
+          WHERE audit.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_crypto_envelopes AS (
+          DELETE FROM hosted_user_crypto_envelope AS envelope
+          WHERE envelope.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_group_sponsorship_authorizations AS (
+          DELETE FROM hosted_group_sponsorship_authorization AS authorization
+          WHERE authorization.beneficiary_member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_ai_usage AS (
+          DELETE FROM hosted_ai_usage AS usage
+          WHERE usage.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_ai_usage_periods AS (
+          DELETE FROM hosted_ai_usage_period AS usage_period
+          WHERE usage_period.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_product_feedback AS (
+          DELETE FROM hosted_product_feedback AS feedback
+          WHERE feedback.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_codex_connections AS (
+          DELETE FROM hosted_codex_auth_connection AS connection
+          WHERE connection.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_inference_connections AS (
+          DELETE FROM hosted_inference_connection AS connection
+          WHERE connection.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_linq_daily_states AS (
+          DELETE FROM hosted_linq_daily_state AS daily_state
+          WHERE daily_state.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_invites AS (
+          DELETE FROM hosted_invite AS invite
+          WHERE invite.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_consent_events AS (
+          DELETE FROM hosted_consent_event AS consent_event
+          WHERE consent_event.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_consent_grants AS (
+          DELETE FROM hosted_consent_grant AS consent_grant
+          WHERE consent_grant.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_workspaces AS (
+          DELETE FROM hosted_workspace AS workspace
+          WHERE workspace.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_phone_calls AS (
+          DELETE FROM hosted_phone_call AS phone_call
+          WHERE phone_call.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_member_email_authorizations AS (
+          DELETE FROM hosted_member_email_authorization AS authorization
+          WHERE authorization.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_subscription_checkouts AS (
+          DELETE FROM hosted_member_subscription_checkout AS checkout
+          WHERE checkout.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_member_billing_refs AS (
+          DELETE FROM hosted_member_billing_ref AS billing_ref
+          WHERE billing_ref.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_account_groups AS (
+          DELETE FROM hosted_account_group AS account_group
+          WHERE account_group.id IN (SELECT id FROM target_account_groups)
+          RETURNING 1
+        ),
+        deleted_groups AS (
+          DELETE FROM hosted_group AS hosted_group
+          WHERE hosted_group.id IN (SELECT id FROM target_groups)
+          RETURNING 1
+        ),
+        deleted_pending_group_setups AS (
+          DELETE FROM hosted_pending_group_setup AS pending_setup
+          WHERE pending_setup.owner_member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_member_routing AS (
+          DELETE FROM hosted_member_routing AS routing
+          WHERE routing.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_sensitive_action_challenges AS (
+          DELETE FROM hosted_sensitive_action_challenge AS challenge
+          WHERE challenge.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_web_sessions AS (
+          DELETE FROM hosted_web_session AS session
+          WHERE session.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_member_identities AS (
+          DELETE FROM hosted_member_identity AS identity
+          WHERE identity.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_thread_containers AS (
+          DELETE FROM hosted_thread_container AS container
+          WHERE container.member_id IN (SELECT id FROM target_members)
+             OR container.owner_member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_connected_app_intents AS (
+          DELETE FROM hosted_connected_app_connect_intent AS intent
+          WHERE intent.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_connected_app_sessions AS (
+          DELETE FROM hosted_connected_apps_session AS session
+          WHERE session.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_clinical_oauth_sessions AS (
+          DELETE FROM clinical_record_oauth_session AS session
+          WHERE session.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_clinical_connect_intents AS (
+          DELETE FROM clinical_record_connect_intent AS intent
+          WHERE intent.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_clinical_connections AS (
+          DELETE FROM clinical_record_connection AS connection
+          WHERE connection.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_connect_intents AS (
+          DELETE FROM device_connect_intent AS intent
+          WHERE intent.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_agent_sessions AS (
+          DELETE FROM device_agent_session AS session
+          WHERE session.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_browser_nonces AS (
+          DELETE FROM device_browser_assertion_nonce AS nonce
+          WHERE nonce.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_web_internal_nonces AS (
+          DELETE FROM hosted_web_internal_request_nonce AS nonce
+          WHERE nonce.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
+        deleted_device_provider_applications AS (
+          DELETE FROM device_provider_application AS application
+          WHERE application.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        )
+        SELECT
+          (SELECT count(*) FROM deleted_mailbox_lane_counters)
+            AS "prisma.hosted_mailbox_lane_counter",
+          (SELECT count(*) FROM deleted_crypto_audits)
+            AS "prisma.hosted_user_crypto_audit",
+          (SELECT count(*) FROM deleted_crypto_envelopes)
+            AS "prisma.hosted_user_crypto_envelope",
+          (SELECT count(*) FROM deleted_group_sponsorship_authorizations)
+            AS "prisma.hosted_group_sponsorship_authorization",
+          (SELECT count(*) FROM deleted_ai_usage)
+            AS "prisma.hosted_ai_usage",
+          (SELECT count(*) FROM deleted_ai_usage_periods)
+            AS "prisma.hosted_ai_usage_period",
+          (SELECT count(*) FROM deleted_product_feedback)
+            AS "prisma.hosted_product_feedback",
+          (SELECT count(*) FROM deleted_codex_connections)
+            AS "prisma.hosted_codex_auth_connection",
+          (SELECT count(*) FROM deleted_inference_connections)
+            AS "prisma.hosted_inference_connection",
+          (SELECT count(*) FROM deleted_linq_daily_states)
+            AS "prisma.hosted_linq_daily_state",
+          (SELECT count(*) FROM deleted_invites)
+            AS "prisma.hosted_invite",
+          (SELECT count(*) FROM deleted_consent_events)
+            AS "prisma.hosted_consent_event",
+          (SELECT count(*) FROM deleted_consent_grants)
+            AS "prisma.hosted_consent_grant",
+          (SELECT count(*) FROM deleted_workspaces)
+            AS "prisma.hosted_workspace",
+          (SELECT count(*) FROM deleted_phone_calls)
+            AS "prisma.hosted_phone_call",
+          (SELECT count(*) FROM deleted_member_email_authorizations)
+            AS "prisma.hosted_member_email_authorization",
+          (SELECT count(*) FROM deleted_subscription_checkouts)
+            AS "prisma.hosted_member_subscription_checkout",
+          (SELECT count(*) FROM deleted_member_billing_refs)
+            AS "prisma.hosted_member_billing_ref",
+          (SELECT count(*) FROM deleted_account_groups)
+            AS "prisma.hosted_account_group",
+          (SELECT count(*) FROM deleted_groups)
+            AS "prisma.hosted_group",
+          (SELECT count(*) FROM deleted_pending_group_setups)
+            AS "prisma.hosted_pending_group_setup",
+          (SELECT count(*) FROM deleted_member_routing)
+            AS "prisma.hosted_member_routing",
+          (SELECT count(*) FROM deleted_sensitive_action_challenges)
+            AS "prisma.hosted_sensitive_action_challenge",
+          (SELECT count(*) FROM deleted_web_sessions)
+            AS "prisma.hosted_web_session",
+          (SELECT count(*) FROM deleted_member_identities)
+            AS "prisma.hosted_member_identity",
+          (SELECT count(*) FROM deleted_thread_containers)
+            AS "prisma.hosted_thread_container",
+          (SELECT count(*) FROM deleted_connected_app_intents)
+            AS "prisma.hosted_connected_app_connect_intent",
+          (SELECT count(*) FROM deleted_connected_app_sessions)
+            AS "prisma.hosted_connected_apps_session",
+          (SELECT count(*) FROM deleted_clinical_oauth_sessions)
+            AS "prisma.clinical_record_oauth_session",
+          (SELECT count(*) FROM deleted_clinical_connect_intents)
+            AS "prisma.clinical_record_connect_intent",
+          (SELECT count(*) FROM deleted_clinical_connections)
+            AS "prisma.clinical_record_connection",
+          (SELECT count(*) FROM deleted_device_connect_intents)
+            AS "prisma.device_connect_intent",
+          (SELECT count(*) FROM deleted_device_agent_sessions)
+            AS "prisma.device_agent_session",
+          (SELECT count(*) FROM deleted_device_browser_nonces)
+            AS "prisma.device_browser_assertion_nonce",
+          (SELECT count(*) FROM deleted_web_internal_nonces)
+            AS "prisma.hosted_web_internal_request_nonce",
+          (SELECT count(*) FROM deleted_device_provider_applications)
+            AS "prisma.device_provider_application"
+      `,
+    ),
+  );
+
+  mergeHostedAccountDeletionOwnerCounts(
+    counts,
+    await readHostedAccountDeletionOwnerCounts(
+      input.prisma,
+      Prisma.sql`
+        /* hosted-account-deletion:member */
+        WITH target_members(id) AS (
+          SELECT unnest(${memberIdsSql})
+        ),
+        deleted_members AS (
+          DELETE FROM hosted_member AS member
+          WHERE member.id IN (SELECT id FROM target_members)
+          RETURNING 1
+        )
+        SELECT
+          (SELECT count(*) FROM deleted_members)
+            AS "prisma.hosted_member"
+      `,
+    ),
+  );
 
   return counts;
-}
-
-async function deleteHostedUserCryptoEnvelopeRows(
-  prisma: Prisma.TransactionClient,
-  memberIds: readonly string[],
-): Promise<{ count: number }> {
-  const count = await prisma.$executeRaw`
-    DELETE FROM hosted_user_crypto_envelope
-    WHERE user_id IN (${Prisma.join(memberIds)})
-  `;
-  return { count };
-}
-
-async function deleteHostedUserCryptoAuditRows(
-  prisma: Prisma.TransactionClient,
-  memberIds: readonly string[],
-): Promise<{ count: number }> {
-  const count = await prisma.$executeRaw`
-    DELETE FROM hosted_user_crypto_audit
-    WHERE user_id IN (${Prisma.join(memberIds)})
-  `;
-  return { count };
 }
 
 async function listDeviceConnectionIdentities(input: {
@@ -2876,19 +3341,6 @@ function assertProviderRevocationsAllowDeletion(
       })),
     },
   });
-}
-
-function buildDeviceWebhookTraceWhere(
-  connections: readonly DeviceConnectionIdentity[],
-): Prisma.DeviceWebhookTraceWhereInput | null {
-  const traceOwners = connections
-    .filter((connection) => connection.providerAccountBlindIndex.length > 0)
-    .map((connection) => ({
-      provider: connection.provider,
-      providerAccountBlindIndex: connection.providerAccountBlindIndex,
-    }));
-
-  return traceOwners.length > 0 ? { OR: traceOwners } : null;
 }
 
 function safeErrorCode(error: unknown): string {
