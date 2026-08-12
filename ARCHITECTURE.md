@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Accepted-Message Targeting
 
@@ -1194,7 +1194,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   admission state. Metric families normalize independently: an unavailable
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
-  never treated as zero. A telemetry-only notification opens after two
+  never treated as zero. Unusable collections receive one bounded confirmation
+  attempt. Usable partial collections stay single-pass whenever available
+  evidence is unsafe; a safe observation missing only the direct-error counter
+  uses the same confirmation budget. The confirmation's available signals are
+  evaluated, a recovered counter joins the original complete gauge evidence,
+  and failure or continued absence retains the original incomplete observation.
+  A telemetry-only notification opens after two
   consecutive incomplete or failed collections. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families observed on partial checks, and uses the threshold
@@ -1437,7 +1443,7 @@ application code.
 - Machine-facing truth lives in append-only JSONL ledgers for inbox captures, events, display-grade metric samples, explicit raw/debug samples, and audit records, with inbox capture intake canonicalized first through `ledger/inbox-captures/**`. Device observation events distinguish raw sample, compact summary, and derived-fact grain so dense telemetry admission does not depend on default query/search visibility.
 - Raw imported artifacts are immutable once copied into `raw/`, and they now live under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, plus a partition only for batch families such as device/sample/workout imports). Dated media captures use the same owner-scoped raw path under `raw/captures/**` while staying durable as tagged note events rather than a separate medical record family. Each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the on-disk path, while normalized device/provider API snapshots continue to live under `raw/integrations/**`. Lookup-backed generated-image captures may also write a portable retry lookup in the compact index at `derived/captures/generated-image-lookups.json`; those capture events are immutable after creation except for `deleteEvent`, so the lookup can resolve the original event shard and raw media without scanning while still treating a tombstone as deleted. `raw/inbox/**` media bytes are the scoped privacy exception: image/audio/video bytes can be retention-expired after 14 days by an append-only retention ledger, while documents/PDFs and explicit promoted owner paths remain durable.
 - Raw-artifact repair helpers must stay explicit and proof-driven. `packages/core` keeps tested wearable storage repair primitives that may compact legacy payload-bearing wearable receipts, tombstone derived canonical-record artifacts, report legacy dense sample-debug ledger candidates without deleting them in v1, and tombstone dense raw provider timeseries only when an operator explicitly asks for dense raw pruning or the hosted device-sync runtime runs its bounded post-drain retention step. Each repair must prove manifest byte/sha state, preserve durable product facts, update raw manifests when raw tombstones are written, and emit metadata-only `vault_repair` audit entries; the hosted path must use the named core dense-prune primitive with recent dense raw excluded, bounded file/byte budgets, and metadata-only runtime logs. There is no separate hosted cron, generic raw delete API, or content-addressed raw store for this repair lane.
-- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction `note` is a sparse product input: the importer keeps dated tag names as completed intervention events and compact evidence, but drops the free-text value before raw snapshot retention. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; sparse or higher-sensitivity resources such as weight and glucose need a separate product/debug policy before any default ingestion or pruning.
+- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction `note` is a sparse product input: the importer keeps normalized dated tags on a kind-stable neutral `note` spine with compact evidence and drops the free-text value before raw snapshot retention. Personal Patterns owns the narrower semantic projection and currently admits only a provenance-verified Oura `sauna` tag as an action factor. The neutral external-reference facet is distinct from the legacy per-tag intervention facets, so existing event kinds are never rewritten in place. Note-history coverage version 2 performs one bounded semantic reimport for sources covered by the legacy intervention normalizer; query excludes the recognizable legacy rows while neutral replacements arrive. The existing resource-job payload freezes the admitted note-history generation across continuations and retries: unversioned persisted work remains v1 and only a complete admitted v2 chain can certify v2 coverage. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; sparse or higher-sensitivity resources such as weight and glucose need a separate product/debug policy before any default ingestion or pruning.
 - Audio/video transcript outputs under `derived/inbox/**` are rebuildable and never canonical health facts. They may survive an earlier raw-media byte pass, but the owning inbound message-content pass deletes them at the receipt-plus-14-day deadline. PDFs, documents, CSVs, and other inspectable attachment files follow their existing raw-inbox lifecycle unless a user or importer creates durable promoted artifacts; they are not reclassified as message-body text by this policy.
 - `bank/library/**` is the stable health reference layer for durable shared entities such as biomarkers, domains, protocol variants, and source artifacts.
 - Model-authored compiled knowledge pages under `derived/knowledge/**` are the separate non-canonical, rebuildable personal wiki layer that synthesizes local vault evidence and saved research notes without becoming a second source of truth. `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` stores the assistant-authored pages themselves.
@@ -1622,21 +1628,21 @@ the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
 Nutrition images retain the calorie ring and metric row while remaining
-rectangular and badge-free so the provider owns the outer mask. The installed
-Messages extension retains its native icon and interactive identity. The
-provider request supplies Murph's canonical App Store id so app-absent cards
-can expose the provider-owned install affordance. That producer change remains
-rollout-blocked until physical no-extension iPhone and macOS proof confirms the
-wide static preview stays legible; if Linq substitutes square artwork for that
-preview, the App Store id must remain omitted until the provider offers a
-treatment that preserves both states.
+rectangular so the provider owns the outer mask. The installed Messages
+extension retains its native icon and interactive identity. The provider
+request omits the optional App Store id, so app-absent static cards receive no
+provider app art; every static bitmap embeds the checked-in canonical Murph
+mark in the native 36×27pt upper-left badge footprint instead.
 Their concise native caption keeps only the date and meal count instead of
-repeating visible totals or target amounts. Each assessed V2 goal keeps one
-concise directional label inside the image without relying on color alone;
-null and unavailable goals stay absent, and a short subcaption appears only
-when some totals are partial. Compact-table images retain the table grid or
-workout progress and exercise rows while keeping the provider's upper-left icon
-footprint clear without drawing that icon into the bitmap. Their provider
+repeating visible totals or target amounts. The static default mirrors the
+native visible hierarchy without repeated direction labels; the safe text
+recovery retains the complete status meaning outside the bitmap.
+Null, incomplete, and unavailable goal states retain a neutral ring, and a
+short subcaption appears only when some totals are partial. Compact-table
+images retain the table grid or workout progress and exercise rows without a
+large empty icon gutter. Stacked generic fields place each measured header
+above its full-width measured value so contract-valid tokens remain contained.
+Their provider
 chrome stays bounded to the title plus an optional generic subtitle or derived
 workout progress rather than repeating the raster's rows and sets. Complete
 semantic text remains available through the deterministic text renderer and
@@ -1644,7 +1650,7 @@ value-free recovery fallback.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension
-URL keeps the immutable V1, V2, V3, or V4 snapshot in a bounded Base64URL
+URL keeps the immutable V1, V2, V3, V4, or V5 snapshot in a bounded Base64URL
 fragment that the extension decodes offline. The static image URL carries that
 same bounded presentation envelope in one queryless path so the Web image route
 can render it and Linq can rehost it. V3 strips its canonical tracking reference
@@ -2540,6 +2546,31 @@ performs no first-time provider/KMS unwrap. This exact-root contract belongs to
 the Linq reaction append path; it does not assert that every generic mailbox
 producer prewarms its root.
 
+The standalone generic mailbox-item append has its own narrower prepared
+boundary. It checks for an already-durable dedupe replay before crypto work and,
+on a miss, unwraps the exact active ingress root before opening its transaction.
+The transaction locks and re-reads root authority, seals only from the matching
+request-scoped cache entry, and permits one full reprepare after typed root
+drift. Its prepared envelope adapter retains the envelope owner's ordinary
+target and workspace checks while carrying the same generic prepared-root
+capability; mailbox adds no proxy capability or drift-error owner. Existing
+transaction-owned envelope, identity,
+source-message, and specialized append adapters remain explicitly legacy and
+provider-capable until their owning flows migrate; they gain neither implicit
+preparation nor a second retry owner from the standalone append.
+
+Web identity reconciliation uses the same crypto-only root preparation
+boundary for the control domain. Privy live authority, the exact control root,
+and existing private projections settle outside the owner transaction; sibling
+work is drained while preserving the first observed failure. The transaction
+revalidates the exact root under the canonical root lock and member identity
+and verified-email writes seal from that local root. Exact winner drift rolls
+back and permits one fresh full attempt. The prepared root conveys no member,
+invite, email, routing, or provider authority, all of which remain revalidated
+by their owning stores. Phone-conflict suppression reads only the blind-index
+owner id, so preserving another member's binding never decrypts that member's
+private identity or requires a second prepared root inside the transaction.
+
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner
 input, using the reaction event as inbound identity and the reacted-to message
@@ -2864,14 +2895,20 @@ message URL, is not sent to the Web origin by an HTTPS request, and is decoded
 locally by the Messages extension. Recipients without that extension receive a
 provider static layout whose `image_url` carries the exact same authority-free
 envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
-stateless Web renderer accepts only strict V1-V4 presentation envelopes, reads
+stateless Web renderer accepts only strict V1-V5 presentation envelopes, reads
 no database or remote service, logs no card values, and returns private
 no-store/no-index headers. Linq uses that image as its static card fallback;
 Telegram daily-nutrition Rich Messages reuse the same image inside their native
 table-and-details presentation. This is a narrow presentation exception to the
-fixed-URL rule: either URL may contain the same bounded health-related values
-visible in the immutable private-direct message, but never a member identity,
-canonical record reference, credential, tracking reference, or other authority.
+fixed-URL rule: either URL may contain only the bounded values permitted by its
+versioned delivery contract. V1-V4 carry the same private-direct presentation
+values; V5 uses the identity-free public challenge projection. Neither may
+contain a member identity, canonical record reference, credential, tracking
+reference, or other authority.
+Generic V3 tables choose their one shared-header grid solely from the exact
+intrinsic width of every admitted header and cell track plus its gutters. Only
+genuinely overwide content uses repeated full-width field labels; column count
+does not create a second layout authority.
 The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
 delivery. Compact-table provider chrome uses only bounded title, optional

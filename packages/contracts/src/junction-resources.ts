@@ -1,3 +1,6 @@
+export const JUNCTION_WEARABLE_TAG_NOTE_TYPE = "junction_wearable_tags" as const;
+export const JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET = "wearable-tags" as const;
+
 // These resources are part of the runtime configuration contract shared by
 // device-syncd and the Junction importer. Keep the list in the lower contracts
 // package so boot-time config readers do not import the turn-scoped importer

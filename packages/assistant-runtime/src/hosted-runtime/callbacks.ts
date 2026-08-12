@@ -50,6 +50,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  persistAssistantPrivateCompletionContinuityAfterDelivery,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
@@ -259,6 +260,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       intent.status === "retryable"
       && !intent.deliveryTransportIdempotent
       && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+      && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
     ) {
       continue;
     }
@@ -1745,6 +1747,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
         intent.status === "retryable"
         && !intent.deliveryTransportIdempotent
         && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+        && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
       ) {
         return null;
       }
@@ -3013,6 +3016,127 @@ export async function resetHostedPreparedAssistantDeliveryEffects(input: {
   }
 }
 
+type HostedAcceptedLinqReactionDelivery = Extract<
+  AssistantChannelDelivery,
+  { kind: "message-reaction" }
+>;
+
+interface HostedAcceptedLinqReactionTiming {
+  acceptedAt: Date;
+  attemptedAt: Date;
+}
+
+function hostedLinqReactionRequiresExactConsumeConfirmation(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return intent.channel === "linq"
+    && intent.operation?.kind === "message-reaction"
+    && intent.answeredMailboxItemIds.length > 0;
+}
+
+function readHostedAcceptedLinqReactionDeliveryAwaitingConsume(
+  intent: AssistantOutboxIntent,
+): HostedAcceptedLinqReactionDelivery | null {
+  const delivery = intent.delivery;
+  if (
+    !hostedLinqReactionRequiresExactConsumeConfirmation(intent)
+    || delivery?.kind !== "message-reaction"
+    || delivery.channel !== "linq"
+    || delivery.reaction !== intent.operation?.reaction
+    || delivery.targetMessageId !== intent.replyToMessageId
+    || !(
+      delivery.idempotencyKey?.trim()
+      || intent.deliveryIdempotencyKey?.trim()
+    )
+  ) {
+    return null;
+  }
+
+  return delivery;
+}
+
+function buildHostedAcceptedLinqReactionOutcomeFromIntent(input: {
+  intent: AssistantOutboxIntent;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  timing: HostedAcceptedLinqReactionTiming | null;
+}): {
+  delivery: HostedAcceptedLinqReactionDelivery;
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+} | null {
+  const delivery = readHostedAcceptedLinqReactionDeliveryAwaitingConsume(
+    input.intent,
+  );
+  if (!delivery) {
+    return null;
+  }
+
+  const deliveryContext =
+    resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest({
+      contexts: input.linqDeliveryContexts,
+      target: delivery.target,
+      targetMessageId: delivery.targetMessageId,
+    });
+  const idempotencyKey =
+    delivery.idempotencyKey?.trim()
+    || input.intent.deliveryIdempotencyKey?.trim()
+    || null;
+  if (!idempotencyKey) {
+    return null;
+  }
+  const acceptedAt = input.timing?.acceptedAt ?? new Date(delivery.sentAt);
+  const attemptedAt = input.timing?.attemptedAt ?? acceptedAt;
+
+  return {
+    delivery,
+    outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+      acceptedAt,
+      answeredMailboxItemIds: input.intent.answeredMailboxItemIds,
+      attemptedAt,
+      fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+      idempotencyKey,
+      intentId: input.intent.intentId,
+      providerTarget: delivery.target,
+      providerThreadId: null,
+      result: null,
+      target: delivery.target,
+      targetKind: delivery.targetKind,
+      threadIsDirect:
+        input.intent.threadIsDirect
+        ?? deliveryContext?.threadIsDirect
+        ?? null,
+    }),
+  };
+}
+
+async function confirmHostedAcceptedLinqReactionDelivery(input: {
+  effectsPort: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome">;
+  intent: AssistantOutboxIntent;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  timing: HostedAcceptedLinqReactionTiming | null;
+}): Promise<HostedAcceptedLinqReactionDelivery | null> {
+  if (!hostedLinqReactionRequiresExactConsumeConfirmation(input.intent)) {
+    return null;
+  }
+  const confirmation = buildHostedAcceptedLinqReactionOutcomeFromIntent(input);
+  if (!confirmation) {
+    throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+      "ASSISTANT_LINQ_REACTION_DELIVERY_RECEIPT_INVALID",
+      "Accepted Linq reaction exact-consume confirmation requires its durable provider receipt.",
+      { retryable: true },
+    ));
+  }
+
+  try {
+    await recordHostedAssistantLinqDeliveryOutcomeRequired({
+      effectsPort: input.effectsPort,
+      outcome: confirmation.outcome,
+    });
+  } catch (error) {
+    throw markHostedDeliveryMayHaveSucceeded(error);
+  }
+  return confirmation.delivery;
+}
+
 async function deliverHostedPreparedAssistantDelivery(input: {
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending: boolean;
@@ -3047,6 +3171,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
     : input.linqDeliveryContexts;
   let providerDispatchEntered = false;
+  let acceptedLinqReactionTiming: HostedAcceptedLinqReactionTiming | null = null;
   try {
     assertHostedDeliveryLiveness(input.signal);
     const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
@@ -3084,8 +3209,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
-        preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
-          preflightHostedAssistantDispatch({
+        persistDeliveredIntent: async ({ intent }) => {
+          await confirmHostedAcceptedLinqReactionDelivery({
+            effectsPort: input.effectsPort,
+            intent,
+            linqDeliveryContexts,
+            timing: acceptedLinqReactionTiming,
+          });
+        },
+        preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) => {
+          if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
+            return { action: "continue" };
+          }
+          return preflightHostedAssistantDispatch({
             actionApprovalPort: input.actionApprovalPort,
             effectsPort: input.effectsPort,
             intent,
@@ -3094,7 +3230,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             payload: input.assistantDeliveryEffect.payload,
             signal: input.signal,
             vaultRoot: vault,
-          }),
+          });
+        },
+        resolveDeliveredIntent: async ({ intent }) => {
+          if (intent.delivery === null) {
+            return null;
+          }
+          return confirmHostedAcceptedLinqReactionDelivery({
+            effectsPort: input.effectsPort,
+            intent,
+            linqDeliveryContexts,
+            timing: null,
+          });
+        },
         shouldRethrowDispatchError: ({ error }) =>
           input.preparedDispatch !== null
           && isHostedBackgroundDeliveryDeferredError(error),
@@ -3564,6 +3712,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               effectsPort: input.effectsPort,
               outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
                 attemptedAt,
+                answeredMailboxItemIds:
+                  input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
                 failedAt: new Date(),
                 failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
                 failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
@@ -3580,26 +3730,39 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             });
             throw error;
           }
-          queueHostedAssistantLinqDeliveryOutcomeWrite({
-            effectsPort: input.effectsPort,
-            outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-              acceptedAt: new Date(),
-              attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
-              fromPhoneNumber: resolvedRoute.fromPhoneNumber,
-              idempotencyKey,
-              intentId: input.assistantDeliveryEffect.effectId,
-              providerTarget,
-              providerThreadId: null,
-              result: null,
-              target: providerTarget,
-              targetKind: "thread",
-              threadIsDirect: resolvedRoute.threadIsDirect,
-            }),
-          });
-          try {
-            await assertHostedDeliveryLiveNow(input);
-          } catch (error) {
-            throw markHostedDeliveryMayHaveSucceeded(error);
+          const acceptedAt = new Date();
+          const acceptedAttemptedAt =
+            requireHostedLinqProviderAttemptedAt(attemptedAt);
+          if (
+            input.assistantDeliveryEffect.payload.answeredMailboxItemIds.length
+              > 0
+          ) {
+            acceptedLinqReactionTiming = {
+              acceptedAt,
+              attemptedAt: acceptedAttemptedAt,
+            };
+          } else {
+            queueHostedAssistantLinqDeliveryOutcomeWrite({
+              effectsPort: input.effectsPort,
+              outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+                acceptedAt,
+                attemptedAt: acceptedAttemptedAt,
+                fromPhoneNumber: resolvedRoute.fromPhoneNumber,
+                idempotencyKey,
+                intentId: input.assistantDeliveryEffect.effectId,
+                providerTarget,
+                providerThreadId: null,
+                result: null,
+                target: providerTarget,
+                targetKind: "thread",
+                threadIsDirect: resolvedRoute.threadIsDirect,
+              }),
+            });
+            try {
+              await assertHostedDeliveryLiveNow(input);
+            } catch (error) {
+              throw markHostedDeliveryMayHaveSucceeded(error);
+            }
           }
           return {
             ...result,
@@ -3640,6 +3803,32 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         userId: input.userId,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
+      });
+    }
+    try {
+      await persistAssistantPrivateCompletionContinuityAfterDelivery({
+        intent: dispatched.intent,
+        vault: input.vaultRoot,
+      });
+    } catch (error) {
+      // Provider delivery and required transport confirmation are already
+      // durable. The attended direct-turn owner repairs optional continuity.
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectFingerprint: input.assistantDeliveryEffect.fingerprint,
+          effectId: input.assistantDeliveryEffect.effectId,
+          extra: {
+            failureDomain: "private-continuity",
+          },
+          userId: input.userId,
+        }),
+        wake: input.wake,
+        error,
+        level: "warn",
+        message: "Hosted private completion continuity persistence failed.",
+        phase: "outbox",
+        userId: input.userId,
       });
     }
     assertHostedDeliveryLiveness(input.signal);
@@ -5784,6 +5973,9 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
 }): Promise<HostedAssistantDeliveryOutcome | null> {
   const intent = input.mirrorState.intent;
   if (!intent) {
+    return null;
+  }
+  if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
     return null;
   }
   if (!await hostedAssistantDeliveryIntentIsAutoReply({

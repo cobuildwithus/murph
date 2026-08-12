@@ -24,7 +24,7 @@ function isCanonicalMeasurementValue(
     && 'value' in value
 }
 
-test('Junction scale and blood-pressure readings survive as canonical vault metrics', async () => {
+test('Junction composition and blood-pressure readings survive as canonical vault metrics', async () => {
   const parentRoot = await mkdtemp(
     path.join(tmpdir(), 'junction-scale-blood-pressure-'),
   )
@@ -51,7 +51,10 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
               provider_slug: 'withings',
               source_type: 'scale',
               observedAt: '2026-08-08T12:00:00.000Z',
-              lean_body_mass_kilogram: 61.4,
+              bone_mass_percentage: 4.2,
+              muscle_mass_percentage: 42.7,
+              visceral_fat_index: 7,
+              water_percentage: 55.3,
             }],
           },
           timeseries: {
@@ -71,11 +74,18 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
       vaultRoot,
       relativePath: 'ledger/events/2026/2026-08.jsonl',
     })
-    expect(canonicalRecords.some((record) =>
-      record.kind === 'observation'
-      && record.metric === 'lean-body-mass'
-      && record.value === 61.4
-    )).toBe(true)
+    for (const [metric, value] of [
+      ['bone-mass-percentage', 4.2],
+      ['muscle-mass-percentage', 42.7],
+      ['visceral-fat-index', 7],
+      ['body-water-percentage', 55.3],
+    ] as const) {
+      expect(canonicalRecords.some((record) =>
+        record.kind === 'observation'
+        && record.metric === metric
+        && record.value === value
+      )).toBe(true)
+    }
     expect(canonicalRecords.some((record) =>
       record.kind === 'measurement'
       && Array.isArray(record.measurements)
@@ -94,13 +104,13 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
     )).toBe(true)
 
     const points = await listMetricPointsBatch(vaultRoot, [
-      { metricKey: 'lean-body-mass', limit: 1 },
+      { metricKey: 'bone-mass-percentage', limit: 1 },
+      { metricKey: 'muscle-mass-percentage', limit: 1 },
+      { metricKey: 'visceral-fat-index', limit: 1 },
+      { metricKey: 'body-water-percentage', limit: 1 },
       { metricKey: 'systolic-blood-pressure', limit: 1 },
       { metricKey: 'diastolic-blood-pressure', limit: 1 },
     ])
-    const leanBodyMass = points.find(
-      (point) => point.metricKey === 'lean-body-mass',
-    )
     const systolic = points.find(
       (point) => point.metricKey === 'systolic-blood-pressure',
     )
@@ -108,11 +118,18 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
       (point) => point.metricKey === 'diastolic-blood-pressure',
     )
 
-    expect(leanBodyMass).toMatchObject({
-      effectiveDate: '2026-08-08',
-      unit: 'kg',
-      value: 61.4,
-    })
+    for (const [metricKey, value, unit] of [
+      ['bone-mass-percentage', 4.2, '%'],
+      ['muscle-mass-percentage', 42.7, '%'],
+      ['visceral-fat-index', 7, 'index'],
+      ['body-water-percentage', 55.3, '%'],
+    ] as const) {
+      expect(points.find((point) => point.metricKey === metricKey)).toMatchObject({
+        effectiveDate: '2026-08-08',
+        unit,
+        value,
+      })
+    }
     expect(systolic).toMatchObject({
       canonicalUnit: 'mmHg',
       canonicalValue: 121,
@@ -140,7 +157,12 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
         vault: vaultRoot,
       })
     expect(bodyRead.count).toBe(1)
-    expect(JSON.stringify(bodyRead.items)).toContain('leanBodyMass')
+    expect(bodyRead.items[0]).toMatchObject({
+      bodyWaterPercentage: { provider: 'withings', unit: '%', value: 55.3 },
+      boneMassPercentage: { provider: 'withings', unit: '%', value: 4.2 },
+      muscleMassPercentage: { provider: 'withings', unit: '%', value: 42.7 },
+      visceralFatIndex: { provider: 'withings', unit: 'index', value: 7 },
+    })
 
     await expect(
       coreRuntime.readCanonicalEventAvailabilityInterruptible({ vaultRoot }),

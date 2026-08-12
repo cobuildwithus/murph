@@ -16,6 +16,7 @@ import { test } from "vitest";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 
 import { DeviceSyncError } from "../src/errors.ts";
+import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -3026,13 +3027,16 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      const data = new URL(url).searchParams.get("start_date") === "2026-04-02"
+        ? [{
+            start: "2026-04-02T12:00:00.000Z",
+            value: 97,
+          }]
+        : [];
       return createJsonResponse({
         groups: {
           garmin: [{
-            data: [{
-              start: "2026-04-02T12:00:00.000Z",
-              value: 97,
-            }],
+            data,
             source: { provider: "garmin", type: "watch" },
           }],
         },
@@ -3266,6 +3270,7 @@ test("Junction profile-only historical backfill has no historical completion obl
 
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
+    junctionProfileSummaryNormalizationRevision: 1,
     junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
@@ -3274,6 +3279,10 @@ test("Junction profile-only historical backfill has no historical completion obl
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    requests.filter((url) => new URL(url).pathname.includes("/v2/summary/profile/")).length,
+    1,
+  );
   const profileRequest = requireValue(
     requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
     "Junction profile-only backfill should fetch the profile current-state summary.",
@@ -3283,7 +3292,101 @@ test("Junction profile-only historical backfill has no historical completion obl
   assert.equal(profileSearchParams.has("end_date"), false);
 });
 
-test("Junction scheduled polling skips profile after the one-shot profile marker", async () => {
+test("Junction reconcile refreshes a legacy profile marker once", async () => {
+  const importedSnapshots: unknown[] = [];
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          slug: "oura",
+          name: "Oura Ring",
+          status: "connected",
+          resource_availability: { profile: true },
+        }],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        data: [{
+          gender: "other",
+          height: 181,
+          updated_at: "2026-04-01T09:00:00Z",
+          source: { provider: "oura", type: "ring" },
+        }],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+  const legacyAccount = createAccount({
+    metadata: {
+      junctionProfileSummaryCheckedAt: "2026-04-02T00:00:00.000Z",
+    },
+  });
+  const job = createJob("reconcile", {
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+
+  const firstResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: legacyAccount,
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    job,
+  );
+
+  assert.deepEqual(firstResult.metadataPatch, {
+    junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
+    junctionProfileSummaryNormalizationRevision: 1,
+  });
+  const firstSnapshot = importedSnapshots[0] as {
+    summaries?: Record<string, unknown[]>;
+  };
+  assert.deepEqual(firstSnapshot.summaries?.profile, [{
+    gender: "other",
+    height: 181,
+    sourceProviderSlug: "oura",
+    sourceType: "ring",
+    updated_at: "2026-04-01T09:00:00Z",
+  }]);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          ...legacyAccount.metadata,
+          ...firstResult.metadataPatch,
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    job,
+  );
+
+  assert.equal(
+    requests.filter((url) => new URL(url).pathname.includes("/v2/summary/profile/")).length,
+    1,
+  );
+});
+
+test("Junction scheduled polling skips profile after the current normalization marker", async () => {
   const importedSnapshots: unknown[] = [];
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -3317,6 +3420,7 @@ test("Junction scheduled polling skips profile after the one-shot profile marker
       account: createAccount({
         metadata: {
           junctionProfileSummaryCheckedAt: "2026-04-02T00:00:00.000Z",
+          junctionProfileSummaryNormalizationRevision: 1,
         },
       }),
       importSnapshot: async (snapshot) => {
@@ -3443,6 +3547,9 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse({
         groups: {
           garmin: [{
@@ -4663,8 +4770,15 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     true,
   );
   assert.equal(
-    scheduledResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
-    "v1|garmin,omron",
+    ["garmin", "omron"].every((providerSlug) =>
+      hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        scheduledResult.metadataPatch ?? {},
+        providerSlug,
+        "blood_pressure",
+        1,
+      )
+    ),
+    true,
   );
 });
 
@@ -8920,6 +9034,9 @@ test("Junction polling updates source projection and imports bounded summary/tim
 
     const timeseriesResource = new URL(url).pathname.match(/\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
     if (timeseriesResource && timeseriesResource in groupedTimeseriesPayloads) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse(groupedTimeseriesPayloads[timeseriesResource]);
     }
 
@@ -9658,6 +9775,7 @@ test("Junction polling skips optional unavailable resource collections", async (
   );
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
+    junctionProfileSummaryNormalizationRevision: 1,
     junctionSkippedResourceTotal: 12,
     junctionSkippedSummaryTotal: 5,
     junctionSkippedTimeseriesTotal: 7,
@@ -9748,6 +9866,7 @@ test("Junction polling skips ambiguous optional resource responses and records t
   ]);
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
+    junctionProfileSummaryNormalizationRevision: 1,
     junctionSkippedResourceTotal: 1,
     junctionSkippedSummaryTotal: 1,
     junctionSkippedTimeseriesTotal: 0,
@@ -9893,6 +10012,11 @@ test("Junction polling treats missing profile summary as a one-shot optional ski
   const result = await executeJunctionJob(
     provider,
     createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionProfileSummaryCheckedAt: "2026-04-01T00:00:00.000Z",
+        },
+      }),
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
         return { imported: true };
@@ -9923,6 +10047,7 @@ test("Junction polling treats missing profile summary as a one-shot optional ski
   }]);
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
+    junctionProfileSummaryNormalizationRevision: 1,
     junctionSkippedResourceTotal: 1,
     junctionSkippedSummaryTotal: 1,
     junctionSkippedTimeseriesTotal: 0,

@@ -12619,7 +12619,8 @@ describe('assistant auto-reply runtime', () => {
           'The existing outbound delivery does not cover every requested input; retry after the current dispatch settles.',
       },
       deliveryIntentId: 'intent-frozen-grouped-reply',
-      response: 'response for the late grouped input',
+      response: '',
+      responseDisposition: 'none',
       session: {
         sessionId: 'session-frozen-grouped-reply',
       },
