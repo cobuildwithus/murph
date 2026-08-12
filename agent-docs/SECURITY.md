@@ -76,10 +76,11 @@ Last verified: 2026-08-11
   while any source admission is pending; a truly absent row retains the legacy
   admitted behavior.
 - Junction `note` data is admitted only as normalized dated tag state. The
-  importer keeps one kind-stable neutral note spine per provider id, or per
-  source-and-timestamp fallback when no id exists, and retains only compact tag
-  evidence. A record without a tag field stays canonical-no-op; a replay of the
-  same provider note with changed or explicitly empty tags revises or clears the
+  importer keeps one kind-stable neutral note spine per source-scoped provider
+  id, or per source-and-timestamp fallback when no id exists, and retains only
+  compact tag evidence. Two instances of the same provider cannot share that
+  spine. A record without a tag field stays canonical-no-op; a replay of the same
+  provider note with changed or explicitly empty tags revises or clears the
   spine's tag set. It must remove the free-text `value` before provider-snapshot
   or evidence retention, and it must not place that text in Patterns, logs, or
   fixtures. Personal Patterns fails closed on the canonical note type plus

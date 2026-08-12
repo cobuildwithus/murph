@@ -3458,7 +3458,7 @@ test("Junction normalizer lands note tags on one neutral, revision-stable spine"
   assert.equal(
     stableInitialNote?.externalRef?.resourceId,
     createHash("sha256")
-      .update(JSON.stringify(["junction-oura-note", "provider-note-1"]))
+      .update(JSON.stringify(["junction-oura-note", "ring", undefined, "provider-note-1"]))
       .digest("hex")
       .slice(0, 16),
   );
@@ -3469,6 +3469,57 @@ test("Junction normalizer lands note tags on one neutral, revision-stable spine"
   assert.doesNotMatch(JSON.stringify(missingTags), /SENSITIVE_VALUE_SENTINEL/u);
   assert.doesNotMatch(JSON.stringify(stableInitial), /SENSITIVE_VALUE_SENTINEL/u);
   assert.doesNotMatch(JSON.stringify(stableChanged), /SENSITIVE_VALUE_SENTINEL/u);
+});
+
+test("Junction note ids remain scoped to their same-provider source instance", () => {
+  const snapshot = (firstSourceTags: readonly string[]) => ({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      note: [{
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: firstSourceTags,
+      }, {
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: ["sauna"],
+      }],
+    },
+  });
+  const initial = normalizeJunctionSnapshot(snapshot(["headache"]));
+  const edited = normalizeJunctionSnapshot(snapshot([]));
+  const initialNotes = initial.events?.filter((event) => event.kind === "note") ?? [];
+  const editedNotes = edited.events?.filter((event) => event.kind === "note") ?? [];
+
+  assert.equal(initialNotes.length, 2);
+  assert.equal(findJunctionNoteArtifacts(initial).length, 2);
+  assert.equal(new Set(initialNotes.map((event) => event.externalRef?.resourceId)).size, 2);
+  assert.deepEqual(
+    initialNotes.map((event) => event.dataOrigin?.sourceInstanceId).sort(),
+    ["source-aaaaaaaaaaaaaaaaaaaaaaaa", "source-bbbbbbbbbbbbbbbbbbbbbbbb"],
+  );
+  assert.deepEqual(
+    editedNotes.map((event) => event.externalRef?.resourceId).sort(),
+    initialNotes.map((event) => event.externalRef?.resourceId).sort(),
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-aaaaaaaaaaaaaaaaaaaaaaaa"
+    )?.tags,
+    [],
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-bbbbbbbbbbbbbbbbbbbbbbbb"
+    )?.tags,
+    ["sauna"],
+  );
 });
 
 test("Junction exposes repair-stable opaque identities for blood pressure provider rows", () => {

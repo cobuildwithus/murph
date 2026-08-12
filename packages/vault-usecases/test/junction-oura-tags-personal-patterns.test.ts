@@ -94,13 +94,28 @@ test('edited and cleared Junction tags revise the same neutral notes', async () 
     importedAt: string,
     noteValue: string,
     ouraTags: readonly string[],
-  ) => buildSnapshot({
-    includeSleep: false,
+  ) => ({
     importedAt,
-    noteValue,
-    ouraDates,
-    ouraTags,
-    start,
+    summaries: {},
+    timeseries: {
+      note: [{
+        id: 'provider-local-note-1',
+        sourceInstanceId: 'source-aaaaaaaaaaaaaaaaaaaaaaaa',
+        sourceProviderSlug: 'oura',
+        sourceType: 'ring',
+        start: `${start}T18:05:00.000Z`,
+        tags: ouraTags,
+        value: noteValue,
+      }, {
+        id: 'provider-local-note-1',
+        sourceInstanceId: 'source-bbbbbbbbbbbbbbbbbbbbbbbb',
+        sourceProviderSlug: 'oura',
+        sourceType: 'ring',
+        start: `${start}T18:05:00.000Z`,
+        tags: ['sauna'],
+        value: noteValue,
+      }],
+    },
   })
 
   try {
@@ -123,6 +138,7 @@ test('edited and cleared Junction tags revise the same neutral notes', async () 
     const initialNotes = initialEvents.filter(isJunctionWearableTagNote)
     const initialNoteIds = initialNotes.map((entity) => entity.entityId).sort()
     expect(initialNotes).toHaveLength(2)
+    expect(new Set(initialNoteIds).size).toBe(2)
     expect(initialEvents.filter((entity) => entity.kind === 'intervention_session'))
       .toHaveLength(0)
 
@@ -141,8 +157,13 @@ test('edited and cleared Junction tags revise the same neutral notes', async () 
       readExternalResourceType(entity) === 'junction-oura-note'
     )
     expect(editedNotes.map((entity) => entity.entityId).sort()).toEqual(initialNoteIds)
-    expect(editedOuraNotes).toHaveLength(1)
-    expect(editedOuraNotes[0]?.tags).toEqual(['custom-tag', 'headache', 'late-meal', 'recovery'])
+    expect(editedOuraNotes).toHaveLength(2)
+    expect(editedOuraNotes.find((entity) =>
+      readSourceInstanceId(entity) === 'source-aaaaaaaaaaaaaaaaaaaaaaaa'
+    )?.tags).toEqual(['custom-tag', 'headache', 'late-meal', 'recovery'])
+    expect(editedOuraNotes.find((entity) =>
+      readSourceInstanceId(entity) === 'source-bbbbbbbbbbbbbbbbbbbbbbbb'
+    )?.tags).toEqual(['sauna'])
     expect(editedEvents.filter((entity) => entity.kind === 'intervention_session'))
       .toHaveLength(0)
 
@@ -161,8 +182,13 @@ test('edited and cleared Junction tags revise the same neutral notes', async () 
       readExternalResourceType(entity) === 'junction-oura-note'
     )
     expect(clearedNotes.map((entity) => entity.entityId).sort()).toEqual(initialNoteIds)
-    expect(clearedOuraNotes).toHaveLength(1)
-    expect(clearedOuraNotes[0]?.tags).toEqual([])
+    expect(clearedOuraNotes).toHaveLength(2)
+    expect(clearedOuraNotes.find((entity) =>
+      readSourceInstanceId(entity) === 'source-aaaaaaaaaaaaaaaaaaaaaaaa'
+    )?.tags).toEqual([])
+    expect(clearedOuraNotes.find((entity) =>
+      readSourceInstanceId(entity) === 'source-bbbbbbbbbbbbbbbbbbbbbbbb'
+    )?.tags).toEqual(['sauna'])
     expect(clearedEvents.filter((entity) => entity.kind === 'intervention_session'))
       .toHaveLength(0)
     await expect(directoryContainsText(vaultRoot, SENSITIVE_NOTE_VALUE))
@@ -229,7 +255,7 @@ function buildSnapshot(input: {
   }
 }
 
-async function importSnapshot(vaultRoot: string, snapshot: ReturnType<typeof buildSnapshot>) {
+async function importSnapshot(vaultRoot: string, snapshot: unknown) {
   return importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
     {
       deliveryMode: 'scheduled_reconcile',
@@ -261,6 +287,15 @@ function readExternalResourceType(entity: CanonicalEntity): string | null {
   }
   const resourceType = (externalRef as Record<string, unknown>).resourceType
   return typeof resourceType === 'string' ? resourceType : null
+}
+
+function readSourceInstanceId(entity: CanonicalEntity): string | null {
+  const dataOrigin = entity.attributes.dataOrigin
+  if (typeof dataOrigin !== 'object' || dataOrigin === null || Array.isArray(dataOrigin)) {
+    return null
+  }
+  const sourceInstanceId = (dataOrigin as Record<string, unknown>).sourceInstanceId
+  return typeof sourceInstanceId === 'string' ? sourceInstanceId : null
 }
 
 function addDays(date: string, days: number): string {

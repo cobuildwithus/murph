@@ -1727,10 +1727,15 @@ function buildJunctionNoteResourceId(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
   if (stableId) {
-    // Preserve PR #1673's opaque provider-note resource id. The new neutral
-    // facet creates a distinct kind-stable spine without obscuring any future
-    // explicit repair relationship to legacy per-tag intervention facets.
-    return shortHash([resourceContext.externalRefResourceType, stableId]);
+    // Junction ids are provider-local, not globally unique across two devices
+    // or accounts of the same provider. Preserve edit/clear stability while
+    // keeping each source instance on its own kind-stable note spine.
+    return shortHash([
+      resourceContext.externalRefResourceType,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      stableId,
+    ]);
   }
 
   return buildStableTimeseriesResourceId(resourceContext, timestamp);

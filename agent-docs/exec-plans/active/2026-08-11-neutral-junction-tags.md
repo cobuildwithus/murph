@@ -101,6 +101,10 @@ Updated: 2026-08-11
   a source already marked complete under the legacy normalizer. The v2
   obligation is terminal after one successful bounded pass and requires no
   event rewrite or deletion.
+- Accepted the final round-one source-identity finding: Junction provider note
+  ids are local to a source instance. Explicit-id note spines therefore include
+  source type and source-instance provenance, preserving edit stability without
+  letting one same-provider device overwrite another.
 - Bump the Browser Vault replica generation so existing projections rebuild
   under the corrected factor interpretation.
 
@@ -114,6 +118,9 @@ Updated: 2026-08-11
 - Focused Junction historical-backfill test after ReviewGPT remediation:
   passed, 62 tests; a stored `v1|oura` marker schedules exactly one v2 bounded
   note-history pass and terminal coverage prevents repetition.
+- Source-instance collision remediation: focused importer and canonical
+  import/replay tests cover two Oura instances sharing one provider-local note
+  id; editing or clearing one leaves the other intact.
 - Focused Web changelog tests: passed, 56 tests.
 - Contracts, importers, query, vault-usecases, device-syncd,
   hosted-execution, and full Web typechecks: passed.
