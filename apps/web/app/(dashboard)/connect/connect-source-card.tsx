@@ -15,6 +15,7 @@ export function SourceCard({
   pending,
   pendingDisconnect,
   source,
+  onCancelSetup,
   onDisconnectTargetChange,
   onSetupGuideOpen,
   onStartConnection,
@@ -24,6 +25,7 @@ export function SourceCard({
   pending: boolean;
   pendingDisconnect: boolean;
   source: ConnectSource;
+  onCancelSetup?: (source: ConnectSource) => Promise<void>;
   onDisconnectTargetChange: (source: ConnectSource | null) => void;
   onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
@@ -48,6 +50,11 @@ export function SourceCard({
     && !requiresReconnect;
   const actionLabel = requiresReconnect ? "Reconnect" : "Connect";
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
+  const setupDisconnectFirst = source.memberOwnedSetup?.action === "disconnect_first";
+  const memberOwnedDisconnectLabel = setupDisconnectFirst
+    ? source.memberOwnedSetupPresentation?.actionLabels.disconnect_first
+      ?? `Disconnect ${source.name} first`
+    : "Disconnect";
   const reconnectUnavailable = requiresReconnect && !isAvailable;
   const connectionOfferEnabled = source.connectionAvailable !== false;
   const historicalReconnectUnavailable = historicalResetIncomplete && !connectionOfferEnabled;
@@ -116,6 +123,11 @@ export function SourceCard({
               onAction={() => {
                 void onStartConnection(source);
               }}
+              onCancel={onCancelSetup
+                ? () => {
+                    void onCancelSetup(source);
+                  }
+                : undefined}
             />
             {!authenticated ? (
               <AuthButton
@@ -133,12 +145,14 @@ export function SourceCard({
             {canDisconnect ? (
               <button
                 type="button"
-                aria-label={disconnectAriaLabel}
+                aria-label={setupDisconnectFirst
+                  ? memberOwnedDisconnectLabel
+                  : disconnectAriaLabel}
                 disabled={pendingDisconnect}
                 onClick={() => onDisconnectTargetChange(source)}
                 className="relative self-end text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
-                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+                {pendingDisconnect ? "Disconnecting..." : memberOwnedDisconnectLabel}
               </button>
             ) : null}
           </div>

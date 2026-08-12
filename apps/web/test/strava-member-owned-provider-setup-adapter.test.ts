@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { parseHTML } from "linkedom";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createStravaDeviceSyncProvider } from "@murphai/device-syncd/providers/strava";
 
@@ -512,6 +512,17 @@ const AsyncFunction = Object.getPrototypeOf(async function noop() {
 
 class FakeSetupComputer implements MemberOwnedProviderSetupComputer {
   readonly page: FakePage;
+  readonly finishOwnedRun = vi.fn(async (input: {
+    memberId: string;
+    outcome: "canceled";
+    ownerKey: string;
+    ownerPurpose: typeof MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE;
+    runId: string;
+  }) => {
+    this.assertOwner(input);
+    this.assertRun(input.runId);
+    return { ok: true as const, runId: RUN_ID, status: "canceled" as const };
+  });
   runtimeSnapshot = "";
 
   constructor(surface: FakeStravaSurface) {
@@ -529,6 +540,7 @@ class FakeSetupComputer implements MemberOwnedProviderSetupComputer {
       throw new Error("Synthetic run ownership mismatch.");
     }
     return {
+      awaitingReason: null,
       reused: input.expectedRunId === RUN_ID,
       runId: RUN_ID,
       status: "running",
@@ -658,7 +670,6 @@ describe("Strava member-owned provider setup adapter", () => {
     surface.state.mode = "prerequisite";
     await expect(adapter.inspectDashboard(operationInput())).resolves.toEqual({
       kind: "prerequisite_required",
-      reason: "subscription_required",
     });
     await expect(adapter.createOwnedApplication(operationInput())).resolves.toEqual({
       kind: "known_unsent",
@@ -671,6 +682,24 @@ describe("Strava member-owned provider setup adapter", () => {
       reason: "unavailable",
     });
     expect(surface.state.createAttempts).toBe(0);
+  });
+
+  it("cancels only the exact setup-owned browser run", async () => {
+    const computer = new FakeSetupComputer(surface);
+    const adapter = createAdapter(computer, surface);
+
+    await expect(adapter.cancelBrowserRun({
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+      setupId: SETUP_ID,
+    })).resolves.toBe("canceled");
+    expect(computer.finishOwnedRun).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      outcome: "canceled",
+      ownerKey: SETUP_ID,
+      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+      runId: RUN_ID,
+    });
   });
 
   it("creates the deterministic marked app with exact product fields and recovers it", async () => {
@@ -789,6 +818,20 @@ describe("Strava member-owned provider setup adapter", () => {
     expect(surface.state.deleteAttempts).toEqual(["owned_app"]);
     expect(surface.state.applications.map((application) => application.id)).toEqual([
       "unrelated_app",
+    ]);
+  });
+
+  it("does not report deletion until the marked app is proved absent", async () => {
+    const marker = buildStravaMemberOwnedProviderApplicationMarker(MEMBER_ID);
+    surface.addApplication({ id: "owned_app", name: marker });
+    vi.spyOn(surface, "deleteApplication").mockImplementation(() => {});
+    const adapter = createAdapter(new FakeSetupComputer(surface), surface);
+
+    await expect(adapter.deleteOwnedApplication(operationInput())).resolves.toEqual({
+      kind: "ambiguous",
+    });
+    expect(surface.state.applications.map((application) => application.id)).toEqual([
+      "owned_app",
     ]);
   });
 

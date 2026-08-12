@@ -14,6 +14,7 @@ export function MemberOwnedProviderSetup({
   presentation,
   setup,
   onAction,
+  onCancel,
 }: {
   actionAvailable?: boolean;
   connected: boolean;
@@ -22,17 +23,31 @@ export function MemberOwnedProviderSetup({
   presentation: MemberOwnedProviderSetupPresentation;
   setup: MemberOwnedProviderSetupView | null;
   onAction: () => void;
+  onCancel?: () => void;
 }) {
-  const effective = setup ?? buildPendingView(presentation);
+  const effective: MemberOwnedProviderSetupDisplay = setup
+    ?? (connected ? buildDisconnectFirstView(presentation) : buildPendingView(presentation));
   const actionLabel = pending
     ? "Working…"
     : effective.action === "none"
       ? null
       : presentation.actionLabels[effective.action];
-  const complete = connected || effective.connected || effective.status === "connected";
+  const complete = effective.connected || effective.status === "connected";
+  const showSetupAction = !complete
+    && effective.action !== "none"
+    && actionLabel
+    && actionAvailable
+    && effective.action !== "disconnect_first";
+  const showCancel = !complete
+    && (effective.status === "provider_prerequisite" || effective.status === "canceling")
+    && Boolean(onCancel);
+  const showActions = showSetupAction || showCancel;
 
   return (
-    <div className="flex w-full flex-col gap-3 rounded-lg border border-border/60 bg-background/60 p-3">
+    <div
+      data-member-owned-provider-setup
+      className="flex w-full flex-col gap-3"
+    >
       <div aria-live="polite" className="min-w-0">
         <p className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
           {complete ? "Connected" : resolveStatusLabel(effective.status)}
@@ -52,16 +67,30 @@ export function MemberOwnedProviderSetup({
         ) : null}
       </div>
 
-      {!complete && actionLabel && actionAvailable ? (
-        <Button
-          type="button"
-          disabled={controlsInert || pending || effective.action === "disconnect_first"}
-          aria-label={`${actionLabel} for ${presentation.providerName}`}
-          className="self-end"
-          onClick={onAction}
-        >
-          {actionLabel}
-        </Button>
+      {showActions ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          {showCancel ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={controlsInert || pending}
+              aria-label={`${presentation.cancelSetupLabel} for ${presentation.providerName}`}
+              onClick={onCancel}
+            >
+              {presentation.cancelSetupLabel}
+            </Button>
+          ) : null}
+          {showSetupAction ? (
+            <Button
+              type="button"
+              disabled={controlsInert || pending}
+              aria-label={`${actionLabel} for ${presentation.providerName}`}
+              onClick={onAction}
+            >
+              {actionLabel}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -69,7 +98,7 @@ export function MemberOwnedProviderSetup({
 
 function buildPendingView(
   presentation: MemberOwnedProviderSetupPresentation,
-): MemberOwnedProviderSetupView {
+): MemberOwnedProviderSetupDisplay {
   return {
     action: "start",
     applicationRevision: null,
@@ -80,6 +109,25 @@ function buildPendingView(
     updatedAt: new Date(0).toISOString(),
   };
 }
+
+function buildDisconnectFirstView(
+  presentation: MemberOwnedProviderSetupPresentation,
+): MemberOwnedProviderSetupDisplay {
+  return {
+    action: "disconnect_first",
+    applicationRevision: null,
+    connected: false,
+    message: presentation.messages.disconnect_first,
+    provider: presentation.provider,
+    status: "disconnect_first",
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
+type MemberOwnedProviderSetupDisplay = Omit<
+  MemberOwnedProviderSetupView,
+  "setupId"
+>;
 
 function resolveStatusLabel(
   status: MemberOwnedProviderSetupView["status"],
@@ -95,6 +143,8 @@ function resolveStatusLabel(
       return "Your action needed";
     case "provider_prerequisite":
       return "Provider prerequisite";
+    case "canceling":
+      return "Canceling safely";
     case "repair_required":
       return "Repair available";
     case "retryable_failure":

@@ -87,6 +87,7 @@ import {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
+  listMemberOwnedDeviceSyncConnectTargets,
 } from "@murphai/device-syncd/connect-config";
 import {
   type AssistantCurrentDeliveryRoute,
@@ -8232,9 +8233,17 @@ function hostedAssistantWakeStateProgressed(input: {
 
 function resolveHostedWorkspaceDeviceConnectProviders(
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">,
-): Array<{ label: string; provider: string }> {
+): Array<{
+  label: string;
+  memberOwnedApplicationSetup?: boolean;
+  provider: string;
+}> {
   const providerConfigs = runtime.resolvedConfig.deviceSync?.providerConfigs ?? null;
-  const providers = providerConfigs
+  const providers: Array<{
+    label: string;
+    memberOwnedApplicationSetup?: boolean;
+    provider: string;
+  }> = providerConfigs
     ? listConfiguredDeviceSyncConnectTargets(providerConfigs)
         .filter((target) =>
           isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
@@ -8245,8 +8254,19 @@ function resolveHostedWorkspaceDeviceConnectProviders(
         }))
     : [];
 
-  if (!providers.some((candidate) => candidate.provider === "strava")) {
-    providers.push({ label: "Strava", provider: "strava" });
+  for (const target of listMemberOwnedDeviceSyncConnectTargets()) {
+    const existing = providers.find(
+      (candidate) => candidate.provider === target.connectTarget,
+    );
+    if (existing) {
+      existing.memberOwnedApplicationSetup = true;
+      continue;
+    }
+    providers.push({
+      label: target.label,
+      memberOwnedApplicationSetup: true,
+      provider: target.connectTarget,
+    });
   }
   return providers;
 }

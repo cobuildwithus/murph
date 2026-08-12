@@ -15,7 +15,10 @@ import {
   type MemberOwnedDeviceProviderApplicationProvider,
   type ResolvedDeviceProviderApplication,
 } from "../provider-applications";
-import type { MemberOwnedProviderSetupAdapter } from "./adapter";
+import type {
+  MemberOwnedProviderSetupAdapter,
+  MemberOwnedProviderSetupBrowserRun,
+} from "./adapter";
 import {
   requireMemberOwnedProviderSetupRegistration,
   type MemberOwnedProviderSetupRegistration,
@@ -89,9 +92,10 @@ interface ProviderSetupIngress {
   ): Promise<{ authorizationUrl: string; state: string }>;
 }
 type CreateIngress = (request: Request) => ProviderSetupIngress;
+const PROVIDER_SETUP_WORKING_STALE_MS = 2 * 60 * 1000;
 
 export class MemberOwnedProviderSetupService {
-  private readonly adapter: MemberOwnedProviderSetupAdapter;
+  private adapterInstance: MemberOwnedProviderSetupAdapter | null;
   private readonly createIngress: CreateIngress;
   private readonly now: () => Date;
   private readonly readApplicationView: ReadApplicationView;
@@ -113,8 +117,10 @@ export class MemberOwnedProviderSetupService {
   ) {
     this.registration = input.registration
       ?? requireMemberOwnedProviderSetupRegistration(provider);
-    this.adapter = input.adapter ?? this.registration.createAdapter();
-    assertAdapterMatchesRegistration(this.adapter, this.registration);
+    this.adapterInstance = input.adapter ?? null;
+    if (this.adapterInstance) {
+      assertAdapterMatchesRegistration(this.adapterInstance, this.registration);
+    }
     this.createIngress = input.createIngress
       ?? createHostedDeviceSyncPublicIngressService;
     this.now = input.now ?? (() => new Date());
@@ -125,28 +131,44 @@ export class MemberOwnedProviderSetupService {
     this.store = input.store ?? new PrismaDeviceProviderSetupStore();
   }
 
+  private get adapter(): MemberOwnedProviderSetupAdapter {
+    if (!this.adapterInstance) {
+      this.adapterInstance = this.registration.createAdapter();
+      assertAdapterMatchesRegistration(this.adapterInstance, this.registration);
+    }
+    return this.adapterInstance;
+  }
+
   async read(memberId: string): Promise<MemberOwnedProviderSetupView | null> {
     const setup = await this.store.readActive({
       memberId,
-      provider: this.adapter.provider,
+      provider: this.registration.coordinates.provider,
     });
     if (!setup) {
       return null;
     }
-    const recovered = await this.recoverStoredApplicationBinding(setup);
+    if (setup.status === "canceling") {
+      return this.toView(setup);
+    }
+    const resumable = await this.recoverInterruptedWorking(setup);
+    const recovered = await this.recoverStoredApplicationBinding(resumable);
     const reconciled = await this.reconcileConnectionTruth(recovered, "read");
     return this.toView(reconciled);
   }
 
   async ensure(memberId: string): Promise<MemberOwnedProviderSetupRecord> {
     const setup = await this.store.ensureActive({
-      connectSourceId: this.adapter.connectSourceId,
-      connectTarget: this.adapter.connectTarget,
+      connectSourceId: this.registration.coordinates.connectSourceId,
+      connectTarget: this.registration.coordinates.connectTarget,
       memberId,
-      provider: this.adapter.provider,
-      sourceProviderSlug: this.adapter.sourceProviderSlug,
+      provider: this.registration.coordinates.provider,
+      sourceProviderSlug: this.registration.coordinates.sourceProviderSlug,
     });
-    const recovered = await this.recoverStoredApplicationBinding(setup);
+    if (setup.status === "canceling") {
+      return setup;
+    }
+    const resumable = await this.recoverInterruptedWorking(setup);
+    const recovered = await this.recoverStoredApplicationBinding(resumable);
     return this.reconcileConnectionTruth(recovered, "ensure");
   }
 
@@ -205,7 +227,8 @@ export class MemberOwnedProviderSetupService {
       const bound = await this.ensureBoundBrowserRun(setup);
       setup = bound.setup;
       if (bound.runStatus !== "running") {
-        return { setup: this.toView(setup) };
+        return await this.continuePausedBrowserRun(setup, bound)
+          ?? { setup: this.toView(setup) };
       }
 
       return await this.inspectAndContinue({
@@ -228,7 +251,20 @@ export class MemberOwnedProviderSetupService {
           latest.status === "waiting_for_user"
           || latest.status === "provider_prerequisite"
         ) {
-          return { setup: this.toView(latest) };
+          if (!latest.browserRunId) {
+            return { setup: this.toView(latest) };
+          }
+          const run = await this.adapter.ensureBrowserRun({
+            expectedRunId: latest.browserRunId,
+            memberId: latest.memberId,
+            setupId: latest.id,
+          });
+          return run.status === "running"
+            ? { setup: this.toView(latest) }
+            : await this.continuePausedBrowserRun(latest, {
+                awaitingReason: run.awaitingReason,
+                runId: run.runId,
+              }) ?? { setup: this.toView(latest) };
         }
         const failed = await this.transition(latest, {
           lastErrorCode: readSafeProviderSetupErrorCode(error),
@@ -238,6 +274,69 @@ export class MemberOwnedProviderSetupService {
       }
       throw error;
     }
+  }
+
+  async cancel(
+    memberId: string,
+    expectedSetupId: string,
+  ): Promise<MemberOwnedProviderSetupView> {
+    let setup = await this.store.readOwned({
+      memberId,
+      provider: this.registration.coordinates.provider,
+      setupId: expectedSetupId,
+    });
+    assertSetupCancelableOrCanceling(setup);
+    if (setup.status !== "canceling") {
+      setup = await this.recoverStoredApplicationBinding(setup);
+      const disposition = await this.store.readConnectionDisposition(setup);
+      const binding = readMemberOwnedProviderSetupBinding(setup);
+      if (
+        setup.status !== "provider_prerequisite"
+        || !setup.browserRunId
+        || setup.providerSubmissionAt !== null
+        || binding !== null
+        || disposition.kind !== "none"
+      ) {
+        throw unsafeProviderSetupCancellationError(
+          this.registration.presentation.providerName,
+        );
+      }
+      setup = await this.transition(setup, {
+        lastErrorCode: null,
+        status: "canceling",
+      });
+    }
+
+    if (
+      !setup.browserRunId
+      || setup.providerSubmissionAt !== null
+      || readMemberOwnedProviderSetupBinding(setup) !== null
+    ) {
+      throw unsafeProviderSetupCancellationError(
+        this.registration.presentation.providerName,
+      );
+    }
+
+    const runStatus = await this.adapter.cancelBrowserRun({
+      memberId,
+      runId: setup.browserRunId,
+      setupId: setup.id,
+    });
+    if (runStatus !== "canceled") {
+      throw unsafeProviderSetupCancellationError(
+        this.registration.presentation.providerName,
+      );
+    }
+    setup = await this.transition(setup, {
+      browserRunId: null,
+      completedAt: null,
+      lastErrorCode: null,
+      providerApplicationId: null,
+      providerApplicationRevision: null,
+      providerSubmissionAt: null,
+      status: "canceled",
+    });
+    return this.toView(setup);
   }
 
   async startOAuth(input: {
@@ -404,6 +503,7 @@ export class MemberOwnedProviderSetupService {
   private async ensureBoundBrowserRun(
     setup: MemberOwnedProviderSetupRecord,
   ): Promise<{
+    awaitingReason: MemberOwnedProviderSetupBrowserRun["awaitingReason"];
     runId: string;
     runStatus: string;
     setup: MemberOwnedProviderSetupRecord;
@@ -427,9 +527,39 @@ export class MemberOwnedProviderSetupService {
       });
     }
     return {
+      awaitingReason: run.awaitingReason,
       runId: run.runId,
       runStatus: run.status,
       setup: bound,
+    };
+  }
+
+  private async continuePausedBrowserRun(
+    setup: MemberOwnedProviderSetupRecord,
+    run: {
+      awaitingReason: MemberOwnedProviderSetupBrowserRun["awaitingReason"];
+      runId: string;
+    },
+  ): Promise<MemberOwnedProviderSetupAdvanceResult | null> {
+    if (
+      setup.status !== "waiting_for_user"
+      && setup.status !== "provider_prerequisite"
+    ) {
+      return null;
+    }
+    const handoff = await this.adapter.pauseForUser({
+      memberId: setup.memberId,
+      reason: setup.status === "provider_prerequisite"
+        ? "prerequisite"
+        : run.awaitingReason === "login_needed"
+        ? "signed_out"
+        : "challenge",
+      runId: run.runId,
+      setupId: setup.id,
+    });
+    return {
+      ...(handoff.handoffUrl ? { handoffUrl: handoff.handoffUrl } : {}),
+      setup: this.toView(setup),
     };
   }
 
@@ -619,8 +749,17 @@ export class MemberOwnedProviderSetupService {
           setupId: expectedSetupId,
         })
       : await this.ensure(memberId);
-    assertSetupAvailable(setup);
-    return setup;
+    const resumable = await this.recoverInterruptedWorking(setup);
+    assertSetupAvailable(resumable);
+    if (resumable.status === "working") {
+      throw deviceSyncError({
+        code: "DEVICE_PROVIDER_SETUP_ALREADY_IN_PROGRESS",
+        httpStatus: 409,
+        message: "Private provider setup is already in progress.",
+        retryable: true,
+      });
+    }
+    return resumable;
   }
 
   private async requireLatestAvailableSetup(
@@ -645,9 +784,7 @@ export class MemberOwnedProviderSetupService {
   private async recoverStoredApplicationBinding(
     setup: MemberOwnedProviderSetupRecord,
   ): Promise<MemberOwnedProviderSetupRecord> {
-    if (readMemberOwnedProviderSetupBinding(setup)) {
-      return setup;
-    }
+    const binding = readMemberOwnedProviderSetupBinding(setup);
     const application = await this.readApplicationView({
       memberId: setup.memberId,
       provider: setup.provider,
@@ -655,11 +792,58 @@ export class MemberOwnedProviderSetupService {
     if (!application) {
       return setup;
     }
+    if (
+      binding?.applicationId === application.applicationId
+      && binding.revision === application.revision
+    ) {
+      return setup;
+    }
+    if (
+      binding
+      && (
+        binding.applicationId !== application.applicationId
+        || application.revision < binding.revision
+      )
+    ) {
+      throw deviceSyncError({
+        code: "DEVICE_PROVIDER_SETUP_REPAIR_REQUIRED",
+        httpStatus: 409,
+        message: "Private provider application state does not match this setup.",
+        retryable: false,
+      });
+    }
     return this.transition(setup, {
       providerApplicationId: application.applicationId,
       providerApplicationRevision: application.revision,
       status: setup.status,
     });
+  }
+
+  private async recoverInterruptedWorking(
+    setup: MemberOwnedProviderSetupRecord,
+  ): Promise<MemberOwnedProviderSetupRecord> {
+    if (
+      setup.status !== "working"
+      || this.now().getTime() - setup.updatedAt.getTime()
+        < PROVIDER_SETUP_WORKING_STALE_MS
+    ) {
+      return setup;
+    }
+    try {
+      return await this.transition(setup, {
+        lastErrorCode: "PROVIDER_SETUP_DASHBOARD_UNAVAILABLE",
+        status: "retryable_failure",
+      });
+    } catch (error) {
+      const latest = await this.store.readActive({
+        memberId: setup.memberId,
+        provider: setup.provider,
+      });
+      if (latest && latest.version !== setup.version) {
+        return latest;
+      }
+      throw error;
+    }
   }
 
   private async inspectStoredApplication(
@@ -790,6 +974,35 @@ function assertSetupAvailable(setup: MemberOwnedProviderSetupRecord): void {
       retryable: false,
     });
   }
+  if (setup.status === "canceling") {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_CANCELLATION_IN_PROGRESS",
+      httpStatus: 409,
+      message: "Private provider setup cancellation is already in progress.",
+      retryable: false,
+    });
+  }
+}
+
+function assertSetupCancelableOrCanceling(
+  setup: MemberOwnedProviderSetupRecord,
+): void {
+  if (!setup.active || setup.status === "deleted") {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_INACTIVE",
+      httpStatus: 410,
+      message: "This private provider setup is no longer active.",
+      retryable: false,
+    });
+  }
+  if (setup.status === "deletion_pending") {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_DELETION_IN_PROGRESS",
+      httpStatus: 409,
+      message: "Private provider cleanup is already in progress.",
+      retryable: false,
+    });
+  }
 }
 
 export function createMemberOwnedProviderSetupService(
@@ -863,4 +1076,13 @@ function readSafeProviderSetupErrorCode(error: unknown): string {
     return error.code;
   }
   return "PROVIDER_SETUP_DASHBOARD_UNAVAILABLE";
+}
+
+function unsafeProviderSetupCancellationError(providerName: string) {
+  return deviceSyncError({
+    code: "DEVICE_PROVIDER_SETUP_CANCELLATION_UNSAFE",
+    httpStatus: 409,
+    message: `Murph could not prove that no ${providerName} application was submitted. Setup was not canceled.`,
+    retryable: false,
+  });
 }

@@ -183,8 +183,10 @@ export {
 } from "./config/runtime-config.ts";
 export {
   isDeviceConnectSourceAvailableForConnection,
+  isMemberOwnedDeviceSyncConnectTarget,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
+  listMemberOwnedDeviceSyncConnectTargets,
   normalizeDeviceSyncConnectTargetKey,
   resolveConfiguredDeviceSyncConnectTarget,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,

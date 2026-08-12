@@ -1,5 +1,6 @@
 import { formatDeviceSyncProviderLabel } from "../provider-label.ts";
 import {
+  listDirectDeviceConnectRouteEntries,
   normalizeDeviceConnectSourceId,
   normalizeJunctionLinkProviderFilter,
   resolveDirectDeviceConnectRouteByProvider,
@@ -25,9 +26,6 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
 };
 
 const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["whoop"]);
-// Keep provider ingestion configured for existing accounts while this product
-// gate controls whether a fresh user-facing connection can be started.
-const DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["strava"]);
 
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value
@@ -43,7 +41,33 @@ export function isDeviceConnectSourceAvailableForConnection(
   connectSourceId: string,
 ): boolean {
   const normalized = normalizeDeviceConnectSourceId(connectSourceId);
-  return Boolean(normalized && !DISABLED_DEVICE_CONNECT_SOURCE_IDS.has(normalized));
+  if (!normalized) {
+    return false;
+  }
+  return !listMemberOwnedDeviceSyncConnectTargets().some(
+    (target) => target.connectSourceId === normalized,
+  );
+}
+
+export function isMemberOwnedDeviceSyncConnectTarget(
+  target: Pick<DeviceSyncConnectTarget, "connectSourceId" | "connectTarget" | "provider">,
+): boolean {
+  return listMemberOwnedDeviceSyncConnectTargets().some((candidate) =>
+    candidate.connectSourceId === normalizeDeviceConnectSourceId(target.connectSourceId)
+    && candidate.connectTarget === normalizeDeviceSyncConnectTargetKey(target.connectTarget)
+    && candidate.provider === target.provider
+  );
+}
+
+export function listMemberOwnedDeviceSyncConnectTargets(): DeviceSyncConnectTarget[] {
+  return listDirectDeviceConnectRouteEntries()
+    .filter(({ route }) => route.applicationOwnership === "member")
+    .map(({ route, source }) => ({
+      connectSourceId: source.connectSourceId,
+      connectTarget: route.connectTarget,
+      label: source.label,
+      provider: route.provider,
+    }));
 }
 
 export function listConfiguredDeviceSyncConnectTargets(

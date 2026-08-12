@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   isDeviceConnectSourceAvailableForConnection,
+  isMemberOwnedDeviceSyncConnectTarget,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -26,11 +27,11 @@ export async function startHostedDeviceSyncConnection(input: {
   request: Request;
   target: DeviceSyncConnectTarget;
 }): Promise<HostedDeviceSyncConnectResponse> {
-  if (input.target.provider === "strava") {
+  if (isMemberOwnedDeviceSyncConnectTarget(input.target)) {
     throw deviceSyncError({
       code: "DEVICE_PROVIDER_SETUP_REQUIRED",
       httpStatus: 409,
-      message: "Direct Strava connections must use the private provider setup journey.",
+      message: "This connection must use the private provider setup journey.",
       retryable: false,
     });
   }

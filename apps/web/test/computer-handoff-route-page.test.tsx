@@ -84,6 +84,7 @@ describe("computer handoff route and page", () => {
     mocks.requireActiveHostedAppSession.mockResolvedValue(createSession());
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue(createSession());
     mocks.service.completeHandoff.mockResolvedValue({
+      redirectTo: null,
       returnContactKind: "text",
       status: "completed",
       suggestedReply: "private suggested reply",
@@ -134,6 +135,20 @@ describe("computer handoff route and page", () => {
     expect(mocks.service.readHandoffPageState).not.toHaveBeenCalled();
   });
 
+  it("redirects a completed setup-owned handoff back to authenticated Connect", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "redirect",
+      url: "/connect",
+    });
+
+    await expect(computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    })).rejects.toMatchObject({ url: "/connect" });
+
+    expect(mocks.redirect).toHaveBeenCalledWith("/connect");
+    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
+  });
+
   it("does not hide non-auth handoff page errors behind the auth state", async () => {
     const accessError = hostedOnboardingError({
       code: "HOSTED_MEMBER_ACCESS_REQUIRED",
@@ -169,8 +184,29 @@ describe("computer handoff route and page", () => {
     });
   });
 
+  it("returns setup-owned handoffs directly to Connect without contact lookup", async () => {
+    mocks.service.completeHandoff.mockResolvedValueOnce({
+      redirectTo: "/connect",
+      returnContactKind: null,
+      status: "completed",
+      suggestedReply: null,
+    });
+
+    const response = await computerHandoffDoneRoute.POST(
+      new Request("https://join.example.test/computer/handoff/handoff-token/done", {
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ redirectTo: "/connect" });
+    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
+  });
+
   it("returns email handoffs to the completed page instead of opening another app", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
+      redirectTo: null,
       returnContactKind: "email",
       status: "completed",
       suggestedReply: "private suggested reply",
@@ -196,6 +232,7 @@ describe("computer handoff route and page", () => {
 
   it("falls back to the handoff page path when the completed handoff has no source kind", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
+      redirectTo: null,
       returnContactKind: null,
       status: "completed",
       suggestedReply: "private suggested reply",
@@ -225,6 +262,7 @@ describe("computer handoff route and page", () => {
 
   it("falls back to the completed page when the source auto-return channel is unavailable", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
+      redirectTo: null,
       returnContactKind: "text",
       status: "completed",
       suggestedReply: "private suggested reply",
@@ -255,6 +293,7 @@ describe("computer handoff route and page", () => {
 
   it("falls back to the completed page when source contact resolution fails after completion", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
+      redirectTo: null,
       returnContactKind: "telegram",
       status: "completed",
       suggestedReply: "private suggested reply",
@@ -282,6 +321,7 @@ describe("computer handoff route and page", () => {
     "falls back to the completed page without contact lookup for %s source handoffs",
     async (status) => {
       mocks.service.completeHandoff.mockResolvedValueOnce({
+        redirectTo: null,
         returnContactKind: "text",
         status,
         suggestedReply: "private suggested reply",
@@ -346,6 +386,26 @@ describe("computer handoff route and page", () => {
     });
   });
 
+  it("returns verified setup-owned managed login directly to authenticated Connect", async () => {
+    mocks.service.continueManagedLoginHandoff.mockResolvedValueOnce({
+      kind: "redirect",
+      url: "/connect",
+    });
+
+    const response = await computerManagedLoginRoute.GET(
+      new Request(
+        "https://join.example.test/api/computer/handoff/handoff-token/managed-login",
+      ),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://join.example.test/connect",
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
   it("returns completed managed login callbacks to the handoff page", async () => {
     mocks.service.continueManagedLoginHandoff.mockResolvedValueOnce({
       kind: "completed",
@@ -400,6 +460,7 @@ describe("computer handoff route and page", () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
       kind: "checkpointing",
       purpose: "managed_login",
+      returnTo: "/connect",
       returnContactKind: null,
       suggestedReply: "Done",
     });
@@ -411,7 +472,7 @@ describe("computer handoff route and page", () => {
 
     assert.match(markup, /Secure sign-in could not start/);
     assert.match(markup, /Return to Murph/);
-    assert.match(markup, /href="\/home"/);
+    assert.match(markup, /href="\/connect"/);
     assert.equal(markup.includes("Saving your progress"), false);
     assert.equal(markup.includes("managed-login"), false);
     assert.equal(markup.includes("Try again"), false);
@@ -553,6 +614,7 @@ describe("computer handoff route and page", () => {
 
   it("renders the live view immediately", async () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      description: "Take over to finish this step.",
       handoffId: "hch_open",
       iframeAllow: "clipboard-read",
       interaction: "takeover",
@@ -560,6 +622,7 @@ describe("computer handoff route and page", () => {
       liveViewUrl: "https://browser.example.test/live",
       purpose: "login",
       suggestedReply: "done",
+      title: "Your turn",
     });
 
     const markup = renderToStaticMarkup(await computerHandoffPage.default({
@@ -567,6 +630,29 @@ describe("computer handoff route and page", () => {
     }));
 
     assert.match(markup, /<iframe[^>]+src="https:\/\/browser\.example\.test\/live"/);
+  });
+
+  it("renders explicit provider prerequisite guidance in the real handoff page", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      description: "Your provider may require a developer prerequisite before Murph can create your private application. Complete that provider step, then choose Done to return to Connect.",
+      handoffId: "hch_prerequisite",
+      iframeAllow: "clipboard-read",
+      interaction: "takeover",
+      kind: "open",
+      liveViewUrl: "https://browser.example.test/live",
+      purpose: "manual_browser_help",
+      suggestedReply: null,
+      title: "Continue provider setup",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    assert.match(markup, /Continue provider setup/u);
+    assert.match(markup, /developer prerequisite/u);
+    assert.match(markup, /choose Done to return to Connect/u);
+    assert.doesNotMatch(markup, /Reply to Murph/u);
   });
 
 });

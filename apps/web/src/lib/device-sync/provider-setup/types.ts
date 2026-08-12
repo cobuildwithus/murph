@@ -9,6 +9,7 @@ export const MEMBER_OWNED_PROVIDER_SETUP_STATUSES = [
   "inspection_required",
   "waiting_for_user",
   "provider_prerequisite",
+  "canceling",
   "repair_required",
   "retryable_failure",
   "oauth_ready",
@@ -36,7 +37,9 @@ export const MEMBER_OWNED_PROVIDER_SETUP_ERROR_CODES = [
 export type MemberOwnedProviderSetupErrorCode =
   (typeof MEMBER_OWNED_PROVIDER_SETUP_ERROR_CODES)[number];
 
-export interface MemberOwnedProviderSetupRecord {
+export interface MemberOwnedProviderSetupRecord<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> {
   active: boolean;
   browserRunId: string | null;
   completedAt: Date | null;
@@ -46,7 +49,7 @@ export interface MemberOwnedProviderSetupRecord {
   id: string;
   lastErrorCode: string | null;
   memberId: string;
-  provider: MemberOwnedDeviceProviderApplicationProvider;
+  provider: TProvider;
   providerApplicationId: string | null;
   providerApplicationRevision: number | null;
   providerSubmissionAt: Date | null;
@@ -70,27 +73,35 @@ type MemberOwnedProviderSetupInteractiveAction = Exclude<
   "none"
 >;
 
-export interface MemberOwnedProviderSetupPresentation {
+export interface MemberOwnedProviderSetupPresentation<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> {
   actionLabels: Readonly<Record<MemberOwnedProviderSetupInteractiveAction, string>>;
+  cancelSetupLabel: string;
   messages: Readonly<Record<MemberOwnedProviderSetupStatus, string>>;
-  provider: MemberOwnedDeviceProviderApplicationProvider;
+  provider: TProvider;
   providerName: string;
   readOnlyAccessLabel: string;
 }
 
-export interface MemberOwnedProviderSetupView {
+export interface MemberOwnedProviderSetupView<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> {
   action: MemberOwnedProviderSetupAction;
   applicationRevision: number | null;
   connected: boolean;
   message: string;
-  provider: MemberOwnedDeviceProviderApplicationProvider;
+  provider: TProvider;
+  setupId: string;
   status: MemberOwnedProviderSetupStatus;
   updatedAt: string;
 }
 
-export interface MemberOwnedProviderSetupProjection {
-  presentation: MemberOwnedProviderSetupPresentation;
-  setup: MemberOwnedProviderSetupView | null;
+export interface MemberOwnedProviderSetupProjection<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> {
+  presentation: MemberOwnedProviderSetupPresentation<TProvider>;
+  setup: MemberOwnedProviderSetupView<TProvider> | null;
 }
 
 export type MemberOwnedProviderSetupProjectionMap = Partial<
@@ -111,10 +122,12 @@ export interface MemberOwnedProviderSetupOAuthResult {
   setup: MemberOwnedProviderSetupView;
 }
 
-export type MemberOwnedProviderSetupConnectionDisposition =
+export type MemberOwnedProviderSetupConnectionDisposition<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> =
   | { kind: "none" }
   | {
-      binding: DeviceProviderApplicationBinding;
+      binding: DeviceProviderApplicationBinding<TProvider>;
       connectionId: string;
       kind: "exact";
     }
@@ -122,7 +135,7 @@ export type MemberOwnedProviderSetupConnectionDisposition =
 
 export type MemberOwnedProviderDashboardInspection =
   | { kind: "authentication_required"; reason: "challenge" | "signed_out" }
-  | { kind: "prerequisite_required"; reason: "subscription_required" }
+  | { kind: "prerequisite_required" }
   | { kind: "ambiguous" }
   | { kind: "missing" }
   | { kind: "owned_application" }
@@ -161,12 +174,12 @@ export function requireMemberOwnedProviderSetupStatus(
   throw new TypeError("Member-owned provider setup status is invalid.");
 }
 
-export function readMemberOwnedProviderSetupBinding(
+export function readMemberOwnedProviderSetupBinding<TProvider extends string>(
   setup: Pick<
-    MemberOwnedProviderSetupRecord,
+    MemberOwnedProviderSetupRecord<TProvider>,
     "provider" | "providerApplicationId" | "providerApplicationRevision"
   >,
-): DeviceProviderApplicationBinding | null {
+): DeviceProviderApplicationBinding<TProvider> | null {
   if (
     setup.providerApplicationId === null
     && setup.providerApplicationRevision === null
@@ -191,10 +204,10 @@ export function readMemberOwnedProviderSetupBinding(
   };
 }
 
-export function toMemberOwnedProviderSetupView(
-  setup: MemberOwnedProviderSetupRecord,
-  presentation: MemberOwnedProviderSetupPresentation,
-): MemberOwnedProviderSetupView {
+export function toMemberOwnedProviderSetupView<TProvider extends string>(
+  setup: MemberOwnedProviderSetupRecord<TProvider>,
+  presentation: MemberOwnedProviderSetupPresentation<TProvider>,
+): MemberOwnedProviderSetupView<TProvider> {
   if (setup.provider !== presentation.provider) {
     throw new TypeError(
       "Member-owned provider setup presentation does not match its provider.",
@@ -207,6 +220,7 @@ export function toMemberOwnedProviderSetupView(
     connected: setup.status === "connected",
     message: presentation.messages[setup.status],
     provider: setup.provider,
+    setupId: setup.id,
     status: setup.status,
     updatedAt: setup.updatedAt.toISOString(),
   };
@@ -226,6 +240,7 @@ function resolveSetupAction(
     case "inspection_required":
     case "repair_required":
     case "retryable_failure":
+    case "provider_conflict":
       return "retry";
     case "oauth_ready":
     case "oauth_in_progress":
@@ -233,8 +248,8 @@ function resolveSetupAction(
     case "disconnect_first":
       return "disconnect_first";
     case "working":
+    case "canceling":
     case "connected":
-    case "provider_conflict":
     case "deletion_pending":
     case "deleted":
       return "none";

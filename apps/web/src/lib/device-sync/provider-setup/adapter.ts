@@ -1,4 +1,9 @@
 import type {
+  HostedComputerAwaitingReason,
+  HostedComputerFinishOutcome,
+} from "@murphai/hosted-execution/computer-use";
+
+import type {
   MemberOwnedDeviceProviderApplicationProvider,
   DeviceProviderApplicationView,
 } from "../provider-applications";
@@ -13,6 +18,7 @@ import type {
 } from "./types";
 
 export interface MemberOwnedProviderSetupBrowserRun {
+  awaitingReason: HostedComputerAwaitingReason | null;
   reused: boolean;
   runId: string;
   status: string;
@@ -59,17 +65,31 @@ export interface MemberOwnedProviderSetupComputer {
     handoffUrl: string | null;
     runId: string;
   }>;
+  finishOwnedRun(input: {
+    memberId: string;
+    outcome: "canceled";
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<{
+    ok: true;
+    runId: string;
+    status: HostedComputerFinishOutcome;
+  }>;
 }
 
-export interface MemberOwnedProviderSetupCoordinates {
+export interface MemberOwnedProviderSetupCoordinates<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> {
   connectSourceId: string;
   connectTarget: string;
-  provider: MemberOwnedDeviceProviderApplicationProvider;
+  provider: TProvider;
   sourceProviderSlug: string | null;
 }
 
-export interface MemberOwnedProviderSetupAdapter
-extends MemberOwnedProviderSetupCoordinates {
+export interface MemberOwnedProviderSetupAdapter<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> extends MemberOwnedProviderSetupCoordinates<TProvider> {
   createOwnedApplication(input: {
     memberId: string;
     runId: string;
@@ -80,12 +100,22 @@ extends MemberOwnedProviderSetupCoordinates {
     memberId: string;
     runId: string;
     setupId: string;
-  }): Promise<DeviceProviderApplicationView>;
+  }): Promise<DeviceProviderApplicationView<TProvider>>;
+  cancelBrowserRun(input: {
+    memberId: string;
+    runId: string;
+    setupId: string;
+  }): Promise<HostedComputerFinishOutcome>;
   deleteOwnedApplication(input: {
     memberId: string;
     runId: string;
     setupId: string;
   }): Promise<MemberOwnedProviderApplicationDeleteResult>;
+  finishBrowserRun(input: {
+    memberId: string;
+    runId: string;
+    setupId: string;
+  }): Promise<HostedComputerFinishOutcome>;
   ensureBrowserRun(input: {
     expectedRunId: string | null;
     memberId: string;

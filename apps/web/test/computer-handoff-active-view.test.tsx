@@ -150,6 +150,7 @@ test("ComputerHandoffActiveView unmounts the iframe while completing a handoff",
   const fallbackLink = successStatus.querySelector("a");
   assert.ok(fallbackLink);
   expect(fallbackLink.getAttribute("href")).toBe("sms:+15550100001?body=Done");
+  expect(fallbackLink.getAttribute("aria-label")).toBe("Open Murph");
   expect(fallbackLink.textContent).toContain("Open Murph");
   expect(container.querySelector("iframe")).toBeNull();
   expect(track).toHaveBeenCalledWith("handoff_completed");

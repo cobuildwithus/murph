@@ -124,6 +124,29 @@ implements MemberOwnedProviderSetupAdapter {
     };
   }
 
+  async cancelBrowserRun(input: {
+    memberId: string;
+    runId: string;
+    setupId: string;
+  }) {
+    const finished = await this.computer.finishOwnedRun({
+      memberId: input.memberId,
+      outcome: "canceled",
+      ownerKey: input.setupId,
+      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+      runId: input.runId,
+    });
+    return finished.status;
+  }
+
+  async finishBrowserRun(input: {
+    memberId: string;
+    runId: string;
+    setupId: string;
+  }) {
+    return this.cancelBrowserRun(input);
+  }
+
   async createOwnedApplication(input: {
     memberId: string;
     runId: string;
@@ -192,7 +215,23 @@ implements MemberOwnedProviderSetupAdapter {
       runId: input.runId,
       timeoutMs: STRAVA_PROVIDER_SETUP_ACT_TIMEOUT_MS,
     });
-    return readStravaApplicationDeleteResult(result.result);
+    const requested = readStravaApplicationDeleteActionResult(result.result);
+    if (requested.kind !== "delete_requested") {
+      return requested;
+    }
+    const inspection = await this.inspectDashboard(input);
+    switch (inspection.kind) {
+      case "missing":
+        return { kind: "deleted" };
+      case "authentication_required":
+        return inspection;
+      case "unrelated_application":
+        return { kind: "deleted" };
+      case "ambiguous":
+      case "owned_application":
+      case "prerequisite_required":
+        return { kind: "ambiguous" };
+    }
   }
 }
 
@@ -276,11 +315,11 @@ if (exactMatches.length > 1) return { kind: "ambiguous" };
 if (exactMatches.length === 1) return { kind: "owned_application" };
 if (names.length > 0) return { kind: "unrelated_application" };
 if (await visible('[data-murph-state="subscription-required"], [data-testid="developer-subscription-required"]')) {
-  return { kind: "prerequisite_required", reason: "subscription_required" };
+  return { kind: "prerequisite_required" };
 }
 const prerequisiteText = page.getByText(/developer subscription|subscribe to create an app|subscription required/iu).first();
 if (await prerequisiteText.count() && await prerequisiteText.isVisible().catch(() => false)) {
-  return { kind: "prerequisite_required", reason: "subscription_required" };
+  return { kind: "prerequisite_required" };
 }
 const forms = page.locator('form[data-strava-application-form], form[action*="settings/api"]');
 if (await forms.count() > 1) return { kind: "ambiguous" };
@@ -459,7 +498,7 @@ if (await confirmation.count() === 1 && await confirmation.first().isVisible().c
   await confirmation.first().click();
 }
 await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-return { kind: "deleted" };
+return { kind: "delete_requested" };
 `.trim();
 }
 
@@ -474,11 +513,8 @@ function readStravaDashboardInspection(
       return { kind, reason };
     }
   }
-  if (
-    kind === "prerequisite_required"
-    && record.reason === "subscription_required"
-  ) {
-    return { kind, reason: "subscription_required" };
+  if (kind === "prerequisite_required") {
+    return { kind };
   }
   if (
     kind === "ambiguous"
@@ -507,9 +543,9 @@ function readStravaApplicationCreateResult(
   throw invalidAdapterResult("application creation");
 }
 
-function readStravaApplicationDeleteResult(
+function readStravaApplicationDeleteActionResult(
   value: unknown,
-): MemberOwnedProviderApplicationDeleteResult {
+): MemberOwnedProviderApplicationDeleteResult | { kind: "delete_requested" } {
   const record = requireResultRecord(value, "application deletion");
   const kind = record.kind;
   if (kind === "authentication_required") {
@@ -520,7 +556,7 @@ function readStravaApplicationDeleteResult(
   }
   if (
     kind === "ambiguous"
-    || kind === "deleted"
+    || kind === "delete_requested"
     || kind === "missing"
     || kind === "unrelated_application"
   ) {

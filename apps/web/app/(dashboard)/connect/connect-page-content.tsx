@@ -371,6 +371,13 @@ export default async function ConnectPage({
       memberOwnedProviderSetups = await readMemberOwnedProviderSetupProjections(
         auth.authenticatedMember.id,
       );
+    } catch (error) {
+      initialLoadError = isHostedOnboardingError(error)
+        ? { message: error.message }
+        : { message: "Could not load private provider setup right now." };
+    }
+
+    try {
       const response = await buildHostedDeviceSyncSettingsResponse({
         member: auth.authenticatedMember,
       });

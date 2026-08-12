@@ -41,6 +41,10 @@ export default async function ComputerHandoffPage({
   const managedEndpoint =
     `/api/computer/handoff/${encodeURIComponent(token)}/managed-login`;
 
+  if (state.kind === "redirect") {
+    redirect(state.url);
+  }
+
   if (state.kind === "managed_login") {
     if (managedState !== "retry" && managedState !== "waiting") {
       redirect(managedEndpoint);
@@ -88,7 +92,7 @@ export default async function ComputerHandoffPage({
               The secure sign-in provider could not connect. Return to Murph and ask for a live browser link.
             </p>
             <a
-              href="/home"
+              href={state.returnTo ?? "/home"}
               className={cn(buttonVariants({ size: "lg" }), "mt-6 inline-flex")}
             >
               Return to Murph
@@ -169,9 +173,11 @@ export default async function ComputerHandoffPage({
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
       <ComputerHandoffActiveView
+        description={state.description}
         doneEndpoint={doneEndpoint}
         iframeAllow={state.iframeAllow}
         liveViewUrl={state.liveViewUrl}
+        title={state.title}
       />
     </main>
   );

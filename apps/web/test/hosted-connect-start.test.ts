@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   getPrisma: vi.fn(),
   isDeviceConnectSourceAvailableForConnection: vi.fn(),
+  isMemberOwnedDeviceSyncConnectTarget: vi.fn(),
   prepareConnectionStart: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   startConnection: vi.fn(),
@@ -19,6 +20,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@murphai/device-syncd/connect-config", () => ({
   isDeviceConnectSourceAvailableForConnection:
     mocks.isDeviceConnectSourceAvailableForConnection,
+  isMemberOwnedDeviceSyncConnectTarget:
+    mocks.isMemberOwnedDeviceSyncConnectTarget,
 }));
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
@@ -78,6 +81,9 @@ beforeEach(() => {
   vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
 
   mocks.isDeviceConnectSourceAvailableForConnection.mockReturnValue(true);
+  mocks.isMemberOwnedDeviceSyncConnectTarget.mockImplementation(
+    (target: { connectSourceId: string }) => target.connectSourceId === "strava",
+  );
   mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
     member: { id: "member_a" },
     sessionId: "session_a",
@@ -111,6 +117,22 @@ describe("startHostedDeviceSyncConnection", () => {
     });
 
     expect(mocks.isDeviceConnectSourceAvailableForConnection).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+  });
+
+  it("applies the same direct-start fence to any catalog-owned target", async () => {
+    mocks.isMemberOwnedDeviceSyncConnectTarget.mockReturnValueOnce(true);
+
+    await expect(startHostedDeviceSyncConnection({
+      defaultReturnTo: "/device-sync/connect/complete?source=connect",
+      request: REQUEST,
+      target: OURA_TARGET,
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_REQUIRED",
+      httpStatus: 409,
+    });
+
     expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
     expect(mocks.startConnection).not.toHaveBeenCalled();
   });

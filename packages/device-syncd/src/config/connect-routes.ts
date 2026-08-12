@@ -24,6 +24,7 @@ export interface DeviceConnectJunctionSdkRoute {
 
 export interface DeviceConnectDirectRoute {
   readonly kind: "direct";
+  readonly applicationOwnership: "member" | "operator";
   readonly connectTarget: string;
   readonly provider: DirectDeviceConnectProvider;
   readonly defaultEnabled: boolean;
@@ -94,7 +95,10 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "strava",
     label: "Strava",
-    routes: [directRoute("strava"), junctionLinkRoute("strava")],
+    routes: [
+      directRoute("strava", { applicationOwnership: "member" }),
+      junctionLinkRoute("strava"),
+    ],
   },
   {
     connectSourceId: "freestyle-libre-ble",
@@ -457,7 +461,11 @@ function junctionSdkRoute(
 
 function directRoute(
   provider: DirectDeviceConnectProvider,
-  options: { connectTarget?: string; defaultEnabled?: boolean } = {},
+  options: {
+    applicationOwnership?: "member" | "operator";
+    connectTarget?: string;
+    defaultEnabled?: boolean;
+  } = {},
 ): DeviceConnectDirectRoute {
   const normalizedConnectTarget = normalizeJunctionProviderSlug(options.connectTarget ?? provider);
   if (!normalizedConnectTarget) {
@@ -466,6 +474,7 @@ function directRoute(
 
   return {
     kind: "direct",
+    applicationOwnership: options.applicationOwnership ?? "operator",
     connectTarget: normalizedConnectTarget,
     provider,
     defaultEnabled: options.defaultEnabled ?? true,

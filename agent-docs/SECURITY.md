@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Non-Negotiable Rules
 
@@ -70,7 +70,12 @@ Last verified: 2026-08-10
   and returns only non-secret application metadata. General browser actions, DOM
   summaries, screenshots, tool results, logs, exceptions, analytics, workspaces,
   fixtures, and UI must never receive the secret. Human sign-in, MFA, CAPTCHA,
-  and consent use only the same-origin `/computer/handoff/` surface. The Strava
+  provider prerequisites, and consent use only the same-origin
+  `/computer/handoff/` surface. A setup-owned completed handoff resumes only its
+  exact member/setup run and returns to authenticated `/connect`, without contact
+  routing or an inbound-reply dependency. Prerequisite cancellation terminates
+  only that exact run and is rejected unless durable state proves there is no
+  provider submission, application binding, or connection. The Strava
   adapter may inspect, create, repair, or delete only the exact deterministic
   Murph marker and must fail closed around unrelated applications. A setup may
   navigate only a browser run durably bound to that exact setup owner key; a

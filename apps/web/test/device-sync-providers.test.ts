@@ -47,6 +47,7 @@ describe("mergeHostedDeviceSyncProviderConfigs", () => {
         strava: {
           clientId: "member-client",
           clientSecret: "member-secret",
+          scopes: ["activity:read"],
         },
       },
     });
@@ -57,7 +58,7 @@ describe("mergeHostedDeviceSyncProviderConfigs", () => {
       clientId: "member-client",
       clientSecret: "member-secret",
       reconcileDays: 7,
-      scopes: ["read", "activity:read_all"],
+      scopes: ["activity:read"],
     });
     expect(merged.strava).not.toHaveProperty("fetchImpl");
     expect(merged.strava).not.toHaveProperty("webhookSigningSecret");

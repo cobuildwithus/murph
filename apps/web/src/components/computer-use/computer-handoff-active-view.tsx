@@ -15,15 +15,19 @@ type Phase =
   | { kind: "done"; redirectTo: string };
 
 interface ComputerHandoffActiveViewProps {
+  description?: string;
   doneEndpoint: string;
   iframeAllow: string;
   liveViewUrl: string;
+  title?: string;
 }
 
 export function ComputerHandoffActiveView({
+  description = "Take over to finish this step. Use the keyboard icon in the browser to type or paste.",
   doneEndpoint,
   iframeAllow,
   liveViewUrl,
+  title = "Your turn",
 }: ComputerHandoffActiveViewProps) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle", error: null });
   const [takeoverStarted, setTakeoverStarted] = useState(false);
@@ -133,14 +137,13 @@ export function ComputerHandoffActiveView({
                   id="computer-handoff-takeover-title"
                   className="mt-3 font-serif text-3xl leading-tight text-balance"
                 >
-                  Your turn
+                  {title}
                 </h1>
                 <p
                   id="computer-handoff-takeover-description"
                   className="mt-4 text-sm leading-6 text-muted-foreground text-pretty"
                 >
-                  Take over to finish this step. Use the keyboard icon in the browser
-                  to type or paste.
+                  {description}
                 </p>
                 <Button
                   type="button"
@@ -229,7 +232,7 @@ export function ComputerHandoffActiveView({
             ref={successAnchorRef}
             href={phase.redirectTo}
             className={cn(buttonVariants({ size: "lg" }))}
-            aria-label="Open Murph to send your reply"
+            aria-label="Open Murph"
           >
             <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
             Open Murph

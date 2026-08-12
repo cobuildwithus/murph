@@ -6,6 +6,11 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type { MemberOwnedProviderSetupAdapter } from "@/src/lib/device-sync/provider-setup/adapter";
 import {
+  STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
+  STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+  type MemberOwnedProviderSetupRegistration,
+} from "@/src/lib/device-sync/provider-setup/registry";
+import {
   MemberOwnedProviderSetupService,
 } from "@/src/lib/device-sync/provider-setup/service";
 import type {
@@ -181,22 +186,35 @@ class MemorySetupStore {
 }
 
 function createFakeAdapter(input: {
+  cancelRunStatus?: "canceled" | "completed" | "failed";
   capture?: (expectedRevision: number | null) => Promise<DeviceProviderApplicationView>;
   createResults?: MemberOwnedProviderApplicationCreateResult[];
+  awaitingReasons?: Array<"login_needed" | "other" | null>;
+  handoffUrls?: Array<string | null>;
   inspections?: MemberOwnedProviderDashboardInspection[];
   runId?: string;
+  runStatuses?: string[];
 } = {}) {
   const inspections = [...(input.inspections ?? [{ kind: "owned_application" as const }])];
   const createResults = [...(input.createResults ?? [{ kind: "submitted" as const }])];
+  const awaitingReasons = [...(input.awaitingReasons ?? [null])];
+  const handoffUrls = [...(input.handoffUrls ?? [
+    "https://web.example.test/computer/handoff/synthetic-handoff",
+  ])];
+  const runStatuses = [...(input.runStatuses ?? ["running"])];
   const ensureBrowserRun = vi.fn(async (runInput: {
     expectedRunId: string | null;
     memberId: string;
     setupId: string;
-  }) => ({
-    reused: runInput.expectedRunId === (input.runId ?? RUN_ID),
-    runId: input.runId ?? RUN_ID,
-    status: "running",
-  }));
+  }) => {
+    const status = runStatuses.shift() ?? runStatuses.at(-1) ?? "running";
+    return {
+      awaitingReason: awaitingReasons.shift() ?? awaitingReasons.at(-1) ?? null,
+      reused: runInput.expectedRunId === (input.runId ?? RUN_ID),
+      runId: input.runId ?? RUN_ID,
+      status,
+    };
+  });
   const inspectDashboard = vi.fn(async () =>
     inspections.shift() ?? inspections.at(-1) ?? { kind: "owned_application" as const });
   const createOwnedApplication = vi.fn(async () =>
@@ -206,11 +224,21 @@ function createFakeAdapter(input: {
   }) => input.capture
     ? input.capture(captureInput.expectedRevision)
     : APPLICATION);
-  const pauseForUser = vi.fn(async () => ({
-    handoffUrl: "https://web.example.test/computer/handoff/synthetic-handoff",
+  const pauseForUser = vi.fn(async (_pauseInput: {
+    memberId: string;
+    reason: "challenge" | "prerequisite" | "signed_out";
+    runId: string;
+    setupId: string;
+  }) => {
+    void _pauseInput;
+    return {
+    handoffUrl: handoffUrls.shift() ?? handoffUrls.at(-1) ?? null,
     runId: input.runId ?? RUN_ID,
-  }));
+    };
+  });
+  const cancelBrowserRun = vi.fn(async () => input.cancelRunStatus ?? "canceled");
   const adapter: MemberOwnedProviderSetupAdapter = {
+    cancelBrowserRun,
     captureAndSealOwnedApplication,
     connectSourceId: "strava",
     connectTarget: "strava",
@@ -218,12 +246,14 @@ function createFakeAdapter(input: {
     deleteOwnedApplication: vi.fn(async () => ({ kind: "deleted" as const })),
     ensureBrowserRun,
     inspectDashboard,
+    finishBrowserRun: cancelBrowserRun,
     pauseForUser,
     provider: "strava",
     sourceProviderSlug: null,
   };
   return {
     adapter,
+    cancelBrowserRun,
     captureAndSealOwnedApplication,
     createOwnedApplication,
     ensureBrowserRun,
@@ -278,6 +308,58 @@ describe("member-owned provider setup service", () => {
     vi.unstubAllEnvs();
   });
 
+  it("recovers a stale persisted working state into an explicit retry", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      status: "working",
+      updatedAt: new Date(NOW.getTime() - 3 * 60 * 1_000),
+    });
+    const fake = createFakeAdapter();
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      action: "retry",
+      status: "retryable_failure",
+    });
+    expect(fake.ensureBrowserRun).not.toHaveBeenCalled();
+  });
+
+  it("does not recover a fresh working state owned by an in-flight request", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({ status: "working" });
+    const fake = createFakeAdapter();
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      action: "none",
+      status: "working",
+    });
+    expect(store.transitionStatuses).toEqual([]);
+  });
+
+  it("projects durable setup state without constructing a browser adapter", async () => {
+    const store = new MemorySetupStore();
+    const createAdapter = vi.fn(() => {
+      throw new Error("Projection must not construct a browser adapter.");
+    });
+    const registration: MemberOwnedProviderSetupRegistration = {
+      coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
+      createAdapter,
+      presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    };
+    const service = new MemberOwnedProviderSetupService("strava", {
+      readApplicationView: async () => null,
+      registration,
+      store,
+    });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      action: "start",
+      status: "pending",
+    });
+    expect(createAdapter).not.toHaveBeenCalled();
+  });
+
   it("persists a signed-out handoff and resumes the exact setup-owned run", async () => {
     const store = new MemorySetupStore();
     const fake = createFakeAdapter({
@@ -285,14 +367,33 @@ describe("member-owned provider setup service", () => {
         { kind: "authentication_required", reason: "signed_out" },
         { kind: "owned_application" },
       ],
+      handoffUrls: [
+        "https://web.example.test/computer/handoff/first",
+        "https://web.example.test/computer/handoff/refreshed",
+        "https://web.example.test/computer/handoff/back",
+      ],
+      awaitingReasons: [null, "login_needed", "login_needed", null],
+      runStatuses: ["running", "awaiting_user", "awaiting_user", "running"],
     });
     const service = createService({ adapter: fake.adapter, store });
 
     await expect(service.advance(MEMBER_ID)).resolves.toMatchObject({
-      handoffUrl: "https://web.example.test/computer/handoff/synthetic-handoff",
+      handoffUrl: "https://web.example.test/computer/handoff/first",
       setup: { action: "continue_sign_in", status: "waiting_for_user" },
     });
     expect(store.setup?.browserRunId).toBe(RUN_ID);
+
+    await expect(service.advance(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      handoffUrl: "https://web.example.test/computer/handoff/refreshed",
+      setup: { action: "continue_sign_in", status: "waiting_for_user" },
+    });
+    await expect(service.advance(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      handoffUrl: "https://web.example.test/computer/handoff/back",
+      setup: { action: "continue_sign_in", status: "waiting_for_user" },
+    });
+    expect(fake.inspectDashboard).toHaveBeenCalledTimes(1);
+    expect(fake.createOwnedApplication).not.toHaveBeenCalled();
+    expect(fake.captureAndSealOwnedApplication).not.toHaveBeenCalled();
 
     await expect(service.advance(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
       setup: {
@@ -305,13 +406,19 @@ describe("member-owned provider setup service", () => {
       expectedRunId: RUN_ID,
       setupId: SETUP_ID,
     });
-    expect(fake.pauseForUser).toHaveBeenCalledTimes(1);
+    expect(fake.pauseForUser).toHaveBeenCalledTimes(3);
+    expect(fake.pauseForUser.mock.calls.map(([call]) => call.reason)).toEqual([
+      "signed_out",
+      "signed_out",
+      "signed_out",
+    ]);
+    expect(fake.createOwnedApplication).not.toHaveBeenCalled();
   });
 
   it("surfaces a provider prerequisite as a recoverable first-party handoff", async () => {
     const store = new MemorySetupStore();
     const fake = createFakeAdapter({
-      inspections: [{ kind: "prerequisite_required", reason: "subscription_required" }],
+      inspections: [{ kind: "prerequisite_required" }],
     });
     const service = createService({ adapter: fake.adapter, store });
 
@@ -325,6 +432,208 @@ describe("member-owned provider setup service", () => {
       setupId: SETUP_ID,
     }));
     expect(fake.createOwnedApplication).not.toHaveBeenCalled();
+  });
+
+  it("cancels only a proved-unsent provider prerequisite and terminates its exact run", async () => {
+    const store = new MemorySetupStore();
+    const fake = createFakeAdapter({
+      inspections: [{ kind: "prerequisite_required" }],
+    });
+    const service = createService({ adapter: fake.adapter, store });
+    fake.cancelBrowserRun.mockImplementationOnce(async () => {
+      expect(store.setup?.status).toBe("canceling");
+      return "canceled";
+    });
+
+    await service.advance(MEMBER_ID);
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      action: "start",
+      status: "canceled",
+    });
+    expect(fake.cancelBrowserRun).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+      setupId: SETUP_ID,
+    });
+    expect(store.setup).toMatchObject({
+      browserRunId: null,
+      providerApplicationId: null,
+      providerApplicationRevision: null,
+      providerSubmissionAt: null,
+      status: "canceled",
+    });
+    expect(fake.createOwnedApplication).not.toHaveBeenCalled();
+    expect(fake.captureAndSealOwnedApplication).not.toHaveBeenCalled();
+  });
+
+  it("retries the exact external cancellation from its persisted fence", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      lastErrorCode: "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
+      status: "provider_prerequisite",
+    });
+    const fake = createFakeAdapter();
+    fake.cancelBrowserRun
+      .mockRejectedValueOnce(new Error("NON_SECRET_TEST_RUN_CANCELLATION_FAILURE"))
+      .mockResolvedValueOnce("canceled");
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toThrow(
+      "NON_SECRET_TEST_RUN_CANCELLATION_FAILURE",
+    );
+    expect(store.setup?.status).toBe("canceling");
+
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      action: "start",
+      status: "canceled",
+    });
+    expect(fake.cancelBrowserRun).toHaveBeenCalledTimes(2);
+    expect(store.setup).toMatchObject({
+      browserRunId: null,
+      status: "canceled",
+    });
+  });
+
+  it("blocks setup advancement while the persisted cancellation fence is active", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      status: "canceling",
+    });
+    const fake = createFakeAdapter();
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.advance(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_CANCELLATION_IN_PROGRESS",
+    });
+    expect(fake.ensureBrowserRun).not.toHaveBeenCalled();
+    expect(fake.inspectDashboard).not.toHaveBeenCalled();
+    expect(fake.createOwnedApplication).not.toHaveBeenCalled();
+  });
+
+  it("does not let a stale cancellation target a different active setup", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      lastErrorCode: "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
+      status: "provider_prerequisite",
+    });
+    const fake = createFakeAdapter();
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.cancel(MEMBER_ID, "dps_stale")).rejects.toThrow(
+      "setup not found",
+    );
+    expect(fake.cancelBrowserRun).not.toHaveBeenCalled();
+    expect(store.setup?.status).toBe("provider_prerequisite");
+  });
+
+  it("fails closed when any provider connection is still bound", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      lastErrorCode: "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
+      status: "provider_prerequisite",
+    });
+    store.disposition = {
+      connectionId: "hdc_conflict",
+      kind: "conflict",
+    };
+    const fake = createFakeAdapter();
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_CANCELLATION_UNSAFE",
+    });
+    expect(fake.cancelBrowserRun).not.toHaveBeenCalled();
+    expect(store.setup?.status).toBe("provider_prerequisite");
+  });
+
+  it("fails closed instead of canceling when provider submission cannot be disproved", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      lastErrorCode: "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
+      providerSubmissionAt: NOW,
+      status: "provider_prerequisite",
+    });
+    const fake = createFakeAdapter();
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_CANCELLATION_UNSAFE",
+    });
+    expect(fake.cancelBrowserRun).not.toHaveBeenCalled();
+    expect(store.setup?.status).toBe("provider_prerequisite");
+  });
+
+  it("fails closed instead of canceling when an application binding already exists", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      lastErrorCode: "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
+      providerApplicationId: APPLICATION.applicationId,
+      providerApplicationRevision: APPLICATION.revision,
+      status: "provider_prerequisite",
+    });
+    const fake = createFakeAdapter();
+    const service = createService({
+      adapter: fake.adapter,
+      readApplicationView: async () => APPLICATION,
+      store,
+    });
+
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_CANCELLATION_UNSAFE",
+    });
+    expect(fake.cancelBrowserRun).not.toHaveBeenCalled();
+    expect(store.setup).toMatchObject({
+      providerApplicationId: APPLICATION.applicationId,
+      providerApplicationRevision: APPLICATION.revision,
+      status: "provider_prerequisite",
+    });
+  });
+
+  it("fails closed when the exact run did not reach the canceled terminal state", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      lastErrorCode: "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
+      status: "provider_prerequisite",
+    });
+    const fake = createFakeAdapter({ cancelRunStatus: "completed" });
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_CANCELLATION_UNSAFE",
+    });
+    expect(store.setup).toMatchObject({
+      browserRunId: RUN_ID,
+      status: "canceling",
+    });
+  });
+
+  it("keeps the setup active when exact-run cancellation cannot be confirmed", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      lastErrorCode: "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
+      status: "provider_prerequisite",
+    });
+    const fake = createFakeAdapter();
+    fake.cancelBrowserRun.mockRejectedValueOnce(
+      new Error("NON_SECRET_TEST_RUN_CANCELLATION_FAILURE"),
+    );
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toThrow(
+      "NON_SECRET_TEST_RUN_CANCELLATION_FAILURE",
+    );
+    expect(store.setup).toMatchObject({
+      browserRunId: RUN_ID,
+      status: "canceling",
+    });
   });
 
   it("re-inspects an ambiguous submission before a later explicit create retry", async () => {
@@ -379,6 +688,28 @@ describe("member-owned provider setup service", () => {
       runId: RUN_ID,
       setupId: SETUP_ID,
     });
+  });
+
+  it("recovers a newer sealed credential revision after setup binding was interrupted", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      providerApplicationId: APPLICATION.applicationId,
+      providerApplicationRevision: APPLICATION.revision - 1,
+      status: "oauth_ready",
+    });
+    const fake = createFakeAdapter();
+    const service = createService({
+      adapter: fake.adapter,
+      readApplicationView: async () => APPLICATION,
+      store,
+    });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      applicationRevision: APPLICATION.revision,
+      status: "oauth_ready",
+    });
+    expect(store.setup?.providerApplicationRevision).toBe(APPLICATION.revision);
+    expect(fake.ensureBrowserRun).not.toHaveBeenCalled();
   });
 
   it("does not navigate before an acquired run is durably bound and safely reuses it after ambiguity", async () => {

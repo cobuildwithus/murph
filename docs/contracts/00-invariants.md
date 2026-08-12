@@ -287,6 +287,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   Generic member browser runs are not setup authority. Connection records are the
   authoritative completion/disconnection truth, and projection bookkeeping after
   an irreversible provider effect cannot turn success into a reported failure.
+  An awaiting setup may reissue only the latest capability for its exact owned
+  handoff; completing that handoff resumes only that run and returns to `/connect`
+  without conversation routing. Prerequisite cancellation is permitted only when
+  durable state proves no provider submission, application binding, or connection.
   Account deletion commits its suspension fence before external setup cleanup and
   retains local retry ownership when that cleanup fails.
 - Any path that suppresses or defers a user-visible effect records a typed

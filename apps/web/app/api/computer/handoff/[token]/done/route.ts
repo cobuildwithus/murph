@@ -21,6 +21,9 @@ export async function POST(
     memberId: session.member.id,
     token,
   });
+  if (completed.redirectTo) {
+    return NextResponse.json({ redirectTo: completed.redirectTo });
+  }
 
   const sourceContactKind = completed.returnContactKind;
   const fallbackHref = buildCompletedHandoffHref({ token });

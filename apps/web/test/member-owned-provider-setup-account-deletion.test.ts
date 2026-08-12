@@ -67,10 +67,12 @@ function createAdapter(input: {
       memberId: string;
       setupId: string;
     }) => ({
+      awaitingReason: null,
       reused: runInput.expectedRunId === runId,
       runId,
       status: input.runStatus ?? "running",
     })),
+    finishBrowserRun: vi.fn(async () => "canceled" as const),
     pauseForUser: vi.fn(async () => ({
       handoffUrl: "https://web.example.test/computer/handoff/synthetic-handoff",
       runId,
@@ -107,6 +109,7 @@ describe("member-owned provider setup account deletion", () => {
       adapterFactory: factory,
       memberId: "member_synthetic",
       prisma: PRISMA_NOT_USED,
+      readApplicationView: async () => null,
       store,
     })).resolves.toBeUndefined();
 
@@ -156,6 +159,36 @@ describe("member-owned provider setup account deletion", () => {
     expect(store.setup.status).toBe("deleted");
   });
 
+  it("inspects when credential sealing committed before setup binding", async () => {
+    const store = new MemoryDeletionStore();
+    store.setup = buildSetup({
+      providerApplicationId: null,
+      providerApplicationRevision: null,
+      providerSubmissionAt: null,
+      status: "pending",
+    });
+    const adapter = createAdapter();
+    const factory = adapterFactory(adapter);
+
+    await deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
+      adapterFactory: factory,
+      memberId: "member_synthetic",
+      prisma: PRISMA_NOT_USED,
+      readApplicationView: async () => ({
+        applicationId: "dpa_recovered",
+        createdAt: CREATED_AT.toISOString(),
+        provider: "strava",
+        revision: 1,
+        updatedAt: CREATED_AT.toISOString(),
+      }),
+      store,
+    });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(adapter.deleteOwnedApplication).toHaveBeenCalledTimes(1);
+    expect(store.setup.status).toBe("deleted");
+  });
+
   it.each(["deleted", "missing", "unrelated_application"] as const)(
     "finishes exact, absent, or unrelated-safe dashboard result %s",
     async (kind) => {
@@ -183,7 +216,7 @@ describe("member-owned provider setup account deletion", () => {
       });
       expect(store.statuses[0]).toBe("deletion_pending");
       expect(store.setup.status).toBe("deleted");
-      expect(store.setup.browserRunId).toBe("hcr_setup_owned");
+      expect(store.setup.browserRunId).toBeNull();
       expect(store.setup.providerApplicationId).toBe("dpa_synthetic");
       expect(store.setup.providerApplicationRevision).toBe(2);
     },

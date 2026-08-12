@@ -1,6 +1,6 @@
 # Murph Product Constitution
 
-Last verified: 2026-07-15
+Last verified: 2026-08-11
 
 Draft v0.1
 
@@ -172,9 +172,10 @@ private results come first. Friend sharing and public contribution both require 
 
 Members should not become accidental integration engineers. When a provider
 permits a private member-owned application, Murph should perform the mechanical
-setup, preserve progress, and ask for only irreducible sign-in or consent. Secret
-copying, opaque duplicate applications, hijacking unrelated browser work, and
-false success states are product failures, not acceptable setup friction. Shared
+setup, preserve progress, and ask only for irreducible sign-in, provider-required
+prerequisites, or consent. Secret copying, opaque duplicate applications,
+hijacking unrelated browser work, and false success states are product failures,
+not acceptable setup friction. Shared
 setup behavior should remain provider-neutral while each provider's finite
 browser semantics stay explicit and checked in.
 

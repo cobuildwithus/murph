@@ -30,6 +30,10 @@ const STUDY_STATES: readonly {
     setup: buildStudySetup("provider_prerequisite", "continue_provider"),
   },
   {
+    label: "Canceling safely",
+    setup: buildStudySetup("canceling", "none"),
+  },
+  {
     label: "Ambiguous create recovery",
     setup: buildStudySetup("inspection_required", "retry"),
   },
@@ -59,7 +63,7 @@ const STUDY_STATES: readonly {
   },
   {
     label: "Unrelated application protected",
-    setup: buildStudySetup("provider_conflict", "none"),
+    setup: buildStudySetup("provider_conflict", "retry"),
   },
   {
     label: "Canceled, ready to restart",
@@ -119,6 +123,7 @@ function StudyCard({
         presentation={STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION}
         setup={setup}
         onAction={() => undefined}
+        onCancel={() => undefined}
       />
     </article>
   );
@@ -136,6 +141,7 @@ function buildStudySetup(
     connected,
     message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages[status],
     provider: "strava",
+    setupId: "dps_design_study",
     status,
     updatedAt: STUDY_UPDATED_AT,
   };

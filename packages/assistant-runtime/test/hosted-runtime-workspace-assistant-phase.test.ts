@@ -7689,7 +7689,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
-          { label: "Strava", provider: "strava" },
+          {
+            label: "Strava",
+            memberOwnedApplicationSetup: true,
+            provider: "strava",
+          },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
@@ -7829,7 +7833,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
     expect(hydratedContext?.hosted?.deviceConnectProviders).toEqual([
-      { label: "Strava", provider: "strava" },
+      {
+        label: "Strava",
+        memberOwnedApplicationSetup: true,
+        provider: "strava",
+      },
     ]);
     expect(hydratedContext?.hosted?.deviceTool).toBeUndefined();
     expect(

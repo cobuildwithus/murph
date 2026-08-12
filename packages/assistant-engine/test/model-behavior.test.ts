@@ -1474,10 +1474,10 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'Name about six examples, not all; omit generic health apps and unsolicited unsupported caveats',
+      'Name about six examples; omit generic health apps and unsolicited unsupported caveats',
     )
     expect(prompt).toContain(
-      'For a source in neither this list nor health relay guidance, say it is not supported yet',
+      'If a source is absent from this list and health relay guidance, say it is unsupported',
     )
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real link, or reconcile',
@@ -1590,11 +1590,12 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).not.toContain('connection links are temporarily unavailable')
   })
 
-  it('keeps Strava private-app setup guidance in direct initial input only', () => {
+  it('keeps catalog-owned private-app setup guidance in direct initial input only', () => {
     const directLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput({
         assistantHostedDeviceConnectProviders: [
-          { label: 'Strava', provider: 'strava' },
+          { label: 'Strava', memberOwnedApplicationSetup: true, provider: 'strava' },
+          { label: 'Trailbox', memberOwnedApplicationSetup: true, provider: 'trailbox' },
         ],
         conversationScope: 'direct',
       }),
@@ -1602,7 +1603,8 @@ describe('assistant local PDF evidence guidance', () => {
     const groupLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput({
         assistantHostedDeviceConnectProviders: [
-          { label: 'Strava', provider: 'strava' },
+          { label: 'Strava', memberOwnedApplicationSetup: true, provider: 'strava' },
+          { label: 'Trailbox', memberOwnedApplicationSetup: true, provider: 'trailbox' },
         ],
         conversationScope: 'group',
       }),
@@ -1614,18 +1616,20 @@ describe('assistant local PDF evidence guidance', () => {
       ))
 
     expect(directGuidance).toContain(
-      'For Strava, the link starts/resumes durable private-app setup',
+      'For Strava (`strava`) and Trailbox (`trailbox`), the link starts or resumes durable private-app setup',
     )
     expect(directGuidance).toContain(
-      'Murph creates the app and seals credentials; the member only handles sign-in, MFA/CAPTCHA, and explicit read-only consent',
+      'Murph creates it and immediately seals its client credentials; the member handles sign-in, MFA/CAPTCHA, any provider-required developer prerequisite, and OAuth consent',
     )
     expect(directGuidance).toContain(
-      'Never ask for, accept, quote, or redisplay its client ID/secret, or keep setup progress in conversation memory',
+      'Never ask for, accept, quote, or redisplay credentials, or keep setup progress in conversation memory',
     )
-    // The pre-PR direct wearable line was 804 characters for this provider.
-    expect(directGuidance?.length).toBeLessThanOrEqual(804)
+    // The approved direct wearable line stays bounded after prerequisite disclosure.
+    expect(directGuidance?.length).toBeLessThanOrEqual(900)
     expect(groupLayers.prompt).not.toContain('durable private-app setup')
     expect(groupLayers.prompt).not.toContain('client ID/secret')
+    expect(groupLayers.prompt).not.toContain('developer subscription')
+    expect(groupLayers.prompt).not.toContain('provider prerequisite')
   })
 
   it('hides Android app guidance while forbidding fabricated wearable connect URLs', () => {

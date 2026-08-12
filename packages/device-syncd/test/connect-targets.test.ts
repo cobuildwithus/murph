@@ -3,8 +3,10 @@ import { test } from "vitest";
 
 import {
   isDeviceConnectSourceAvailableForConnection,
+  isMemberOwnedDeviceSyncConnectTarget,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
+  listMemberOwnedDeviceSyncConnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
@@ -107,6 +109,22 @@ test("Strava remains configured for status and self-hosted routing while its off
 
   assert.ok(configs.strava);
   assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
+  assert.deepEqual(listMemberOwnedDeviceSyncConnectTargets(), [{
+    connectSourceId: "strava",
+    connectTarget: "strava",
+    label: "Strava",
+    provider: "strava",
+  }]);
+  assert.equal(isMemberOwnedDeviceSyncConnectTarget({
+    connectSourceId: "strava",
+    connectTarget: "strava",
+    provider: "strava",
+  }), true);
+  assert.equal(isMemberOwnedDeviceSyncConnectTarget({
+    connectSourceId: "oura",
+    connectTarget: "oura",
+    provider: "oura",
+  }), false);
   assert.deepEqual(listConfiguredDeviceSyncConnectTargets(configs), [{
     connectSourceId: "strava",
     connectTarget: "strava",

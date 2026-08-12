@@ -31,7 +31,7 @@ export async function GET(
 
     switch (result.kind) {
       case "redirect":
-        return noStoreRedirect(result.url);
+        return noStoreRedirect(new URL(result.url, request.url));
       case "completed":
         return noStoreRedirect(handoffUrl);
       case "checkpointing":

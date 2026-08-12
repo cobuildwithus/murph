@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createHostedBrowserConnectionId } from "../src/lib/device-sync/public-connection";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "../src/lib/device-sync/provider-setup/presentation";
 import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 vi.mock("server-only", () => ({}));
@@ -9,6 +10,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  cancelMemberOwnedProviderSetup: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   createBrowserConnectionId: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
 
 vi.mock("@/src/lib/device-sync/provider-setup", () => ({
   createMemberOwnedProviderSetupService: () => ({
+    cancel: mocks.cancelMemberOwnedProviderSetup,
     markDisconnected: mocks.markMemberOwnedSetupDisconnected,
   }),
   readMemberOwnedProviderSetupRegistration: mocks.readMemberOwnedProviderSetupRegistration,
@@ -99,6 +102,7 @@ type SettingsDeviceSyncDisconnectRouteModule = typeof import("../app/api/setting
 type SettingsDeviceSyncSourceDisconnectRouteModule =
   typeof import("../app/api/settings/device-sync/connections/[connectionId]/sources/[sourceProviderSlug]/disconnect/route");
 type SettingsDeviceSyncStatusRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
+type SettingsDeviceSyncProviderSetupRouteModule = typeof import("../app/api/settings/device-sync/provider-setups/[provider]/route");
 type ConnectSourceStartRouteModule = typeof import("../app/api/connect-sources/[sourceId]/start/route");
 
 let settingsDeviceSyncRoute: SettingsDeviceSyncRouteModule;
@@ -107,6 +111,7 @@ let settingsDeviceSyncDiagnoseBackfillRoute: SettingsDeviceSyncDiagnoseBackfillR
 let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
 let settingsDeviceSyncSourceDisconnectRoute: SettingsDeviceSyncSourceDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
+let settingsDeviceSyncProviderSetupRoute: SettingsDeviceSyncProviderSetupRouteModule;
 let connectSourceStartRoute: ConnectSourceStartRouteModule;
 
 const ROUTING_INDEX_KEY = Buffer.from(
@@ -270,6 +275,9 @@ describe("device sync settings routes", () => {
       "../app/api/settings/device-sync/connections/[connectionId]/sources/[sourceProviderSlug]/disconnect/route"
     );
     settingsDeviceSyncStatusRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
+    settingsDeviceSyncProviderSetupRoute = await import(
+      "../app/api/settings/device-sync/provider-setups/[provider]/route"
+    );
     connectSourceStartRoute = await import("../app/api/connect-sources/[sourceId]/start/route");
   });
 
@@ -488,6 +496,16 @@ describe("device sync settings routes", () => {
         code: "REMOTE_REVOKE_FAILED",
         message: "Provider revocation timed out.",
       },
+    });
+    mocks.cancelMemberOwnedProviderSetup.mockResolvedValue({
+      action: "start",
+      applicationRevision: null,
+      connected: false,
+      message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages.canceled,
+      provider: "strava",
+      setupId: "dps_synthetic",
+      status: "canceled",
+      updatedAt: "2026-04-03T12:00:00.000Z",
     });
     mocks.markMemberOwnedSetupDisconnected.mockResolvedValue(undefined);
     mocks.readMemberOwnedProviderSetupRegistration.mockReturnValue(null);
@@ -1344,7 +1362,7 @@ describe("device sync settings routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "DEVICE_PROVIDER_SETUP_REQUIRED",
-        message: "Direct Strava connections must use the private provider setup journey.",
+        message: "This connection must use the private provider setup journey.",
         retryable: false,
       },
     });
@@ -1823,6 +1841,89 @@ describe("device sync settings routes", () => {
     });
   });
 
+
+  it("cancels only the authenticated member's active provider setup without requiring historical consent", async () => {
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValueOnce({
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+      presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    });
+
+    const response = await settingsDeviceSyncProviderSetupRoute.DELETE(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/provider-setups/strava",
+        {
+          body: JSON.stringify({ setupId: "dps_synthetic" }),
+          headers: {
+            "content-type": "application/json",
+            origin: "https://join.example.test",
+          },
+          method: "DELETE",
+        },
+      ),
+      createRouteContext({ provider: "strava" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(
+      expect.any(Request),
+    );
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(
+      expect.any(Request),
+    );
+    expect(mocks.cancelMemberOwnedProviderSetup).toHaveBeenCalledWith(
+      "member_123",
+      "dps_synthetic",
+    );
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+      provider: "strava",
+      setup: {
+        action: "start",
+        status: "canceled",
+      },
+    });
+  });
+
+  it("rejects provider setup cancellation without one exact setup owner", async () => {
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValueOnce({
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+      presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    });
+
+    const response = await settingsDeviceSyncProviderSetupRoute.DELETE(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/provider-setups/strava",
+        {
+          body: JSON.stringify({}),
+          headers: {
+            "content-type": "application/json",
+            origin: "https://join.example.test",
+          },
+          method: "DELETE",
+        },
+      ),
+      createRouteContext({ provider: "strava" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.cancelMemberOwnedProviderSetup).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "DEVICE_PROVIDER_SETUP_CANCELLATION_INVALID",
+      },
+    });
+  });
 
   it("returns a completed member-owned disconnect when setup projection repair fails", async () => {
     const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

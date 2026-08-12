@@ -5,6 +5,10 @@ import type { PrismaClient } from "@prisma/client";
 import { ComputerUseService } from "../../computer-use/service";
 import { PrismaComputerUseStore } from "../../computer-use/store";
 import { hostedOnboardingError } from "../../hosted-onboarding/errors";
+import {
+  readDeviceProviderApplicationView,
+  type DeviceProviderApplicationView,
+} from "../provider-applications";
 import type { MemberOwnedProviderSetupAdapter } from "./adapter";
 import {
   requireMemberOwnedProviderSetupRegistration,
@@ -22,17 +26,23 @@ interface ProviderSetupDeletionStore {
 
 type ProviderSetupDeletionAdapter = Pick<
   MemberOwnedProviderSetupAdapter,
-  "deleteOwnedApplication" | "ensureBrowserRun" | "pauseForUser"
+  "deleteOwnedApplication" | "ensureBrowserRun" | "finishBrowserRun" | "pauseForUser"
 >;
 
 type ProviderSetupDeletionAdapterFactory = (
   registration: MemberOwnedProviderSetupRegistration,
 ) => ProviderSetupDeletionAdapter;
 
+type ReadProviderApplicationView = (input: {
+  memberId: string;
+  provider: MemberOwnedProviderSetupRecord["provider"];
+}) => Promise<DeviceProviderApplicationView | null>;
+
 export async function deleteMemberOwnedProviderSetupExternalStateForAccountDeletion(input: {
   adapterFactory?: ProviderSetupDeletionAdapterFactory;
   memberId: string;
   prisma: PrismaClient;
+  readApplicationView?: ReadProviderApplicationView;
   store?: ProviderSetupDeletionStore;
 }): Promise<void> {
   const store = input.store ?? new PrismaDeviceProviderSetupStore(input.prisma);
@@ -40,12 +50,26 @@ export async function deleteMemberOwnedProviderSetupExternalStateForAccountDelet
     .filter((setup) => setup.active && setup.status !== "deleted");
 
   for (const setup of setups) {
-    // Before submission or binding, no provider application can exist. The
-    // ordinary computer-use cleanup still owns any setup browser run.
-    if (
-      setup.providerApplicationId === null
+    const needsAbsenceProof = setup.providerApplicationId === null
       && setup.providerApplicationRevision === null
       && setup.providerSubmissionAt === null
+      && (setup.status === "pending" || setup.status === "canceled");
+    const application = needsAbsenceProof
+      ? await (input.readApplicationView
+          ?? ((query) => readDeviceProviderApplicationView({
+            ...query,
+            prisma: input.prisma,
+          }))
+        )({
+          memberId: setup.memberId,
+          provider: setup.provider,
+        })
+      : null;
+    // Only pre-work or durably canceled setup states can prove that no
+    // provider application exists without inspecting the provider dashboard.
+    if (
+      application === null
+      && needsAbsenceProof
     ) {
       await transitionDeletionState(store, setup, {
         completedAt: new Date(),
@@ -119,10 +143,25 @@ async function deleteProviderSetup(input: {
     });
   }
 
+  const runStatus = await input.adapter.finishBrowserRun({
+    memberId: deleting.memberId,
+    runId: run.runId,
+    setupId: deleting.id,
+  });
+  if (runStatus !== "canceled") {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_PROVIDER_BROWSER_CLEANUP_INCOMPLETE",
+      httpStatus: 503,
+      message: "Murph could not finish the private provider cleanup browser safely. Retry account deletion.",
+      retryable: true,
+    });
+  }
+
   // The exact deterministic marker is the only external deletion authority.
   // A missing app or an unrelated app is left untouched while local cleanup
   // continues from the fenced, retryable deletion state.
   await transitionDeletionState(input.store, deleting, {
+    browserRunId: null,
     completedAt: new Date(),
     lastErrorCode: null,
     status: "deleted",

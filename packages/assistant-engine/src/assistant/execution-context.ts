@@ -103,6 +103,7 @@ export interface AssistantHostedDeviceConnectLink {
 
 export interface AssistantHostedDeviceConnectProvider {
   label: string
+  memberOwnedApplicationSetup?: boolean
   provider: string
 }
 

@@ -28,6 +28,7 @@ describe("member-owned device provider application secrets", () => {
       strava: {
         clientId: "member-client",
         clientSecret: "member-secret",
+        scopes: ["activity:read"],
       },
     });
   });

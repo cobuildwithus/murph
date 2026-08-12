@@ -47,6 +47,7 @@ const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
+const MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH = "/connect";
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
@@ -141,12 +142,17 @@ export type ComputerManagedLoginContinuation =
     };
 
 export interface ComputerHandoffCompletion {
+  redirectTo: string | null;
   returnContactKind: HostedComputerReturnContactKind | null;
   status: ComputerHandoffRecord["status"];
   suggestedReply: string | null;
 }
 
 export type ComputerHandoffPageState =
+  | {
+      kind: "redirect";
+      url: string;
+    }
   | {
       kind: "completed";
       returnContactKind: HostedComputerReturnContactKind | null;
@@ -160,6 +166,7 @@ export type ComputerHandoffPageState =
   | {
       kind: "checkpointing";
       purpose: PersistedComputerHandoffPurpose;
+      returnTo?: string | null;
       returnContactKind: HostedComputerReturnContactKind | null;
       suggestedReply: string | null;
     }
@@ -173,8 +180,10 @@ export type ComputerHandoffPageState =
       interaction: "takeover";
       kind: "open";
       liveViewUrl: string;
+      description: string;
       purpose: HostedComputerHandoffPurpose;
       suggestedReply: string | null;
+      title: string;
     };
 
 export class ComputerUseService {
@@ -959,6 +968,19 @@ export class ComputerUseService {
     return await this.finishRunWithStore(input, this.store);
   }
 
+  async finishOwnedRun(input: {
+    memberId: string;
+    outcome: HostedComputerFinishOutcome;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<{ ok: true; runId: string; status: HostedComputerFinishOutcome }> {
+    return await this.finishRunWithStore(input, this.store, {
+      ownerKey: input.ownerKey,
+      ownerPurpose: input.ownerPurpose,
+    });
+  }
+
   private async finishRunWithStore(
     input: {
       memberId: string;
@@ -966,15 +988,28 @@ export class ComputerUseService {
       runId: string;
     },
     store: ComputerUseStore,
+    owner: ComputerRunOwner | null = null,
   ): Promise<{ ok: true; runId: string; status: HostedComputerFinishOutcome }> {
-    await store.requireMemberComputerUseAvailable({
-      memberId: input.memberId,
-    });
+    if (owner) {
+      await store.requireMemberOwnedProviderSetupRun({
+        memberId: input.memberId,
+        ownerKey: owner.ownerKey,
+        ownerPurpose: owner.ownerPurpose,
+        runId: input.runId,
+      });
+    } else {
+      await store.requireMemberComputerUseAvailable({
+        memberId: input.memberId,
+      });
+    }
     const now = this.now();
     let run = await store.requireOwnedRun({
       memberId: input.memberId,
       runId: input.runId,
     });
+    if (!owner) {
+      assertGenericComputerRun(run);
+    }
     if (isFinishOutcomeStatus(run.status)) {
       await this.deleteTerminalRunBrowser(run, now, store);
       return {
@@ -1049,7 +1084,23 @@ export class ComputerUseService {
     const now = this.now();
 
     assertHandoffOwnedByMember(handoff, input.memberId);
+    const readCheckpointReturnTo = async (): Promise<string | null> =>
+      handoff.purpose === "managed_login" && handoff.status === "checkpointing"
+        ? this.readMemberOwnedProviderSetupReturnPath({
+            handoff,
+            memberId: input.memberId,
+            store: this.store,
+          })
+        : null;
     if (handoff.status === "completed") {
+      const redirectTo = await this.resumeMemberOwnedProviderSetupAfterHandoff({
+        handoff,
+        memberId: input.memberId,
+        store: this.store,
+      });
+      if (redirectTo) {
+        return { kind: "redirect", url: redirectTo };
+      }
       return {
         kind: "completed",
         returnContactKind: handoff.returnContactKind,
@@ -1058,9 +1109,11 @@ export class ComputerUseService {
     }
 
     if (isDeferredLoginCheckpointHandoff(handoff)) {
+      const returnTo = await readCheckpointReturnTo();
       return {
         kind: "checkpointing",
         purpose: handoff.purpose,
+        ...(returnTo ? { returnTo } : {}),
         returnContactKind: handoff.returnContactKind,
         suggestedReply: handoff.suggestedReply,
       };
@@ -1078,9 +1131,11 @@ export class ComputerUseService {
     }
 
     if (isFreshCheckpointingHandoff(handoff, now)) {
+      const returnTo = await readCheckpointReturnTo();
       return {
         kind: "checkpointing",
         purpose: handoff.purpose,
+        ...(returnTo ? { returnTo } : {}),
         returnContactKind: handoff.returnContactKind,
         suggestedReply: handoff.suggestedReply,
       };
@@ -1120,6 +1175,14 @@ export class ComputerUseService {
     });
 
     if (handoff.status === "completed") {
+      const redirectTo = await this.resumeMemberOwnedProviderSetupAfterHandoff({
+        handoff,
+        memberId: input.memberId,
+        store: this.store,
+      });
+      if (redirectTo) {
+        return { kind: "redirect", url: redirectTo };
+      }
       return {
         kind: "completed",
         returnContactKind: handoff.returnContactKind,
@@ -1128,9 +1191,11 @@ export class ComputerUseService {
     }
 
     if (isFreshCheckpointingHandoff(handoff, now)) {
+      const returnTo = await readCheckpointReturnTo();
       return {
         kind: "checkpointing",
         purpose: handoff.purpose,
+        ...(returnTo ? { returnTo } : {}),
         returnContactKind: handoff.returnContactKind,
         suggestedReply: handoff.suggestedReply,
       };
@@ -1207,8 +1272,15 @@ export class ComputerUseService {
       });
     }
     this.assertAllowedLiveViewUrl(liveViewUrl);
+    const setupOwned = await this.readMemberOwnedProviderSetupRun(run, this.store);
+    const prerequisite = Boolean(
+      setupOwned && handoff.purpose === "manual_browser_help",
+    );
 
     return {
+      description: prerequisite
+        ? "Your provider may require a developer prerequisite before Murph can create your private application. Complete that provider step, then choose Done to return to Connect."
+        : "Take over to finish this step. Use the keyboard icon in the browser to type or paste.",
       handoffId: handoff.id,
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
       interaction: "takeover",
@@ -1216,6 +1288,7 @@ export class ComputerUseService {
       liveViewUrl,
       purpose: requireSupportedPersistedHandoffPurpose(handoff.purpose),
       suggestedReply: handoff.suggestedReply,
+      title: prerequisite ? "Continue provider setup" : "Your turn",
     };
   }
 
@@ -1232,9 +1305,14 @@ export class ComputerUseService {
 
     assertHandoffOwnedByMember(handoff, input.memberId);
     if (handoff.status === "completed") {
-      return {
-        kind: "completed",
-      };
+      const redirectTo = await this.resumeMemberOwnedProviderSetupAfterHandoff({
+        handoff,
+        memberId: input.memberId,
+        store: this.store,
+      });
+      return redirectTo
+        ? { kind: "redirect", url: redirectTo }
+        : { kind: "completed" };
     }
     if (
       handoff.purpose === "managed_login" &&
@@ -1441,12 +1519,11 @@ export class ComputerUseService {
             providerWriterMutationAmbiguous = false;
             providerWriterObserved = false;
           }
-          await this.completeSuccessfulManagedLoginHandoff({
+          return await this.completeSuccessfulManagedLoginContinuation({
             claimed,
             run,
             store: input.store,
           });
-          return { kind: "completed" };
         }
 
         fallbackRun = null;
@@ -1497,14 +1574,11 @@ export class ComputerUseService {
             token: input.token,
           });
         }
-        await this.completeSuccessfulManagedLoginHandoff({
+        return await this.completeSuccessfulManagedLoginContinuation({
           claimed,
           run,
           store: input.store,
         });
-        return {
-          kind: "completed",
-        };
       }
 
       if (currentFlow && isManagedAuthInProgressFlow(currentFlow, this.now())) {
@@ -1752,6 +1826,155 @@ export class ComputerUseService {
     }
   }
 
+  private async completeSuccessfulManagedLoginContinuation(input: {
+    claimed: ComputerHandoffRecord;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<ComputerManagedLoginContinuation> {
+    await this.completeSuccessfulManagedLoginHandoff(input);
+    const completed = await input.store.findHandoffByRun({
+      handoffId: input.claimed.id,
+      runId: input.run.id,
+    });
+    if (!completed || completed.status !== "completed") {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_HANDOFF_INCOMPLETE",
+        message: "Computer handoff completion could not be confirmed.",
+      });
+    }
+    const redirectTo = await this.resumeMemberOwnedProviderSetupAfterHandoff({
+      handoff: completed,
+      memberId: input.run.memberId,
+      store: input.store,
+    });
+    return redirectTo
+      ? { kind: "redirect", url: redirectTo }
+      : { kind: "completed" };
+  }
+
+  private async readMemberOwnedProviderSetupRun(
+    run: ComputerRunRecord,
+    store: ComputerUseStore,
+  ): Promise<ComputerRunRecord | null> {
+    if (!run.ownerKey && !run.ownerPurpose) {
+      return null;
+    }
+    if (
+      !run.ownerKey
+      || run.ownerPurpose !== MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+    ) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        message: "Computer run ownership could not be verified.",
+      });
+    }
+    return await store.requireMemberOwnedProviderSetupRun({
+      memberId: run.memberId,
+      ownerKey: run.ownerKey,
+      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+      runId: run.id,
+    });
+  }
+
+  private async readMemberOwnedProviderSetupReturnPath(input: {
+    handoff: ComputerHandoffRecord;
+    memberId: string;
+    store: ComputerUseStore;
+  }): Promise<string | null> {
+    const candidate = await input.store.requireOwnedRun({
+      memberId: input.memberId,
+      runId: input.handoff.runId,
+    });
+    const owned = await this.readMemberOwnedProviderSetupRun(candidate, input.store);
+    return owned ? MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH : null;
+  }
+
+  private async resumeMemberOwnedProviderSetupAfterHandoff(input: {
+    handoff: ComputerHandoffRecord;
+    memberId: string;
+    store: ComputerUseStore;
+  }): Promise<string | null> {
+    const candidate = await input.store.requireOwnedRun({
+      memberId: input.memberId,
+      runId: input.handoff.runId,
+    });
+    const owned = await this.readMemberOwnedProviderSetupRun(
+      candidate,
+      input.store,
+    );
+    if (!owned) {
+      return null;
+    }
+    if (owned.status === "running") {
+      return MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH;
+    }
+    if (
+      input.handoff.status !== "completed"
+      || owned.status !== "awaiting_user"
+      || owned.pendingHandoffId !== input.handoff.id
+      || owned.pausedAt === null
+    ) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_NOT_RUNNING",
+        message: "Private provider setup could not resume from this handoff.",
+        retryable: true,
+      });
+    }
+
+    const ownerKey = owned.ownerKey;
+    if (!ownerKey) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        message: "Computer run ownership could not be verified.",
+      });
+    }
+
+    try {
+      await input.store.markRunRunning({
+        awaitingReason: owned.awaitingReason,
+        expectedHandoffStatus: "completed",
+        expectedHandoffUpdatedAt: input.handoff.updatedAt,
+        expectedKernelSessionId: requireKernelSessionId(owned),
+        expectedPausedAt: owned.pausedAt,
+        expectedPendingHandoffId: input.handoff.id,
+        expectedResumeAfterMailboxLaneSeq: owned.resumeAfterMailboxLaneSeq,
+        now: this.now(),
+        runId: owned.id,
+      });
+    } catch (error) {
+      const latest = await input.store.requireMemberOwnedProviderSetupRun({
+        memberId: owned.memberId,
+        ownerKey,
+        ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+        runId: owned.id,
+      });
+      if (latest.status !== "running") {
+        throw error;
+      }
+    }
+    return MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH;
+  }
+
+  private async buildHandoffCompletion(
+    handoff: ComputerHandoffRecord,
+    memberId: string,
+    store: ComputerUseStore,
+  ): Promise<ComputerHandoffCompletion> {
+    const redirectTo = handoff.status === "completed"
+      ? await this.resumeMemberOwnedProviderSetupAfterHandoff({
+          handoff,
+          memberId,
+          store,
+        })
+      : null;
+    return {
+      redirectTo,
+      returnContactKind: redirectTo ? null : handoff.returnContactKind,
+      status: handoff.status,
+      suggestedReply: redirectTo ? null : handoff.suggestedReply,
+    };
+  }
+
   async completeHandoff(input: {
     memberId: string;
     token: string;
@@ -1777,19 +2000,11 @@ export class ComputerUseService {
     assertHandoffOwnedByMember(handoff, input.memberId);
 
     if (handoff.status === "completed") {
-      return {
-        returnContactKind: handoff.returnContactKind,
-        status: handoff.status,
-        suggestedReply: handoff.suggestedReply,
-      };
+      return await this.buildHandoffCompletion(handoff, input.memberId, store);
     }
 
     if (isDeferredLoginCheckpointHandoff(handoff)) {
-      return {
-        returnContactKind: handoff.returnContactKind,
-        status: handoff.status,
-        suggestedReply: handoff.suggestedReply,
-      };
+      return await this.buildHandoffCompletion(handoff, input.memberId, store);
     }
 
     if (handoff.purpose === "managed_login") {
@@ -1807,19 +2022,19 @@ export class ComputerUseService {
     });
 
     if (openHandoff.status === "completed") {
-      return {
-        returnContactKind: openHandoff.returnContactKind,
-        status: openHandoff.status,
-        suggestedReply: openHandoff.suggestedReply,
-      };
+      return await this.buildHandoffCompletion(
+        openHandoff,
+        input.memberId,
+        store,
+      );
     }
 
     if (isFreshCheckpointingHandoff(openHandoff, now)) {
-      return {
-        returnContactKind: openHandoff.returnContactKind,
-        status: openHandoff.status,
-        suggestedReply: openHandoff.suggestedReply,
-      };
+      return await this.buildHandoffCompletion(
+        openHandoff,
+        input.memberId,
+        store,
+      );
     }
 
     if (isExpiredHandoff(openHandoff, now)) {
@@ -1830,17 +2045,13 @@ export class ComputerUseService {
           handoffId: openHandoff.id,
           now,
         });
-        return {
-          returnContactKind: expired.returnContactKind,
-          status: expired.status,
-          suggestedReply: expired.suggestedReply,
-        };
+        return await this.buildHandoffCompletion(expired, input.memberId, store);
       }
-      return {
-        returnContactKind: openHandoff.returnContactKind,
-        status: openHandoff.status,
-        suggestedReply: openHandoff.suggestedReply,
-      };
+      return await this.buildHandoffCompletion(
+        openHandoff,
+        input.memberId,
+        store,
+      );
     }
 
     assertOpenFreshHandoff(openHandoff, now);
@@ -1859,11 +2070,7 @@ export class ComputerUseService {
       const latest = await store.requireHandoffByTokenHash({
         tokenHash,
       });
-      return {
-        returnContactKind: latest.returnContactKind,
-        status: latest.status,
-        suggestedReply: latest.suggestedReply,
-      };
+      return await this.buildHandoffCompletion(latest, input.memberId, store);
     }
 
     try {
@@ -1878,11 +2085,7 @@ export class ComputerUseService {
           handoffId: claimed.id,
           now,
         });
-        return {
-          returnContactKind: expired.returnContactKind,
-          status: expired.status,
-          suggestedReply: expired.suggestedReply,
-        };
+        return await this.buildHandoffCompletion(expired, input.memberId, store);
       }
 
       const completed = await store.completeHandoff({
@@ -1891,11 +2094,7 @@ export class ComputerUseService {
         now,
       });
 
-      return {
-        returnContactKind: completed.returnContactKind,
-        status: completed.status,
-        suggestedReply: completed.suggestedReply,
-      };
+      return await this.buildHandoffCompletion(completed, input.memberId, store);
     } catch (error) {
       await store.releaseHandoffClaim({
         handoffId: claimed.id,

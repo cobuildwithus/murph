@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Accepted-Message Targeting
 
@@ -915,17 +915,35 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   component. The adapter owns only finite provider-dashboard semantics. The
   existing hosted computer owner owns the persistent browser profile and human
   handoff, and admits navigation only on a run bound to that exact setup (or a
-  newly acquired setup-owned run persisted before navigation).
+  newly acquired setup-owned run persisted before navigation). Re-entering
+  `/connect` while that run is awaiting the member rotates or reuses only its
+  latest same-origin handoff capability and never repeats provider submission.
+  Completing that exact setup-owned handoff resumes the run directly and returns
+  the authenticated member to `/connect`; it never creates a conversation reply
+  or contact deeplink. Generic browser handoffs retain their existing return
+  behavior.
   `DeviceProviderApplication` owns encrypted credentials, while device-sync owns
   OAuth, authoritative connection activation, initial backfill, polling, revoke,
   and disconnect. Setup reads reconcile their visible projection from current
   connection truth; post-callback and post-disconnect projection updates are
-  idempotent best-effort bookkeeping. Strava is the first registry entry: it
+  idempotent best-effort bookkeeping. The shared primitive is intentionally
+  bounded to providers where a member creates an application in a browser,
+  receives a client id and secret immediately, completes OAuth, and can remove
+  that application in the browser. Adding another provider with that lifecycle
+  extends the finite connect catalog, encrypted-application definition,
+  presentation, and dashboard adapter; it does not add another state machine,
+  route family, handoff owner, projection owner, or deletion orchestrator.
+  Providers with a different credential or application lifecycle require a new
+  product and ownership decision rather than being forced through this seam.
+  Strava is the first registry entry: it
   recognizes only the deterministic Murph marker, models the provider's
-  subscription prerequisite as a recoverable pause, uses the checked-in callback
-  and `activity:read` scope, never falls back to global credentials, and does not
-  enable member-application webhooks. Ambiguous form submission resumes by
-  dashboard inspection rather than replaying creation.
+  subscription prerequisite as a disclosed recoverable pause with explicit
+  Continue and Cancel actions, uses the checked-in callback and `activity:read`
+  scope, never falls back to global credentials, and does not enable
+  member-application webhooks. Cancellation is allowed only while exact durable
+  state proves there is no submission, application binding, or connection, and
+  it terminates only the exact setup-owned browser run. Ambiguous form submission
+  resumes by dashboard inspection rather than replaying creation.
 
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display

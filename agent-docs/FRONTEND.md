@@ -107,10 +107,13 @@ When frontend behavior changes:
   hidden Strava default.
   Studies are synthetic and inert; production actions call authenticated,
   CSRF-protected routes.
-- Show one truthful primary action only when provider sign-in/consent, OAuth, or
-  retry is required. Working, connected, repair, transient retry, and
-  disconnect-first states remain visible after refresh. Never render client-id or
-  client-secret fields, and never display a captured secret.
+- Show one truthful primary action only when provider sign-in/prerequisite,
+  consent, OAuth, or retry is required. A reached provider prerequisite may add
+  one secondary `Cancel setup` action. Render the setup group flat inside the
+  source card, without nested card chrome. Working and connected states have no
+  action; in disconnect-first, the source card's confirmation-opening
+  registered `Disconnect <provider> first` control is the sole action. Never
+  render client-id or client-secret fields, and never display a captured secret.
 - Browser handoffs must remain same-origin under `/computer/handoff/`; external
   redirects are reserved for the exact OAuth authorization URL. Preserve source
   card semantics, keyboard focus, accessible status copy, and narrow-screen flow.

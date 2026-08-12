@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-08-05
+Last verified: 2026-08-11
 
 ## Current Posture
 
@@ -131,8 +131,13 @@ default destination for every goal or the definition of activation.
   account and lands on the Connect callback-error notice to start again.
 - For a permitted member-owned wearable application, conversation still begins
   and resumes the durable setup while Murph performs provider-dashboard work. The
-  member handles only provider sign-in, MFA/CAPTCHA, and explicit consent through
-  the first-party handoff. Never turn developer credentials into a copy/paste
+  member handles provider sign-in, MFA/CAPTCHA, any provider-required developer
+  prerequisite, and explicit consent through the first-party
+  handoff. Disclose the possible prerequisite before setup starts. When it is
+  actually required, offer the registered provider's Continue action and
+  exact-owner `Cancel setup`;
+  cancellation fails closed unless no submission, application binding, or
+  connection can be proved. Never turn developer credentials into a copy/paste
   chore or imply completion before the exact connection is active. `/connect` is
   the truthful provider-indexed progress and recovery surface, not a separate
   setup owner. Provider-specific dashboard friction stays inside a finite adapter;

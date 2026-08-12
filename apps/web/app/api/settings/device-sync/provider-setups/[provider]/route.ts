@@ -8,6 +8,7 @@ import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import { readJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -47,6 +48,37 @@ export const POST = withJsonError(async (
     presentation: registration.presentation,
     provider,
     ...result,
+  });
+});
+
+export const DELETE = withJsonError(async (
+  request: Request,
+  context: { params: Promise<{ provider: string }> },
+) => {
+  assertHostedOnboardingMutationOrigin(request);
+  const registration = await requireSupportedRegistration(context.params);
+  const provider = registration.coordinates.provider;
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const body = await readJsonObject(request, { limitBytes: 1_024 });
+  if (
+    Object.keys(body).length !== 1
+    || typeof body.setupId !== "string"
+    || body.setupId.length === 0
+  ) {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_CANCELLATION_INVALID",
+      httpStatus: 400,
+      message: "Private provider setup cancellation is invalid.",
+      retryable: false,
+    });
+  }
+  const setup = await createMemberOwnedProviderSetupService(provider)
+    .cancel(auth.member.id, body.setupId);
+
+  return jsonOk({
+    presentation: registration.presentation,
+    provider,
+    setup,
   });
 });
 

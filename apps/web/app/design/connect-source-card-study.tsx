@@ -13,6 +13,7 @@ import {
 import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/presentation";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
 
 type ConnectSourceCardStudyCase = {
@@ -37,6 +38,8 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     errorMessage: null,
     source: MOBVOI_HEALTH_CONNECT_SOURCE,
   },
+  buildStravaSetupStudyCase("provider_prerequisite"),
+  buildStravaSetupStudyCase("disconnect_first"),
   {
     authenticated: true,
     errorMessage: null,
@@ -247,6 +250,7 @@ export function ConnectSourceCardStudy({
               pending={false}
               pendingDisconnect={false}
               source={source}
+              onCancelSetup={() => Promise.resolve()}
               onDisconnectTargetChange={() => {}}
               onSetupGuideOpen={() => {}}
               onStartConnection={() => Promise.resolve()}
@@ -265,6 +269,47 @@ export function ConnectSourceCardStudy({
       />
     </>
   );
+}
+
+function buildStravaSetupStudyCase(
+  status: "disconnect_first" | "provider_prerequisite",
+): ConnectSourceCardStudyCase {
+  const disconnectFirst = status === "disconnect_first";
+  return {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connectTarget: "strava",
+      description: "Runs, rides, workouts, segments, and activity history.",
+      ...(disconnectFirst
+        ? {
+            connected: true,
+            disconnectConnectionId: "design-strava-connection",
+          }
+        : {}),
+      id: `strava-${status}`,
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 32,
+        src: "/brand-logos/connect/strava.svg",
+        width: 128,
+      },
+      memberOwnedSetup: {
+        action: disconnectFirst ? "disconnect_first" : "continue_provider",
+        applicationRevision: null,
+        connected: false,
+        message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages[status],
+        provider: "strava",
+        setupId: `dps_design_${status}`,
+        status,
+        updatedAt: "2026-08-11T12:00:00.000Z",
+      },
+      memberOwnedSetupPresentation:
+        STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+      memberOwnedSetupProvider: "strava",
+      name: "Strava",
+    },
+  };
 }
 
 export function ZeppAppleHealthSetupStudy() {

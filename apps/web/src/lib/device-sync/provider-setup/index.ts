@@ -10,11 +10,13 @@ export type {
 export {
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+  defineMemberOwnedProviderSetupRegistry,
   listMemberOwnedProviderSetupRegistrations,
   readMemberOwnedProviderSetupRegistration,
   readMemberOwnedProviderSetupRegistrationByConnectSourceId,
   readMemberOwnedProviderSetupRegistrationByConnectTarget,
   requireMemberOwnedProviderSetupRegistration,
+  type MemberOwnedProviderSetupRegistry,
   type MemberOwnedProviderSetupRegistration,
 } from "./registry";
 export {

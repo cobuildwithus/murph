@@ -678,11 +678,15 @@ Keep the copy observational. Use “lined up with” or “was associated with.�
 ### Member-Owned Provider Setup
 
 Render the shared `MemberOwnedProviderSetup` inside the existing source card.
-The component is a compact status journey, not a credential form: short title,
-plain status sentence, optional non-secret application revision, and at most one
-primary action. Working and connected states have no action; waiting states name
-the human step; repair and transient failures retain saved-progress language; an
-active conflicting connection says `Disconnect first`. Never show client ids,
+The component is a flat compact status group, not a nested card or credential
+form: no inner border, rounded surface, background, or card padding; use a short
+title, plain status sentence, optional non-secret application revision, and at
+most one primary action. A provider prerequisite may pair that primary with one
+secondary `Cancel setup` action. Working and connected states have no action;
+waiting states name the human step; repair and transient failures retain
+saved-progress language. In `disconnect_first`, the source card's existing
+confirmation-opening control is the only visible action and reads `Disconnect
+Strava first`; do not render a disabled setup button. Never show client ids,
 secrets, dashboard screenshots, or raw provider errors. The same component must
 appear in `/design?tab=components`, and the complete synthetic state study must
 appear in `/design?tab=sections` with inert controls.

@@ -309,6 +309,107 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("rotates and completes only the exact setup-owned handoff without a reply channel", async () => {
+    let now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+        updatedAt: now,
+      }),
+    });
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
+      }),
+      env: { HOSTED_WEB_BASE_URL: "https://web.example.test" },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+    const pause = () => service.pauseOwnedRunForUser({
+      handoffPurpose: "manual_browser_help",
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      reason: "other",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    const first = await pause();
+    expect(first.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(store.handoff).toMatchObject({
+      id: "hch_handoff123",
+      purpose: "manual_browser_help",
+      returnContactKind: null,
+      status: "open",
+    });
+
+    now = new Date("2026-06-17T12:05:00.000Z");
+    const refreshed = await pause();
+    expect(refreshed.handoffUrl).not.toBe(first.handoffUrl);
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123"))
+      .toMatchObject({ status: "expired" });
+    expect(store.handoff).toMatchObject({
+      id: "hch_handoff124",
+      purpose: "manual_browser_help",
+      status: "open",
+    });
+
+    now = new Date("2026-06-17T12:26:00.000Z");
+    const afterExpiry = await pause();
+    expect(afterExpiry.handoffUrl).not.toBe(refreshed.handoffUrl);
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124"))
+      .toMatchObject({ status: "expired" });
+    expect(store.handoff).toMatchObject({
+      id: "hch_handoff125",
+      purpose: "manual_browser_help",
+      status: "open",
+    });
+
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "synthetic-current-token",
+    })).resolves.toMatchObject({
+      description: expect.stringContaining("developer prerequisite"),
+      kind: "open",
+      title: "Continue provider setup",
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "synthetic-current-token",
+    })).resolves.toEqual({
+      redirectTo: "/connect",
+      returnContactKind: null,
+      status: "completed",
+      suggestedReply: null,
+    });
+    expect(store.run).toMatchObject({
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      pendingHandoffId: null,
+      status: "running",
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "synthetic-current-token",
+    })).resolves.toEqual({
+      redirectTo: "/connect",
+      returnContactKind: null,
+      status: "completed",
+      suggestedReply: null,
+    });
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "synthetic-current-token",
+    })).resolves.toEqual({ kind: "redirect", url: "/connect" });
+  });
+
   it("rotates the capability for a browserless managed-login handoff when pause is retried", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const oldHandoff = createHandoffRecord({
@@ -4498,6 +4599,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      description: "Take over to finish this step. Use the keyboard icon in the browser to type or paste.",
       handoffId: handoff.id,
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
       interaction: "takeover",
@@ -4505,6 +4607,7 @@ describe("ComputerUseService", () => {
       liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
       purpose: "login",
       suggestedReply: "done",
+      title: "Your turn",
     });
     expect(store.handoff).toMatchObject({
       status: "open",
@@ -4548,6 +4651,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      description: "Take over to finish this step. Use the keyboard icon in the browser to type or paste.",
       handoffId: handoff.id,
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
       interaction: "takeover",
@@ -4555,6 +4659,7 @@ describe("ComputerUseService", () => {
       liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
       purpose: "manual_browser_help",
       suggestedReply: "yes",
+      title: "Your turn",
     });
     expect(crypto.decryptRunSecretCalls).toBe(1);
     expect(kernel.executePlaywrightCalls).toBe(0);
@@ -5111,6 +5216,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      redirectTo: null,
       returnContactKind: null,
       status: "completed",
       suggestedReply: "done",
@@ -5359,6 +5465,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      redirectTo: null,
       returnContactKind: null,
       status: "completed",
       suggestedReply: "done",
@@ -5406,6 +5513,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      redirectTo: null,
       returnContactKind: null,
       status: "completed",
       suggestedReply: "done",
@@ -5462,6 +5570,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      redirectTo: null,
       returnContactKind: null,
       status: "completed",
       suggestedReply: "done",
@@ -5568,6 +5677,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      redirectTo: null,
       returnContactKind: null,
       status: "checkpointing",
       suggestedReply: "done",
@@ -5851,6 +5961,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
+      redirectTo: null,
       returnContactKind: null,
       status: "completed",
       suggestedReply: "done",
@@ -6900,6 +7011,53 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
     });
     expect(kernel.executePlaywrightCalls).toBe(0);
+  });
+
+  it("finishes only the exact setup-owned run during prerequisite cancellation", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.finishRun({
+      memberId: "member_123",
+      outcome: "canceled",
+      runId: "hcr_run123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+    await expect(service.finishOwnedRun({
+      memberId: "member_123",
+      outcome: "canceled",
+      ownerKey: "dps_other",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_run123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+
+    await expect(service.finishOwnedRun({
+      memberId: "member_123",
+      outcome: "canceled",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_run123",
+    })).resolves.toEqual({
+      ok: true,
+      runId: "hcr_run123",
+      status: "canceled",
+    });
+    expect(store.run).toMatchObject({
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      status: "canceled",
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
   });
 
   it("deletes stored Kernel sessions and profiles even when namespace cleanup is not configured", async () => {

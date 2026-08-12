@@ -2,7 +2,7 @@ import type {
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 
-export const DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA =
+const STRAVA_DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA =
   "murph.device-provider-application.strava.v1" as const;
 
 export const MEMBER_OWNED_DEVICE_PROVIDER_APPLICATION_PROVIDERS = [
@@ -12,29 +12,53 @@ export const MEMBER_OWNED_DEVICE_PROVIDER_APPLICATION_PROVIDERS = [
 export type MemberOwnedDeviceProviderApplicationProvider =
   (typeof MEMBER_OWNED_DEVICE_PROVIDER_APPLICATION_PROVIDERS)[number];
 
-export interface StravaDeviceProviderApplicationSecret {
-  schema: typeof DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA;
+export interface DeviceProviderApplicationSecret {
+  schema: string;
   clientId: string;
   clientSecret: string;
 }
 
-export type DeviceProviderApplicationSecret =
-  StravaDeviceProviderApplicationSecret;
+interface MemberOwnedOAuthClientApplicationDefinition {
+  buildRuntimeConfigs(
+    credentials: Pick<DeviceProviderApplicationSecret, "clientId" | "clientSecret">,
+  ): SerializableConfiguredDeviceSyncProviderConfigs;
+  secretSchema: string;
+}
 
-export interface DeviceProviderApplicationBinding {
+const MEMBER_OWNED_OAUTH_CLIENT_APPLICATION_DEFINITIONS = {
+  strava: {
+    buildRuntimeConfigs: (credentials) => ({
+      strava: {
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
+        scopes: ["activity:read"],
+      },
+    }),
+    secretSchema: STRAVA_DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA,
+  },
+} as const satisfies Record<
+  MemberOwnedDeviceProviderApplicationProvider,
+  MemberOwnedOAuthClientApplicationDefinition
+>;
+
+export interface DeviceProviderApplicationBinding<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> {
   applicationId: string;
-  provider: MemberOwnedDeviceProviderApplicationProvider;
+  provider: TProvider;
   revision: number;
 }
 
-export interface DeviceProviderApplicationView
-  extends DeviceProviderApplicationBinding {
+export interface DeviceProviderApplicationView<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> extends DeviceProviderApplicationBinding<TProvider> {
   createdAt: string;
   updatedAt: string;
 }
 
-export interface ResolvedDeviceProviderApplication
-  extends DeviceProviderApplicationBinding {
+export interface ResolvedDeviceProviderApplication<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> extends DeviceProviderApplicationBinding<TProvider> {
   providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
 }
 
@@ -72,18 +96,18 @@ export function parseDeviceProviderApplicationSecret(input: {
     "Device provider application secret",
   );
 
-  switch (input.expectedProvider) {
-    case "strava":
-      assertExactKeys(record, ["schema", "clientId", "clientSecret"]);
-      if (record.schema !== DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA) {
-        throw new TypeError("Device provider application secret schema is invalid.");
-      }
-      return {
-        schema: DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA,
-        clientId: requireBoundedString(record.clientId, "clientId", 512),
-        clientSecret: requireBoundedString(record.clientSecret, "clientSecret", 4096),
-      };
+  const definition = MEMBER_OWNED_OAUTH_CLIENT_APPLICATION_DEFINITIONS[
+    input.expectedProvider
+  ];
+  assertExactKeys(record, ["schema", "clientId", "clientSecret"]);
+  if (record.schema !== definition.secretSchema) {
+    throw new TypeError("Device provider application secret schema is invalid.");
   }
+  return {
+    schema: definition.secretSchema,
+    clientId: requireBoundedString(record.clientId, "clientId", 512),
+    clientSecret: requireBoundedString(record.clientSecret, "clientSecret", 4096),
+  };
 }
 
 export function buildDeviceProviderApplicationSecret(input: {
@@ -91,37 +115,32 @@ export function buildDeviceProviderApplicationSecret(input: {
   clientSecret: string;
   provider: MemberOwnedDeviceProviderApplicationProvider;
 }): DeviceProviderApplicationSecret {
-  switch (input.provider) {
-    case "strava":
-      return parseDeviceProviderApplicationSecret({
-        expectedProvider: "strava",
-        value: {
-          schema: DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA,
-          clientId: input.clientId,
-          clientSecret: input.clientSecret,
-        },
-      });
-  }
+  const definition = MEMBER_OWNED_OAUTH_CLIENT_APPLICATION_DEFINITIONS[
+    input.provider
+  ];
+  return parseDeviceProviderApplicationSecret({
+    expectedProvider: input.provider,
+    value: {
+      schema: definition.secretSchema,
+      clientId: input.clientId,
+      clientSecret: input.clientSecret,
+    },
+  });
 }
 
 export function buildDeviceProviderApplicationRuntimeConfigs(input: {
   provider: MemberOwnedDeviceProviderApplicationProvider;
   secret: DeviceProviderApplicationSecret;
 }): SerializableConfiguredDeviceSyncProviderConfigs {
-  switch (input.provider) {
-    case "strava":
-      if (input.secret.schema !== DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA) {
-        throw new TypeError(
-          "Strava device provider application secret schema is invalid.",
-        );
-      }
-      return {
-        strava: {
-          clientId: input.secret.clientId,
-          clientSecret: input.secret.clientSecret,
-        },
-      };
+  const definition = MEMBER_OWNED_OAUTH_CLIENT_APPLICATION_DEFINITIONS[
+    input.provider
+  ];
+  if (input.secret.schema !== definition.secretSchema) {
+    throw new TypeError(
+      "Device provider application secret schema is invalid for its provider.",
+    );
   }
+  return definition.buildRuntimeConfigs(input.secret);
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

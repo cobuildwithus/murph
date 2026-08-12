@@ -128,7 +128,9 @@ export function ConnectSourcesGrid({
     createConnectCallbackNotice(initialCallback, sources),
   );
   const [search, setSearch] = useState("");
-  const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
+  const [pendingSourceIds, setPendingSourceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [pendingDisconnectSourceId, setPendingDisconnectSourceId] = useState<
     string | null
   >(null);
@@ -338,6 +340,42 @@ export function ConnectSourcesGrid({
     [memberOwnedSetupBySourceId],
   );
 
+  const cancelMemberOwnedProviderSetup = useCallback(
+    async (source: ConnectSource): Promise<void> => {
+      const provider = source.memberOwnedSetupProvider;
+      const setupId = source.memberOwnedSetup?.setupId;
+      if (!authenticated || !provider || !setupId) {
+        return;
+      }
+
+      setActionError(null);
+      setNotice(null);
+      setPendingSourceIds((values) => addPendingSourceId(values, source.id));
+      try {
+        const canceled = await requestHostedOnboardingJson<
+          MemberOwnedProviderSetupMutationResponse
+        >({
+          method: "DELETE",
+          payload: { setupId },
+          url: `/api/settings/device-sync/provider-setups/${encodeURIComponent(provider)}`,
+        });
+        setMemberOwnedSetupBySourceId((values) =>
+          new Map(values).set(source.id, canceled.setup),
+        );
+      } catch (error) {
+        setActionError({
+          message: error instanceof Error
+            ? error.message
+            : "Private provider setup could not be canceled safely.",
+          sourceId: source.id,
+        });
+      } finally {
+        setPendingSourceIds((values) => removePendingSourceId(values, source.id));
+      }
+    },
+    [authenticated],
+  );
+
   const startConnection = useCallback(
     async (source: ConnectSource, options: ConnectStartOptions = {}) => {
       if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
@@ -352,7 +390,7 @@ export function ConnectSourcesGrid({
       setActiveSetupGuideId(null);
 
       if (source.memberOwnedSetupProvider && !options.intentClaim) {
-        setPendingSourceId(source.id);
+        setPendingSourceIds((values) => addPendingSourceId(values, source.id));
         try {
           await startMemberOwnedProviderSetup(source);
         } catch (error) {
@@ -363,7 +401,7 @@ export function ConnectSourcesGrid({
             sourceId: source.id,
           });
         } finally {
-          setPendingSourceId(null);
+          setPendingSourceIds((values) => removePendingSourceId(values, source.id));
         }
         return;
       }
@@ -372,7 +410,7 @@ export function ConnectSourcesGrid({
         requiresVitalConnectionPreflight(source) &&
         !options.vitalDisclosureConfirmed
       ) {
-        setPendingSourceId(null);
+        setPendingSourceIds((values) => removePendingSourceId(values, source.id));
         setVitalConnectionRequest({
           ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
           source,
@@ -381,7 +419,7 @@ export function ConnectSourcesGrid({
       }
 
       setVitalConnectionRequest(null);
-      setPendingSourceId(source.id);
+      setPendingSourceIds((values) => addPendingSourceId(values, source.id));
       if (options.intentClaim) {
         setConnectIntentRedirectName(source.name);
       }
@@ -409,13 +447,13 @@ export function ConnectSourcesGrid({
             message: error.message,
             sourceName: source.name,
           });
-          setPendingSourceId(null);
+          setPendingSourceIds((values) => removePendingSourceId(values, source.id));
           return;
         }
 
         if (isHostedWhoopDirectConnectCapReachedError(error)) {
           setShowWhoopAppleHealthSetupDialog(true);
-          setPendingSourceId(null);
+          setPendingSourceIds((values) => removePendingSourceId(values, source.id));
           return;
         }
 
@@ -427,7 +465,7 @@ export function ConnectSourcesGrid({
           message,
           sourceId: source.id,
         });
-        setPendingSourceId(null);
+        setPendingSourceIds((values) => removePendingSourceId(values, source.id));
       }
     },
     [authenticated, startMemberOwnedProviderSetup],
@@ -530,7 +568,7 @@ export function ConnectSourcesGrid({
     if (
       !connectionId ||
       pendingDisconnectSourceId ||
-      pendingSourceId === source.id
+      pendingSourceIds.has(source.id)
     ) {
       return;
     }
@@ -672,9 +710,10 @@ export function ConnectSourcesGrid({
                   ? visibleActionError.message
                   : null
               }
-              pending={pendingSourceId === source.id}
+              pending={pendingSourceIds.has(source.id)}
               pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
+              onCancelSetup={cancelMemberOwnedProviderSetup}
               onDisconnectTargetChange={setDisconnectSource}
               onSetupGuideOpen={setActiveSetupGuideId}
               onStartConnection={startConnection}
@@ -806,4 +845,20 @@ function resolveDisconnectWarningDetail(warning: {
   return warning.historicalResetIncomplete
     ? "The historical reset did not finish. Remove the old connection in your wearable provider account before reconnecting here."
     : "The provider did not fully confirm, so check that account if you want access removed there too.";
+}
+
+export function addPendingSourceId(
+  values: ReadonlySet<string>,
+  sourceId: string,
+): ReadonlySet<string> {
+  return new Set(values).add(sourceId);
+}
+
+export function removePendingSourceId(
+  values: ReadonlySet<string>,
+  sourceId: string,
+): ReadonlySet<string> {
+  const next = new Set(values);
+  next.delete(sourceId);
+  return next;
 }

@@ -33,6 +33,7 @@ type MockComputerUseStore = ComputerUseStore & {
   convertManagedLoginHandoffToLogin: MockStoreMethod<"convertManagedLoginHandoffToLogin">;
   createHandoff: MockStoreMethod<"createHandoff">;
   findActiveRunForMember: MockStoreMethod<"findActiveRunForMember">;
+  findHandoffByRun: MockStoreMethod<"findHandoffByRun">;
   listMemberRuns: MockStoreMethod<"listMemberRuns">;
   markHandoffExpired: MockStoreMethod<"markHandoffExpired">;
   markRunRunning: MockStoreMethod<"markRunRunning">;
@@ -82,7 +83,7 @@ describe("Kernel managed-login handoffs", () => {
     });
     const store = createStore({ handoff, run });
     const service = new ComputerUseService({
-      kernel: {} as ComputerKernelClient,
+      kernel: createKernel(),
       now: () => NOW,
       store,
     });
@@ -96,6 +97,34 @@ describe("Kernel managed-login handoffs", () => {
     });
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
     expect(store.markHandoffExpired).not.toHaveBeenCalled();
+  });
+
+  it("keeps the exact Connect return path on a setup-owned login checkpoint", async () => {
+    const run = createRun({
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+    const handoff = createHandoff({
+      status: "checkpointing",
+      updatedAt: CLAIMED_AT,
+    });
+    const store = createStore({ handoff, run });
+    const service = new ComputerUseService({
+      kernel: createKernel(),
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.readHandoffPageState({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "checkpointing",
+      purpose: "managed_login",
+      returnContactKind: null,
+      returnTo: "/connect",
+      suggestedReply: "Done",
+    });
   });
 
   it("rejects the generic Done path for managed login", async () => {
@@ -772,6 +801,7 @@ describe("Kernel managed-login handoffs", () => {
     });
     const store = createStore({ handoff, run });
     store.requireHandoffByTokenHash.mockImplementation(async () => handoff);
+    store.findHandoffByRun.mockImplementation(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
       handoff = {
         ...handoff,
@@ -1056,6 +1086,66 @@ describe("Kernel managed-login handoffs", () => {
     });
     expect(store.replaceRunBrowser).not.toHaveBeenCalled();
     expect(store.completeHandoff).not.toHaveBeenCalled();
+  });
+
+  it("verifies managed login before resuming the exact setup-owned run to Connect", async () => {
+    const run = createRun({
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+    const handoff = createHandoff();
+    const connection = createConnection({
+      flowExpiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      flowStatus: "SUCCESS",
+      status: "AUTHENTICATED",
+    });
+    const store = createStore({ handoff, run });
+    const kernel = createKernel({
+      createBrowser: vi.fn(async () => ({
+        liveViewUrl: "https://browser.onkernel.com:8443/live/setup",
+        sessionId: "kernel-session-setup",
+      })),
+      findManagedAuthConnection: vi.fn(async () => connection),
+    });
+    const service = new ComputerUseService({
+      crypto: createCrypto(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://join.example.test",
+      },
+      kernel,
+      now: () => NOW,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MANAGED_LOGIN_REQUIRES_VERIFICATION",
+    });
+
+    await expect(service.continueManagedLoginHandoff({
+      memberId: run.memberId,
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "redirect",
+      url: "/connect",
+    });
+    expect(store.requireMemberOwnedProviderSetupRun).toHaveBeenCalledWith({
+      memberId: run.memberId,
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: run.id,
+    });
+    expect(store.completeManagedLoginHandoff).toHaveBeenCalledTimes(1);
+    expect(store.markRunRunning).toHaveBeenCalledWith(expect.objectContaining({
+      expectedHandoffStatus: "completed",
+      expectedKernelSessionId: "kernel-session-setup",
+      expectedPendingHandoffId: handoff.id,
+      runId: run.id,
+    }));
   });
 
   it("reuses an in-progress Kernel Hosted UI flow for duplicate opens", async () => {
@@ -2158,6 +2248,8 @@ function createStore(input: {
   handoff: ComputerHandoffRecord | null;
   run: ComputerRunRecord;
 }): MockComputerUseStore {
+  let latestHandoff = input.handoff;
+  let latestRun = input.run;
   const claimed = input.handoff
     ? {
         ...input.handoff,
@@ -2189,14 +2281,14 @@ function createStore(input: {
     >[0],
   ): Promise<ComputerRunRecord> => {
     if (
-      input.run.memberId !== ownerInput.memberId
-      || input.run.id !== ownerInput.runId
-      || input.run.ownerKey !== ownerInput.ownerKey
-      || input.run.ownerPurpose !== ownerInput.ownerPurpose
+      latestRun.memberId !== ownerInput.memberId
+      || latestRun.id !== ownerInput.runId
+      || latestRun.ownerKey !== ownerInput.ownerKey
+      || latestRun.ownerPurpose !== ownerInput.ownerPurpose
     ) {
       throw new Error("Browser run ownership does not match setup.");
     }
-    return input.run;
+    return latestRun;
   });
   const requireMemberOwnedProviderSetupRunAcquisition = vi.fn(async (
     ownerInput: Parameters<
@@ -2278,14 +2370,15 @@ function createStore(input: {
       completedAt: NOW,
       status: "completed" as const,
     })),
-    completeManagedLoginHandoff: vi.fn(async (completeInput) => ({
-      handoff: {
+    completeManagedLoginHandoff: vi.fn(async (completeInput) => {
+      latestHandoff = {
         ...claimed!,
         completedAt: completeInput.now,
         status: "completed" as const,
-      },
-      run: {
-        ...input.run,
+        updatedAt: completeInput.now,
+      };
+      latestRun = {
+        ...latestRun,
         ...(completeInput.browser
           ? {
               kernelLiveViewUrlEncrypted:
@@ -2293,8 +2386,12 @@ function createStore(input: {
               kernelSessionId: completeInput.browser.kernelSessionId,
             }
           : {}),
-      },
-    })),
+      };
+      return {
+        handoff: latestHandoff,
+        run: latestRun,
+      };
+    }),
     convertManagedLoginHandoffToLogin: vi.fn(async (convertInput) => ({
       handoff: {
         ...claimed!,
@@ -2328,9 +2425,7 @@ function createStore(input: {
       throw new Error("createRun should not be called.");
     },
     findActiveRunForMember: vi.fn(async () => null),
-    async findHandoffByRun() {
-      return input.handoff;
-    },
+    findHandoffByRun: vi.fn(async () => latestHandoff),
     async finishRun() {
       throw new Error("finishRun should not be called.");
     },
@@ -2357,12 +2452,16 @@ function createStore(input: {
     async markRunExpired() {
       throw new Error("markRunExpired should not be called.");
     },
-    markRunRunning: vi.fn(async () => ({
-      ...input.run,
-      pausedAt: null,
-      resumeAfterMailboxLaneSeq: null,
-      status: "running" as const,
-    })),
+    markRunRunning: vi.fn(async () => {
+      latestRun = {
+        ...latestRun,
+        pausedAt: null,
+        pendingHandoffId: null,
+        resumeAfterMailboxLaneSeq: null,
+        status: "running" as const,
+      };
+      return latestRun;
+    }),
     reclaimHandoffForCompletion: vi.fn(async () => claimed),
     releaseHandoffClaim: vi.fn(async () => {}),
     replaceAwaitingRunHandoff: vi.fn(async (replaceInput) => ({
@@ -2385,7 +2484,7 @@ function createStore(input: {
     requireMemberComputerUseAvailable,
     requireMemberOwnedProviderSetupRun,
     requireMemberOwnedProviderSetupRunAcquisition,
-    requireOwnedRun: vi.fn(async () => input.run),
+    requireOwnedRun: vi.fn(async () => latestRun),
     async updateRunBrowserState() {},
   } satisfies MockComputerUseStore;
 }
