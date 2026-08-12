@@ -37,7 +37,8 @@ Last verified: 2026-08-11
   exercise sequences bounded without adding a second message or partial-send
   lifecycle; Murph teaches fewer movements when the complete useful sequences
   would exceed the budget. Linq text is rendered and checked against the
-  provider's 10,000-character limit before network entry. A terminal ordinary
+  provider's 10,000-character limit before private media is loaded or uploaded
+  and before message-provider entry. A terminal direct-chat
   image failure stays image work and cannot recover as text alone. Hosted
   outbox logs retain metadata-only payload aggregates plus allowlisted request
   shape, provider correlation tokens, and response-body signatures, never

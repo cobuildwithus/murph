@@ -8139,18 +8139,12 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     sanitizedDetails,
     ["errorCode", "errorCodeDetail", "providerErrorCode"],
   ));
-  appendHostedOutboxDeliveryErrorDetail(output, "Description", readFirstHostedOutboxDeliveryErrorDetail(
-    sanitizedDetails,
-    ["description", "errorDetail", "safeErrorMessage"],
-  ));
   appendHostedOutboxDeliveryErrorDetail(output, "Operation", readFirstHostedOutboxDeliveryErrorDetail(
     sanitizedDetails,
     ["operation", "action"],
   ));
   appendHostedOutboxDeliveryErrorDetail(output, "FailureStage", sanitizedDetails.failureStage);
   appendHostedOutboxDeliveryErrorDetail(output, "Method", sanitizedDetails.method);
-  appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
-  appendHostedOutboxDeliveryErrorDetail(output, "TimedOut", sanitizedDetails.timedOut);
   appendHostedOutboxDeliveryErrorDetail(
     output,
     "RequestSummary",
@@ -8178,19 +8172,24 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
   );
   appendHostedOutboxDeliveryErrorDetail(
     output,
-    "ResponseSignature",
-    sanitizedDetails.responseBodySha256,
+    "ProviderRequestId",
+    sanitizedDetails.providerRequestId,
   );
   appendHostedOutboxDeliveryErrorDetail(
     output,
-    "ProviderRequestId",
-    sanitizedDetails.providerRequestId,
+    "ResponseSignature",
+    sanitizedDetails.responseBodySha256,
   );
   appendHostedOutboxDeliveryErrorDetail(
     output,
     "TransportErrorName",
     sanitizedDetails.transportErrorName,
   );
+  appendHostedOutboxDeliveryErrorDetail(output, "TimedOut", sanitizedDetails.timedOut);
+  appendHostedOutboxDeliveryErrorDetail(output, "Description", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["description", "errorDetail", "safeErrorMessage"],
+  ));
   appendHostedOutboxDeliveryErrorDetail(output, "ErrorName", readFirstHostedOutboxDeliveryErrorDetail(
     sanitizedDetails,
     ["name", "errorName"],
@@ -8203,6 +8202,7 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     sanitizedDetails,
     ["errorCause", "cause"],
   ));
+  appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
   if (Object.keys(output).length < 9) {
     output.deliveryErrorDetailFieldCount = Object.keys(sanitizedDetails).length;
   }
@@ -8261,7 +8261,9 @@ function appendHostedOutboxDeliveryErrorDetail(
   suffix: string,
   value: HostedRuntimeRedactedScalar | undefined,
 ): void {
-  if (value === undefined) {
+  // A delivery summary always has seven base fields. Keep details to nine so
+  // every summary satisfies the hosted runtime parser's 16-key object bound.
+  if (value === undefined || Object.keys(output).length >= 9) {
     return;
   }
 

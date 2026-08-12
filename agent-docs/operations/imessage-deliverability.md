@@ -79,11 +79,12 @@ limits.
 
 The Linq adapter includes distinct image alternative text in the provider text
 part for accessibility. It must reject a rendered text part over Linq's 10,000
-character limit before network entry, with `deliveryMayHaveSucceeded: false`.
-An ordinary failed image response remains outstanding image work: its terminal
-failure input must not offer or send a text-only substitute. This rule does not
-change the separately persisted, deterministic text recovery owned by an
-iMessage app card.
+character limit before private vault bytes are loaded or uploaded and before
+message-provider entry, with `deliveryMayHaveSucceeded: false`.
+An ordinary failed direct-chat image response remains outstanding image work:
+its terminal failure input must not offer or send a text-only substitute. This
+rule does not change the separately persisted, deterministic text recovery
+owned by an iMessage app card.
 
 Every hosted outbox drain records only bounded payload aggregates: base message
 lengths, media counts and kinds, image-alt length, and public/private image

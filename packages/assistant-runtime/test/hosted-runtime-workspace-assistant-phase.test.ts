@@ -12377,6 +12377,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
         deliveryErrorDetails: {
           failureStage: "http",
+          method: "POST",
+          name: "VaultCliError",
           operation: "send_message",
           providerErrorCode: "INVALID_MEDIA",
           providerErrorMessage: "provider response prose",
@@ -12415,6 +12417,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       deliveryErrorSummaries: [
         expect.objectContaining({
           deliveryErrorDetailFailureStage: "http",
+          deliveryErrorDetailMethod: "POST",
           deliveryErrorDetailOperation: "send_message",
           deliveryErrorDetailProviderCode: "INVALID_MEDIA",
           deliveryErrorDetailProviderRequestId: "trace_safe_123",
@@ -12436,11 +12439,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             stringFieldSummary: "code,trace_id",
           }),
           deliveryErrorDetailResponseSignature: "a".repeat(64),
-          deliveryErrorDetailRetryable: false,
           deliveryErrorDetailStatus: 400,
         }),
       ],
     }));
+    const deliveryErrorSummaries = deliveryLogRequest?.entries[0]?.redactedJson
+      ?.deliveryErrorSummaries;
+    expect(Array.isArray(deliveryErrorSummaries)).toBe(true);
+    if (!Array.isArray(deliveryErrorSummaries)) {
+      throw new Error("Expected delivery error summaries.");
+    }
+    const deliveryErrorSummary = deliveryErrorSummaries[0];
+    expect(deliveryErrorSummary).toBeDefined();
+    if (
+      deliveryErrorSummary === null
+      || typeof deliveryErrorSummary !== "object"
+      || Array.isArray(deliveryErrorSummary)
+    ) {
+      throw new Error("Expected a delivery error summary object.");
+    }
+    expect(Object.keys(deliveryErrorSummary)).toHaveLength(16);
     expect(JSON.stringify(deliveryLogRequest)).not.toContain("provider response prose");
     expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });

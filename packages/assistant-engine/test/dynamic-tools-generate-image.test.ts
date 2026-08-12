@@ -49,6 +49,12 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'Exact scheduled automation occurrences remain synchronous and attach private media to the same final response',
     )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'that image consumes one of the same 8 final-response media slots, so leave a slot before calling',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'Local runs stay synchronous with the same slot rule',
+    )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
     )

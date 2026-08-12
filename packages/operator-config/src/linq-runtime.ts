@@ -2467,40 +2467,17 @@ function buildLinqMessageBody(input: {
     : null
   const media = normalizeLinqMediaList(input.media ?? [])
   const normalizedMessage = normalizeNullableString(input.message)
-  let textPart: TextPart | null = null
-  if (normalizedMessage !== null) {
-    const renderedText = renderMarkdownMessageText(normalizedMessage)
-    if (renderedText.text.length > LINQ_MAX_TEXT_PART_LENGTH) {
-      throw Object.assign(new VaultCliError(
-        'LINQ_INVALID_INPUT',
-        `Linq text parts may contain at most ${LINQ_MAX_TEXT_PART_LENGTH} characters.`,
-        {
-          failureStage: 'configuration',
-          operation: input.operation,
-          provider: 'linq',
-          requestAttachmentMediaPartCount:
-            media.filter((part) => 'attachment_id' in part).length,
-          requestMediaPartCount: media.length,
-          requestMessageLength: renderedText.text.length,
-          requestMessagePartCount: media.length + 1,
-          requestPublicUrlMediaPartCount:
-            media.filter((part) => 'url' in part).length,
-          requestTextPartCount: 1,
-          retryable: false,
-        },
-      ), {
-        deliveryMayHaveSucceeded: false as const,
-        retryable: false as const,
+  const textPart = normalizedMessage === null
+    ? null
+    : buildLinqTextPartWithinLimit({
+        message: normalizedMessage,
+        operation: input.operation,
+        requestAttachmentMediaPartCount:
+          media.filter((part) => 'attachment_id' in part).length,
+        requestMediaPartCount: media.length,
+        requestPublicUrlMediaPartCount:
+          media.filter((part) => 'url' in part).length,
       })
-    }
-    textPart = {
-      type: 'text',
-      value: renderedText.text,
-    }
-    if (renderedText.decorations.length > 0) {
-      textPart.text_decorations = renderedText.decorations
-    }
-  }
   const parts: MessageContent['parts'] = textPart ? [textPart, ...media] : media
   if (parts.length === 0) {
     throw new VaultCliError(
@@ -2522,6 +2499,62 @@ function buildLinqMessageBody(input: {
     message.reply_to = { message_id: replyToMessageId }
   }
   return { message }
+}
+
+export function assertLinqMessageTextPartWithinLimit(input: {
+  message: string
+  operation: 'create_chat' | 'send_message'
+  requestAttachmentMediaPartCount: number
+  requestMediaPartCount: number
+  requestPublicUrlMediaPartCount: number
+}): void {
+  const normalizedMessage = normalizeNullableString(input.message)
+  if (normalizedMessage === null) {
+    return
+  }
+  buildLinqTextPartWithinLimit({
+    ...input,
+    message: normalizedMessage,
+  })
+}
+
+function buildLinqTextPartWithinLimit(input: {
+  message: string
+  operation: 'create_chat' | 'send_message'
+  requestAttachmentMediaPartCount: number
+  requestMediaPartCount: number
+  requestPublicUrlMediaPartCount: number
+}): TextPart {
+  const renderedText = renderMarkdownMessageText(input.message)
+  if (renderedText.text.length > LINQ_MAX_TEXT_PART_LENGTH) {
+    throw Object.assign(new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      `Linq text parts may contain at most ${LINQ_MAX_TEXT_PART_LENGTH} characters.`,
+      {
+        failureStage: 'configuration',
+        operation: input.operation,
+        provider: 'linq',
+        requestAttachmentMediaPartCount: input.requestAttachmentMediaPartCount,
+        requestMediaPartCount: input.requestMediaPartCount,
+        requestMessageLength: renderedText.text.length,
+        requestMessagePartCount: input.requestMediaPartCount + 1,
+        requestPublicUrlMediaPartCount: input.requestPublicUrlMediaPartCount,
+        requestTextPartCount: 1,
+        retryable: false,
+      },
+    ), {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: false as const,
+    })
+  }
+
+  return {
+    type: 'text',
+    value: renderedText.text,
+    ...(renderedText.decorations.length > 0
+      ? { text_decorations: renderedText.decorations }
+      : {}),
+  }
 }
 
 function normalizeLinqMediaList(
