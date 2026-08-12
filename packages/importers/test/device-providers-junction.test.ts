@@ -2845,36 +2845,41 @@ test("Junction opt-in heart rate and active calories emit only bounded hourly or
 });
 
 test("Junction opt-in weight readings are compact, replay-stable, distinct, and canonically queryable", async () => {
-  const withingsReadings = [
-    { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
-    { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
-    { id: "reading-b", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
-    { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 81, rawSecret: "RAW_WEIGHT_SENTINEL" },
-    { timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 82, rawSecret: "RAW_WEIGHT_SENTINEL" },
-  ];
   const garminReadings = [
     { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
   ];
-  const snapshot = (reverse: boolean) => ({
-    accountId: "junction-account-hash-1",
-    importedAt: "2026-04-24T12:00:00.000Z",
-    timeseries: {
-      weight: {
-        groups: {
-          withings: [{
-            data: reverse ? [...withingsReadings].reverse() : withingsReadings,
-            source: { provider: "withings", type: "scale", device_id: "scale-a" },
-          }],
-          garmin: [{
-            data: reverse ? [...garminReadings].reverse() : garminReadings,
-            source: { provider: "garmin", type: "scale", device_id: "scale-b" },
-          }],
+  const snapshot = (input: { reverse: boolean; withingsReadingAWeight: number }) => {
+    const withingsReadings = [
+      { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: input.withingsReadingAWeight, rawSecret: "RAW_WEIGHT_SENTINEL" },
+      { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: input.withingsReadingAWeight, rawSecret: "RAW_WEIGHT_SENTINEL" },
+      { id: "reading-b", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
+      { timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 82, rawSecret: "RAW_WEIGHT_SENTINEL" },
+    ];
+    return {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        weight: {
+          groups: {
+            withings: [{
+              data: input.reverse ? [...withingsReadings].reverse() : withingsReadings,
+              source: { provider: "withings", type: "scale", device_id: "scale-a" },
+            }],
+            garmin: [{
+              data: input.reverse ? [...garminReadings].reverse() : garminReadings,
+              source: { provider: "garmin", type: "scale", device_id: "scale-b" },
+            }],
+          },
         },
       },
-    },
-  });
-  const ordered = normalizeJunctionSnapshot(snapshot(false));
-  const reversed = normalizeJunctionSnapshot(snapshot(true));
+    };
+  };
+  const orderedSnapshot = snapshot({ reverse: false, withingsReadingAWeight: 80 });
+  const reversedSnapshot = snapshot({ reverse: true, withingsReadingAWeight: 80 });
+  const correctedSnapshot = snapshot({ reverse: true, withingsReadingAWeight: 81 });
+  const ordered = normalizeJunctionSnapshot(orderedSnapshot);
+  const reversed = normalizeJunctionSnapshot(reversedSnapshot);
+  const corrected = normalizeJunctionSnapshot(correctedSnapshot);
   const weightEvents = (ordered.events ?? []).filter((event) => event.kind === "measurement");
   const externalResourceIds = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
     (payload.events ?? [])
@@ -2891,12 +2896,14 @@ test("Junction opt-in weight readings are compact, replay-stable, distinct, and 
 
   assert.deepEqual(ordered.provenance?.timeseriesResources, ["weight"]);
   assert.equal(ordered.samples?.length ?? 0, 0);
-  assert.equal(weightEvents.length, 5);
-  assert.equal(findJunctionWeightReadingArtifacts(ordered).length, 5);
-  assert.deepEqual(readingValues, [80, 80, 80, 81, 82]);
-  assert.equal(new Set(externalResourceIds(ordered)).size, 5);
+  assert.equal(weightEvents.length, 4);
+  assert.equal(findJunctionWeightReadingArtifacts(ordered).length, 4);
+  assert.deepEqual(readingValues, [80, 80, 80, 82]);
+  assert.equal(new Set(externalResourceIds(ordered)).size, 4);
   assert.deepEqual(externalResourceIds(ordered), externalResourceIds(reversed));
+  assert.deepEqual(externalResourceIds(ordered), externalResourceIds(corrected));
   assert.deepEqual(evidenceRoles(ordered), evidenceRoles(reversed));
+  assert.deepEqual(evidenceRoles(ordered), evidenceRoles(corrected));
   assert.ok(weightEvents.every((event) => event.dataOrigin?.sourceProviderSlug));
   assertNoFullJunctionTimeseriesArtifacts(ordered);
   assertEventRawArtifactRolesExist(ordered);
@@ -2915,11 +2922,15 @@ test("Junction opt-in weight readings are compact, replay-stable, distinct, and 
       timezone: "UTC",
     });
     const firstImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      { provider: "junction", vaultRoot, snapshot: snapshot(false) },
+      { provider: "junction", vaultRoot, snapshot: orderedSnapshot },
       { corePort: coreRuntime },
     );
     const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      { provider: "junction", vaultRoot, snapshot: snapshot(true) },
+      { provider: "junction", vaultRoot, snapshot: reversedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const correctedImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot: correctedSnapshot },
       { corePort: coreRuntime },
     );
     const importedWeightIds = (events: typeof firstImport.events) => events
@@ -2929,6 +2940,12 @@ test("Junction opt-in weight readings are compact, replay-stable, distinct, and 
     const availability = await coreRuntime.readCanonicalEventAvailabilityInterruptible({ vaultRoot });
 
     assert.deepEqual(importedWeightIds(firstImport.events), importedWeightIds(replayImport.events));
+    assert.deepEqual(importedWeightIds(firstImport.events), importedWeightIds(correctedImport.events));
+    assert.ok(correctedImport.events.some((event) =>
+      event.kind === "measurement"
+      && event.dataOrigin?.sourceProviderSlug === "withings"
+      && event.measurements[0]?.value === 81
+    ));
     assert.equal(availability.interrupted, false);
     assert.equal(availability.latestBodyMeasurementOccurredAt, "2026-04-22T08:05:00.000Z");
     assert.equal(availability.latestBodyMeasurementDayKey, "2026-04-22");

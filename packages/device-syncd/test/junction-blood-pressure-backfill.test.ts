@@ -914,7 +914,7 @@ test("weight receives summary-history backfill while dense opt-ins stay bounded"
   );
   const sources = [createSourceSummary(
     "withings",
-    NOW,
+    "2026-01-01T12:00:00.000Z",
     "connected",
     { heartrate: true, steps: true, weight: true },
   )];

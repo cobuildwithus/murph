@@ -703,11 +703,12 @@ export function createJunctionDeviceSyncProvider(
       }
 
       return [...scheduledSources.entries()].map(([sourceProviderSlug, firstSeenAt]) => {
-        // Sparse measurements existed before the member connected its source,
-        // so their history ends at first-seen. Notes became ingestible in a
-        // newer runtime, so existing sources need recent history ending now.
+        // Blood pressure history existed before the member connected its
+        // source, so its historical-only window ends at first-seen. Notes and
+        // weight became ingestible in newer runtimes, so existing sources need
+        // one complete summary-history window ending now.
         const window = buildExtendedTimeseriesBackfillWindow(
-          resource === "note" ? now : firstSeenAt,
+          resource === "blood_pressure" ? firstSeenAt : now,
         );
         return buildExtendedTimeseriesBackfillJob({
           availableAt: now,

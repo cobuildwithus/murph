@@ -2766,15 +2766,22 @@ function pushJunctionWeightReadings(
       firstStringFromPaths(entry, JUNCTION_READING_STABLE_ID_PATHS),
       160,
     );
-    const readingIdentityHash = shortHash([
-      resourceSlug,
-      resourceContext.sourceProviderSlug,
-      resourceContext.origin.sourceType ?? "",
-      resourceContext.origin.sourceInstanceId ?? "",
-      providerReadingId ?? "",
-      timestamp.observedAtRaw ?? occurredAt,
-      weightKilograms,
-    ]);
+    const readingIdentityHash = providerReadingId
+      ? shortHash([
+          resourceSlug,
+          resourceContext.sourceProviderSlug,
+          resourceContext.origin.sourceType ?? "",
+          resourceContext.origin.sourceInstanceId ?? "",
+          providerReadingId,
+        ])
+      : shortHash([
+          resourceSlug,
+          resourceContext.sourceProviderSlug,
+          resourceContext.origin.sourceType ?? "",
+          resourceContext.origin.sourceInstanceId ?? "",
+          timestamp.observedAtRaw ?? occurredAt,
+          weightKilograms,
+        ]);
     if (seenReadingIdentityHashes.has(readingIdentityHash)) {
       continue;
     }
