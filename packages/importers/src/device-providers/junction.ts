@@ -1237,15 +1237,17 @@ function normalizeSummaries(
           resourceSlug,
         })
       : new Map<number, string>();
-    pushEvidencePart(
-      context.evidenceParts,
-      createEvidencePart(
-        evidencePartRole,
-        `${evidencePartRole}.json`,
-        preparedMenstrualCycle?.evidence
-          ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
-      ),
-    );
+    if (resource !== "workouts") {
+      pushEvidencePart(
+        context.evidenceParts,
+        createEvidencePart(
+          evidencePartRole,
+          `${evidencePartRole}.json`,
+          preparedMenstrualCycle?.evidence
+            ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
+        ),
+      );
+    }
 
     if (preparedMenstrualCycle) {
       preparedMenstrualCycle.cycles.forEach((cycle, index) => {
@@ -1300,6 +1302,7 @@ function normalizeSummaries(
       continue;
     }
 
+    const firstResourceEventIndex = context.events.length;
     resolvedEntries.forEach(({ entry, resourceContext }) => {
       const firstEventIndex = context.events.length;
       switch (resource) {
@@ -1332,6 +1335,19 @@ function normalizeSummaries(
         context.events.slice(firstEventIndex),
       );
     });
+
+    if (resource === "workouts") {
+      pushEvidencePart(
+        context.evidenceParts,
+        createEvidencePart(
+          evidencePartRole,
+          `${evidencePartRole}.json`,
+          buildJunctionWorkoutSummaryEvidence(
+            context.events.slice(firstResourceEventIndex),
+          ),
+        ),
+      );
+    }
   }
 }
 
@@ -2714,6 +2730,27 @@ function buildRawResourcePayload(
     payload,
     profile && connectionsByKey ? resolveEntryConnection(profile, connectionsByKey) : undefined,
   );
+}
+
+function buildJunctionWorkoutSummaryEvidence(
+  events: readonly DeviceEventPayload[],
+): Record<string, unknown> {
+  return {
+    schema: "junction.workout-summary-evidence.v1",
+    workouts: events.flatMap((event) => event.kind === "activity_session"
+      ? [stripUndefined({
+          occurredAt: event.occurredAt,
+          recordedAt: event.recordedAt,
+          dayKey: event.dayKey,
+          timeZone: event.timeZone,
+          title: event.title,
+          externalRef: event.externalRef,
+          legacyExternalRefs: event.legacyExternalRefs,
+          dataOrigin: event.dataOrigin,
+          fields: event.fields,
+        })]
+      : []),
+  };
 }
 
 function sanitizeJunctionNoteRawValue(value: unknown): unknown {

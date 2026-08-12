@@ -1,14 +1,27 @@
 import { createHash, createHmac } from "node:crypto";
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  eventRecordSchema,
+  eventRevisionFromLifecycle,
+  isDeletedEventLifecycle,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import {
+  prepareDeviceProviderSnapshotImport,
+  reduceJunctionWorkoutStream,
+} from "@murphai/importers";
+import {
+  importDeviceBatch,
+  initializeVault,
+  readJsonlRecords,
+  upsertEvent,
+} from "@murphai/core";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -18,6 +31,7 @@ import { mergeHostedDeviceSyncConnectionMetadata } from "../src/hosted-runtime.t
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import {
+  createDefaultImporterPort,
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
 } from "../src/service.ts";
@@ -1353,11 +1367,13 @@ test("device sync service reports canonical counts separately from durable deliv
       {
         canonicalEventCount: 2,
         canonicalEventExternalRefResourceIds: [],
+        canonicalEventKinds: ["activity", "sleep"],
         durableDeliveryAccepted: true,
       },
       {
         canonicalEventCount: 0,
         canonicalEventExternalRefResourceIds: [],
+        canonicalEventKinds: [],
         durableDeliveryAccepted: true,
       },
     ]);
@@ -1548,6 +1564,369 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     reopenedStore.close();
   }
 });
+
+test.each([8, 30, 90, 179])(
+  "Junction %d-day workout-duration history migrates a pre-canonical session through scheduler and real vault import",
+  async (ageDays) => {
+    const vaultRoot = await makeTempDirectory(`murph-device-syncd-workout-history-${ageDays}`);
+    const now = new Date("2026-08-11T12:00:00.000Z");
+    const workoutStart = new Date(
+      Date.parse("2026-08-11T10:00:00.000Z") - ageDays * 24 * 60 * 60_000,
+    ).toISOString();
+    const workoutEnd = new Date(Date.parse(workoutStart) + 30 * 60_000).toISOString();
+    const workoutId = `workout-history-${ageDays}`;
+    const providerWorkoutId = `provider-workout-history-${ageDays}`;
+    const sourceInstanceId = `source-${createHash("sha256")
+      .update(JSON.stringify({ sourceProviderSlug: "garmin", values: ["garmin-device"] }))
+      .digest("hex")
+      .slice(0, 24)}`;
+    const summarySnapshot = {
+      accountId: `junction-workout-history-${ageDays}`,
+      connections: [{
+        sourceInstanceId,
+        sourceProviderSlug: "garmin",
+      }],
+      importedAt: workoutEnd,
+      summaries: {
+        workouts: [{
+          id: workoutId,
+          provider_id: providerWorkoutId,
+          time_start: workoutStart,
+          time_end: workoutEnd,
+          sourceInstanceId,
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          sport: { slug: "running" },
+        }],
+      },
+      timeseries: {},
+    };
+
+    await initializeVault({
+      createdAt: "2026-02-01T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const prepared = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      snapshot: summarySnapshot,
+      vaultRoot,
+    });
+    const canonicalSession = prepared.events?.find((event) =>
+      event.kind === "activity_session"
+    );
+    assert.ok(canonicalSession?.externalRef);
+    const historicalExternalRef = canonicalSession.legacyExternalRefs?.[0];
+    assert.ok(historicalExternalRef);
+    const legacySeed = await importDeviceBatch({
+      vaultRoot,
+      provider: prepared.provider,
+      accountId: prepared.accountId,
+      importedAt: prepared.importedAt,
+      events: [{
+        ...canonicalSession,
+        externalRef: historicalExternalRef,
+        legacyExternalRefs: undefined,
+      }],
+      evidenceParts: (prepared.evidenceParts ?? []).map((part) => ({
+        role: part.role,
+        fileName: part.fileName,
+        mediaType: part.mediaType,
+        content: part.content,
+      })),
+    });
+    const seededSession = legacySeed.events[0];
+    assert.ok(seededSession);
+    await upsertEvent({
+      vaultRoot,
+      payload: {
+        ...seededSession,
+        links: [{ type: "related_to", targetId: seededSession.id }],
+        note: "member-owned workout context",
+        source: "manual",
+        tags: ["member-context"],
+      },
+    });
+    const feature = reduceJunctionWorkoutStream({
+      cadence: [80, 82, 84],
+      distance: [0, 500, 1_000],
+      heartrate: [120, 130, 140],
+      power: [180, 200, 220],
+      time: [
+        Date.parse(workoutStart) / 1_000,
+        Date.parse(workoutStart) / 1_000 + 10,
+        Date.parse(workoutStart) / 1_000 + 20,
+      ],
+    }, {
+      workoutId,
+      sourceUpdatedAt: now.toISOString(),
+      sourceProviderSlug: "garmin",
+      sourceInstanceId,
+      sourceType: "watch",
+      sport: "running",
+    });
+    assert.ok(feature);
+    await createDefaultImporterPort().importDeviceProviderSnapshot({
+      provider: "junction",
+      snapshot: {
+        ...summarySnapshot,
+        summaries: {},
+        workoutFeatures: [feature],
+      },
+      vaultRoot,
+    });
+
+    const summaryRequests: URL[] = [];
+    const durationRequests: URL[] = [];
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["workout_duration"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === `/v2/user/providers/junction-workout-history-${ageDays}`) {
+          return createJsonResponse({ providers: [{
+            id: "garmin-device",
+            slug: "garmin",
+            status: "connected",
+            source: { device_id: "garmin-device" },
+            resource_availability: { workout_duration: true, workouts: true },
+          }] });
+        }
+        if (url.pathname === `/v2/summary/workouts/junction-workout-history-${ageDays}`) {
+          summaryRequests.push(url);
+          const requestStart = Date.parse(url.searchParams.get("start_date") ?? "");
+          const requestEnd = Date.parse(url.searchParams.get("end_date") ?? "");
+          const includesWorkout = requestStart <= Date.parse(workoutStart)
+            && requestEnd >= Date.parse(workoutEnd);
+          return createJsonResponse({ workouts: includesWorkout ? [{
+              id: workoutId,
+              provider_id: providerWorkoutId,
+              time_start: workoutStart,
+              time_end: workoutEnd,
+              source: {
+                device_id: "garmin-device",
+                provider: "garmin",
+                raw_marker: "raw-summary-source-marker",
+                type: "watch",
+              },
+              provider_snapshot: { raw_marker: "raw-summary-provider-snapshot" },
+              route: {
+                coordinates: [[-87.6298, 41.8781], [-87.6297, 41.8782]],
+                raw_marker: "raw-summary-route-marker",
+              },
+              sport: { slug: "running" },
+            }] : [] });
+        }
+        if (
+          url.pathname.startsWith("/v2/summary/")
+          && url.pathname.endsWith(`/junction-workout-history-${ageDays}`)
+        ) {
+          return createJsonResponse({ data: [] });
+        }
+        if (url.pathname === `/v2/timeseries/junction-workout-history-${ageDays}/workout_duration/grouped`) {
+          durationRequests.push(url);
+          return createJsonResponse({ groups: { garmin: [{
+            data: [{
+              start: workoutStart,
+              end: workoutEnd,
+              unit: "minutes",
+              value: 30,
+            }],
+            source: {
+              device_id: "garmin-device",
+              provider: "garmin",
+              raw_marker: "raw-duration-source-marker",
+              type: "watch",
+              workout_id: workoutId,
+            },
+          }] } });
+        }
+        throw new Error(`Unexpected workout-history request: ${url.pathname}`);
+      },
+    });
+    const { service, store, close } = createServiceFixture({
+      secret: "secret-for-tests",
+      clock: { now: () => now },
+      config: {
+        vaultRoot,
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      },
+      providers: [provider],
+    });
+
+    try {
+      const account = store.upsertAccount({
+        provider: "junction",
+        externalAccountId: `junction-workout-history-${ageDays}`,
+        displayName: "Junction",
+        scopes: [],
+        status: "active",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+          credentialMetadata: {},
+        },
+        connectedAt: now.toISOString(),
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_complete",
+          junctionHistoricalBackfillEmptyAttempts: 0,
+          junctionHistoricalBackfillLastEmptyAt: null,
+          junctionHistoricalBackfillWindowStart: "2026-02-12T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-08-11T00:00:00.000Z",
+          junctionHistoricalBackfillEvidence:
+            "e2|2026-02-12T00:00:00.000Z|2026-08-11T00:00:00.000Z|garmin:7",
+        },
+        nextReconcileAt: "2026-08-12T12:00:00.000Z",
+      });
+      store.upsertConnectionSource({
+        connectionId: account.id,
+        sourceInstanceKey: "garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected",
+        resourceAvailabilitySummary: { workout_duration: true, workouts: true },
+        lastSeenAt: now.toISOString(),
+      });
+
+      const storedAccount = store.getAccountById(account.id);
+      assert.ok(storedAccount);
+      const scheduledHistoryJob = provider.jobExecutor?.createScheduledJobs?.(
+        storedAccount,
+        now.toISOString(),
+      ).jobs.find((job) =>
+        job.kind === "resource" && job.payload?.resource === "workout_duration"
+      );
+      assert.ok(scheduledHistoryJob?.payload);
+      const historyStart = Date.parse(String(scheduledHistoryJob.payload.historicalWindowStart));
+      const historyEnd = Date.parse(String(scheduledHistoryJob.payload.windowEnd));
+      const historyChunkMs = 30 * 24 * 60 * 60_000;
+      const chunkIndex = Math.floor((Date.parse(workoutStart) - historyStart) / historyChunkMs);
+      const chunkStart = new Date(historyStart + chunkIndex * historyChunkMs).toISOString();
+      const chunkEnd = new Date(
+        Math.min(historyStart + (chunkIndex + 1) * historyChunkMs, historyEnd),
+      ).toISOString();
+      store.enqueueJob({
+        accountId: account.id,
+        provider: "junction",
+        kind: "resource",
+        payload: {
+          ...scheduledHistoryJob.payload,
+          windowStart: chunkStart,
+          windowEnd: chunkEnd,
+        },
+        priority: scheduledHistoryJob.priority,
+        dedupeKey: scheduledHistoryJob.dedupeKey,
+        availableAt: now.toISOString(),
+      });
+      assert.equal(
+        readJobsForAccountForTesting(store, account.id).filter((job) =>
+          job.kind === "resource" && job.status === "queued"
+        ).length,
+        1,
+      );
+      await service.runWorkerOnce();
+
+      const historicalSummaryRequests = summaryRequests.filter((request) => {
+        const requestStart = Date.parse(request.searchParams.get("start_date") ?? "");
+        const requestEnd = Date.parse(request.searchParams.get("end_date") ?? "");
+        return request.searchParams.get("provider") === "garmin"
+          && requestStart <= Date.parse(workoutStart)
+          && requestEnd >= Date.parse(workoutEnd);
+      });
+      assert.equal(historicalSummaryRequests.length, 1);
+      const historicalDurationRequests = durationRequests.filter((request) =>
+        request.searchParams.get("start_date") === historicalSummaryRequests[0]?.searchParams.get("start_date")
+        && request.searchParams.get("end_date") === historicalSummaryRequests[0]?.searchParams.get("end_date")
+      );
+      assert.equal(historicalDurationRequests.length, 1);
+      assert.equal(historicalSummaryRequests[0]?.searchParams.get("provider"), "garmin");
+      assert.equal(historicalDurationRequests[0]?.searchParams.get("provider"), "garmin");
+      assert.equal(
+        historicalSummaryRequests[0]?.searchParams.get("start_date"),
+        historicalDurationRequests[0]?.searchParams.get("start_date"),
+      );
+      assert.equal(
+        historicalSummaryRequests[0]?.searchParams.get("end_date"),
+        historicalDurationRequests[0]?.searchParams.get("end_date"),
+      );
+
+      const eventPath = `ledger/events/${workoutStart.slice(0, 4)}/${workoutStart.slice(0, 7)}.jsonl`;
+      const records = (await readJsonlRecords({ vaultRoot, relativePath: eventPath }))
+        .map((record) => eventRecordSchema.parse(record));
+      const latestById = new Map<string, (typeof records)[number]>();
+      for (const record of records) {
+        const previous = latestById.get(record.id);
+        if (
+          !previous
+          || eventRevisionFromLifecycle(record.lifecycle)
+            > eventRevisionFromLifecycle(previous.lifecycle)
+        ) {
+          latestById.set(record.id, record);
+        }
+      }
+      const liveRecords = [...latestById.values()].filter((record) =>
+        !isDeletedEventLifecycle(record.lifecycle)
+      );
+      const sessions = liveRecords.filter((record) => record.kind === "activity_session");
+      assert.equal(sessions.length, 1);
+      const session = sessions[0];
+      assert.equal(session?.id, seededSession.id);
+      assert.equal(session?.externalRef?.resourceId, canonicalSession.externalRef.resourceId);
+      assert.equal(session?.note, "member-owned workout context");
+      assert.equal(session?.source, "manual");
+      assert.deepEqual(session?.tags, ["member-context"]);
+      assert.deepEqual(session?.links, [{ type: "related_to", targetId: seededSession.id }]);
+      const linkedFacts = liveRecords.filter((record) =>
+        record.kind === "measurement"
+        && record.externalRef?.resourceId === session?.externalRef?.resourceId
+      );
+      assert.ok(linkedFacts.some((record) =>
+        record.kind === "measurement"
+        && record.measurements.some((measurement) =>
+          measurement.metric === "workout-duration"
+        )
+      ));
+      assert.ok(linkedFacts.some((record) => record.externalRef?.facet === "stream-features"));
+      assert.ok(linkedFacts.some((record) => record.externalRef?.facet === "stream-split-1"));
+      const persistedFiles = await fs.readdir(vaultRoot, { recursive: true });
+      const persistedText = Buffer.concat(await Promise.all(
+        persistedFiles.map(async (relativePath) => {
+          const absolutePath = path.join(vaultRoot, relativePath);
+          return (await fs.stat(absolutePath)).isFile()
+            ? fs.readFile(absolutePath)
+            : Buffer.alloc(0);
+        }),
+      )).toString("utf8");
+      assert.doesNotMatch(
+        persistedText,
+        /raw-summary-source-marker|raw-summary-provider-snapshot|raw-summary-route-marker|raw-duration-source-marker/u,
+      );
+
+      const beforeReplay = await fs.readFile(path.join(vaultRoot, eventPath));
+      store.enqueueJob({
+        accountId: account.id,
+        provider: "junction",
+        kind: "resource",
+        payload: {
+          ...scheduledHistoryJob.payload,
+          windowStart: historicalDurationRequests[0]?.searchParams.get("start_date"),
+          windowEnd: historicalDurationRequests[0]?.searchParams.get("end_date"),
+        },
+        priority: scheduledHistoryJob.priority,
+        dedupeKey: scheduledHistoryJob.dedupeKey,
+        availableAt: now.toISOString(),
+      });
+      await service.runWorkerOnce();
+      assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeReplay);
+    } finally {
+      close();
+    }
+  },
+);
 
 test("Junction schedule-time history keeps one durable retry chain across UTC days", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-schedule-history-retry");

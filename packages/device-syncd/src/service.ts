@@ -989,6 +989,7 @@ class DeviceSyncServiceController {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
             canonicalEventExternalRefResourceIds:
               readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
+            canonicalEventKinds: readCanonicalDeviceImportEventKinds(importResult),
             durableDeliveryAccepted: true,
           };
           return receipt;
@@ -2124,6 +2125,18 @@ function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): s
     return typeof externalRef?.resourceId === "string"
       ? [externalRef.resourceId]
       : [];
+  });
+}
+
+function readCanonicalDeviceImportEventKinds(value: unknown): string[] {
+  const record = toPlainRecord(value);
+  if (!record || !Array.isArray(record.events)) {
+    return [];
+  }
+
+  return record.events.flatMap((event) => {
+    const kind = toPlainRecord(event)?.kind;
+    return typeof kind === "string" ? [kind] : [];
   });
 }
 

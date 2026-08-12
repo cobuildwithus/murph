@@ -1934,7 +1934,7 @@ function buildDirtyResourceKey(resource: HostedDeviceSyncDirtyResource): string 
   return [
     resource.dirtyPayloadId ?? "marker",
     buildDirtyResourcePayloadKey(resource.payload),
-    resource.maxAttempts ?? "attempts",
+    ...(resource.maxAttempts === undefined ? [] : [resource.maxAttempts]),
     resource.sourceProviderSlug ?? "provider",
     resource.resourceCategory ?? "category",
     resource.resource ?? resource.jobKind,

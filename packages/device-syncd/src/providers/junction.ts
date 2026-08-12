@@ -181,6 +181,7 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
 }
 
 interface JunctionPreciseTimeseriesImportOptions {
+  companionSummaryResource?: "workouts";
   historicalProviderRecordsSeen?: boolean;
   historyChunkDays?: number;
   preservePartialRetryableFailure?: boolean;
@@ -259,6 +260,7 @@ interface JunctionWindowFetchOptions {
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
+const JUNCTION_WORKOUT_DURATION_TIMESERIES_RESOURCE = "workout_duration";
 const JUNCTION_WORKOUT_STREAM_RESOURCE = "workout_stream";
 const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
 
@@ -2171,6 +2173,11 @@ export function createJunctionDeviceSyncProvider(
           [effectiveResource],
           sourceProviderSlug,
           {
+            companionSummaryResource:
+              extendedHistoricalBackfill
+              && effectiveResource === JUNCTION_WORKOUT_DURATION_TIMESERIES_RESOURCE
+                ? "workouts"
+                : undefined,
             historicalProviderRecordsSeen:
               job.payload.historicalProviderRecordsSeen === true,
             historyChunkDays: extendedHistoricalBackfill
@@ -2717,27 +2724,47 @@ export function createJunctionDeviceSyncProvider(
       if (isJunctionProfileSummaryResource(resource)) {
         continue;
       }
-
-      const request: JunctionWindowInput = {
+      snapshots[resource] = await fetchSummaryResourceSnapshot(
+        context,
         resource,
-        signal: context.signal ?? null,
-        userId: context.account.externalAccountId,
         windowStart,
         windowEnd,
-      };
-      if (options.dateQueryFormat) {
-        request.dateQueryFormat = options.dateQueryFormat;
-      }
-      snapshots[resource] = await fetchOptionalJunctionResourceRecords(
-        context,
-        "summary",
-        resource,
         skippedOptionalResources,
-        () => client.listSummary(request),
+        null,
+        options,
       );
     }
 
     return snapshots;
+  }
+
+  async function fetchSummaryResourceSnapshot(
+    context: ProviderJobContext,
+    resource: string,
+    windowStart: string,
+    windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    sourceProviderSlug: string | null,
+    options: JunctionWindowFetchOptions = {},
+  ): Promise<unknown[]> {
+    const request: JunctionWindowInput = {
+      resource,
+      signal: context.signal ?? null,
+      sourceProviderSlug,
+      userId: context.account.externalAccountId,
+      windowStart,
+      windowEnd,
+    };
+    if (options.dateQueryFormat) {
+      request.dateQueryFormat = options.dateQueryFormat;
+    }
+    return fetchOptionalJunctionResourceRecords(
+      context,
+      "summary",
+      resource,
+      skippedOptionalResources,
+      () => client.listSummary(request),
+    );
   }
 
   async function fetchProfileSummaryOnce(
@@ -2868,6 +2895,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
     options: JunctionPreciseTimeseriesImportOptions = {},
   ): Promise<JunctionPreciseTimeseriesImportResult> {
+    const accumulatedSummaries: Record<string, unknown[]> = {};
     const accumulatedTimeseries: Record<string, unknown[]> = {};
     let executionWindowEnd: string | null = null;
     let executionWindowStart: string | null = null;
@@ -2890,8 +2918,22 @@ export function createJunctionDeviceSyncProvider(
       }
 
       const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+      let summaries: Record<string, unknown[]> = {};
       let timeseries: Record<string, unknown[]>;
       try {
+        if (options.companionSummaryResource) {
+          summaries = {
+            [options.companionSummaryResource]: await fetchSummaryResourceSnapshot(
+              context,
+              options.companionSummaryResource,
+              window.windowStart,
+              window.windowEnd,
+              skippedOptionalResources,
+              sourceProviderSlug ?? null,
+              { dateQueryFormat: "datetime" },
+            ),
+          };
+        }
         timeseries = await fetchTimeseriesSnapshots(
           context,
           window.windowStart,
@@ -2929,6 +2971,12 @@ export function createJunctionDeviceSyncProvider(
 
       executionWindowStart ??= window.windowStart;
       executionWindowEnd = window.windowEnd;
+      for (const [resource, records] of Object.entries(summaries)) {
+        accumulatedSummaries[resource] = [
+          ...(accumulatedSummaries[resource] ?? []),
+          ...records,
+        ];
+      }
       for (const [resource, records] of Object.entries(timeseries)) {
         accumulatedTimeseries[resource] = [
           ...(accumulatedTimeseries[resource] ?? []),
@@ -3010,12 +3058,27 @@ export function createJunctionDeviceSyncProvider(
         }
         const preparedImport = await prepareJunctionImportSnapshot(
           context,
-          dedupedTimeseries,
+          {
+            ...accumulatedSummaries,
+            ...dedupedTimeseries,
+          },
           sourceProviders,
           {},
           options.sourceStatusRequirement,
         );
-        if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+        const preparedTimeseries = Object.fromEntries(
+          resources.flatMap((resource) => {
+            const records = preparedImport.snapshots[resource];
+            return records ? [[resource, records]] : [];
+          }),
+        );
+        if (hasJunctionSnapshotRecords(preparedTimeseries)) {
+          const preparedSummaries = options.companionSummaryResource
+            ? {
+                [options.companionSummaryResource]:
+                  preparedImport.snapshots[options.companionSummaryResource] ?? [],
+              }
+            : {};
           const receipt = await context.importSnapshot({
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
@@ -3024,10 +3087,12 @@ export function createJunctionDeviceSyncProvider(
             windowStart: executionWindowStart,
             windowEnd: executionWindowEnd,
             connections: preparedImport.connections,
-            summaries: {},
-            timeseries: preparedImport.snapshots,
+            summaries: preparedSummaries,
+            timeseries: preparedTimeseries,
           });
-          canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+          canonicalEventCount = options.companionSummaryResource
+            ? readProviderSnapshotCanonicalEventKindCount(receipt, "measurement")
+            : readProviderSnapshotCanonicalEventCount(receipt);
           if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
               resolveJunctionBloodPressureProviderRecordResolutionEvidence({
@@ -7956,6 +8021,16 @@ function readProviderSnapshotCanonicalEventCount(value: unknown): number {
       && Number.isSafeInteger(canonicalEventCount)
       && canonicalEventCount >= 0
     ? canonicalEventCount
+    : 0;
+}
+
+function readProviderSnapshotCanonicalEventKindCount(
+  value: unknown,
+  expectedKind: string,
+): number {
+  const canonicalEventKinds = readPlainObject(value)?.canonicalEventKinds;
+  return Array.isArray(canonicalEventKinds)
+    ? canonicalEventKinds.filter((kind) => kind === expectedKind).length
     : 0;
 }
 
