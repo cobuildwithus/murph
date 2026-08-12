@@ -118,7 +118,11 @@ terminalized HTTP 408. Before replaying it or admitting another note for that
 member, Web waits through the existing 23-hour provider window and uses the
 existing exact-metadata lookup. Proven absence persists `unknown`; proven
 acceptance restores the same row without another send or an unsupported legacy
-charge; a recent or indeterminate result stays pending. The assistant tells the
+charge; a recent or indeterminate replay of that same request stays pending. A
+different current request is first recorded under its own request key as an
+unsent `unknown` failure, then at most one older row is reconciled. The current
+reply and every replay therefore identify the current row and cannot later turn
+the suppressed request into a new provider effect. The assistant tells the
 person whether to check the address, regenerate the artwork, or wait for Murph
 to fix its printing setup or request. It never guesses from an unknown reason
 or retries an ambiguous outcome.

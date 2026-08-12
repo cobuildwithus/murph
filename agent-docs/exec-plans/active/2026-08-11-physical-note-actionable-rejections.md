@@ -50,8 +50,12 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Before replay or a later send for the same member, resolve at most one legacy
   row through the existing Lob lookup after 23 hours. Proven absence persists
   `unknown`, proven acceptance restores the same row without an unsupported
-  historical charge, and indeterminate evidence stays pending. Do not add a
-  queue, another state owner, or a reconciliation lifecycle.
+  historical charge, and indeterminate evidence stays pending for the same
+  request. Before reconciling an older row for a distinct request, persist that
+  current request as an unsent `unknown` failure under its own request key.
+  Always answer with the current row so reply loss and replay cannot turn a
+  suppressed request into a provider effect. Do not add an enum, queue, another
+  state owner, or a reconciliation lifecycle.
 - Cover the member-scoped legacy lookup with an index on member, status, reason,
   and creation time so physical-note history does not create a table-scan hot
   path. The request performs one bounded row lookup and at most one serial
@@ -80,7 +84,8 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Lob adapter tests cover every public reason category, malformed/unknown
   payloads, and 408/5xx ambiguity without retaining provider text.
 - Web service tests prove persistence, replay parity, complimentary release only
-  for definite rejection, and legacy accepted/absent/indeterminate recovery.
+  for definite rejection, legacy accepted/absent/indeterminate recovery, and
+  current-request identity plus zero provider calls across suppression replay.
 - Assistant tool tests prove each member-facing recovery path and preserve the
   pending no-retry instruction.
 - Focused Hosted Execution, Web, Assistant Engine, and Cloudflare tests pass:
@@ -143,3 +148,12 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   ambiguity, block a later provider effect, and reuse the existing 23-hour Lob
   metadata lookup for accepted/absent/indeterminate resolution. This preserves
   the same row and owners without a queue, new state, or repair lifecycle.
+- Round 7 found that the first legacy correction returned the older row for a
+  distinct current request without recording the current request. Reply loss
+  could then replay the unrecorded request after the older row was restored and
+  create a new provider effect. Persist the distinct current request first as
+  an unsent bounded failure through the existing row/status/reason owner,
+  reconcile at most one older row, and always return the current row. Prove the
+  current request key and physical-note id survive replay with zero provider
+  create and usage calls. This is the seven-round cap; do not start round 8
+  without an explicit continuation decision.

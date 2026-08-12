@@ -395,7 +395,7 @@ describe('assistant physical notes', () => {
     ['artwork', 'regenerate the image'],
     ['service_unavailable', "on Murph's side, not the recipient address"],
     ['request_invalid', 'correct the printing request'],
-    ['unknown', 'without a recognized safe correction'],
+    ['unknown', 'could not complete the physical-note request'],
   ] as const)(
     'returns actionable recovery for %s physical-note failures',
     async (failureReason, expectedGuidance) => {

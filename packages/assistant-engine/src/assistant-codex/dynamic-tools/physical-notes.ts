@@ -235,6 +235,6 @@ export function buildPhysicalNoteFailureInstruction(
     case 'unknown':
     case null:
     case undefined:
-      return 'The printer rejected the physical note without a recognized safe correction. Nothing was sent. Do not guess that the address or artwork was wrong. Explain that Murph needs to investigate. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+      return 'Murph could not complete the physical-note request with a recognized safe correction. Nothing was sent for this request. Do not guess that the address or artwork was wrong. Explain that Murph needs to investigate. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
   }
 }
