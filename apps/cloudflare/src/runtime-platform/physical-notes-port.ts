@@ -42,6 +42,7 @@ export function createHostedWebPhysicalNotePort(input: {
           error instanceof HostedWebControlPlaneResponseError
           && error.status >= 400
           && error.status < 500
+          && error.status !== 408
         ) {
           return {
             complimentary: false,

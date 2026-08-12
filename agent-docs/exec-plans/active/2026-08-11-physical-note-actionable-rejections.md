@@ -31,6 +31,9 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - The assistant gives reason-specific next steps, states that nothing was sent,
   and never invites an automatic retry after an ambiguous outcome.
 - HTTP outcomes that may be ambiguous do not release the one-effect reservation.
+- A Cloudflare Web-control HTTP 408 remains pending because Web may have
+  consumed the POST and accepted the note before the caller timed out; it never
+  becomes definite no-send guidance.
 - A current `starting` row remains pending on every same-key replay without
   another Lob create call, even when a refreshed private-media URL changes the
   request body.
@@ -48,6 +51,8 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   state owner.
 - Parse only Lob's bounded allowlisted error code. Never propagate or persist its
   freeform message.
+- At the Cloudflare Web-control boundary, exclude HTTP 408 from generic 4xx
+  definite-failure mapping so it reaches the assistant's existing pending path.
 - Add one nullable column to `hosted_physical_note` so a definite rejection has
   the same answer on the original call and every replay. Null on an existing
   failed row is the legacy-ambiguity marker, not an unknown definite rejection.
@@ -108,6 +113,9 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   usage even when another note already owns the complimentary claim.
 - Assistant tool tests prove each member-facing recovery path and preserve the
   pending no-retry instruction.
+- Cloudflare port and Assistant integration tests prove a control-plane HTTP 408
+  rejects into the existing pending result without a “nothing was sent” claim
+  or another-request invitation.
 - Round 11 focused proof passes 20 Web owner tests, 3 real-PostgreSQL
   concurrency tests, and 20 Assistant physical-note tests. The changed Web
   files pass focused ESLint, Web and Assistant typechecks pass, and agent-docs
@@ -225,3 +233,11 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   Real PostgreSQL concurrency plus changed-artwork-URL replay prove one Lob
   create and no second provider effect. The correction shrinks production code
   and keeps the existing row, lock, lookup, allowance owner, and reason enum.
+- Round 12 found that the Cloudflare physical-note Web-control port still mapped
+  every 4xx except 403—including HTTP 408—to a definite failed result without a
+  reason. The new assistant recovery copy could then falsely claim nothing was
+  sent and invite a later explicit request after Web and Lob had actually
+  accepted the first note. Exclude only 408 at the HTTP-status owner so it
+  throws into the existing pending path. Focused port and Assistant integration
+  tests prove the prior bug and the corrected no-claim, no-retry result. This
+  adds no state, enum, queue, compatibility path, or reconciliation mechanism.

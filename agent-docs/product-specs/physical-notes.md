@@ -220,6 +220,13 @@ state, or mixed-version protocol. Deploy the Cloudflare Worker and runner bundle
 with the ordinary fingerprint convergence check; an older warm runner simply
 retains the prior ask-for-address behavior.
 
+The Cloudflare physical-note Web-control port preserves HTTP 408 as uncertainty
+instead of translating it into a definite failed response. A gateway or caller
+timeout can occur after Web consumed the POST and Lob accepted the note, so only
+Web's categorized JSON response can authorize “nothing was sent” recovery copy.
+Control-plane 408, transport failure, 5xx, and response-parse failure all throw
+into the assistant's existing `pending` result with no retry invitation.
+
 The original physical-note deployment order remains: deploy the Prisma migration
 and Web route/service first, with live sending off.
 Then deploy Cloudflare and the assistant runtime/tool surface with
@@ -241,7 +248,8 @@ rejects a categorized failure response and the assistant fails closed to
 unchanged.
 Then deploy Cloudflare and the runner bundle with `container_rollout=immediate`
 and require the managed-container smoke to prove the exact new runner-bundle
-fingerprint. Verify one synthetic rejection category, one HTTP 408 ambiguity,
+fingerprint. Verify one synthetic rejection category, provider-side and
+control-plane HTTP 408 ambiguity,
 one legacy-null resolution, and one accepted test-mode note after both sides
 converge. Once current Web can persist categorized failures or the
 `prior_note_accepted` no-send authority, that Web artifact is a hard rollback

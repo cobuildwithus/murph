@@ -159,6 +159,20 @@ describe("createHostedWebPhysicalNotePort", () => {
     });
   });
 
+  it("preserves an HTTP 408 as uncertain after Web may have accepted the note", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 408 }));
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.send(REQUEST)).rejects.toMatchObject({
+      status: 408,
+    });
+  });
+
   it("forwards physical notes with their longer deadline and keeps other operations on the default", async () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
       Response.json({ ok: true }),

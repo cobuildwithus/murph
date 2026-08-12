@@ -493,6 +493,49 @@ describe('assistant physical notes', () => {
     },
   )
 
+  it('keeps a transport-timeout result pending without inviting another request', async () => {
+    const vaultRoot = await createPhysicalNoteVault()
+    const send = vi.fn(async () => {
+      throw new Error('Hosted Web control plane returned HTTP 408.')
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { send },
+        privateImageUrlPublisher: {
+          publishPrivateImageUrl: async () => ({
+            expiresAt: '2027-08-01T00:00:00.000Z',
+            url: 'https://private-media.example.test/note',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        imageRef: IMAGE_REF,
+        imageSha256: IMAGE_SHA256,
+        kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        recipient: RECIPIENT,
+      },
+      vaultRoot,
+    })
+
+    const toolText = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(send).toHaveBeenCalledOnce()
+    expect(result.rpcResult).toMatchObject({ success: false })
+    expect(toolText).toContain('"status":"pending"')
+    expect(toolText).toContain(
+      'could not confirm whether this physical note was accepted',
+    )
+    expect(toolText).not.toContain('Nothing was sent')
+    expect(toolText).not.toContain('new explicit send request')
+  })
+
   it.each([
     ['recipient_address', 'check the street and unit'],
     ['artwork', 'regenerate the image'],
