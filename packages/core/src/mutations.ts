@@ -2478,6 +2478,23 @@ function hasHistoricalExternalRefUserAuthoredChanges(match: IndexedEventExternal
     userAuthoredEventStateKey(match.record) !== userAuthoredEventStateKey(match.indexedRecord);
 }
 
+function isAttributionOnlyLegacyIdentityCorrection(
+  entry: PreparedDeviceEventEntry,
+  match: IndexedEventExternalRefMatch,
+): boolean {
+  const incomingExternalRef = entry.record.externalRef;
+  if (!incomingExternalRef) {
+    return false;
+  }
+
+  const indexedRefKey = eventExternalRefKey(match.indexedExternalRef);
+  return indexedRefKey !== eventExternalRefKey(incomingExternalRef)
+    && entry.legacyExternalRefs.some((legacyExternalRef) =>
+      eventExternalRefKey(legacyExternalRef) === indexedRefKey
+    )
+    && userAuthoredEventStateKey(match.indexedRecord) === userAuthoredEventStateKey(entry.record);
+}
+
 function buildLegacyExternalRefReservations(
   entries: readonly PreparedDeviceEventEntry[],
   index: EventExternalRefIndex,
@@ -3077,7 +3094,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const historicalUserEditMatch = matchedEntries.find((match) =>
       hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
     );
-    if (historicalUserEditMatch) {
+    const preservesEditedLegacyIdentity = historicalUserEditMatch !== undefined
+      && isAttributionOnlyLegacyIdentityCorrection(entry, historicalUserEditMatch.indexedMatch);
+    if (historicalUserEditMatch && !preservesEditedLegacyIdentity) {
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
         `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
@@ -3090,10 +3109,24 @@ async function reconcileDeviceEventEntriesByExternalRef(
       eventSpineRevision(latest),
       index.maxRevisionById.get(latest.id) ?? 0,
     ) + 1;
-    const superseding: EventRecord = {
+    const providerSuperseding: EventRecord = {
       ...entry.record,
       id: latest.id,
       lifecycle: buildEventSpineLifecycle(revision),
+    };
+    const superseding: EventRecord = {
+      ...(preservesEditedLegacyIdentity
+        ? {
+          ...latest,
+          dataOrigin: entry.record.dataOrigin,
+          externalRef: entry.record.externalRef,
+          rawRefs: entry.record.rawRefs,
+        }
+        : providerSuperseding),
+      id: latest.id,
+      lifecycle: buildEventSpineLifecycle(
+        preservesEditedLegacyIdentity ? revision + 1 : revision,
+      ),
     };
 
     forceAppendIds.add(latest.id);
@@ -3108,7 +3141,13 @@ async function reconcileDeviceEventEntriesByExternalRef(
         index.latestByRefKey.delete(matchedRefKey);
       }
     }
-    index.maxRevisionById.set(latest.id, revision);
+    index.maxRevisionById.set(latest.id, eventSpineRevision(superseding));
+    if (preservesEditedLegacyIdentity) {
+      // Keep the canonical provider baseline as its own spine revision so an
+      // exact replay can prove delivery while the following member revision
+      // carries every user-owned field across the identity correction.
+      appendEntries.push({ relativePath: entry.relativePath, record: providerSuperseding });
+    }
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
     appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
     records.push(superseding);

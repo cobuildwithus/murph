@@ -410,6 +410,7 @@ export class JunctionClient {
       undefined,
       {
         endpointKind: "junction_workout_stream",
+        maxAttempts: 1,
         maxResponseBytes: JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES,
         signal: options.signal ?? null,
       },
@@ -578,12 +579,13 @@ export class JunctionClient {
     body?: Record<string, unknown>,
     options: {
       endpointKind?: string;
+      maxAttempts?: number;
       maxResponseBytes?: number;
       optional404?: boolean;
       signal?: AbortSignal | null;
     } = {},
   ): Promise<T> {
-    const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
+    const attempts = options.maxAttempts ?? (method === "GET" ? MAX_GET_ATTEMPTS : 1);
     let lastError: unknown;
     const endpointKind = options.endpointKind ?? resolveJunctionEndpointKind(path);
     const requestDiagnostics = buildProviderRequestDiagnostics({

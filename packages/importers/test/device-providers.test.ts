@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -1765,6 +1765,206 @@ test("importDeviceProviderSnapshot persists bounded Junction workout features th
     ["stream-features", "stream-split-1"],
   );
   assert.equal(replay.sampleShardPaths.length, 0);
+});
+
+test("Junction workout identity migration aliases pre-canonical sessions through the real core port", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-identity-migration");
+  const conflictVaultRoot = await makeTempDirectory("murph-junction-workout-identity-conflict");
+  try {
+    await Promise.all([
+      coreRuntime.initializeVault({
+        createdAt: "2026-04-22T00:00:00.000Z",
+        vaultRoot,
+      }),
+      coreRuntime.initializeVault({
+        createdAt: "2026-04-22T00:00:00.000Z",
+        vaultRoot: conflictVaultRoot,
+      }),
+    ]);
+    const feature = reduceJunctionWorkoutStream({
+      cadence: [80, 82, 84],
+      distance: [0, 500, 1_000],
+      heartrate: [120, 130, 140],
+      power: [180, 200, 220],
+      time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
+    }, {
+      workoutId: "junction-workout-canonical-1",
+      sourceUpdatedAt: "2026-04-22T13:00:00.000Z",
+      sourceProviderSlug: "garmin",
+      sourceInstanceId: "source-0123456789abcdef01234567",
+      sourceType: "watch",
+      sport: "running",
+    });
+    assert.ok(feature);
+    const snapshot = {
+      accountId: "junction-workout-identity-user",
+      importedAt: "2026-04-22T13:00:00.000Z",
+      summaries: {
+        workouts: [{
+          id: "junction-workout-canonical-1",
+          provider_id: "provider-workout-legacy-1",
+          authoritativeVersion: "2026-04-22T13:00:00.000Z",
+          time_start: "2026-04-22T12:00:00.000Z",
+          time_end: "2026-04-22T12:30:00.000Z",
+          sourceInstanceId: "source-0123456789abcdef01234567",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          sport: { slug: "running" },
+        }],
+      },
+      timeseries: {
+        workout_duration: [{
+          workout_id: "junction-workout-canonical-1",
+          start: "2026-04-22T12:00:00.000Z",
+          end: "2026-04-22T12:30:00.000Z",
+          source: {
+            device_id: "source-0123456789abcdef01234567",
+            provider: "garmin",
+            type: "watch",
+          },
+          sport: { name: "Running" },
+          unit: "minutes",
+          value: 30,
+        }],
+      },
+      workoutFeatures: [feature],
+    };
+    const prepared = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      snapshot,
+      vaultRoot,
+    });
+    const currentSession = prepared.events?.find((event) => event.kind === "activity_session");
+    const canonicalExternalRef = currentSession?.externalRef;
+    const legacyExternalRef = currentSession?.legacyExternalRefs?.[0];
+    assert.ok(currentSession);
+    assert.ok(canonicalExternalRef);
+    assert.ok(legacyExternalRef);
+    const evidenceParts = (prepared.evidenceParts ?? []).map((part) => ({
+      role: part.role,
+      fileName: part.fileName,
+      mediaType: part.mediaType,
+      content: part.content,
+    }));
+    const preCanonicalSession = {
+      ...currentSession,
+      externalRef: legacyExternalRef,
+      legacyExternalRefs: undefined,
+    };
+    const legacyImport = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: prepared.provider,
+      accountId: prepared.accountId,
+      importedAt: prepared.importedAt,
+      events: [preCanonicalSession],
+      evidenceParts,
+    });
+    const legacySession = legacyImport.events[0];
+    assert.ok(legacySession);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...legacySession,
+        links: [{ type: "related_to", targetId: legacySession.id }],
+        note: "member-owned workout context",
+        source: "manual",
+        tags: ["member-context"],
+      },
+    });
+
+    const currentImport = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      snapshot,
+      vaultRoot,
+    }, { corePort: coreRuntime });
+    const records = (
+      await Promise.all(
+        [...new Set([...legacyImport.eventShardPaths, ...currentImport.eventShardPaths])].map(
+          (relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath }),
+        ),
+      )
+    ).flat();
+    const liveRecords = latestLiveRecords(records);
+    const sessions = liveRecords.filter((record) => record.kind === "activity_session");
+    const session = sessions[0];
+    assert.equal(sessions.length, 1);
+    assert.equal(session?.id, legacySession.id);
+    assert.equal(eventRevisionFromLifecycle(session?.lifecycle), 4);
+    assert.equal(storedExternalRefResourceId(session), canonicalExternalRef.resourceId);
+    assert.equal(session?.note, "member-owned workout context");
+    assert.equal(session?.source, "manual");
+    assert.deepEqual(session?.tags, ["member-context"]);
+    assert.deepEqual(session?.links, [{ type: "related_to", targetId: legacySession.id }]);
+    const joinedWorkoutFacts = liveRecords.filter((record) =>
+      record.kind === "measurement"
+      && storedExternalRefResourceId(record) === storedExternalRefResourceId(session)
+    );
+    assert.ok(joinedWorkoutFacts.some((record) =>
+      "measurements" in record
+      && Array.isArray(record.measurements)
+      && record.measurements.some((measurement) =>
+        measurement
+        && typeof measurement === "object"
+        && !Array.isArray(measurement)
+        && measurement.metric === "workout-duration"
+      )
+    ));
+    assert.ok(joinedWorkoutFacts.some((record) => storedExternalRefFacet(record) === "stream-features"));
+    assert.ok(joinedWorkoutFacts.some((record) => storedExternalRefFacet(record) === "stream-split-1"));
+
+    const watchedPaths = [...new Set([...legacyImport.eventShardPaths, ...currentImport.eventShardPaths])];
+    const beforeReplay = await Promise.all(
+      watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath))),
+    );
+    const replay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      snapshot,
+      vaultRoot,
+    }, { corePort: coreRuntime });
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      await Promise.all(watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath)))),
+      beforeReplay,
+    );
+
+    const importConflictSeed = (externalRef: typeof canonicalExternalRef) =>
+      coreRuntime.importDeviceBatch({
+        vaultRoot: conflictVaultRoot,
+        provider: prepared.provider,
+        accountId: prepared.accountId,
+        importedAt: prepared.importedAt,
+        events: [{
+          ...currentSession,
+          externalRef,
+          legacyExternalRefs: undefined,
+        }],
+        evidenceParts,
+      });
+    await importConflictSeed(canonicalExternalRef);
+    await importConflictSeed(legacyExternalRef);
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          snapshot,
+          vaultRoot: conflictVaultRoot,
+        },
+        { corePort: coreRuntime },
+      ),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    );
+  } finally {
+    await Promise.all([
+      rm(vaultRoot, { recursive: true, force: true }),
+      rm(conflictVaultRoot, { recursive: true, force: true }),
+    ]);
+  }
 });
 
 test("excluded Junction workout row feeds stay below core bounds at 25,000 provider records", async () => {

@@ -109,7 +109,7 @@ describe("hosted device-sync dirty timing source parsing", () => {
       count: 1,
       firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
       jobKind: "reconcile",
-      maxAttempts: 1,
+      maxAttempts: 3,
       resource: null,
       resourceCategory: null,
       sourceProviderSlug: null,
@@ -138,7 +138,7 @@ describe("hosted device-sync dirty timing source parsing", () => {
     });
 
     expect(parsed?.dirtyResources[0]).toMatchObject({
-      maxAttempts: 1,
+      maxAttempts: 3,
       sourceProviderSlug: null,
       timingSourceProviderSlug: "garmin",
     });

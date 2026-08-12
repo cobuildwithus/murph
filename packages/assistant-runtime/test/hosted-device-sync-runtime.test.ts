@@ -22,12 +22,17 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceSyncAccount,
+  type DeviceSyncImporterPort,
   type DeviceSyncJobRecord,
   type DeviceSyncProvider,
   type ProviderAuthTokens,
   type StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
-import type { DeviceSyncService } from "@murphai/device-syncd/service";
+import {
+  createDefaultImporterPort,
+  type DeviceSyncClock,
+  type DeviceSyncService,
+} from "@murphai/device-syncd/service";
 import type {
   HostedExecutionDeviceSyncDirtyStateResponse,
   HostedExecutionDeviceSyncDirtyPendingResponse,
@@ -187,15 +192,23 @@ function readTestUrl(input: RequestInfo | URL): string {
 function createDeviceSyncServiceForVault(
   vaultRoot: string,
   providers: readonly DeviceSyncProvider[] = [createFakeProvider()],
+  options: {
+    clock?: DeviceSyncClock;
+    importer?: DeviceSyncImporterPort;
+    shouldYieldJobExecution?: (() => boolean) | null;
+  } = {},
 ) {
+  const { shouldYieldJobExecution, ...serviceOptions } = options;
   return createHostedRuntimeDeviceSyncService({
     secret: DEVICE_SYNC_SECRET,
     config: {
       publicBaseUrl: "https://sync.example.test/device-sync",
+      shouldYieldJobExecution,
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
       vaultRoot,
     },
     providers,
+    ...serviceOptions,
   });
 }
 
@@ -206,6 +219,94 @@ function buildCronWake(occurredAt: string) {
     occurredAt,
     triggerKind: "runtime_timer" as const,
     userId: "member_123",
+  };
+}
+
+function buildHostedWorkoutRuntimeFixture(input: {
+  connectionId: string;
+  externalAccountId: string;
+  workoutId: string;
+}) {
+  return {
+    snapshot: buildRuntimeSnapshot({
+      connectionId: input.connectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: input.externalAccountId,
+      provider: "junction",
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-04T09:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-04T10:00:00.000Z",
+        resourceCount: 1,
+        resourceAvailabilitySummary: { workouts: true },
+        sourceInstanceKey: "garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }],
+    }),
+    dirtyState: buildDirtyState({
+      connectionId: input.connectionId,
+      dirtyResources: [{
+        count: 1,
+        jobKind: "resource",
+        maxAttempts: 3,
+        payload: {
+          eventType: "daily.data.workout_stream.created",
+          objectId: input.workoutId,
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          resource: "workout_stream",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          sport: "running",
+          windowEnd: "2026-04-04T10:00:00.000Z",
+          windowStart: "2026-04-04T10:00:00.000Z",
+        },
+        resource: "workout_stream",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowEnd: "2026-04-04T10:00:00.000Z",
+        windowStart: "2026-04-04T10:00:00.000Z",
+      }],
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 1 },
+      sourceProviderCounts: { garmin: 1 },
+      windowEnd: "2026-04-04T10:00:00.000Z",
+      windowStart: "2026-04-04T10:00:00.000Z",
+    }),
+  };
+}
+
+function createSingleHostedDirtyStatePort(
+  snapshot: ReturnType<typeof buildRuntimeSnapshot>,
+  dirtyState: ReturnType<typeof buildDirtyState>,
+): HostedRuntimeDeviceSyncPort {
+  return {
+    ...createNoDirtyStateDeviceSyncPortMethods(),
+    async applyUpdates() {
+      throw new Error("applyUpdates should not be called during sync");
+    },
+    async createConnectLink() {
+      throw new Error("createConnectLink should not be called during sync");
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false,
+        items: [dirtyState],
+        nextWakeAt: null,
+        userId: "member_123",
+      };
+    },
+    async fetchSnapshot() {
+      return snapshot;
+    },
   };
 }
 
@@ -3237,12 +3338,13 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("hosted workout dirty state preserves one durable execution around three client requests", async () => {
+  test("hosted workout dirty state uses three durable executions with one stream GET each", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-workout-retry-",
     );
     await mkdir(vaultRoot, { recursive: true });
     let streamRequests = 0;
+    let now = new Date("2030-04-04T10:00:00.000Z");
     const externalAccountId = "junction-hosted-workout-retry";
     const connectionId = "hosted_conn_workout_retry";
     const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
@@ -3274,7 +3376,9 @@ describe("hosted device-sync runtime", () => {
       },
     });
     assert.ok(provider);
-    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider], {
+      clock: { now: () => now },
+    });
     const snapshot = buildRuntimeSnapshot({
       connectionId,
       credential: {
@@ -3303,7 +3407,7 @@ describe("hosted device-sync runtime", () => {
       dirtyResources: [{
         count: 1,
         jobKind: "resource",
-        maxAttempts: 1,
+        maxAttempts: 3,
         payload: {
           eventType: "daily.data.workout_stream.created",
           objectId: "workout-hosted-retry",
@@ -3358,15 +3462,458 @@ describe("hosted device-sync runtime", () => {
       const accountId = state.hostedToLocalAccountIds.get(connectionId);
       assert.ok(accountId);
       const [queued] = readJobsForAccount(service, accountId);
-      assert.equal(queued?.maxAttempts, 1);
+      assert.ok(queued);
+      assert.equal(queued.maxAttempts, 3);
 
       assert.equal(await service.drainWorker(1), 1);
+      assert.equal(streamRequests, 1);
+      assert.equal(getStore(service).getJobById(queued.id)?.status, "queued");
+      now = new Date("2030-04-04T10:00:16.000Z");
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(streamRequests, 2);
+      assert.equal(getStore(service).getJobById(queued.id)?.status, "queued");
+      now = new Date("2030-04-04T10:01:17.000Z");
+      assert.equal(await service.drainWorker(1), 1);
 
-      const [terminal] = readJobsForAccount(service, accountId);
+      const terminal = getStore(service).getJobById(queued.id);
       assert.equal(streamRequests, 3);
-      assert.equal(terminal?.maxAttempts, 1);
+      assert.equal(terminal?.attempts, 3);
+      assert.equal(terminal?.maxAttempts, 3);
       assert.equal(terminal?.status, "dead");
       assert.equal(terminal?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("hosted exact workout timeouts recover on attempt three or dead-letter after three", async () => {
+    for (const scenario of [
+      { label: "third-success", timeoutCount: 2, expectedStatus: "succeeded" },
+      { label: "terminal", timeoutCount: 3, expectedStatus: "dead" },
+    ] as const) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        `hosted-device-sync-runtime-workout-timeout-${scenario.label}-`,
+      );
+      await initializeVault({
+        createdAt: "2026-04-04T00:00:00.000Z",
+        vaultRoot,
+      });
+      let now = new Date("2030-04-04T10:00:00.000Z");
+      let streamRequests = 0;
+      const externalAccountId = `junction-hosted-workout-timeout-${scenario.label}`;
+      const connectionId = `hosted_conn_workout_timeout_${scenario.label}`;
+      const workoutId = `workout-hosted-timeout-${scenario.label}`;
+      const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+        junction: {
+          apiKey: "sk_us_test_123",
+          clientUserIdSecret: "junction-client-user-id-secret",
+          environment: "sandbox",
+          fetchImpl: async (input, init) => {
+            const url = new URL(readTestUrl(input));
+            if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+              return createTestJsonResponse({ providers: [{
+                id: `provider-garmin-${scenario.label}`,
+                slug: "garmin",
+                status: "connected",
+                resource_availability: { workouts: true },
+              }] });
+            }
+            if (url.pathname === `/v2/timeseries/workouts/${workoutId}/stream`) {
+              streamRequests += 1;
+              if (streamRequests <= scenario.timeoutCount) {
+                const signal = init?.signal;
+                assert.ok(signal);
+                return await new Promise<Response>((_resolve, reject) => {
+                  signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                });
+              }
+              return createTestJsonResponse({
+                cadence: [80, 82],
+                distance: [0, 1_000],
+                heartrate: [120, 130],
+                source: { provider: "garmin", type: "watch" },
+                time: [1_775_174_400, 1_775_174_460],
+              });
+            }
+            throw new Error(`Unexpected Junction request: ${url.pathname}`);
+          },
+          region: "us",
+          requestTimeoutMs: 1,
+          summaryResources: [],
+          timeseriesResources: [],
+        },
+      });
+      assert.ok(provider);
+      const service = createDeviceSyncServiceForVault(vaultRoot, [provider], {
+        clock: { now: () => now },
+      });
+      const fixture = buildHostedWorkoutRuntimeFixture({
+        connectionId,
+        externalAccountId,
+        workoutId,
+      });
+
+      try {
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSingleHostedDirtyStatePort(fixture.snapshot, fixture.dirtyState),
+          wake: buildCronWake(now.toISOString()),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+        const accountId = state.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(accountId);
+        const [job] = readJobsForAccount(service, accountId);
+        assert.ok(job);
+        assert.equal(job.maxAttempts, 3);
+
+        assert.equal(await service.drainWorker(1), 1);
+        assert.equal(streamRequests, 1);
+        now = new Date("2030-04-04T10:00:16.000Z");
+        assert.equal(await service.drainWorker(1), 1);
+        assert.equal(streamRequests, 2);
+        now = new Date("2030-04-04T10:01:17.000Z");
+        assert.equal(await service.drainWorker(1), 1);
+
+        const terminal = getStore(service).getJobById(job.id);
+        assert.equal(streamRequests, 3);
+        assert.equal(terminal?.attempts, 3);
+        assert.equal(terminal?.status, scenario.expectedStatus);
+        const records = scenario.expectedStatus === "succeeded"
+          ? await readCanonicalEventRecords(vaultRoot)
+          : [];
+        assert.equal(
+          records.filter((record) => eventHasMetric(record, "average-workout-cadence")).length,
+          scenario.expectedStatus === "succeeded" ? 1 : 0,
+        );
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    }
+  });
+
+  test("hosted exact workout work is reclaimed after lease expiry and runtime restart", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-workout-lease-restart-",
+    );
+    await initializeVault({
+      createdAt: "2026-04-04T00:00:00.000Z",
+      vaultRoot,
+    });
+    let now = new Date("2030-04-04T10:00:00.000Z");
+    let streamRequests = 0;
+    const externalAccountId = "junction-hosted-workout-lease-restart";
+    const connectionId = "hosted_conn_workout_lease_restart";
+    const workoutId = "workout-hosted-lease-restart";
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async (input) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              id: "provider-garmin-lease-restart",
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workouts: true },
+            }] });
+          }
+          if (url.pathname === `/v2/timeseries/workouts/${workoutId}/stream`) {
+            streamRequests += 1;
+            return createTestJsonResponse({
+              cadence: [80, 82],
+              distance: [0, 1_000],
+              source: { provider: "garmin", type: "watch" },
+              time: [1_775_174_400, 1_775_174_460],
+            });
+          }
+          throw new Error(`Unexpected Junction request: ${url.pathname}`);
+        },
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    let service = createDeviceSyncServiceForVault(vaultRoot, [provider], {
+      clock: { now: () => now },
+    });
+    let serviceClosed = false;
+    const fixture = buildHostedWorkoutRuntimeFixture({
+      connectionId,
+      externalAccountId,
+      workoutId,
+    });
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSingleHostedDirtyStatePort(fixture.snapshot, fixture.dirtyState),
+        wake: buildCronWake(now.toISOString()),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      const [job] = readJobsForAccount(service, accountId);
+      assert.ok(job);
+      const claimed = getStore(service).claimDueJob(
+        "interrupted-hosted-worker",
+        now.toISOString(),
+        60_000,
+      );
+      assert.equal(claimed?.id, job.id);
+      assert.equal(claimed?.attempts, 1);
+      closeHostedRuntimeDeviceSyncService(service);
+      serviceClosed = true;
+
+      now = new Date("2030-04-04T10:01:01.000Z");
+      service = createDeviceSyncServiceForVault(vaultRoot, [provider], {
+        clock: { now: () => now },
+      });
+      serviceClosed = false;
+      assert.equal(await service.drainWorker(1), 1);
+
+      const completed = getStore(service).getJobById(job.id);
+      assert.equal(streamRequests, 1);
+      assert.equal(completed?.attempts, 2);
+      assert.equal(completed?.status, "succeeded");
+      assert.equal(
+        (await readCanonicalEventRecords(vaultRoot))
+          .filter((record) => eventHasMetric(record, "average-workout-cadence")).length,
+        1,
+      );
+    } finally {
+      if (!serviceClosed) {
+        closeHostedRuntimeDeviceSyncService(service);
+      }
+      await cleanup();
+    }
+  });
+
+  test("hosted runner yield during exact workout body reading releases durable work for continuation", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-workout-body-yield-",
+    );
+    await initializeVault({
+      createdAt: "2026-04-04T00:00:00.000Z",
+      vaultRoot,
+    });
+    const now = new Date("2030-04-04T10:00:00.000Z");
+    let shouldYield = false;
+    let streamRequests = 0;
+    let markBodyReadStarted: (() => void) | null = null;
+    const bodyReadStarted = new Promise<void>((resolve) => {
+      markBodyReadStarted = resolve;
+    });
+    const externalAccountId = "junction-hosted-workout-body-yield";
+    const connectionId = "hosted_conn_workout_body_yield";
+    const workoutId = "workout-hosted-body-yield";
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async (input, init) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              id: "provider-garmin-body-yield",
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workouts: true },
+            }] });
+          }
+          if (url.pathname === `/v2/timeseries/workouts/${workoutId}/stream`) {
+            streamRequests += 1;
+            if (streamRequests === 1) {
+              const signal = init?.signal;
+              assert.ok(signal);
+              return new Response(new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode("{"));
+                  markBodyReadStarted?.();
+                  signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+                },
+              }), {
+                headers: { "content-type": "application/json" },
+              });
+            }
+            return createTestJsonResponse({
+              cadence: [80, 82],
+              distance: [0, 1_000],
+              source: { provider: "garmin", type: "watch" },
+              time: [1_775_174_400, 1_775_174_460],
+            });
+          }
+          throw new Error(`Unexpected Junction request: ${url.pathname}`);
+        },
+        region: "us",
+        requestTimeoutMs: 10_000,
+        summaryResources: [],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider], {
+      clock: { now: () => now },
+      shouldYieldJobExecution: () => shouldYield,
+    });
+    const fixture = buildHostedWorkoutRuntimeFixture({
+      connectionId,
+      externalAccountId,
+      workoutId,
+    });
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSingleHostedDirtyStatePort(fixture.snapshot, fixture.dirtyState),
+        wake: buildCronWake(now.toISOString()),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      const [job] = readJobsForAccount(service, accountId);
+      assert.ok(job);
+
+      const yieldingExecution = service.runWorkerOnce();
+      await bodyReadStarted;
+      shouldYield = true;
+      assert.equal((await yieldingExecution)?.id, job.id);
+      shouldYield = false;
+      const released = getStore(service).getJobById(job.id);
+      assert.equal(streamRequests, 1);
+      assert.equal(released?.attempts, 0);
+      assert.equal(released?.status, "queued");
+
+      assert.equal(await service.drainWorker(1), 1);
+      const completed = getStore(service).getJobById(job.id);
+      assert.equal(streamRequests, 2);
+      assert.equal(completed?.attempts, 1);
+      assert.equal(completed?.status, "succeeded");
+      assert.equal(
+        (await readCanonicalEventRecords(vaultRoot))
+          .filter((record) => eventHasMetric(record, "average-workout-cadence")).length,
+        1,
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("hosted exact workout replay is a no-op after a post-import worker crash", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-workout-post-import-crash-",
+    );
+    await initializeVault({
+      createdAt: "2026-04-04T00:00:00.000Z",
+      vaultRoot,
+    });
+    let now = new Date("2030-04-04T10:00:00.000Z");
+    let streamRequests = 0;
+    const importResults: unknown[] = [];
+    const defaultImporter = createDefaultImporterPort();
+    const importer: DeviceSyncImporterPort = {
+      async importDeviceProviderSnapshot(input) {
+        const result = await defaultImporter.importDeviceProviderSnapshot(input);
+        importResults.push(result);
+        if (importResults.length === 1) {
+          throw deviceSyncError({
+            code: "POST_IMPORT_WORKER_CRASH",
+            message: "Worker stopped after canonical import and before durable completion.",
+            retryable: true,
+          });
+        }
+        return result;
+      },
+    };
+    const externalAccountId = "junction-hosted-workout-post-import-crash";
+    const connectionId = "hosted_conn_workout_post_import_crash";
+    const workoutId = "workout-hosted-post-import-crash";
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async (input) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              id: "provider-garmin-post-import-crash",
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workouts: true },
+            }] });
+          }
+          if (url.pathname === `/v2/timeseries/workouts/${workoutId}/stream`) {
+            streamRequests += 1;
+            return createTestJsonResponse({
+              cadence: [80, 82],
+              distance: [0, 1_000],
+              source: { provider: "garmin", type: "watch" },
+              time: [1_775_174_400, 1_775_174_460],
+            });
+          }
+          throw new Error(`Unexpected Junction request: ${url.pathname}`);
+        },
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider], {
+      clock: { now: () => now },
+      importer,
+    });
+    const fixture = buildHostedWorkoutRuntimeFixture({
+      connectionId,
+      externalAccountId,
+      workoutId,
+    });
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSingleHostedDirtyStatePort(fixture.snapshot, fixture.dirtyState),
+        wake: buildCronWake(now.toISOString()),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      const [job] = readJobsForAccount(service, accountId);
+      assert.ok(job);
+
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(getStore(service).getJobById(job.id)?.status, "queued");
+      const afterCrash = await readCanonicalEventRecords(vaultRoot);
+      assert.equal(
+        afterCrash.filter((record) => eventHasMetric(record, "average-workout-cadence")).length,
+        1,
+      );
+
+      now = new Date("2030-04-04T10:00:16.000Z");
+      assert.equal(await service.drainWorker(1), 1);
+      const completed = getStore(service).getJobById(job.id);
+      const afterReplay = await readCanonicalEventRecords(vaultRoot);
+      assert.equal(streamRequests, 2);
+      assert.equal(completed?.attempts, 2);
+      assert.equal(completed?.status, "succeeded");
+      assert.deepEqual(
+        importResults.map((result) =>
+          typeof result === "object" && result !== null ? Reflect.get(result, "applied") : undefined
+        ),
+        [true, false],
+      );
+      assert.equal(
+        afterReplay.filter((record) => eventHasMetric(record, "average-workout-cadence")).length,
+        1,
+      );
+      assert.deepEqual(afterReplay, afterCrash);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

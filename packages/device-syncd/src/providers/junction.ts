@@ -6427,7 +6427,7 @@ function buildJunctionWebhookJobs(input: {
     const directPayloads = input.webhookDataJsons.length > 0 ? input.webhookDataJsons : [null];
     return directPayloads.map((webhookDataJson, index) => ({
       kind: "resource",
-      ...(input.resource?.name === JUNCTION_WORKOUT_STREAM_RESOURCE ? { maxAttempts: 1 } : {}),
+      ...(input.resource?.name === JUNCTION_WORKOUT_STREAM_RESOURCE ? { maxAttempts: 3 } : {}),
       payload: {
         eventType: input.eventType,
         objectId: input.objectId ?? "",

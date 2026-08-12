@@ -1334,7 +1334,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     expect(Object.keys(mixed.persistedDirtyResources)).toHaveLength(1);
   });
 
-  it("moves Junction webhook payload JSON out of the compact dirty row while preserving the runtime resource", async () => {
+  it("preserves an exact workout job's three-attempt budget inside its encrypted dirty payload", async () => {
     installHostedSecureBoxStringTestCodec();
     let createData: Record<string, unknown> | null = null;
     let payloadCreateData: Array<Record<string, unknown>> | null = null;
@@ -1391,7 +1391,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     const result = await store.upsertDirtyConnection({
       connectionId: "dsc_junction_123",
       dirtyAt: "2026-05-26T12:00:00.000Z",
-      eventType: "daily.data.steps.created",
+      eventType: "daily.data.workout_stream.created",
       provider: "junction",
       resourceCategory: "timeseries",
       resources: [
@@ -1401,12 +1401,13 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
           providerSendToWebhookMs: 60_000,
           jobKind: "resource",
-          maxAttempts: 1,
+          maxAttempts: 3,
           payload: {
+            objectId: "workout-encrypted-retry-budget",
             ordinary: "y".repeat(1_000),
             webhookDataJson,
           },
-          resource: "steps",
+          resource: "workout_stream",
           resourceCategory: "timeseries",
           sourceProviderSlug: "garmin",
           timingSourceProviderSlug: "garmin",
@@ -1425,8 +1426,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     const resourceEncrypted = createdPayloadData?.[0]?.resourceEncrypted;
 
     expect(dirtyResource?.payload?.webhookDataJson).toBe(webhookDataJson);
+    expect(dirtyResource?.payload?.objectId).toBe("workout-encrypted-retry-budget");
     expect(dirtyResource?.dirtyPayloadId).toBe(createdPayloadData?.[0]?.id);
-    expect(dirtyResource?.maxAttempts).toBe(1);
+    expect(dirtyResource?.maxAttempts).toBe(3);
     expect(dirtyResource?.payload?.ordinary).toHaveLength(512);
     expect(compactDirtyJson).not.toContain("webhookDataJson");
     expect(compactDirtyJson.length).toBeLessThan(128);
@@ -1447,7 +1449,8 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     })).resolves.toMatchObject({
       eventToProviderSendBucket: "under_5_minutes",
       firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
-      maxAttempts: 1,
+      maxAttempts: 3,
+      payload: expect.objectContaining({ objectId: "workout-encrypted-retry-budget" }),
       providerSendToWebhookMs: 60_000,
       timingSourceProviderSlug: "garmin",
     });

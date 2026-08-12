@@ -5940,6 +5940,7 @@ test("Junction exact workout IDs join stream features despite a distinct provide
       workouts: [{
         id: "workout-stream-sibling-1",
         provider_id: "provider-workout-sibling-1",
+        authoritativeVersion: "2026-04-22T13:00:00.000Z",
         time_start: "2026-04-22T12:00:00.000Z",
         time_end: "2026-04-22T12:30:00.000Z",
         sourceInstanceId: "source-0123456789abcdef01234567",
@@ -5966,6 +5967,22 @@ test("Junction exact workout IDs join stream features despite a distinct provide
 
   const sessionExternalRef = session?.externalRef;
   assert.ok(sessionExternalRef);
+  const legacyWorkoutResourceId = `workouts-${createHash("sha256")
+    .update(JSON.stringify([
+      "garmin",
+      "watch",
+      "source-0123456789abcdef01234567",
+      "provider-workout-sibling-1",
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
+  assert.deepEqual(session?.legacyExternalRefs, [{
+    system: sessionExternalRef.system,
+    resourceType: sessionExternalRef.resourceType,
+    resourceId: legacyWorkoutResourceId,
+    version: "2026-04-22T13:00:00.000Z",
+    facet: "session",
+  }]);
   assert.ok(featureEvents.length >= 3);
   assert.ok(featureEvents.every((event) =>
     event.externalRef?.resourceType === sessionExternalRef.resourceType

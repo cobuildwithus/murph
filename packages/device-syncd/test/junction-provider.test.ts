@@ -13899,7 +13899,7 @@ test("Junction import accountId is stable across local account row re-registrati
   assert.equal(new Set(importedAccountIds).size, 1);
 });
 
-test("Junction client fetches an exact workout stream with bounded bytes and three GET attempts", async () => {
+test("Junction client fetches an exact workout stream with bounded bytes and one GET per execution", async () => {
   const requests: string[] = [];
   const client = new JunctionClient({
     apiKey: "sk_us_test_123",
@@ -13974,7 +13974,7 @@ test("Junction client fetches an exact workout stream with bounded bytes and thr
     },
   });
   await assert.rejects(() => retryClient.getWorkoutStream("workout-retry-limit"));
-  assert.equal(retryAttempts, 3);
+  assert.equal(retryAttempts, 1);
 });
 
 test("Junction shallow workout stream webhook imports only a bounded feature envelope", async () => {
@@ -14074,7 +14074,7 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
   assert.equal(jobPayload.objectId, "workout-stream-1");
   assert.equal(jobPayload.resource, "workout_stream");
   assert.equal(jobPayload.resourceCategory, "timeseries");
-  assert.equal(job.maxAttempts, 1);
+  assert.equal(job.maxAttempts, 3);
   assert.equal(jobPayload.sourceInstanceId, "source-774aa2ab0133069118cf5c1e");
   assert.equal(jobPayload.sourceType, "watch");
   assert.equal(jobPayload.sport, "running");
@@ -14114,7 +14114,7 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
     rawBody: updatedWebhook.rawBody,
     now: "2026-04-03T00:00:01.000Z",
   });
-  assert.equal(parsedUpdate.jobs[0]?.maxAttempts, 1);
+  assert.equal(parsedUpdate.jobs[0]?.maxAttempts, 3);
   assert.notEqual(parsedUpdate.jobs[0]?.dedupeKey, job.dedupeKey);
 });
 

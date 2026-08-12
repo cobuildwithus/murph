@@ -3982,6 +3982,12 @@ function pushWorkoutSummary(
     firstNumberFromPaths(entry, ["distanceKm", "distance_km"]) ??
     metersToKilometers(firstNumberFromPaths(entry, ["distanceMeters", "distance_meters", "distance"]));
   const workoutMetrics = buildWorkoutSessionMetrics(entry);
+  const externalRef = makeJunctionExternalRef(resourceContext, entry, workoutTimestamp, "session");
+  const legacyExternalRef = makeJunctionLegacyWorkoutExternalRef(
+    resourceContext,
+    entry,
+    externalRef,
+  );
 
   context.events.push(stripUndefined({
     kind: "activity_session",
@@ -3992,7 +3998,8 @@ function pushWorkoutSummary(
     source: "device",
     title,
     evidenceRoles: resourceContext.evidenceRoles,
-    externalRef: makeJunctionExternalRef(resourceContext, entry, workoutTimestamp, "session"),
+    externalRef,
+    legacyExternalRefs: legacyExternalRef ? [legacyExternalRef] : undefined,
     dataOrigin: buildDataOrigin(entry, resourceContext, workoutTimestamp),
     fields: stripUndefined({
       durationMinutes,
@@ -5818,6 +5825,35 @@ function makeJunctionExternalRef(
     buildStableResourceId(resourceContext, entry, timestamp),
     junctionExternalRefVersion(resourceContext, entry),
     slugify(facet, "value"),
+  );
+}
+
+function makeJunctionLegacyWorkoutExternalRef(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  canonicalExternalRef: DeviceExternalRefPayload,
+): DeviceExternalRefPayload | undefined {
+  if (resourceContext.identityKind !== "summary" || resourceContext.resource !== "workouts") {
+    return undefined;
+  }
+
+  const junctionWorkoutId = firstStringFromPaths(entry, JUNCTION_WORKOUT_JUNCTION_ID_PATHS);
+  const providerWorkoutId = firstStringFromPaths(entry, JUNCTION_WORKOUT_PROVIDER_ID_PATHS);
+  if (!junctionWorkoutId || !providerWorkoutId || junctionWorkoutId === providerWorkoutId) {
+    return undefined;
+  }
+
+  return makeProviderExternalRef(
+    "junction",
+    resourceContext.externalRefResourceType,
+    `${resourceContext.resourceSlug}-${shortHash([
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      providerWorkoutId,
+    ])}`,
+    junctionExternalRefVersion(resourceContext, entry),
+    canonicalExternalRef.facet ?? "session",
   );
 }
 
