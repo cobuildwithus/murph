@@ -543,8 +543,9 @@ test("releases the microphone when Safari moves the page into the background", a
 
 test("keeps a failed recording for retry and reuses its capture time", async () => {
   const onAccepted = vi.fn();
+  const onUploadStarted = vi.fn();
   const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture, { onAccepted }),
+    createElement(EnvironmentVoiceCapture, { onAccepted, onUploadStarted }),
   );
   const uploadRequests: RequestInit[] = [];
   const trackStop = vi.fn();
@@ -659,6 +660,7 @@ test("keeps a failed recording for retry and reuses its capture time", async () 
     );
 
     assert.equal(onAccepted.mock.calls.length, 1);
+    assert.equal(onUploadStarted.mock.calls.length, 2);
     assert.equal(uploadRequests.length, 2);
     const firstHeaders = new Headers(uploadRequests[0]?.headers);
     const secondHeaders = new Headers(uploadRequests[1]?.headers);

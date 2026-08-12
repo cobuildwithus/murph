@@ -1,6 +1,8 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 
+import { ELEVENLABS_TTS_MAX_TEXT_LENGTH } from '@murphai/operator-config/elevenlabs-runtime'
+
 import {
   executeMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -32,6 +34,18 @@ function createLinqRuntime(
 
 describe('murph.generate_voice_memo dynamic tool execution', () => {
   it('keeps accompanying text optional and non-duplicative in the model-visible contract', () => {
+    expect(ELEVENLABS_TTS_MAX_TEXT_LENGTH).toBe(1_000)
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text.maxLength).toBe(
+      ELEVENLABS_TTS_MAX_TEXT_LENGTH,
+    )
+    for (const guidanceSurface of [
+      MURPH_GENERATE_VOICE_MEMO_TOOL.description,
+      MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text.description,
+    ]) {
+      expect(guidanceSurface).toContain(
+        'Voice memo text is limited to at most 1,000 characters. Compress it before calling the tool.',
+      )
+    }
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'when a loaded Murph skill or product flow explicitly asks for a voice memo',
     )
@@ -138,6 +152,36 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     })
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
+  })
+
+  it('keeps the shared 1,000-character voice memo maximum strict', () => {
+    const accepted = readTestMurphDynamicToolRequest({
+      id: 12,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          text: 'a'.repeat(ELEVENLABS_TTS_MAX_TEXT_LENGTH),
+        },
+        namespace: 'murph',
+        tool: 'generate_voice_memo',
+      },
+    })
+    const rejected = readTestMurphDynamicToolRequest({
+      id: 13,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          text: 'a'.repeat(ELEVENLABS_TTS_MAX_TEXT_LENGTH + 1),
+        },
+        namespace: 'murph',
+        tool: 'generate_voice_memo',
+      },
+    })
+
+    expect(accepted).toMatchObject({ kind: 'generate-voice-memo' })
+    expect(rejected).toMatchObject({
+      kind: 'invalid-generate-voice-memo-arguments',
+    })
   })
 
   it('rejects voice memo generation when response media is already attached', async () => {

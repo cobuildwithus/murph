@@ -535,11 +535,15 @@ future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
-work arrives, the runner uses the same exact-child abort and identity-cleared
-replacement path. It must start a default-mode child rather than coalescing the
-wake because system-mailbox mode imports only system work and returns before
-assistant admission. A system-mailbox request behind an active default runtime
-remains deferred and cannot broaden that child's admission authority.
+work arrives, the runner wakes that exact child and leaves its fence intact.
+System-mailbox mode may import and run one bounded model-free device-sync item;
+it checkpoints any successfully applied unit, observes the wake, and returns
+before assistant admission. The foreground request then retries through the
+ordinary controller path and starts a default-mode child after the system child
+releases its fence. Operator maintenance receipts are not system-mode recovery
+work and remain pending for their existing owner. A system-mailbox request
+behind an active default runtime remains deferred and cannot broaden that
+child's admission authority.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -556,12 +560,14 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` or
-`system_mailbox` fence, the existing workspace-invocation abort seam is the
-sole preemption authority. UserRunner sends that exact abort directly instead
-of spending foreground command budget on a non-authoritative liveness
-preflight. A local exact-pointer abort enters the same inactive-fence
-replacement path. The container registers the
+For foreground/default work behind an `inbox_media_retention` fence, the
+existing workspace-invocation abort seam is the sole preemption authority.
+UserRunner sends that exact abort directly instead of spending foreground
+command budget on a non-authoritative liveness preflight. System-mailbox work
+uses the exact-child wake-and-checkpoint handoff above instead, because aborting
+a bounded unit after canonical web updates but before its checkpoint would
+discard committed progress. A local exact-pointer abort enters the same
+inactive-fence replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
 and an exact abort can cancel already-queued successors before runner dispatch.
@@ -996,17 +1002,35 @@ unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
 forbidden because it can erase recent paired conversation history
 irreversibly.
 
-Accepted Linq reply delivery carries an earlier copy of the same exact-item
-consume authority:
-the runtime reports
-`answeredMailboxItemIds`, and the signed delivery callback stamps matching
+Accepted Linq reply and reaction delivery carry an earlier copy of the same
+exact-item consume authority: the runtime keeps `answeredMailboxItemIds` on the
+existing outbox intent, and the signed delivery callback stamps matching
 same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
+For a reaction-only terminal turn, the provider-accepted reaction receipt is
+persisted on that same intent before Web confirmation. A retryable or ambiguous
+confirmation retains the receipt and exact ids and retries only the signed Web
+callback; it must not replay the provider reaction or consume from an outcome
+that lacks a concrete accepted receipt. A restart reconciles the retained
+receipt through the same callback before the intent becomes sent. The ordinary
+exact-item checkpoint acknowledgement remains an idempotent fallback, and its
+terminal ids remain retained until a later mailbox fetch confirms the durable
+conversation floor.
 The mailbox fetch response returns both `consumedSeqByLane` and each item's
 `consumedAt`; replayed conversation items at or below the checkpoint replay
 floor, or with `consumedAt != null`, are re-staged as conversation context with
 a null reply target, never as fresh reply candidates. This keeps a workspace
 restore or restart from re-replying to an already-handled message without a
-side table or lane high-water advance past gaps. A container rollout SIGTERM
+side table or lane high-water advance past gaps. The runtime-progress monitor
+uses that same terminal distinction without redefining the contiguous floor:
+conversation candidates above the effective floor must still have
+`consumed_at IS NULL`, while system-lane candidates retain their existing
+live-row semantics. The selected head and `COUNT(*) OVER()` come from that one
+lane-aware predicate. A stamped conversation row is terminal, not usage-resume
+evidence; only staging, provider start, or accepted delivery can establish
+post-denial execution for a remaining candidate. The monitor probes at most one
+row beyond its raw 20,000-candidate cap before runtime-access and usage-denial
+exclusions and reports `scanTruncated` instead of scanning an exclusion-heavy
+population without bound. A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
 
@@ -1156,7 +1180,7 @@ another wake, with no finite application-owned recovery bound. Enrollment
 failure returns no continuation; a previously issued shell command may leave an
 idle container to expire, but it cannot process runtime work. Both direct
 requests are latency hints, not a second durable wake authority:
-accepted Linq reply delivery stamps `consumedAt` on the exact
+accepted Linq reply or reaction delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add
 workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
@@ -1824,9 +1848,12 @@ caller sends its existing ensure-processing HTTP timeout as an internal header.
 An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
-`system_mailbox` path, which imports eligible model-free system work and exits
-before foreground assistant admission. It binds that effective processing mode
-into the same fence so controller priority, preemption, and the container job
+`system_mailbox` path, which imports system work, may run one bounded
+model-free deterministic device-sync item, and exits before foreground
+assistant admission. Operator maintenance receipts retain their existing owner
+and are not consumed by this recovery mode.
+It binds that effective processing mode into the same fence so controller
+priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime
 reaches one unexpectedly. Explicit media
 retention remains model-free, and custom inference keeps its selected route.
