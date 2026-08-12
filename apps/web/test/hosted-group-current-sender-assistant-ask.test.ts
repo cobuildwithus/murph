@@ -389,6 +389,11 @@ describe("hosted current-sender Assistant Ask authority", () => {
       "Murph, ask my Murph how my synthetic activity changed, for me only.",
       "Murph, ask my Murph how my synthetic activity changed but keep it between us.",
       "Murph, ask my Murph how my synthetic activity changed; please in confidence.",
+      "Murph, ask my Murph privately, what synthetic medications do I take?",
+      "Murph, ask my Murph confidentially, what synthetic medications do I take?",
+      "Murph, ask my Murph in a private message, what synthetic medications do I take?",
+      "Murph, ask my Murph for my eyes only, what synthetic medications do I take?",
+      "Murph, ask my Murph privately what synthetic medications do I take?",
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest({
         hasNativeReplyContext: false,
@@ -446,6 +451,10 @@ describe("hosted current-sender Assistant Ask authority", () => {
       {
         hasNativeReplyContext: false,
         text: "Murph, ask my Murph and reply in the group and DM me.",
+      },
+      {
+        hasNativeReplyContext: false,
+        text: "Murph, ask my Murph privately, what changed, then tell the group.",
       },
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest(input)).toHaveProperty(

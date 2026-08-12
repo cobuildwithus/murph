@@ -86,14 +86,29 @@ const HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN =
   /^(?:do\s+not|don['’]?t|never|not)\b|\b(?:do\s+not|don['’]?t|never|not)\s+(?:ask|answer|share|post|reply|respond|send|message|dm|tell|show|disclose)\b/iu;
 const HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN =
   /(?:[,;.!?](?:\s+|$)|—\s*|\s+-\s+|(?<!between\s+you)\s+(?:and|then)\s+)/iu;
-const HOSTED_CURRENT_SENDER_PRIVATE_TERMINAL_CLAUSE_PATTERN =
-  /^(?:please\s+)?(?:privately|confidentially|in\s+confidence|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|for\s+(?:my\s+eyes|me)\s+only|just\s+between\s+us|between\s+you\s+and\s+me|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+it\s+between\s+us|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|make\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm))|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|reply|respond|answer)\s+(?:the\s+answer|it)\s+(?:only\s+)?to\s+me(?:\s+privately)?)$/iu;
-const HOSTED_CURRENT_SENDER_GROUP_TERMINAL_CLAUSE_PATTERN =
-  /^(?:please\s+)?(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+(?:here|in\s+(?:the\s+)?group(?:\s+chat)?|to\s+(?:the\s+)?group)|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)$/iu;
+const HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_CLAUSE =
+  String.raw`(?:please\s+)?(?:privately|confidentially|in\s+confidence|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|for\s+(?:my\s+eyes|me)\s+only|just\s+between\s+us|between\s+you\s+and\s+me|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+it\s+between\s+us|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|make\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm))|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|reply|respond|answer)\s+(?:the\s+answer|it)\s+(?:only\s+)?to\s+me(?:\s+privately)?)`;
+const HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_CLAUSE =
+  String.raw`(?:please\s+)?(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+(?:here|in\s+(?:the\s+)?group(?:\s+chat)?|to\s+(?:the\s+)?group)|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)`;
+const HOSTED_CURRENT_SENDER_PRIVATE_TERMINAL_CLAUSE_PATTERN = new RegExp(
+  `^${HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_CLAUSE}$`,
+  "iu",
+);
+const HOSTED_CURRENT_SENDER_GROUP_TERMINAL_CLAUSE_PATTERN = new RegExp(
+  `^${HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_CLAUSE}$`,
+  "iu",
+);
+const HOSTED_CURRENT_SENDER_LEADING_AUDIENCE_CLAUSE_PATTERN = new RegExp(
+  `^(${HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_CLAUSE})` +
+    String.raw`(?:[,;:—-]\s*|\s+)(\S[\s\S]*)$|` +
+    `^(${HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_CLAUSE})` +
+    String.raw`(?:[,;:—-]\s*|\s+)(\S[\s\S]*)$`,
+  "iu",
+);
 const HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN =
   /\b(?:private|privately|confidential|confidentially|confidence|direct|dm|group|chat|thread|everyone|here|only|between|eyes|secret|public|publicly|record|me|us)\b/iu;
 const HOSTED_CURRENT_SENDER_AUDIENCE_CLAUSE_START_PATTERN =
-  /^(?:please\s+)?(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make|for|to|between|in|off|not|only|just|no)\b/iu;
+  /^(?:please\s+)?(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make|for|to|between|in|off|not|only|just|no|this)\b/iu;
 
 for (const [label, permissionText] of [
   ["Hosted current-sender group permission", HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT],
@@ -181,7 +196,12 @@ export function classifyHostedGroupCurrentSenderRequest(input: {
 function readHostedCurrentSenderTerminalAudience(
   question: string,
 ): HostedGroupCurrentSenderAudience | "ambiguous" | null {
-  const clauses = question
+  const leading = readHostedCurrentSenderLeadingAudience(question);
+  if (leading === "ambiguous") {
+    return "ambiguous";
+  }
+  const questionWithoutLeadingAudience = leading?.question ?? question;
+  const clauses = questionWithoutLeadingAudience
     .split(HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN)
     .map((clause) => clause
       .trim()
@@ -189,7 +209,9 @@ function readHostedCurrentSenderTerminalAudience(
       .replace(/[.!?]+$/u, "")
       .trim())
     .filter(Boolean);
-  const audiences = new Set<HostedGroupCurrentSenderAudience>();
+  const audiences = new Set<HostedGroupCurrentSenderAudience>(
+    leading ? [leading.audience] : [],
+  );
   for (let index = clauses.length - 1; index >= 0; index -= 1) {
     const clause = clauses[index];
     if (clause === undefined) {
@@ -211,6 +233,34 @@ function readHostedCurrentSenderTerminalAudience(
   return audiences.size > 1
     ? "ambiguous"
     : audiences.values().next().value ?? null;
+}
+
+function readHostedCurrentSenderLeadingAudience(
+  question: string,
+): { audience: HostedGroupCurrentSenderAudience; question: string } | "ambiguous" | null {
+  const match = HOSTED_CURRENT_SENDER_LEADING_AUDIENCE_CLAUSE_PATTERN.exec(
+    question.trim(),
+  );
+  if (match) {
+    const privateClause = match[1];
+    const remainingQuestion = (match[2] ?? match[4] ?? "").trim();
+    if (!remainingQuestion) {
+      return "ambiguous";
+    }
+    return {
+      audience: privateClause ? "current_sender" : "group",
+      question: remainingQuestion,
+    };
+  }
+  const firstClause = question
+    .split(HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN, 1)[0]
+    ?.trim() ?? "";
+  return readHostedCurrentSenderAudienceClause({
+    clause: firstClause,
+    separatedFromQuestion: false,
+  }) === "ambiguous"
+    ? "ambiguous"
+    : null;
 }
 
 function readHostedCurrentSenderAudienceClause(input: {

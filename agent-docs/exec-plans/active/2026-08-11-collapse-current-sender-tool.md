@@ -128,6 +128,10 @@ Updated: 2026-08-11
   and gives new group/private terminal envelopes a fresh bounded import window
   without extending the original private-send authority. Focused Web,
   typecheck, and four-case PostgreSQL proof pass.
+- ReviewGPT round six found the bounded parser only inspected trailing audience
+  clauses. The same owner now extracts one recognized leading clause before
+  inspecting the trailing edge, rejects leading/trailing conflicts, and keeps
+  substantive privacy words out of audience authority.
 - Remaining work is the new exact-head final ReviewGPT round, CI, plan closure,
   and merge-tree proof.
 
