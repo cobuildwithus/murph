@@ -1,4 +1,5 @@
 export interface ReadyRepairIdentity {
+  bodySha256: string;
   branch: string;
   head: string;
   issueNumber: number;
@@ -6,7 +7,10 @@ export interface ReadyRepairIdentity {
 }
 
 export interface ReadyRepairRemoteState {
+  bodyAuthoritative: boolean;
+  bodySha256: string;
   head: string;
+  issueBound: boolean;
   pullRequest: number;
 }
 
@@ -17,7 +21,7 @@ export interface ReadyRepairFinalizationDependencies {
   issueIsClosed: () => boolean;
   merge: (identity: ReadyRepairIdentity) => void;
   mergeTreePasses: (identity: ReadyRepairIdentity) => boolean;
-  pullRequestIsMerged: () => boolean;
+  pullRequestIsMerged: (identity: ReadyRepairIdentity) => boolean;
   refreshAndVerifyIssue: () => void;
   requiredChecksPass: (identity: ReadyRepairIdentity) => boolean;
 }
@@ -27,9 +31,13 @@ function assertRemoteIdentity(
   current: ReadyRepairRemoteState | null,
 ) {
   if (
-    !current
+    !/^[0-9a-f]{64}$/u.test(identity.bodySha256)
+    || !current
     || current.pullRequest !== identity.pullRequest
     || current.head !== identity.head
+    || current.bodySha256 !== identity.bodySha256
+    || !current.bodyAuthoritative
+    || !current.issueBound
   ) {
     throw new Error("pull request authority changed before merge");
   }
@@ -62,8 +70,9 @@ export function finalizeReadyRepair(
     throw new Error("required pull request checks changed before merge");
   }
   if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
+  assertRemoteIdentity(identity, dependencies.currentPullRequest());
   dependencies.merge(identity);
-  if (!dependencies.pullRequestIsMerged()) {
+  if (!dependencies.pullRequestIsMerged(identity)) {
     throw new Error("pull request did not reach merged state");
   }
   if (!dependencies.issueIsClosed()) dependencies.closeIssue(identity);

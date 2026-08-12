@@ -19,6 +19,8 @@ review_gpt_context_anchor_head="${REVIEW_GPT_CONTEXT_ANCHOR_HEAD:-}"
 review_gpt_rendered_evidence_paths="${REVIEW_GPT_RENDERED_EVIDENCE_PATHS:-}"
 review_gpt_supplemental_evidence_paths="${REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
+review_gpt_expected_pr_body_path="${REVIEW_GPT_EXPECTED_PR_BODY_PATH:-}"
+review_gpt_expected_pr_body_sha256="${REVIEW_GPT_EXPECTED_PR_BODY_SHA256:-}"
 review_gpt_context_mode="full_snapshot"
 
 if [[ -n "$review_gpt_full_review_reason" ]] \
@@ -42,6 +44,42 @@ review_gpt_require_available_commit() {
   review_gpt_require_full_sha "$label" "$commit"
   if ! git cat-file -e "$commit^{commit}" >/dev/null 2>&1; then
     echo "Error: $label commit is not available locally." >&2
+    exit 1
+  fi
+}
+
+review_gpt_validate_expected_pr_body() {
+  local actual_sha256
+  local body_bytes
+  local body_realpath
+
+  if [[ "$review_gpt_expected_pr_body_path" != "audit-packages/frog-autofix-pr-body.md" ]] \
+    || [[ ! "$review_gpt_expected_pr_body_sha256" =~ ^[0-9a-f]{64}$ ]] \
+    || [[ ! -f "$review_gpt_expected_pr_body_path" ]] \
+    || [[ -L "$review_gpt_expected_pr_body_path" ]]; then
+    echo "Error: expected ReviewGPT PR body evidence is invalid." >&2
+    exit 1
+  fi
+  if ! body_realpath="$(realpath -q "$review_gpt_expected_pr_body_path")" \
+    || [[ "$body_realpath" != "$review_gpt_repo_root_absolute/$review_gpt_expected_pr_body_path" ]]; then
+    echo "Error: expected ReviewGPT PR body evidence escaped its checkout." >&2
+    exit 1
+  fi
+  body_bytes="$(wc -c < "$review_gpt_expected_pr_body_path" | tr -d '[:space:]')"
+  if [[ ! "$body_bytes" =~ ^[0-9]+$ ]] || (( body_bytes > 32768 )); then
+    echo "Error: expected ReviewGPT PR body evidence exceeds its bound." >&2
+    exit 1
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    actual_sha256="$(shasum -a 256 "$review_gpt_expected_pr_body_path" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    actual_sha256="$(sha256sum "$review_gpt_expected_pr_body_path" | awk '{print $1}')"
+  else
+    echo "Error: no SHA-256 utility is available for ReviewGPT PR body evidence." >&2
+    exit 127
+  fi
+  if [[ "$actual_sha256" != "$review_gpt_expected_pr_body_sha256" ]]; then
+    echo "Error: expected ReviewGPT PR body evidence changed before packaging." >&2
     exit 1
   fi
 }
@@ -241,12 +279,23 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   review_gpt_head_oid="$(
     gh pr view "$review_gpt_pr_ref" --json headRefOid --jq '.headRefOid'
   )"
-  review_gpt_pr_body="$(
-    gh pr view "$review_gpt_pr_ref" --json body --jq '.body // ""'
-  )"
+  if [[ -n "$review_gpt_expected_pr_body_path" ]] \
+    || [[ -n "$review_gpt_expected_pr_body_sha256" ]]; then
+    review_gpt_validate_expected_pr_body
+    review_gpt_pr_body="$(< "$review_gpt_expected_pr_body_path")"
+  else
+    review_gpt_pr_body="$(
+      gh pr view "$review_gpt_pr_ref" --json body --jq '.body // ""'
+    )"
+  fi
   review_gpt_load_context_sensitivity "$review_gpt_pr_body"
-  printf '%s\n' "$review_gpt_pr_body" \
-    > "$review_gpt_pr_context_dir/pr-body.md"
+  if [[ -n "$review_gpt_expected_pr_body_path" ]]; then
+    cp -- "$review_gpt_expected_pr_body_path" \
+      "$review_gpt_pr_context_dir/pr-body.md"
+  else
+    printf '%s\n' "$review_gpt_pr_body" \
+      > "$review_gpt_pr_context_dir/pr-body.md"
+  fi
   if [[ ! "$review_gpt_base_oid" =~ ^[0-9a-f]{40}$ ]] \
     || [[ ! "$review_gpt_head_oid" =~ ^[0-9a-f]{40}$ ]]; then
     echo "Error: could not resolve PR base/head SHAs for ReviewGPT PR context." >&2

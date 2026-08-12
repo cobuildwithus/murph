@@ -543,12 +543,17 @@ export function buildCodexWorkerArguments(options: {
   ];
 }
 
-const localAgentScriptPatterns = [
-  /^scripts\/frog(?:-|$)/u,
-  /^scripts\/review-gpt(?:-|$)/u,
-  /^scripts\/chatgpt-review-presets\//u,
-  /^scripts\/package-audit-context(?:-|\.|$)/u,
-];
+const localAgentScriptPaths = new Set([
+  "scripts/frog-autofix",
+  "scripts/frog-autofix-command.ts",
+  "scripts/frog-autofix-finalize.ts",
+  "scripts/frog-autofix-lib.ts",
+  "scripts/frog-autofix-parent.ts",
+  "scripts/frog-autofix-recovery.ts",
+  "scripts/frog-autofix-worker.md",
+  "scripts/frog-autofix.test.ts",
+  "scripts/frog-autofix.ts",
+]);
 
 export interface AutoMergeScopeInput {
   architectureBase?: string;
@@ -655,7 +660,7 @@ export function localAgentOnlyChange(input: AutoMergeScopeInput): boolean {
       || filePath.startsWith(".agents/friction-log/")
       || filePath.startsWith(".agents/skills/")
       || filePath.startsWith("agent-docs/")
-      || localAgentScriptPatterns.some((pattern) => pattern.test(filePath))
+      || localAgentScriptPaths.has(filePath)
     ) return true;
     if (filePath === "package.json") {
       return typeof input.packageBase === "string"

@@ -631,6 +631,7 @@ two-contender serialization, operator-created but foreign-edited baseline/PASS/
 open-and-closed-handoff rejection with safe body recovery, parent-local
 baseline plus exact/ancestor human-handoff preservation when a foreign body
 edit is composed with an unchanged or newer same-repository branch head,
+pre-tooling handoff return with dirty bytes unchanged and no child/model/push,
 remote-only PASS recovery, fixed-body handoff when no trusted baseline remains,
 implementation prompts that derive intent only from the committed friction
 binding and do not request or use a mutable GitHub-content connector,
@@ -640,8 +641,12 @@ resume without a second implementation request or child, exact parent-local
 body/head provenance for push-before-PR recovery plus rejection of seeded or
 stale-tracking remote-no-PR branches, issue-authority revocation before push and
 before draft creation, mandatory foul-play prompt ordering, unrelated hostile
-evidence ignore behavior, boundary-weakening task/candidate refusal, and
-historical merged-PR reopen refusal. A macOS
+evidence ignore behavior, boundary-weakening task/candidate refusal,
+parent-local review-body archive binding with changed digest/editor/body/head
+rejection, non-closing exact issue binding plus parent-only post-merge closure,
+an explicit Frog script allowlist that excludes the GitHub Actions-owned
+`scripts/frog-pr-context.ts` on direct/rename/copy paths, and historical
+merged-PR reopen refusal. A macOS
 permission smoke must also apply the exact native worker profile and prove an
 in-worktree read/write succeeds while an outside-root read and a network
 request fail:
@@ -649,7 +654,9 @@ request fail:
 ```sh
 pnpm exec vitest run scripts/frog-autofix.test.ts \
   --config scripts/vitest.config.ts --no-coverage
-bash -n scripts/frog-autofix
+pnpm exec vitest run packages/cli/test/release-script-coverage-audit.test.ts \
+  --config packages/cli/vitest.workspace.ts --no-coverage
+bash -n scripts/frog-autofix scripts/package-audit-context-full.sh
 scripts/frog-autofix verify-permissions
 scripts/frog-autofix scan
 ```

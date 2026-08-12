@@ -1096,14 +1096,15 @@ Last verified: 2026-08-12
   Mutable body text is a separate authority field: `editor` must equal the live
   operator whenever `lastEditedAt` is present, while the PR creator is accepted
   only for a never-edited body with no editor. Other remote text cannot supply
-  baseline, PASS, handoff, closing, hydration, merge, or closure authority. The
+  baseline, PASS, handoff, hydration, merge, or closure authority. The
   parent captures a validated local body before any child runs or creates a
   fixed authority-free recovery body. A local immutable baseline equal to the
   current head may replace the remote presentation and rerun exact-head review
   only when the same trusted body has no human handoff. Baseline ancestry and
   exact-or-ancestor handoff recovery use that one trusted body; a recovered
-  handoff is re-stamped at the current head and returns before autonomous review
-  or merge. Specialist and final PASS markers remain recoverable only from the
+  handoff is re-stamped at the current head and returns before dependency
+  checks, model work, edits, commits, pushes, autonomous review, or merge.
+  Specialist and final PASS markers remain recoverable only from the
   current parent-owned remote body. If the baseline is an ancestor of a newer
   remote head, the parent preserves it and publishes the existing handoff or a
   review-findings handoff. If no trusted baseline exists, the fixed recovery
@@ -1150,6 +1151,11 @@ Last verified: 2026-08-12
   canonical packager and canonical review state from a detached exact-head
   checkout only when every executable and instructional review control,
   including the complete prompt-preset directory, matches trusted `main`.
+  The parent writes the already validated local body into that checkout and
+  binds it by SHA-256; the packager does not fetch mutable remote presentation
+  as the intent contract. Immediately before either model invocation, one
+  current PR projection must match the expected parent author/branch/repository,
+  exact head and body, latest body editor, and single non-closing issue binding.
   Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
   controls produce the same exact-head human handoff; review prose is never
   delegated to another autonomous editing turn.
@@ -1157,13 +1163,21 @@ Last verified: 2026-08-12
   requires valid preliminary/final ReviewGPT evidence, the exact open PR,
   nonempty green required checks, and a clean current-base merge. It then
   re-fetches and revalidates App author, open state, label, exactly one committed
-  binding, PR head, checks, and the exact-head scope classifier immediately
-  before an ordinary `--match-head-commit` squash merge. Only `.agents` content,
-  `AGENTS.md`, `agent-docs`, named Frog/ReviewGPT local scripts, the exact Frog
-  package script, and the isolated Local Frog Autofix architecture section may
-  auto-merge. Any other path, changed product architecture outside that section,
-  GitHub workflow/action, hook, or possible runtime surface remains open for a
-  human merge decision and does not close its issue. Neither owner uses admin
+  binding, PR head, exact body digest/editor/non-closing issue binding, checks,
+  and the exact-head scope classifier immediately before an ordinary
+  `--match-head-commit` squash merge. Only `.agents` content, `AGENTS.md`,
+  `agent-docs`, the enumerated Frog autofix implementation/launcher/worker/test
+  files, the exact Frog package script, and the isolated Local Frog Autofix
+  architecture section may auto-merge. The shared ReviewGPT controls already
+  force a human handoff, and `scripts/frog-pr-context.ts` remains excluded
+  because GitHub Actions executes it. Any other path, changed product
+  architecture outside that section, GitHub workflow/action, hook, or possible
+  runtime surface remains open for a human merge decision and does not close its
+  issue. The PR body contains only one non-closing issue binding. After proving
+  the exact merge independently of mutable presentation, the parent explicitly
+  closes only that issue. The exact parent-owned merged PR remains
+  queue-complete after a failed close or later reopen, but supplies no authority
+  to close the issue in a later invocation. Neither owner uses admin
   merge, self-approval, ruleset bypass, branch-protection mutation, or
   skipped/missing gate reinterpretation. Merge-authority inventories include
   both source and destination paths for detected renames and copies. Exact-head

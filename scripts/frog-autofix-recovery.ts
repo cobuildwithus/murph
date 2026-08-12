@@ -54,15 +54,6 @@ export function branchOpenPullRequest(
   return pullRequests[0];
 }
 
-function issueClosingKeywordPresent(body: string, issueNumber: number): boolean {
-  const relationship = new RegExp(
-    `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+`
-      + `(?:${FROG_AUTOFIX_REPOSITORY.replace("/", "\\/")})?#${issueNumber}\\b`,
-    "iu",
-  );
-  return relationship.test(body);
-}
-
 export function parseBranchPullRequestPages(
   raw: string,
   branch: string,
@@ -494,6 +485,7 @@ export function branchHasMergedPullRequest(
   branch: string,
   issueNumber: number,
   commands: RecoveryCommandAdapter,
+  expected?: { head: string; pullRequest: number },
 ): boolean {
   const pullRequests = branchPullRequests(root, branch, commands);
   const operator = parseAuthenticatedGitHubOperator(
@@ -507,6 +499,9 @@ export function branchHasMergedPullRequest(
   return pullRequests.length === 1
     && pullRequests[0]?.state === "MERGED"
     && pullRequests[0].headRefOid === localBranchHead
-    && hasParentOwnedPullRequestBody(pullRequests[0], operator)
-    && issueClosingKeywordPresent(pullRequests[0].body, issueNumber);
+    && isParentOwnedPullRequest(pullRequests[0], operator, branch)
+    && (!expected || (
+      pullRequests[0].number === expected.pullRequest
+      && pullRequests[0].headRefOid === expected.head
+    ));
 }

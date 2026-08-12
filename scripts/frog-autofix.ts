@@ -63,6 +63,7 @@ import {
   FROG_AUTOFIX_PR_BODY_PATH,
   extractFirstReviewedHead,
   extractSingleConversationUrl,
+  hasExactFrogIssueBinding,
   parseSinglePatchArtifact,
   publishDraftRepair,
   readBoundedParentFile,
@@ -361,14 +362,12 @@ export function completedHandoffIssueNumbers(
       operator,
       `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`,
     )) continue;
+    if (record.state === "MERGED") {
+      completed.add(issueNumber);
+      continue;
+    }
     if (!hasParentOwnedPullRequestBody(record, operator)) continue;
-    if (record.state === "MERGED") continue;
-    const relationship = new RegExp(
-      `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+`
-        + `(?:${FROG_AUTOFIX_REPOSITORY.replace("/", "\\/")})?#${issueNumber}\\b`,
-      "iu",
-    );
-    if (!relationship.test(record.body)) continue;
+    if (!hasExactFrogIssueBinding(record.body, issueNumber)) continue;
     const matches = record.body.match(
       /^Frog autofix handoff: (product-runtime|review-findings) at ([0-9a-f]{40})$/gmu,
     ) ?? [];
@@ -1499,7 +1498,36 @@ function runParentReview(options: {
   return { chatUrl, response };
 }
 
+export function assertExpectedPullRequestBody(options: {
+  authenticatedOperator: string;
+  branch: string;
+  expectedBody: string;
+  head: string;
+  issueNumber: number;
+  pullRequest: number;
+  record: BranchPullRequestRecord | null;
+}): void {
+  const operator = parseAuthenticatedGitHubOperator(
+    options.authenticatedOperator,
+  );
+  const record = options.record;
+  if (
+    !record
+    || record.number !== options.pullRequest
+    || record.state !== "OPEN"
+    || record.headRefOid !== options.head
+    || !isParentOwnedPullRequest(record, operator, options.branch)
+    || !hasParentOwnedPullRequestBody(record, operator)
+    || record.body !== options.expectedBody
+    || !hasExactFrogIssueBinding(record.body, options.issueNumber)
+  ) {
+    throw new Error("pull request body authority changed before review");
+  }
+}
+
 function runCanonicalPullRequestReview(options: {
+  branch: string;
+  expectedBody: string;
   head: string;
   issueNumber: number;
   kind: "final" | "specialist";
@@ -1509,6 +1537,21 @@ function runCanonicalPullRequestReview(options: {
   transient: string;
   worktree: string;
 }): "findings" | "pass" | "retrospective-required" {
+  const operator = recoveryCommands.authenticatedOperator(options.primary);
+  assertExpectedPullRequestBody({
+    authenticatedOperator: operator,
+    branch: options.branch,
+    expectedBody: options.expectedBody,
+    head: options.head,
+    issueNumber: options.issueNumber,
+    pullRequest: options.pullRequest,
+    record: branchOpenPullRequest(
+      options.primary,
+      options.branch,
+      options.issueNumber,
+      recoveryCommands,
+    ),
+  });
   const label = options.kind === "specialist" ? "specialists" : "final-round-1";
   const reviewRoot = path.join(options.transient, label);
   mkdirSync(reviewRoot, { mode: 0o700, recursive: true });
@@ -1519,6 +1562,9 @@ function runCanonicalPullRequestReview(options: {
     options.transient,
     `${label}-checkout`,
   );
+  const expectedBodyPath = path.join(checkout, FROG_AUTOFIX_PR_BODY_PATH);
+  mkdirSync(path.dirname(expectedBodyPath), { mode: 0o700, recursive: true });
+  writePrivateFileAtomically(expectedBodyPath, options.expectedBody, 0o600);
   const marker = options.kind === "specialist"
     ? "SPECIALIST_REVIEW_COMPLETE"
     : "REVIEW_COMPLETE";
@@ -1526,6 +1572,8 @@ function runCanonicalPullRequestReview(options: {
     ? "completion-specialists"
     : "pr-review";
   const environment: NodeJS.ProcessEnv = {
+    REVIEW_GPT_EXPECTED_PR_BODY_PATH: FROG_AUTOFIX_PR_BODY_PATH,
+    REVIEW_GPT_EXPECTED_PR_BODY_SHA256: sha256(options.expectedBody),
     REVIEW_GPT_PR_URL: String(options.pullRequest),
     REVIEW_GPT_REVIEW_PHASE: options.kind === "specialist" ? "preliminary" : "final",
   };
@@ -1996,6 +2044,31 @@ export function resolveReviewBaselineState(
   };
 }
 
+export function recoveredReviewHandoffBody(options: {
+  authenticatedOperator: string;
+  currentHead: string;
+  existing: BranchPullRequestRecord | null;
+  recoveredExistingBody: string | null;
+  worktree: string;
+}): string | null {
+  const baseline = resolveReviewBaselineState(
+    options.worktree,
+    options.existing,
+    options.authenticatedOperator,
+    options.recoveredExistingBody,
+    options.currentHead,
+  );
+  if (!baseline.requiresHumanHandoff) return null;
+  if (!baseline.handoff || !options.recoveredExistingBody) {
+    throw new Error("review recovery handoff lacks a trusted local body");
+  }
+  return bodyWithParentMetadata(options.recoveredExistingBody, {
+    firstHead: baseline.firstHead,
+    handoff: baseline.handoff,
+    handoffHead: options.currentHead,
+  });
+}
+
 async function runEditOnlyCycle(options: {
   codexHome: string;
   issueNumber: number;
@@ -2191,8 +2264,18 @@ function finalizeReviewedRepair(
   issueNumber: number,
   pullRequest: number,
   head: string,
+  body: string,
 ): "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
-  return finalizeReadyRepair({ branch, issueNumber, pullRequest, head }, {
+  const operator = parseAuthenticatedGitHubOperator(
+    recoveryCommands.authenticatedOperator(primary),
+  );
+  return finalizeReadyRepair({
+    bodySha256: sha256(body),
+    branch,
+    issueNumber,
+    pullRequest,
+    head,
+  }, {
     autoMergeAllowed: (identity) => exactHeadIsLocalAgentOnly(
       primary,
       identity.head,
@@ -2218,7 +2301,13 @@ function finalizeReviewedRepair(
         recoveryCommands,
       );
       return current
-        ? { head: current.headRefOid, pullRequest: current.number }
+        ? {
+          bodyAuthoritative: hasParentOwnedPullRequestBody(current, operator),
+          bodySha256: sha256(current.body),
+          head: current.headRefOid,
+          issueBound: hasExactFrogIssueBinding(current.body, issueNumber),
+          pullRequest: current.number,
+        }
         : null;
     },
     issueIsClosed: () => issueIsClosed(primary, issueNumber),
@@ -2247,11 +2336,12 @@ function finalizeReviewedRepair(
       ],
       primary,
     ).status === 0,
-    pullRequestIsMerged: () => branchHasMergedPullRequest(
+    pullRequestIsMerged: (identity) => branchHasMergedPullRequest(
       primary,
       branch,
       issueNumber,
       recoveryCommands,
+      identity,
     ),
     refreshAndVerifyIssue: () => refreshAndVerifyExactIssue(
       primary,
@@ -2353,6 +2443,8 @@ async function reviewPublishAndFinalize(options: {
 
   if (!specialistPassed) {
     const specialist = runCanonicalPullRequestReview({
+      branch: options.branch,
+      expectedBody: body,
       head,
       issueNumber: options.issueNumber,
       kind: "specialist",
@@ -2373,6 +2465,8 @@ async function reviewPublishAndFinalize(options: {
 
   if (!finalPassed) {
     const finalReview = runCanonicalPullRequestReview({
+      branch: options.branch,
+      expectedBody: body,
       head,
       issueNumber: options.issueNumber,
       kind: "final",
@@ -2455,6 +2549,7 @@ async function reviewPublishAndFinalize(options: {
     options.issueNumber,
     pullRequest,
     head,
+    body,
   );
   if (result === "awaiting-human-conflict") {
     handoff = "review-findings";
@@ -2528,7 +2623,6 @@ async function runOnce() {
       );
       return;
     }
-    const codexHome = readConfiguredCodexHome();
     const worktree = prepareIssueWorktree(primary, issue.number);
     const workerMode = resolveWorkerMode(
       worktree,
@@ -2536,25 +2630,82 @@ async function runOnce() {
       issue.number,
       recoveryCommands,
     );
-    ensureWorkerTooling(worktree, workerMode === "implement");
-    const transientRoot = path.join(supportRoot, "transient");
-    mkdirSync(transientRoot, { mode: 0o700, recursive: true });
-    const transient = mkdtempSync(path.join(transientRoot, "run-"));
-    try {
-      const existingPullRequest = branchOpenPullRequest(
+    const existingPullRequest = branchOpenPullRequest(
+      primary,
+      branch,
+      issue.number,
+      recoveryCommands,
+    );
+    const recoveredExistingBody = existingPullRequest
+      ? preserveExistingPullRequestBody(
+        worktree,
+        issue.number,
+        existingPullRequest,
+      )
+      : null;
+    const authenticatedOperator = parseAuthenticatedGitHubOperator(
+      recoveryCommands.authenticatedOperator(primary),
+    );
+    const recoveredHandoffBody = recoveredReviewHandoffBody({
+      authenticatedOperator,
+      currentHead: requireCommand("git", ["rev-parse", "HEAD"], worktree),
+      existing: existingPullRequest,
+      recoveredExistingBody,
+      worktree,
+    });
+    if (recoveredHandoffBody) {
+      if (!existingPullRequest) {
+        throw new Error("review recovery handoff lost its pull request");
+      }
+      validatePullRequestBody(
+        recoveredHandoffBody,
+        issue.number,
+        homedir(),
+        userInfo().username,
+      );
+      refreshAndVerifyExactIssue(primary, issue.number);
+      const currentPullRequest = branchOpenPullRequest(
         primary,
         branch,
         issue.number,
         recoveryCommands,
       );
-      const recoveredExistingBody = existingPullRequest
-        ? preserveExistingPullRequestBody(
-          worktree,
-          issue.number,
-          existingPullRequest,
+      const currentHead = requireCommand("git", ["rev-parse", "HEAD"], worktree);
+      if (
+        !currentPullRequest
+        || currentPullRequest.number !== existingPullRequest.number
+        || currentPullRequest.headRefOid !== currentHead
+        || currentPullRequest.body !== existingPullRequest.body
+        || !isParentOwnedPullRequest(
+          currentPullRequest,
+          authenticatedOperator,
+          branch,
         )
-        : null;
+        || !hasParentOwnedPullRequestBody(
+          currentPullRequest,
+          authenticatedOperator,
+        )
+      ) {
+        throw new Error("pull request authority changed before handoff restamp");
+      }
+      updateParentPullRequestBody(
+        primary,
+        worktree,
+        existingPullRequest.number,
+        recoveredHandoffBody,
+      );
+      recordEvent("awaiting_human_merge", issue.number);
+      console.log(
+        "Repair reached a durable human-review handoff; continuing with later issues on the next run.",
+      );
+      return;
+    }
+    const transientRoot = path.join(supportRoot, "transient");
+    mkdirSync(transientRoot, { mode: 0o700, recursive: true });
+    const transient = mkdtempSync(path.join(transientRoot, "run-"));
+    try {
       if (workerMode === "implement") {
+        ensureWorkerTooling(worktree, true);
         const implementation = runParentReview({
           issueNumber: issue.number,
           label: "implementation",
@@ -2594,8 +2745,9 @@ async function runOnce() {
         ) {
           validatedWorkerPrBody(worktree, issue.number);
         } else {
+          ensureWorkerTooling(worktree, workerMode === "implement");
           await runEditOnlyCycle({
-            codexHome,
+            codexHome: readConfiguredCodexHome(),
             issueNumber: issue.number,
             lock,
             mode: workerMode,

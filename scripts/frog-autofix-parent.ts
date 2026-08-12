@@ -71,6 +71,9 @@ export function publishDraftRepair(
   dependencies.pushExactHead();
   const existing = dependencies.currentOpenPullRequest();
   if (existing) {
+    if (existing.headRefOid !== head) {
+      throw new Error("existing pull request head changed before body edit");
+    }
     dependencies.editPullRequest(existing.number);
     return existing.number;
   }
@@ -194,7 +197,7 @@ export function validatePullRequestBody(
     "## Verification",
     "## Change shape",
     "ReviewGPT context sensitivity: sensitive",
-    `Fixes #${issueNumber}`,
+    `Frog autofix issue: #${issueNumber}`,
   ];
   if (
     !body
@@ -207,11 +210,22 @@ export function validatePullRequestBody(
   ) {
     throw new Error("worker PR body failed its parent validation");
   }
+  if (!hasExactFrogIssueBinding(body, issueNumber)) {
+    throw new Error("worker PR body has an invalid issue relationship");
+  }
+}
+
+export function hasExactFrogIssueBinding(
+  body: string,
+  issueNumber: number,
+): boolean {
+  if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) return false;
+  const bindings = body.match(/^Frog autofix issue: #\d+$/gmu) ?? [];
   const closing = body.match(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:[\w.-]+\/[\w.-]+)?#\d+/giu)
     ?? [];
-  if (closing.length !== 1 || !closing[0]?.endsWith(`#${issueNumber}`)) {
-    throw new Error("worker PR body has an invalid issue-closing relationship");
-  }
+  return bindings.length === 1
+    && bindings[0] === `Frog autofix issue: #${issueNumber}`
+    && closing.length === 0;
 }
 
 export function renderRecoveredPullRequestBody(issueNumber: number): string {
@@ -269,7 +283,7 @@ The exact committed diff remains authoritative.
 
 ReviewGPT context sensitivity: sensitive
 
-Fixes #${issueNumber}
+Frog autofix issue: #${issueNumber}
 `;
 }
 

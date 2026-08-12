@@ -42,13 +42,14 @@ and the parent reruns review. The same PR predicate guards discovery, body
 hydration/editing, recovery, publication, finalization, and merged-state proof.
 Its server-side `main`/head query traverses every cursor page before foreign
 records are removed and the zero-or-one parent-owned cardinality is enforced.
-Mutable remote body text supplies baseline, PASS, closing, or handoff authority
+Mutable remote body text supplies baseline, PASS, or handoff authority
 only when `editor`/`lastEditedAt` proves the live operator made the latest edit,
 with creator fallback only for a never-edited body. Otherwise the parent
 captures an already validated local body before any child runs or writes one
 fixed recovery body. Baseline ancestry and human handoff resolution use that
 same trusted body. An exact or ancestor local human handoff is re-stamped at the
-current head and returns before canonical review or merge, while specialist and
+current head and returns before dependency checks, model work, worktree edits,
+commits, pushes, canonical review, or merge, while specialist and
 final PASS markers remain recoverable only from a current operator-owned remote
 body. A retained baseline equal to the current head with no handoff may replace
 the remote presentation and rerun exact-head reviews. A retained ancestor
@@ -93,10 +94,13 @@ refreshes `origin/main` and revalidates exact open Frog App author, label, and
 one protected-main binding authority immediately before push, then repeats that
 refresh and revalidation immediately before creating a new draft PR. Existing
 PR recovery still edits the one parent-owned PR after the first checkpoint.
-Preliminary and final ReviewGPT run through Murph's
-canonical packager and state files from a detached parent-only checkout whose
-review controls, including the complete prompt-preset directory, exactly match
-trusted `main`. Either review returning findings, a final review requiring a
+Preliminary and final ReviewGPT run through Murph's canonical packager and
+state files from a detached parent-only checkout. The archive contains the
+exact validated parent-local body rather than refetching mutable presentation;
+one current parent-owned PR projection must match its head, body, editor,
+non-closing issue binding, and digest before either model invocation. Review
+controls, including the complete prompt-preset directory, exactly match trusted
+`main`. Either review returning findings, a final review requiring a
 scope retrospective, or a candidate changing those controls creates the same
 durable human-review handoff; the automation does not ask another child to
 remediate review prose. After both reviews pass, it waits for required CI.
@@ -106,13 +110,21 @@ checks remain retryable. A human-authored descendant of an already handed-off
 head carries the same disposition forward and re-stamps it at the new exact
 head without another model turn. An exact closed-unmerged handoff also remains
 queue-complete, while a merged PR never substitutes for a newly verified
-repair of a reopened issue.
+repair of a reopened issue. The body carries one non-closing exact issue
+binding. After the guarded merge is independently proven, the parent explicitly
+closes only that issue; a later presentation edit cannot negate the proven
+merge. An exact parent-owned merged PR is queue-complete even if that explicit
+close fails or the issue is later reopened, so later scans neither close
+historical work nor let it starve newer issues.
 Immediately before merge it revalidates App author, label, one committed
-binding, PR head, checks, and current-base mergeability. A deterministic
-allowlist, using both sides of detected renames and copies, permits automatic
-merge only for local agent/Codex workflow paths, with semantic exceptions
-limited to the Frog script entry in `package.json` and this section of
-`ARCHITECTURE.md`. Any possible product-runtime, deployment, or GitHub-workflow
+binding, PR head, exact parent body digest/editor/non-closing issue binding,
+checks, and current-base mergeability. A deterministic exact-file allowlist,
+using both sides of detected renames and copies, permits automatic merge only
+for the enumerated Frog autofix implementation, launcher, worker, and focused
+test scripts, with semantic exceptions limited to the Frog script entry in
+`package.json` and this section of `ARCHITECTURE.md`. The GitHub Actions-owned
+`scripts/frog-pr-context.ts` is explicitly outside that authority. Any possible
+product-runtime, deployment, shared ReviewGPT-control, or GitHub-workflow
 change stays as a reviewed ready PR with its issue open for a human merge
 decision. Exact-head open or closed-unmerged handoff markers remove that issue
 from later automated scans so it cannot starve the queue. Only a newly verified

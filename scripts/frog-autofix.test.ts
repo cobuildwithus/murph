@@ -40,6 +40,7 @@ import {
 } from "./frog-autofix-lib.ts";
 import {
   acquireRunLock,
+  assertExpectedPullRequestBody,
   bodyHasExactReviewPass,
   bodyHandoff,
   bodyHandoffRecord,
@@ -51,6 +52,7 @@ import {
   discoverEligibleIssues,
   primaryAdvanceRequiresRestart,
   recoverablePullRequestBody,
+  recoveredReviewHandoffBody,
   requiredCheckWatchHandoff,
   requiredPullRequestCheckState,
   resolveReviewBaselineState,
@@ -91,6 +93,7 @@ const repositoryRoot = path.resolve(
   "..",
 );
 const authenticatedOperator = "automation-operator";
+const authoritativeBodySha256 = "d".repeat(64);
 const pullRequestAuthority = (branch: string) => ({
   author: { login: authenticatedOperator },
   baseRefName: "main",
@@ -324,7 +327,7 @@ describe("Frog autofix guards", () => {
     const openPullRequests: BranchPullRequestRecord[] = [
       {
         ...pullRequestAuthority("agent/frog-autofix-9"),
-        body: `Fixes #9\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
+        body: `Frog autofix issue: #9\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
         headRefOid: firstHead,
         isDraft: true,
         number: 90,
@@ -332,7 +335,7 @@ describe("Frog autofix guards", () => {
       },
       {
         ...pullRequestAuthority("agent/frog-autofix-10"),
-        body: `Fixes #10\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
+        body: `Frog autofix issue: #10\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
         headRefOid: secondHead,
         isDraft: false,
         number: 100,
@@ -340,7 +343,7 @@ describe("Frog autofix guards", () => {
       },
       {
         ...pullRequestAuthority("agent/frog-autofix-11"),
-        body: `Fixes #11\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
+        body: `Frog autofix issue: #11\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
         headRefOid: secondHead,
         isDraft: true,
         number: 110,
@@ -348,7 +351,7 @@ describe("Frog autofix guards", () => {
       },
       {
         ...pullRequestAuthority("agent/frog-autofix-12"),
-        body: `Fixes #12\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
+        body: `Frog autofix issue: #12\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
         headRefOid: secondHead,
         isDraft: true,
         number: 120,
@@ -357,7 +360,7 @@ describe("Frog autofix guards", () => {
       {
         ...pullRequestAuthority("agent/frog-autofix-13"),
         author: { login: "different-operator" },
-        body: `Fixes #13\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
+        body: `Frog autofix issue: #13\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
         headRefOid: secondHead,
         isDraft: true,
         number: 130,
@@ -365,7 +368,7 @@ describe("Frog autofix guards", () => {
       },
       {
         ...pullRequestAuthority("agent/frog-autofix-14"),
-        body: `Fixes #14\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
+        body: `Frog autofix issue: #14\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
         headRefOid: secondHead,
         headRepositoryOwner: { login: "foreign-owner" },
         isCrossRepository: true,
@@ -375,7 +378,7 @@ describe("Frog autofix guards", () => {
       },
       {
         ...pullRequestAuthority("agent/frog-autofix-15"),
-        body: `Fixes #15\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
+        body: `Frog autofix issue: #15\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
         editor: { login: "different-operator" },
         headRefOid: secondHead,
         isDraft: true,
@@ -384,22 +387,37 @@ describe("Frog autofix guards", () => {
       },
       {
         ...pullRequestAuthority("agent/frog-autofix-16"),
-        body: `Fixes #16\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
+        body: `Frog autofix issue: #16\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
         editor: { login: "different-operator" },
         headRefOid: secondHead,
         isDraft: true,
         number: 160,
         state: "CLOSED",
       },
+      {
+        ...pullRequestAuthority("agent/frog-autofix-17"),
+        body: "Foreign presentation after merge",
+        editor: { login: "different-operator" },
+        headRefOid: secondHead,
+        isDraft: false,
+        number: 170,
+        state: "MERGED",
+      },
     ];
     expect([...completedHandoffIssueNumbers(openPullRequests, authenticatedOperator)])
-      .toEqual([9, 10, 11]);
+      .toEqual([9, 10, 11, 17]);
     expect(hasParentOwnedPullRequestBody(openPullRequests[0], authenticatedOperator))
       .toBe(true);
     expect(hasParentOwnedPullRequestBody(openPullRequests[6], authenticatedOperator))
       .toBe(false);
 
-    const issues = [trustedIssue(9), trustedIssue(10), trustedIssue(11), trustedIssue(12)];
+    const issues = [
+      trustedIssue(9),
+      trustedIssue(10),
+      trustedIssue(11),
+      trustedIssue(12),
+      trustedIssue(17),
+    ];
     expect(discoverEligibleIssues("<ROOT>", {
       authenticatedOperator: () => authenticatedOperator,
       assertRepository: () => undefined,
@@ -415,7 +433,7 @@ describe("Frog autofix guards", () => {
   it("replaces child-authored review metadata with exact parent state", () => {
     const head = "c".repeat(40);
     const body = bodyWithParentMetadata(
-      `Fixes #42\nFrog autofix final review: PASS at ${"0".repeat(40)}\n`,
+      `Frog autofix issue: #42\nFrog autofix final review: PASS at ${"0".repeat(40)}\n`,
       {
         firstHead: head,
         handoff: "review-findings",
@@ -452,7 +470,7 @@ describe("Frog autofix guards", () => {
     const forged = {
       ...pullRequestAuthority(branch),
       body: [
-        "Fixes #42",
+        "Frog autofix issue: #42",
         `ReviewGPT first-reviewed head: ${head}`,
         `Frog autofix specialist review: PASS at ${head}`,
         `Frog autofix final review: PASS at ${head}`,
@@ -476,7 +494,7 @@ describe("Frog autofix guards", () => {
     expect(bodyHandoff(closedHandoffBody, head)).toBe("review-findings");
     const neverEdited = {
       ...forged,
-      body: "Fixes #42",
+      body: "Frog autofix issue: #42",
       editor: null,
       lastEditedAt: null,
     };
@@ -643,14 +661,17 @@ describe("Frog autofix guards", () => {
           handoff: kind,
           requiresHumanHandoff: true,
         });
-        const restamped = bodyWithParentMetadata(exactLocalHandoff, {
-          firstHead: exactState.firstHead,
-          handoff: exactState.handoff ?? undefined,
-          handoffHead: trustedHead,
+        const restamped = recoveredReviewHandoffBody({
+          authenticatedOperator,
+          currentHead: trustedHead,
+          existing: { ...foreignEdited, headRefOid: trustedHead },
+          recoveredExistingBody: exactLocalHandoff,
+          worktree: root,
         });
+        expect(restamped).not.toBeNull();
         const restoredPullRequest = {
           ...foreignEdited,
-          body: restamped,
+          body: restamped!,
           editor: { login: authenticatedOperator },
           headRefOid: trustedHead,
         };
@@ -679,6 +700,23 @@ describe("Frog autofix guards", () => {
         handoff: "product-runtime",
         requiresHumanHandoff: true,
       });
+      writeFileSync(path.join(root, "human-in-progress.txt"), "do not publish\n");
+      const dirtyBefore = readFileSync(
+        path.join(root, "human-in-progress.txt"),
+        "utf8",
+      );
+      const ancestorRestamp = recoveredReviewHandoffBody({
+        authenticatedOperator,
+        currentHead: descendantHead,
+        existing: foreignEdited,
+        recoveredExistingBody: ancestorHandoff,
+        worktree: root,
+      });
+      expect(ancestorRestamp).not.toBeNull();
+      expect(bodyHandoff(ancestorRestamp!, descendantHead))
+        .toBe("product-runtime");
+      expect(readFileSync(path.join(root, "human-in-progress.txt"), "utf8"))
+        .toBe(dirtyBefore);
 
       const exactPassBody = bodyWithParentMetadata(
         renderRecoveredPullRequestBody(42),
@@ -711,6 +749,85 @@ describe("Frog autofix guards", () => {
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
+  });
+
+  it("requires the exact parent-owned body before either canonical review", () => {
+    const branch = "agent/frog-autofix-42";
+    const head = "a".repeat(40);
+    const expectedBody = bodyWithParentMetadata(
+      renderRecoveredPullRequestBody(42),
+      { firstHead: head },
+    );
+    const record = {
+      ...pullRequestAuthority(branch),
+      body: expectedBody,
+      headRefOid: head,
+      isDraft: true,
+      number: 99,
+      state: "OPEN" as const,
+    };
+    const assertRecord = (candidate: BranchPullRequestRecord | null) => (
+      assertExpectedPullRequestBody({
+        authenticatedOperator,
+        branch,
+        expectedBody,
+        head,
+        issueNumber: 42,
+        pullRequest: 99,
+        record: candidate,
+      })
+    );
+
+    expect(() => assertRecord(record)).not.toThrow();
+    expect(() => assertRecord({
+      ...record,
+      editor: { login: "different-operator" },
+    })).toThrow("body authority changed before review");
+    expect(() => assertRecord({
+      ...record,
+      body: expectedBody.replace("bounded local autofix", "foreign intent"),
+    })).toThrow("body authority changed before review");
+    expect(() => assertRecord({
+      ...record,
+      body: expectedBody.replace(
+        "Frog autofix issue: #42",
+        "Frog autofix issue: #43",
+      ),
+    })).toThrow("body authority changed before review");
+    expect(() => assertRecord({ ...record, headRefOid: "b".repeat(40) }))
+      .toThrow("body authority changed before review");
+    const source = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    const canonical = source.slice(
+      source.indexOf("function runCanonicalPullRequestReview"),
+      source.indexOf("function downloadImplementationPatch"),
+    );
+    expect(canonical.indexOf("assertExpectedPullRequestBody({"))
+      .toBeLessThan(canonical.indexOf("prepareTrustedReviewCheckout("));
+    expect(canonical.indexOf("assertExpectedPullRequestBody({"))
+      .toBeLessThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
+  });
+
+  it("returns recovered handoffs before tooling or child orchestration", () => {
+    const source = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    const runOnce = source.slice(source.indexOf("async function runOnce()"));
+    const handoff = runOnce.indexOf("const recoveredHandoffBody =");
+    expect(handoff).toBeGreaterThanOrEqual(0);
+    expect(handoff).toBeLessThan(runOnce.indexOf("ensureWorkerTooling("));
+    expect(handoff).toBeLessThan(runOnce.indexOf("runParentReview({"));
+    expect(handoff).toBeLessThan(runOnce.indexOf("runEditOnlyCycle({"));
+    const restamp = runOnce.slice(handoff, runOnce.indexOf("const transientRoot"));
+    expect(restamp).toContain(
+      "currentPullRequest.body !== existingPullRequest.body",
+    );
+    expect(restamp).toContain("!hasParentOwnedPullRequestBody(");
+    expect(restamp.indexOf("currentPullRequest.body !== existingPullRequest.body"))
+      .toBeLessThan(restamp.indexOf("updateParentPullRequestBody("));
   });
 
   it("renders a two-hour LaunchAgent without direct local identifiers", () => {
@@ -1021,20 +1138,20 @@ describe("Frog autofix guards", () => {
     expect(runScenario({
       ahead: 1,
       localHead: implementationHead,
-      pullRequest: { body: "Fixes #42", state: "OPEN" },
+      pullRequest: { body: "Frog autofix issue: #42", state: "OPEN" },
       remoteBranch: true,
     })).toMatchObject({ mode: "resume" });
     expect(runScenario({
       ahead: 1,
       dirty: true,
       localHead: implementationHead,
-      pullRequest: { body: "Fixes #42", state: "OPEN" },
+      pullRequest: { body: "Frog autofix issue: #42", state: "OPEN" },
       remoteBranch: true,
     })).toMatchObject({ mode: "resume" });
     expect(() => runScenario({
       ahead: 1,
       localHead: implementationHead,
-      pullRequest: { body: "Fixes #42", state: "MERGED" },
+      pullRequest: { body: "Frog autofix issue: #42", state: "MERGED" },
       remoteBranch: true,
     })).toThrow("recovery state is ambiguous");
     expect(() => runScenario({
@@ -1045,12 +1162,12 @@ describe("Frog autofix guards", () => {
     })).toThrow("ambiguous recovery state");
   });
 
-  it("requires one exact merged branch head and closing relationship", () => {
+  it("requires one exact merged branch head independent of mutable body text", () => {
     const branch = "agent/frog-autofix-42";
     const mergedHead = "b".repeat(40);
     const record = {
       ...pullRequestAuthority(branch),
-      body: "Fixes #42",
+      body: "Frog autofix issue: #42",
       headRefOid: mergedHead,
       isDraft: false,
       number: 99,
@@ -1081,6 +1198,14 @@ describe("Frog autofix guards", () => {
       branch,
       42,
       commands(mergedHead, "Related to #42"),
+      { head: mergedHead, pullRequest: 99 },
+    )).toBe(true);
+    expect(branchHasMergedPullRequest(
+      "<ROOT>",
+      branch,
+      42,
+      commands(mergedHead),
+      { head: mergedHead, pullRequest: 100 },
     )).toBe(false);
 
     const foreign = {
@@ -1125,6 +1250,31 @@ describe("Frog autofix guards", () => {
       "create",
       "lookup",
     ]);
+
+    const existingEvents: string[] = [];
+    expect(publishDraftRepair(head, {
+      createPullRequest: () => existingEvents.push("create"),
+      currentOpenPullRequest: () => {
+        existingEvents.push("lookup");
+        return { headRefOid: head, number: 99 };
+      },
+      editPullRequest: () => existingEvents.push("edit"),
+      pushExactHead: () => existingEvents.push("push"),
+      refreshAndVerifyIssue: () => existingEvents.push("verify"),
+    })).toBe(99);
+    expect(existingEvents).toEqual(["verify", "push", "lookup", "edit"]);
+    expect(() => publishDraftRepair(head, {
+      createPullRequest: () => undefined,
+      currentOpenPullRequest: () => ({
+        headRefOid: "b".repeat(40),
+        number: 99,
+      }),
+      editPullRequest: () => {
+        throw new Error("body edit must not run");
+      },
+      pushExactHead: () => undefined,
+      refreshAndVerifyIssue: () => undefined,
+    })).toThrow("head changed before body edit");
   });
 
   it("creates no draft after issue authority is revoked at either checkpoint", () => {
@@ -1168,7 +1318,7 @@ describe("Frog autofix guards", () => {
     }));
     const open = {
       ...pullRequestAuthority(branch),
-      body: `Fixes #42\n\nFrog autofix handoff: review-findings at ${head}\n`,
+      body: `Frog autofix issue: #42\n\nFrog autofix handoff: review-findings at ${head}\n`,
       headRefOid: head,
       isDraft: true,
       number: 101,
@@ -1267,6 +1417,7 @@ describe("Frog autofix guards", () => {
 
   it("keeps merge and issue closure in a revalidated non-model parent", () => {
     const identity = {
+      bodySha256: authoritativeBodySha256,
       branch: "agent/frog-autofix-42",
       head: "a".repeat(40),
       issueNumber: 42,
@@ -1285,7 +1436,13 @@ describe("Frog autofix guards", () => {
       },
       currentPullRequest: () => {
         events.push("pr");
-        return { head: identity.head, pullRequest: identity.pullRequest };
+        return {
+          bodyAuthoritative: true,
+          bodySha256: identity.bodySha256,
+          head: identity.head,
+          issueBound: true,
+          pullRequest: identity.pullRequest,
+        };
       },
       issueIsClosed: () => closed,
       merge: () => events.push("merge"),
@@ -1314,6 +1471,7 @@ describe("Frog autofix guards", () => {
       "pr",
       "checks",
       "scope",
+      "pr",
       "merge",
       "close",
     ]);
@@ -1321,20 +1479,42 @@ describe("Frog autofix guards", () => {
 
   it("fails closed before merge when live authority, head, checks, or mergeability drift", () => {
     const identity = {
+      bodySha256: authoritativeBodySha256,
       branch: "agent/frog-autofix-42",
       head: "a".repeat(40),
       issueNumber: 42,
       pullRequest: 99,
     };
-    for (const failure of ["authority", "head", "checks"] as const) {
+    for (const failure of [
+      "authority",
+      "body",
+      "body-owner",
+      "checks",
+      "head",
+      "issue-binding",
+    ] as const) {
       let mergeCalls = 0;
       let verificationCalls = 0;
       const dependencies: ReadyRepairFinalizationDependencies = {
         autoMergeAllowed: () => true,
         closeIssue: () => undefined,
         currentPullRequest: () => failure === "head"
-          ? { head: "b".repeat(40), pullRequest: 99 }
-          : { head: identity.head, pullRequest: identity.pullRequest },
+          ? {
+            bodyAuthoritative: true,
+            bodySha256: identity.bodySha256,
+            head: "b".repeat(40),
+            issueBound: true,
+            pullRequest: 99,
+          }
+          : {
+            bodyAuthoritative: failure !== "body-owner",
+            bodySha256: failure === "body"
+              ? "e".repeat(64)
+              : identity.bodySha256,
+            head: identity.head,
+            issueBound: failure !== "issue-binding",
+            pullRequest: identity.pullRequest,
+          },
         issueIsClosed: () => false,
         merge: () => {
           mergeCalls += 1;
@@ -1355,7 +1535,10 @@ describe("Frog autofix guards", () => {
       autoMergeAllowed: () => true,
       closeIssue: () => undefined,
       currentPullRequest: () => ({
+        bodyAuthoritative: true,
+        bodySha256: identity.bodySha256,
         head: identity.head,
+        issueBound: true,
         pullRequest: identity.pullRequest,
       }),
       issueIsClosed: () => false,
@@ -1373,6 +1556,7 @@ describe("Frog autofix guards", () => {
     let mergeCalls = 0;
     let closeCalls = 0;
     const outcome = finalizeReadyRepair({
+      bodySha256: authoritativeBodySha256,
       branch: "agent/frog-autofix-42",
       head: "a".repeat(40),
       issueNumber: 42,
@@ -1382,7 +1566,13 @@ describe("Frog autofix guards", () => {
       closeIssue: () => {
         closeCalls += 1;
       },
-      currentPullRequest: () => ({ head: "a".repeat(40), pullRequest: 99 }),
+      currentPullRequest: () => ({
+        bodyAuthoritative: true,
+        bodySha256: authoritativeBodySha256,
+        head: "a".repeat(40),
+        issueBound: true,
+        pullRequest: 99,
+      }),
       issueIsClosed: () => false,
       merge: () => {
         mergeCalls += 1;
@@ -1490,11 +1680,26 @@ describe("Frog autofix guards", () => {
         "scripts/frog-autofix.test.ts",
       ],
     })).toBe(true);
+    for (const localPath of [
+      "scripts/frog-autofix",
+      "scripts/frog-autofix-command.ts",
+      "scripts/frog-autofix-finalize.ts",
+      "scripts/frog-autofix-lib.ts",
+      "scripts/frog-autofix-parent.ts",
+      "scripts/frog-autofix-recovery.ts",
+      "scripts/frog-autofix-worker.md",
+      "scripts/frog-autofix.test.ts",
+      "scripts/frog-autofix.ts",
+    ]) expect(localAgentOnlyChange({ paths: [localPath] })).toBe(true);
     for (const productPath of [
       "apps/web/app/page.tsx",
       "packages/assistant-runtime/src/runtime.ts",
       ".github/workflows/release.yml",
       "scripts/deploy-production.sh",
+      "scripts/frog",
+      "scripts/frog-pr-context.ts",
+      "scripts/frog-safe.ts",
+      "scripts/review-gpt.config.sh",
     ]) {
       expect(localAgentOnlyChange({ paths: [productPath] })).toBe(false);
     }
@@ -1521,6 +1726,11 @@ describe("Frog autofix guards", () => {
     )).toEqual(["scripts/deploy-production.sh", "scripts/frog-copy.ts"]);
     expect(() => authorityChangedPaths("", "R100\0only-one-path\0"))
       .toThrow("incomplete copy or rename");
+    const workflowHelperRename = authorityChangedPaths(
+      "scripts/frog-autofix.ts\0scripts/frog-pr-context.ts\0",
+      "R100\0scripts/frog-pr-context.ts\0scripts/frog-autofix.ts\0",
+    );
+    expect(localAgentOnlyChange({ paths: workflowHelperRename })).toBe(false);
   });
 
   it("gets prohibited sources from real Git rename and copy fixtures", () => {
@@ -1686,12 +1896,12 @@ describe("Frog autofix guards", () => {
       "## Change shape",
       "Source and tests only.",
       "ReviewGPT context sensitivity: sensitive",
-      "Fixes #42",
+      "Frog autofix issue: #42",
     ].join("\n\n");
     expect(() => validatePullRequestBody(body, 42, "<HOME>", "<USER>"))
       .not.toThrow();
     expect(() => validatePullRequestBody(`${body}\nFixes #43`, 42, "<HOME>", "<USER>"))
-      .toThrow("issue-closing relationship");
+      .toThrow("issue relationship");
   });
 
   it("recovers only dead or PID-reused locks and preserves live ownership", () => {
@@ -1862,9 +2072,21 @@ describe("Frog autofix guards", () => {
     expect(envelope.timedOut).toBe(true);
     const descendantPid = Number(envelope.stdout);
     expect(Number.isSafeInteger(descendantPid)).toBe(true);
-    expect(() => process.kill(descendantPid, 0)).toThrow(
-      expect.objectContaining({ code: "ESRCH" }),
-    );
+    const reapDeadline = Date.now() + 2_000;
+    let disappeared = false;
+    while (Date.now() < reapDeadline) {
+      try {
+        process.kill(descendantPid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+          disappeared = true;
+          break;
+        }
+        throw error;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    expect(disappeared).toBe(true);
   });
 
   it("waits for exact child termination when lock identity recording fails", async () => {

@@ -77,7 +77,9 @@ preserve as ready, or launder suspicious state into a PR.
    - `## Verification`
    - `## Change shape`
    - exactly `ReviewGPT context sensitivity: sensitive`
-   - exactly one closing relationship: `Fixes #{{ISSUE_NUMBER}}`
+   - exactly one non-closing binding: `Frog autofix issue: #{{ISSUE_NUMBER}}`
+   - no `Close`, `Fix`, or `Resolve` issue-closing relationship; the parent
+     closes only the exact bound issue after proving the merge
 6. Exit successfully only when the local implementation and PR draft are ready
    for parent validation. Do not create readiness, review-response,
    model-verification, or GitHub-state files; the parent does not trust

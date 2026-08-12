@@ -186,7 +186,12 @@ Last verified: 2026-08-12
   and cleaned back to `origin/main`. Dirty work may instead resume only when
   one open parent-owned PR, its remote branch, and the local committed head
   identify the same repair; mutable remote body text is unnecessary for this
-  worktree-preservation decision. The edit-only child finishes the interrupted
+  worktree-preservation decision. Immediately after that recovery projection,
+  the parent resolves the captured local baseline and exact/ancestor handoff.
+  A handoff is re-stamped at the current head and returns before dependency
+  checks, either model, the edit-only child, commits, or pushes; missing
+  `node_modules` therefore cannot strand already human-owned work. Only a
+  no-handoff state proceeds. The edit-only child finishes the interrupted
   diff and the parent reruns the review gates. Resumable runs cannot reacquire or
   reapply an implementation patch. A clean parent commit interrupted before its
   first push also resumes when no remote branch or PR exists; the validated
@@ -232,8 +237,12 @@ Last verified: 2026-08-12
   binds the local body to the immutable review baseline, refreshes `origin/main`
   and exact issue authority immediately before push, and repeats that refresh
   immediately before creating a new draft PR. It then runs the canonical
-  preliminary and final ReviewGPT gates from a trusted parent checkout, and
-  observes CI. A review finding or final retrospective requirement becomes the
+  preliminary and final ReviewGPT gates from a trusted parent checkout. Each
+  archive copies the validated parent-local body, while one current PR
+  projection must still match its exact head, body, latest-editor provenance,
+  non-closing issue binding, and digest before the model starts. Mutable remote
+  presentation is never substituted into the archive. The parent then observes
+  CI. A review finding or final retrospective requirement becomes the
   same durable draft human handoff rather than an autonomous remediation loop;
   later queue discovery skips that exact-head handoff. A human update whose new
   head descends from the marked head carries the disposition forward at the
@@ -243,17 +252,23 @@ Last verified: 2026-08-12
   and uses a validated parent-local body captured before any child or one fixed
   recovery body. Baseline ancestry and exact-or-ancestor human handoff recovery
   use that same trusted body; a recovered handoff is re-stamped at the current
-  head and returns before canonical review or merge. Specialist and final PASS
+  head and returns before any tooling/model/mutation boundary. Specialist and final PASS
   markers still require the current remote body to be parent-owned. An unchanged
   trusted baseline without a handoff restores presentation and reruns review; a
   newer remote descendant preserves the older baseline and receives the
   existing review-findings handoff, while missing trusted baseline evidence
   receives the fixed-body handoff without autonomous rebaselining. Before merge
-  it revalidates live issue authority, PR head, required checks, current-base
-  mergeability, and both old and new paths of any rename or copy. Proven local
-  agent/Codex workflow changes may merge and close automatically; possible
-  product-runtime changes remain as reviewed ready PRs with open issues for
-  human approval.
+  it revalidates live issue authority, PR head, exact parent body digest/editor/
+  issue binding, required checks, current-base mergeability, and both old and
+  new paths of any rename or copy. Only the enumerated Frog autofix script files
+  and documented local process surfaces may merge automatically;
+  `scripts/frog-pr-context.ts` and every other GitHub Actions/runtime path remain
+  human-owned. The body has no closing keyword. Once the exact merge is proven,
+  the parent explicitly closes only the bound issue, and subsequent
+  presentation edits cannot invalidate that merge proof. If the explicit close
+  call still fails, the exact parent-owned merged PR remains queue-complete so
+  later issues advance; a later interval neither closes a reopened issue nor
+  re-enters the historical branch.
 - A successful pass verifies both a merged PR for the deterministic branch and
   the closed issue before attempting ordinary worktree retirement. Retirement
   still uses `scripts/retire-worktree` and silently preserves the checkout when
