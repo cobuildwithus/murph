@@ -24,6 +24,7 @@ export async function grantHostedVaultShareTx(input: {
   grantorMemberId: string;
   destinationMemberId: string;
   projectionScope: HostedVaultShareProjectionScope;
+  refreshMaterializedProjection?: boolean;
   now: Date;
 }): Promise<HostedVaultShareGrantResult> {
   const projectionScope = assertSupportedProjectionScope(input.projectionScope);
@@ -87,14 +88,17 @@ export async function grantHostedVaultShareTx(input: {
     }
   }
 
-  if (existing.status === "granted") {
+  const refreshMaterializedProjection = existing.status === "granted"
+    && input.refreshMaterializedProjection === true
+    && existing.projectionSnapshotCiphertext !== null;
+  if (existing.status === "granted" && !refreshMaterializedProjection) {
     return {
       id: existing.id,
       requiresProjection: existing.projectionSnapshotCiphertext === null,
     };
   }
 
-  const reactivatedId = generateHostedVaultShareId();
+  const nextGenerationId = generateHostedVaultShareId();
   await input.tx.hostedVaultShare.update({
     where: {
       grantorMemberId_projectionScopeKey_destinationMemberId: {
@@ -104,7 +108,7 @@ export async function grantHostedVaultShareTx(input: {
       },
     },
     data: {
-      id: reactivatedId,
+      id: nextGenerationId,
       grantedAt: input.now,
       projectionKind,
       projectionSnapshotCiphertext: null,
@@ -114,7 +118,7 @@ export async function grantHostedVaultShareTx(input: {
       status: "granted",
     },
   });
-  return { id: reactivatedId, requiresProjection: true };
+  return { id: nextGenerationId, requiresProjection: true };
 }
 
 export async function revokeHostedVaultSharesTx(input: {

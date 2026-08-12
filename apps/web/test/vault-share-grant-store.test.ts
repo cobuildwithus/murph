@@ -199,6 +199,55 @@ describe("grantHostedVaultShareTx", () => {
     expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
   });
 
+  it("starts a fresh pending generation when recent-date consent is reaffirmed", async () => {
+    const tx = {
+      hostedVaultShare: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => ({
+          id: "share_previous_generation",
+          projectionSnapshotCiphertext: "ciphertext_from_previous_window",
+          status: "granted",
+        })),
+        update: vi.fn(async () => undefined),
+      },
+    } as unknown as Prisma.TransactionClient & {
+      hostedVaultShare: {
+        create: ReturnType<typeof vi.fn>;
+        findUnique: ReturnType<typeof vi.fn>;
+        update: ReturnType<typeof vi.fn>;
+      };
+    };
+    const now = new Date("2026-07-02T00:00:00.000Z");
+
+    const result = await grantHostedVaultShareTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: SLEEP_SCOPE,
+      refreshMaterializedProjection: true,
+      tx,
+    });
+
+    expect(result.id).not.toBe("share_previous_generation");
+    expect(result.requiresProjection).toBe(true);
+    expect(tx.hostedVaultShare.update).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        grantedAt: now,
+        id: result.id,
+        projectionSnapshotCiphertext: null,
+        revokedAt: null,
+        status: "granted",
+      }),
+      where: {
+        grantorMemberId_projectionScopeKey_destinationMemberId: {
+          destinationMemberId: "member_referee",
+          grantorMemberId: "member_grantor",
+          projectionScopeKey: SLEEP_SCOPE_KEY,
+        },
+      },
+    });
+  });
+
   it("marks an active null snapshot as still requiring projection", async () => {
     const tx = {
       hostedVaultShare: {

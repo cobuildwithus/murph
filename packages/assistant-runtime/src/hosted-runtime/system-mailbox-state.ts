@@ -523,6 +523,15 @@ function parseHostedSystemMailboxRecordRequest(
   }
   const record = value as Record<string, unknown>;
 
+  if (record.kind === "vault-share.projection") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["kind"],
+      "hosted system mailbox vault-share projection postCheckpointRecord",
+    );
+    return { kind: "vault-share.projection" };
+  }
+
   if (record.kind === "clinical-records.outcome-recorded") {
     assertHostedSystemMailboxRecordKeys(
       record,

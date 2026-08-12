@@ -317,6 +317,28 @@ export function isHostedVaultShareCurrentStateProjectionKind(
   return kinds.includes(kind);
 }
 
+/**
+ * Kinds whose consent promise and producer contract are both bounded to recent
+ * member-local civil dates. Reaffirming one of these permissions starts a fresh
+ * projection generation so an older materialized window cannot be reused under
+ * the new consent decision.
+ */
+export function isHostedVaultShareRecentDateProjectionKind(
+  kind: HostedVaultShareProjectionKind,
+): boolean {
+  return kind !== "profile-name.v0"
+    && kind !== "time-zone.v0"
+    && kind !== "group-email.v0"
+    && kind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND;
+}
+
+export const HOSTED_VAULT_SHARE_RECENT_DATE_PROJECTION_KINDS =
+  Object.freeze(
+    HOSTED_VAULT_SHARE_PROJECTION_KINDS.filter(
+      isHostedVaultShareRecentDateProjectionKind,
+    ),
+  );
+
 export type HostedVaultShareProjectionKind =
   (typeof HOSTED_VAULT_SHARE_PROJECTION_KINDS)[number];
 

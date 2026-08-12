@@ -14,6 +14,9 @@ import {
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
+  hostedVaultShareProjectionKindToScope,
+} from "@murphai/hosted-execution/vault-share";
+import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
@@ -2101,6 +2104,108 @@ describe("hosted system mailbox notification execution context", () => {
           }),
         }),
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("retries vault-share maintenance after projection fails and advances only after success", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control:vault-share-projection",
+      kind: "runtime.maintenance-requested",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+    const deliver = vi.fn()
+      .mockRejectedValueOnce(new Error("synthetic projection failure"))
+      .mockResolvedValueOnce({ status: "delivered" });
+    const runtime = createRuntime({
+      vaultSharePort: {
+        deliver,
+        async listActiveProjectionScopes() {
+          return [hostedVaultShareProjectionKindToScope("sleep-times.v0")];
+        },
+      },
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: { kind: "vault-share.projection" },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlItem({
+          dedupeKey: "runtime-control:vault-share-projection",
+          id: "mailbox_item_vault_share_projection",
+          kind: "runtime.maintenance-requested",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(prepared?.status, "processed");
+      assert.equal(prepared.item.postCheckpointRecord?.kind, "vault-share.projection");
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "1",
+        state: await readHostedSystemMailboxState(workspace.vaultRoot),
+      })).toBe("0");
+
+      const failed = await recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      });
+      expect(failed).toEqual(expect.objectContaining({
+        failed: 1,
+        recorded: 0,
+      }));
+      const failedState = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(failedState.pending).toEqual([
+        expect.objectContaining({
+          itemId: "mailbox_item_vault_share_projection",
+          status: "recording",
+        }),
+      ]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "1",
+        state: failedState,
+      })).toBe("0");
+
+      const retry = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => failed.nextWakeAt ?? FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(retry?.status, "recording");
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: retry.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 1,
+      });
+      expect(deliver).toHaveBeenCalledTimes(2);
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({ pending: [] });
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "1",
+        state: await readHostedSystemMailboxState(workspace.vaultRoot),
+      })).toBe("1");
     } finally {
       await workspace.cleanup();
     }

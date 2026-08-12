@@ -318,6 +318,11 @@ the exact active share id and scope. An encrypted empty set means observed but
 missing; `null` means no snapshot has been supplied. Revoke and regrant clear
 the column in the same authority transaction, and regrant rotates the share id,
 so a stale producer cannot update a later grant generation.
+Explicit reaffirmation of a recent-date permission also rotates the share id
+and clears a materialized snapshot in that transaction. The new consent decision
+therefore becomes `pending` immediately and can never reuse records assembled
+under an older recent-date window; current-state, email, and device-status grants
+remain idempotent.
 
 The grantor's personal runtime offers this replacement projection only after its
 source state crosses the existing successful checkpoint boundary. A pending
@@ -464,7 +469,8 @@ materialization excludes the corresponding vault-relative subtrees. No
 foreground cleanup pass or revoke wake is part of the boundary.
 
 When a join or permission acceptance admits a grant generation whose snapshot
-is still null, Web appends one generation-stable
+is null, including a recent-date generation refreshed by explicit
+reaffirmation, Web appends one generation-stable
 `runtime.maintenance-requested` mailbox row in the same transaction as the
 grant. An append failure rolls back the grant. After commit, Web signals that
 exact mailbox pointer alongside join-confirmation recovery, so either
@@ -473,6 +479,27 @@ mailbox-handoff sweep also selects the unconsumed maintenance row, making a
 failed first Temporal signal or a process stop after commit recoverable without
 unrelated member activity. This adds no projection owner; the durable null
 snapshot remains visible as `pending` until the member runtime materializes it.
+
+The runtime does not mark that maintenance row handled when it first imports
+the control wake. It retains a `vault-share.projection` post-checkpoint record,
+runs the existing projection offer only after the source checkpoint, and removes
+the mailbox obligation only after delivery or a terminal no-active/no-projectable
+result. Missing ports and projection errors retain the same recording item with
+the existing bounded retry delay, so the system-lane handled watermark stays
+behind it and the scheduled sweep can resignal it. A crash, foreground
+preemption, or partial multi-scope failure therefore cannot turn a pending share
+into permanently consumed work.
+
+The rollout is consumer-first. Deploy the runtime/Worker consumer, capture one
+stable cutoff, then run the bounded recent-date generation backfill under the
+production Web environment until its count-only result reports no selected
+grantors. Each grantor transaction rotates at most 25 materialized, pre-cutoff
+group health generations, clears their snapshots, and appends one durable
+maintenance row; exact signaling occurs after commit and its failure is
+recoverable from the row. Wait for that maintenance backlog to drain before deploying the Web
+consent/read producer. Reusing the same cutoff makes the command idempotent and
+leaves current-state, email, device-status, non-group, and newly created grants
+untouched.
 
 Recent daily and sleep projection owners derive the member's current civil date
 from the validated vault timezone, admit only that date and the prior six civil

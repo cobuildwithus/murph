@@ -859,6 +859,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
       projectionScope: SLEEP_SCOPE,
+      refreshMaterializedProjection: true,
       tx,
     });
   });
@@ -1501,6 +1502,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now,
       projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      refreshMaterializedProjection: true,
       tx,
     });
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
@@ -1753,6 +1755,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now,
       projectionScope: SLEEP_SCOPE,
+      refreshMaterializedProjection: true,
       tx,
     });
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(

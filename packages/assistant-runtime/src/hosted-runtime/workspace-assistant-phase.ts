@@ -3790,7 +3790,8 @@ interface DeferredHostedSystemMailboxPostCheckpointRecord {
 function shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
   input: HostedSystemMailboxPendingItem,
 ): boolean {
-  return input.postCheckpointRecord?.kind === "codex-auth.updated";
+  return input.postCheckpointRecord?.kind === "codex-auth.updated"
+    || input.postCheckpointRecord?.kind === "vault-share.projection";
 }
 
 function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<

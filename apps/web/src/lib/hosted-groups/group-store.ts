@@ -1,14 +1,10 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
-
 import { resolveDeviceConnectSourceById } from "@murphai/device-syncd/connect-config";
-import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
-  type HostedMailboxLane,
   type HostedRuntimeGroupSharedReadResult,
   type HostedRuntimeGroupSharedRecord,
 } from "@murphai/hosted-execution/runtime-control";
@@ -20,6 +16,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   hostedVaultShareProjectionKindToScope,
   isHostedVaultShareFixedProjectionKind,
+  isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeviceSyncSource,
@@ -38,7 +35,6 @@ import {
   hostedHealthDataConsentNotRevokedWhere,
 } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
   createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
@@ -68,6 +64,10 @@ import {
   readActiveHostedVaultShareProjectionScopes,
   revokeHostedVaultSharesTx,
 } from "../hosted-vault-share/share-grant-store";
+import {
+  appendHostedVaultShareProjectionMaintenanceTx,
+  type HostedVaultShareProjectionMaintenanceSignal,
+} from "../hosted-vault-share/projection-maintenance";
 import {
   decryptHostedVaultShareProjectionSnapshots,
   type HostedVaultShareProjectionSnapshotEntry,
@@ -160,12 +160,8 @@ export interface HostedGroupJoinAcceptanceTxResult
   projectionMaintenanceSignal?: HostedGroupProjectionMaintenanceSignal;
 }
 
-export interface HostedGroupProjectionMaintenanceSignal {
-  lane: HostedMailboxLane;
-  laneSeq: string;
-  mailboxItemId: string;
-  memberId: string;
-}
+export type HostedGroupProjectionMaintenanceSignal =
+  HostedVaultShareProjectionMaintenanceSignal;
 
 export interface HostedGroupJoinOfferBindingTxResult {
   groupId: string;
@@ -2173,6 +2169,9 @@ async function acceptHostedGroupJoinTx(input: {
           grantorMemberId: input.memberId,
           now: input.now,
           projectionScope,
+          ...(isHostedVaultShareRecentDateProjectionKind(projectionScope.projectionKind)
+            ? { refreshMaterializedProjection: true }
+            : {}),
           tx: input.tx,
         });
         if (grant.requiresProjection) {
@@ -2239,7 +2238,7 @@ async function acceptHostedGroupJoinTx(input: {
     ? joinConfirmationResult.signal
     : null;
   const projectionMaintenanceSignal = projectionGrantIds.length > 0
-    ? await appendHostedGroupProjectionMaintenanceTx({
+    ? await appendHostedVaultShareProjectionMaintenanceTx({
         grantIds: projectionGrantIds,
         memberId: input.memberId,
         tx: input.tx,
@@ -2580,34 +2579,6 @@ async function grantHostedGroupMembershipProjectionTx(
     projectionScope: input.projectionScope,
     tx,
   });
-}
-
-async function appendHostedGroupProjectionMaintenanceTx(input: {
-  grantIds: readonly string[];
-  memberId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<HostedGroupProjectionMaintenanceSignal> {
-  const grantIds = [...new Set(input.grantIds)].sort();
-  const deterministicOccurredAt = "1970-01-01T00:00:00.000Z";
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify({ grantIds, memberId: input.memberId, version: 1 }))
-    .digest("hex")
-    .slice(0, 32);
-  const appended = await appendHostedMailboxEnvelopeTx({
-    envelope: buildHostedExecutionRuntimeControlWake({
-      eventId: `runtime-control:group-share-projection:${fingerprint}`,
-      kind: "runtime.maintenance-requested",
-      occurredAt: deterministicOccurredAt,
-      userId: input.memberId,
-    }),
-    tx: input.tx,
-  });
-  return {
-    lane: appended.item.lane,
-    laneSeq: appended.item.laneSeq,
-    mailboxItemId: appended.item.id,
-    memberId: appended.item.userId,
-  };
 }
 
 async function readHostedGroupSummaryById(

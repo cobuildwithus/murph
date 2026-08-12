@@ -153,3 +153,20 @@ Updated: 2026-08-11
   merge-tree proof now conflicts in the durable-doc index. Repository policy
   forbids a second update; this is a `moving-base race`, so the PR and worktree
   must remain active for handoff rather than being merged or retired here.
+- Final ReviewGPT round 3 identified two remaining lifecycle defects. An
+  explicit reaffirmation could reuse a materialized recent-date generation,
+  and the group-share maintenance row could be removed before the later
+  best-effort projection offer succeeded. The remediation rotates and clears
+  explicitly reaffirmed recent-date grants in the acceptance transaction,
+  retains the group-share maintenance row through a post-checkpoint projection
+  record, and retries missing-port or projection failures on the existing
+  system-mailbox recording path while holding back its handled watermark.
+- A bounded, count-only rollout command covers already-materialized group
+  health shares. Under one stable post-consumer-deploy cutoff, each grantor
+  transaction rotates eligible legacy generations to pending and appends one
+  durable maintenance row; failed exact signaling remains recoverable from
+  that row. Current-state, email, device-status, non-group, pending, and
+  post-cutoff grants are excluded, and rerunning the same cutoff is idempotent.
+- Round-3 remediation proof currently passes 88 focused Web tests, 95 focused
+  Assistant Runtime tests, and Web plus Assistant Runtime typechecks. The
+  required final ReviewGPT remediation round and exact-head CI remain pending.

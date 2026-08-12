@@ -520,6 +520,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       record: input.item.postCheckpointRecord,
       runtime: input.runtime,
       signal: input.signal ?? null,
+      vaultRoot: input.vaultRoot,
     });
     await removeHostedSystemMailboxPendingItemIfCurrent({
       item: input.item,
@@ -730,6 +731,7 @@ export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {
   return await recordHostedSystemMailboxPostCheckpointRecord({
     ...input,
     operatorHomeRoot: null,
+    vaultRoot: null,
   });
 }
 
@@ -738,8 +740,33 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
   signal?: AbortSignal | null;
+  vaultRoot: string | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
+    case "vault-share.projection": {
+      if (!input.vaultRoot) {
+        throw new Error(
+          "Hosted vault-share projection checkpoint requires a vault root.",
+        );
+      }
+      const { offerHostedVaultShareProjectionBestEffort } = await import(
+        "./vault-share-projection.ts"
+      );
+      const result = await offerHostedVaultShareProjectionBestEffort({
+        vaultRoot: input.vaultRoot,
+        vaultSharePort: input.runtime.platform.vaultSharePort,
+      });
+      if (result.outcome === "error" || result.outcome === "no-port") {
+        throw new Error(
+          "Hosted vault-share projection checkpoint did not complete.",
+        );
+      }
+      return {
+        nextWakeAt: null,
+        recorded: result.outcome === "delivered" ? 1 : 0,
+        stillDirty: false,
+      };
+    }
     case "clinical-records.outcome-recorded": {
       const port = input.runtime.platform.clinicalRecordsPort;
       if (!port) {
