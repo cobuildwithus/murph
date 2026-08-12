@@ -5,6 +5,9 @@ import {
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+} from "@murphai/hosted-execution/vault-share";
+import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import type {

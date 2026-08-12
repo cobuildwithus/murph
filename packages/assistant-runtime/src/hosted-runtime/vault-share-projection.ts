@@ -40,6 +40,7 @@ import {
   type HostedVaultShareActivitySessionCountProjectionSpec,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDailyMetricProjectionSpec,
+  type HostedVaultShareActiveProjectionKindsResponse,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionMode,
   type HostedVaultShareProjectionScope,

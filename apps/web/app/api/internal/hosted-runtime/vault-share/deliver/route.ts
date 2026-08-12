@@ -173,6 +173,9 @@ export const POST = withJsonError(async (request: Request) => {
   if (deliveryDeferred) {
     throw createHostedVaultShareDeliveryDeferredError();
   }
+  if (deliveryDeferred) {
+    throw createHostedVaultShareDeliveryDeferredError();
+  }
 
   return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
 });
