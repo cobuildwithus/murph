@@ -15343,6 +15343,48 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("defers vault-share projection work until after the durable checkpoint", async () => {
+    const vaultShareItem = createVaultShareProjectionSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: vaultShareItem,
+      itemId: vaultShareItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Array),
+      checkpointReason: "system_mailbox_receipt",
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecordDeferred: true,
+      }),
+    }));
+
+    const effects = postCheckpoint?.afterDurableCheckpoint;
+    const effect = typeof effects === "function" ? effects : effects?.[0];
+    if (!effect) {
+      throw new Error("Expected deferred vault-share projection effect.");
+    }
+    await effect();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: vaultShareItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("does not discover terminal Linq cleanup for foreground assistant input ids", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: ["ain_00000000000000000000000000000007"],
@@ -18653,6 +18695,24 @@ function createCodexAuthSystemMailboxItem() {
       attemptId: "hca_abcdefghijklmnop",
       eventId: "runtime-control:codex-auth",
       kind: "runtime.codex-auth-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createVaultShareProjectionSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_vault_share_projection",
+    mailboxDedupeKey: "runtime-control:group-share-projection:synthetic",
+    postCheckpointRecord: {
+      kind: "vault-share.projection" as const,
+    },
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      eventId: "runtime-control:group-share-projection:synthetic",
+      kind: "runtime.maintenance-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },

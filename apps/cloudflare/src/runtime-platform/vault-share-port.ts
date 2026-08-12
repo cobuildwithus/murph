@@ -1,9 +1,13 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
+  type HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
@@ -21,18 +25,20 @@ export function createHostedWebVaultSharePort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
-    async listActiveProjectionScopes() {
+    async listActiveProjectionScopes(request: {
+      projectionMode?: HostedVaultShareProjectionMode;
+    } = {}) {
       const payload = await fetchHostedWebControlPlaneJson({
         boundUserId: input.boundUserId,
         description: "Hosted vault share active projection scopes",
         fetchImpl: input.fetchImpl,
         method: "GET",
-        path: buildHostedVaultShareActiveKindsPath(),
+        path: buildHostedVaultShareActiveKindsPath(request.projectionMode),
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
 
-      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionScopes;
+      return parseHostedVaultShareActiveProjectionKindsResponse(payload);
     },
     async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
       const payload = await fetchHostedWebControlPlaneJson({
@@ -50,13 +56,22 @@ export function createHostedWebVaultSharePort(input: {
   };
 }
 
-function buildHostedVaultShareActiveKindsPath(): string {
+function buildHostedVaultShareActiveKindsPath(
+  projectionMode?: HostedVaultShareProjectionMode,
+): string {
   const params = new URLSearchParams();
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
     params.append(
       HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
       buildHostedVaultShareProjectionScopeKey(projectionScope),
     );
+  }
+  params.set(
+    HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+    HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+  );
+  if (projectionMode) {
+    params.set(HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM, projectionMode);
   }
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;

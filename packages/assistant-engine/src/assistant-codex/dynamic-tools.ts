@@ -3480,24 +3480,22 @@ function groupSharedUnavailableToolResult(
 /**
  * One read returns every member crossed with every requested scope. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one three-state status. Non-workout record arrays remain
+ * is collapsed to one four-state status. Non-workout record arrays remain
  * byte-identical. `workouts.v0` additionally compacts repeated day identity,
  * time semantics, completion watermark, and activity kinds because its
  * per-workout lists are the one record payload dense enough to need that extra
  * reduction. Encrypted stored records and the complete Web response retain
  * their validated shapes.
- */
-/**
- * `grantStatus` and `dataStatus` only ever encode three states between them, so
- * the model reads one field instead of decoding a pair.
+ * The model reads the four collapsed states from one field instead of decoding
+ * the grant/data pair.
  */
 function groupSharedProjectionStatus(
   projection: AssistantHostedGroupSharedProjection,
-): 'available' | 'missing' | 'not_granted' {
+): 'available' | 'missing' | 'not_granted' | 'pending' {
   if (projection.grantStatus === 'not_granted') {
     return 'not_granted'
   }
-  return projection.dataStatus === 'missing' ? 'missing' : 'available'
+  return projection.dataStatus
 }
 
 function groupSharedWorkoutsModelProjection(

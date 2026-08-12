@@ -1435,7 +1435,7 @@ describe("murph.group dynamic tool", () => {
           participantId: "participant_b",
           projections: [
             {
-              dataStatus: "missing" as const,
+              dataStatus: "pending" as const,
               grantedAt: "2026-07-31T12:32:00.000Z",
               grantStatus: "granted" as const,
               projectionScope: { projectionKind: "steps-days.v0" as const },
@@ -1575,7 +1575,7 @@ describe("murph.group dynamic tool", () => {
             projections: {
               "steps-days.v0": {
                 grantedAt: "2026-07-31T12:32:00.000Z",
-                status: "missing",
+                status: "pending",
               },
               "device-sync-status.v0": {
                 grantedAt: "2026-07-31T12:33:00.000Z",
