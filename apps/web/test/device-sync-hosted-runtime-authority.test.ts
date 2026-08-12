@@ -730,12 +730,12 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
-  it("does not resurrect cleared weight coverage from a pre-reconnect completion", async () => {
+  it("does not resurrect companion weight coverage from a pre-reconnect completion", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         id: "conn_junction_weight_reconnect",
         metadata: {
-          junctionWeightHistoryBackfillCoverage: "v1|renpho",
+          junctionWeightHistoryBackfillCoverage: "v1|withings",
         },
         provider: "junction",
         updatedAt: "2026-04-06T10:01:00.000Z",
@@ -751,7 +751,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [{
             connection: {
               metadata: {
-                junctionWeightHistoryBackfillCoverage: "v1|renpho,withings",
+                junctionWeightHistoryBackfillCoverage: "v1|apple_health_kit,withings",
               },
             },
             connectionId: "conn_junction_weight_reconnect",
@@ -768,7 +768,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(harness.record.metadata).toEqual({
-      junctionWeightHistoryBackfillCoverage: "v1|renpho",
+      junctionWeightHistoryBackfillCoverage: "v1|withings",
     });
   });
 

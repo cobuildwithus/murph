@@ -416,6 +416,12 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    await resetHostedJunctionWeightHistoryCoverageForSource({
+      connection,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
   });
 }
 

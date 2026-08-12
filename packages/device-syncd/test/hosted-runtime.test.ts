@@ -2853,8 +2853,24 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             historicalUnresolvedProviderRecordCount: 65,
             historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
+            timeseriesResourceCursor: "blood_pressure",
             windowEnd: "2026-04-03T00:00:00Z",
             windowStart: "2026-04-01T00:00:00Z",
+          },
+        },
+        {
+          kind: "reconcile",
+          payload: {
+            timeseriesResourceCursor: "heartrate",
+            windowEnd: "2026-04-04T00:00:00Z",
+            windowStart: "2026-04-03T00:00:00Z",
+          },
+        },
+        {
+          kind: "backfill",
+          payload: {
+            windowEnd: "2026-04-05T00:00:00Z",
+            windowStart: "2026-04-04T00:00:00Z",
           },
         },
       ],
@@ -2870,8 +2886,18 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       historicalUnresolvedProviderRecordCount: 65,
       historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor: "blood_pressure",
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-01T00:00:00.000Z",
+    });
+    expect(hint?.jobs?.[1]?.payload).toEqual({
+      timeseriesResourceCursor: "heartrate",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowStart: "2026-04-03T00:00:00.000Z",
+    });
+    expect(hint?.jobs?.[2]?.payload).toEqual({
+      windowEnd: "2026-04-05T00:00:00.000Z",
+      windowStart: "2026-04-04T00:00:00.000Z",
     });
 
     expect(() =>

@@ -6,6 +6,7 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
@@ -971,10 +972,11 @@ test("local Junction workers exclude a disconnected source from production-norma
   }
 });
 
-test("Junction resource success preserves the full-reconcile watermark and closed-day timeseries", async () => {
+test("Junction partial full-resource progress preserves the reconcile watermark", async () => {
   const now = new Date("2026-04-23T00:05:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-resource-watermark");
   const requests: string[] = [];
+  const timeseriesResources: string[] = JUNCTION_DEFAULT_TIMESERIES_RESOURCES.slice(0, 9);
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     clock: { now: () => now },
@@ -995,7 +997,7 @@ test("Junction resource success preserves the full-reconcile watermark and close
         environment: "sandbox",
         region: "us",
         summaryResources: ["activity"],
-        timeseriesResources: ["steps", "heartrate"],
+        timeseriesResources,
         fetchImpl: async (input) => {
           const url = readUrl(input);
           requests.push(url);
@@ -1006,11 +1008,10 @@ test("Junction resource success preserves the full-reconcile watermark and close
                 slug: "garmin",
                 name: "Garmin",
                 status: "connected",
-                resource_availability: {
-                  activity: true,
-                  heartrate: true,
-                  steps: true,
-                },
+                resource_availability: Object.fromEntries([
+                  "activity",
+                  ...timeseriesResources,
+                ].map((resource) => [resource, true])),
               }],
             });
           }
@@ -1018,17 +1019,13 @@ test("Junction resource success preserves the full-reconcile watermark and close
             return createJsonResponse({ data: [] });
           }
           const timeseriesResource = new URL(url).pathname.match(
-            /^\/v2\/timeseries\/junction-user-1\/(steps|heartrate)\/grouped$/u,
+            /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
           )?.[1];
-          if (timeseriesResource) {
+          if (timeseriesResource && timeseriesResources.includes(timeseriesResource)) {
             return createJsonResponse({
               groups: {
                 garmin: [{
-                  data: [{
-                    timestamp: "2026-04-22T12:00:00.000Z",
-                    unit: timeseriesResource === "steps" ? "count" : "bpm",
-                    value: timeseriesResource === "steps" ? 100 : 72,
-                  }],
+                  data: [],
                   source: { provider: "garmin", type: "watch" },
                 }],
               },
@@ -1105,17 +1102,43 @@ test("Junction resource success preserves the full-reconcile watermark and close
     const second = await service.runWorkerOnce();
     assert.equal(second?.id, reconcile.id);
     assert.equal(store.getJobById(reconcile.id)?.status, "succeeded");
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    assert.deepEqual(
+      requests.flatMap((url) => new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+      )?.[1] ?? []),
+      timeseriesResources.slice(0, 8),
+    );
+
+    const continuationRow = readJobsForAccountForTesting(store, account.id).find((job) =>
+      job.kind === "reconcile" && job.status === "queued"
+    );
+    assert.ok(continuationRow);
+    const continuation = store.getJobById(continuationRow.id);
+    assert.ok(continuation);
+    assert.deepEqual(continuation.payload, {
+      ...window,
+      timeseriesResourceCursor: timeseriesResources[8],
+    });
+    assert.equal(
+      continuation.dedupeKey,
+      createHash("sha256")
+        .update(JSON.stringify(["junction", "reconcile", window.windowStart, window.windowEnd]))
+        .digest("hex"),
+    );
+
+    const third = await service.runWorkerOnce();
+    assert.equal(third?.id, continuation.id);
+    assert.equal(store.getJobById(continuation.id)?.status, "succeeded");
     assert.equal(
       store.getAccountById(account.id)?.lastSyncCompletedAt,
       "2026-04-23T00:05:00.000Z",
     );
     assert.deepEqual(
-      requests
-        .flatMap((url) => new URL(url).pathname.match(
-          /^\/v2\/timeseries\/junction-user-1\/(steps|heartrate)\/grouped$/u,
-        )?.[1] ?? [])
-        .sort(),
-      ["heartrate", "steps"],
+      requests.flatMap((url) => new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+      )?.[1] ?? []),
+      timeseriesResources,
     );
 
     requests.length = 0;
@@ -1231,6 +1254,7 @@ test("Junction stale metadata backfill cannot suppress the current closed-day ti
         clientUserIdSecret: "junction-client-user-id-secret",
         environment: "sandbox",
         region: "us",
+        reconcileDays: 1,
         reconcileIntervalMs: 60 * 60_000,
         summaryBackfillDays: 2,
         summaryResources: ["activity"],
@@ -1307,9 +1331,14 @@ test("Junction stale metadata backfill cannot suppress the current closed-day ti
     assert.ok(staleBackfill);
     assert.ok(currentReconcile);
 
-    const first = await service.runWorkerOnce();
-    assert.equal(first?.id, staleBackfill?.id);
-    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    for (let backfillStep = 0; backfillStep < 2; backfillStep += 1) {
+      const processed = await service.runWorkerOnce();
+      assert.equal(processed?.kind, "backfill");
+      if (backfillStep === 0) {
+        assert.equal(processed?.id, staleBackfill?.id);
+      }
+      assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    }
     assert.equal(
       store.getAccountById(account.id)?.metadata.junctionHistoricalBackfillEmptyAttempts,
       2,
@@ -1317,19 +1346,17 @@ test("Junction stale metadata backfill cannot suppress the current closed-day ti
     assert.equal(store.getJobById(currentReconcile.id)?.status, "queued");
 
     requests.length = 0;
-    const second = await service.runWorkerOnce();
-    assert.equal(second?.id, currentReconcile?.id);
+    const reconcileStep = await service.runWorkerOnce();
+    assert.equal(reconcileStep?.id, currentReconcile?.id);
     assert.equal(
       store.getAccountById(account.id)?.lastSyncCompletedAt,
       "2026-04-04T00:15:00.000Z",
     );
     assert.deepEqual(
-      [...new Set(requests.flatMap((url) =>
-        new URL(url).pathname.match(
-          /^\/v2\/timeseries\/junction-user-1\/(steps|heartrate)\/grouped$/u,
-        )?.[1] ?? []
-      ))].sort(),
-      ["heartrate", "steps"],
+      requests.flatMap((url) => new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/(steps|heartrate)\/grouped$/u,
+      )?.[1] ?? []),
+      ["steps", "heartrate"],
     );
 
     requests.length = 0;
@@ -5969,7 +5996,7 @@ test("device sync service stores Junction non-connect empty backfill retry attem
   }
 });
 
-test("device sync service preserves Junction yielded backfill timeseries cursor in queued continuation", async () => {
+test("device sync service preserves Junction yielded backfill day and resource cursors", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-yielded-backfill-cursor");
   const ownerWindowStart = "2026-04-07T00:00:00.000Z";
   const ownerWindowEnd = "2026-04-10T00:00:00.000Z";
@@ -6050,6 +6077,7 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
         windowStart: ownerWindowStart,
         windowEnd: ownerWindowEnd,
         emptyBackfillAttempts: 2,
+        timeseriesResourceCursor: "stress",
       },
       availableAt: ownerWindowEnd,
       priority: 30,
@@ -6073,6 +6101,7 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
       windowEnd: ownerWindowEnd,
       emptyBackfillAttempts: 2,
       timeseriesCursor: ownerWindowStart,
+      timeseriesResourceCursor: "stress_level",
     });
     assert.equal(continuation.dedupeKey, expectedDedupeKey);
   } finally {

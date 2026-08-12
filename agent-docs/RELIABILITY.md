@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Current Guardrails
 
@@ -698,6 +698,15 @@ Last verified: 2026-08-11
   late generation-1 completion cannot downgrade newer coverage. This keeps the
   rollout fence in the existing queue, scheduler, and account-metadata owners
   without another repair loop or lifecycle manager.
+- Junction full reconcile and backfill jobs advance timeseries work through the
+  existing job payload: at most eight configured resources for one closed UTC
+  day per successful attempt, with the canonical next resource carried in
+  `timeseriesResourceCursor`. An absent or unrecognized resource cursor starts
+  that day at the first configured resource. After the final resource, the
+  ordinary day cursor advances and resource progress is omitted. Resource
+  progress is not part of job dedupe identity, and a partial full-job
+  continuation preserves `lastSyncCompletedAt`; terminal current full work may
+  advance it as before.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

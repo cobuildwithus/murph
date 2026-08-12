@@ -176,6 +176,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
@@ -183,6 +184,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },

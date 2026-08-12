@@ -197,6 +197,15 @@ describe("deviceSyncProviderManifests", () => {
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        windowEnd: { kind: "string", includeInHostedHint: true },
+        windowStart: { kind: "string", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "reconcile")).toEqual({
+      payload: {
+        sourceProviderSlug: { kind: "string", includeInHostedHint: true },
+        timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
       },
@@ -513,6 +522,7 @@ describe("deviceSyncProviderManifests", () => {
           emptyBackfillAttempts: 2,
           resources: ["profile"],
           timeseriesCursor: "2026-04-01T00:00:00.000Z",
+          timeseriesResourceCursor: "heartrate",
           windowEnd: "2026-04-22T00:00:00.000Z",
           windowStart: "2026-01-22T00:00:00.000Z",
         },
@@ -520,6 +530,7 @@ describe("deviceSyncProviderManifests", () => {
     ).toEqual({
       emptyBackfillAttempts: 2,
       timeseriesCursor: "2026-04-01T00:00:00.000Z",
+      timeseriesResourceCursor: "heartrate",
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-01-22T00:00:00.000Z",
     });

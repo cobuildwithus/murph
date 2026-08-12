@@ -166,6 +166,15 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+interface JunctionFullJobTimeseriesContinuation {
+  timeseriesResourceCursor: string | null;
+  windowStart: string;
+}
+
+interface JunctionFullJobTimeseriesImportResult {
+  continuation: JunctionFullJobTimeseriesContinuation | null;
+}
+
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
@@ -364,6 +373,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
+// Full jobs have already spent from the 45-second hosted commit budget on
+// inventory, summary, and profile calls. Eight sequential timeseries resources
+// keep the ordinary request path bounded while leaving room for one request to
+// approach Junction's 15-second provider timeout.
+const JUNCTION_FULL_JOB_TIMESERIES_RESOURCE_SLICE_SIZE = 8;
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
 const JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT = 64;
@@ -1103,6 +1117,10 @@ export function createJunctionDeviceSyncProvider(
     const timeseriesCursor = job.kind === "backfill"
       ? readBackfillTimeseriesCursor(job, window)
       : null;
+    const timeseriesResourceCursor = readFullJobTimeseriesResourceCursor(
+      job,
+      jobTimeseriesResources,
+    );
     const timeseriesWindowStart = timeseriesCursor
       ? maxIsoTimestamp(baseTimeseriesWindowStart, timeseriesCursor)
       : baseTimeseriesWindowStart;
@@ -1144,24 +1162,31 @@ export function createJunctionDeviceSyncProvider(
         || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
       )
     ) {
-      const timeseriesImport = await importTimeseriesDailySnapshots(
+      const timeseriesImport = await importFullJobTimeseriesDailySlice(
         context,
         sourceProviders,
         timeseriesWindowStart,
         window.windowEnd,
         skippedOptionalResources,
         jobTimeseriesResources,
+        timeseriesResourceCursor,
       );
-      if (timeseriesImport.yieldedAt) {
+      if (timeseriesImport.continuation) {
         return withJunctionSkippedResourceMetadata(
           context,
           withJunctionMetadataPatch(
             buildYieldedJunctionJobResult({
               context,
               job,
+              timeseriesResourceCursor:
+                timeseriesImport.continuation.timeseriesResourceCursor,
               windowEnd: window.windowEnd,
-              windowStart: job.kind === "backfill" ? window.windowStart : timeseriesImport.yieldedAt,
-              timeseriesCursor: job.kind === "backfill" ? timeseriesImport.yieldedAt : null,
+              windowStart: job.kind === "backfill"
+                ? window.windowStart
+                : timeseriesImport.continuation.windowStart,
+              timeseriesCursor: job.kind === "backfill"
+                ? timeseriesImport.continuation.windowStart
+                : null,
             }),
             profileMetadataPatch,
           ),
@@ -3005,41 +3030,127 @@ export function createJunctionDeviceSyncProvider(
           yieldedAt: window.windowStart,
         };
       }
-      const timeseries = await fetchTimeseriesSnapshots(
+      await importTimeseriesDailyWindow(
         context,
-        window.windowStart,
-        window.windowEnd,
+        sourceProviders,
+        window,
         skippedOptionalResources,
         resources,
         sourceProviderSlug,
-        { dateQueryFormat: "date" },
       );
-      if (!hasJunctionSnapshotRecords(timeseries)) {
-        continue;
-      }
-
-      const preparedImport = await prepareJunctionImportSnapshot(
-        context,
-        timeseries,
-        sourceProviders,
-      );
-      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        await context.importSnapshot({
-          provider: "junction",
-          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-          connectionId: context.account.id,
-          importedAt: window.windowEnd,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-          connections: preparedImport.connections,
-          summaries: {},
-          timeseries: preparedImport.snapshots,
-        });
-      }
     }
     return {
       yieldedAt: null,
     };
+  }
+
+  async function importFullJobTimeseriesDailySlice(
+    context: ProviderJobContext,
+    sourceProviders: readonly JunctionProviderConnection[],
+    windowStart: string,
+    windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources: readonly string[],
+    timeseriesResourceCursor: string | null,
+  ): Promise<JunctionFullJobTimeseriesImportResult> {
+    const dailyWindows = buildClosedDailyWindows(windowStart, windowEnd);
+    const window = dailyWindows[0];
+    if (!window || resources.length === 0) {
+      return { continuation: null };
+    }
+
+    const cursorIndex = timeseriesResourceCursor
+      ? resources.indexOf(timeseriesResourceCursor)
+      : 0;
+    const resourceIndex = cursorIndex >= 0 ? cursorIndex : 0;
+    const currentResource = resources[resourceIndex];
+    if (!currentResource) {
+      return { continuation: null };
+    }
+
+    if (context.shouldYield?.()) {
+      return {
+        continuation: {
+          timeseriesResourceCursor: currentResource,
+          windowStart: window.windowStart,
+        },
+      };
+    }
+
+    const nextResourceIndex = Math.min(
+      resourceIndex + JUNCTION_FULL_JOB_TIMESERIES_RESOURCE_SLICE_SIZE,
+      resources.length,
+    );
+    await importTimeseriesDailyWindow(
+      context,
+      sourceProviders,
+      window,
+      skippedOptionalResources,
+      resources.slice(resourceIndex, nextResourceIndex),
+    );
+
+    const nextResource = resources[nextResourceIndex];
+    if (nextResource) {
+      return {
+        continuation: {
+          timeseriesResourceCursor: nextResource,
+          windowStart: window.windowStart,
+        },
+      };
+    }
+
+    const nextWindow = dailyWindows[1];
+    return {
+      continuation: nextWindow
+        ? {
+            timeseriesResourceCursor: null,
+            windowStart: nextWindow.windowStart,
+          }
+        : null,
+    };
+  }
+
+  async function importTimeseriesDailyWindow(
+    context: ProviderJobContext,
+    sourceProviders: readonly JunctionProviderConnection[],
+    window: { windowStart: string; windowEnd: string },
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources?: readonly string[],
+    sourceProviderSlug?: string | null,
+  ): Promise<void> {
+    const timeseries = await fetchTimeseriesSnapshots(
+      context,
+      window.windowStart,
+      window.windowEnd,
+      skippedOptionalResources,
+      resources,
+      sourceProviderSlug,
+      { dateQueryFormat: "date" },
+    );
+    if (!hasJunctionSnapshotRecords(timeseries)) {
+      return;
+    }
+
+    const preparedImport = await prepareJunctionImportSnapshot(
+      context,
+      timeseries,
+      sourceProviders,
+    );
+    if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+      return;
+    }
+
+    await context.importSnapshot({
+      provider: "junction",
+      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+      connectionId: context.account.id,
+      importedAt: window.windowEnd,
+      windowStart: window.windowStart,
+      windowEnd: window.windowEnd,
+      connections: preparedImport.connections,
+      summaries: {},
+      timeseries: preparedImport.snapshots,
+    });
   }
 
   async function importJunctionDirectResourceSnapshot(
@@ -3185,12 +3296,15 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
+    timeseriesResourceCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
     return {
-      ...(followUp ? { scheduledJobs: [followUp] } : {}),
+      ...(followUp
+        ? { scheduledJobs: [{ ...followUp, availableAt: input.context.now }] }
+        : {}),
       nextReconcileAt: input.job.kind === "resource"
         ? clampWebhookJobNextReconcileAt(input.context)
         : addMilliseconds(input.context.now, reconcileIntervalMs),
@@ -3204,12 +3318,19 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
+    timeseriesResourceCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
     if (Date.parse(input.windowStart) >= Date.parse(input.windowEnd)) {
       return null;
     }
+
+    const timeseriesResourceCursor = normalizeFullJobTimeseriesResourceCursor(
+      input.timeseriesResourceCursor,
+      timeseriesResources,
+    );
+    const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
 
     if (input.job.kind === "backfill") {
       const cursor = toIsoTimestampIfValid(input.timeseriesCursor);
@@ -3219,6 +3340,7 @@ export function createJunctionDeviceSyncProvider(
       const emptyBackfillAttempts = readHistoricalBackfillJobEmptyAttempts(input.job);
       const followUp = buildExactWindowJob({
         kind: "backfill",
+        payload: sourceProviderSlug ? { sourceProviderSlug } : undefined,
         priority: input.job.priority,
         windowEnd: input.windowEnd,
         windowStart: input.windowStart,
@@ -3229,6 +3351,7 @@ export function createJunctionDeviceSyncProvider(
           ...followUp.payload,
           ...(emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}),
           timeseriesCursor: cursor,
+          ...(timeseriesResourceCursor ? { timeseriesResourceCursor } : {}),
         },
       };
     }
@@ -3236,6 +3359,10 @@ export function createJunctionDeviceSyncProvider(
     if (input.job.kind === "reconcile") {
       return buildExactWindowJob({
         kind: input.job.kind,
+        payload: {
+          ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+          ...(timeseriesResourceCursor ? { timeseriesResourceCursor } : {}),
+        },
         priority: input.job.priority,
         windowEnd: input.windowEnd,
         windowStart: input.windowStart,
@@ -5386,6 +5513,24 @@ function readBackfillTimeseriesCursor(
   return cursor && isTimestampInHalfOpenWindow(cursor, ownerWindow)
     ? cursor
     : null;
+}
+
+function readFullJobTimeseriesResourceCursor(
+  job: DeviceSyncJobRecord,
+  resources: readonly string[],
+): string | null {
+  return normalizeFullJobTimeseriesResourceCursor(
+    job.payload.timeseriesResourceCursor,
+    resources,
+  );
+}
+
+function normalizeFullJobTimeseriesResourceCursor(
+  value: unknown,
+  resources: readonly string[],
+): string | null {
+  const cursor = normalizeJunctionResourceName(value);
+  return cursor && resources.includes(cursor) ? cursor : null;
 }
 
 function isTimestampInHalfOpenWindow(
