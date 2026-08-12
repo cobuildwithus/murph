@@ -2227,9 +2227,9 @@ export function createJunctionDeviceSyncProvider(
       encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
-    // A note without usable tags is an intentional importer no-op, not a
-    // canonical repair obligation. A complete note scan can therefore close
-    // its one-time source coverage even when it creates no events.
+    // A complete note scan can close its one-time source coverage even when
+    // no action-like tags exist. Neutral wearable-tag notes, including a
+    // cleared tag state, do not create a separate backfill repair obligation.
     if (input.resource === "note" && input.importResult.fetchComplete) {
       return withJunctionMetadataPatch(
         input.result,

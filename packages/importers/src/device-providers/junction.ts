@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import {
   extractIsoDatePrefix,
   ID_PREFIXES,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   MEAL_MICRONUTRIENT_KEYS,
   parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
@@ -1590,7 +1592,14 @@ function pushJunctionNoteTags(
   context: NormalizationContext,
 ): void {
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
-  const seenNoteHashes = new Set<string>();
+  type JunctionNoteSpine = {
+    entry: PlainObject;
+    resourceContext: ResourceContext;
+    resourceId: string;
+    tags: Set<string>;
+    timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  };
+  const noteSpines = new Map<string, JunctionNoteSpine>();
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
     const resourceContext = buildResourceContext({
@@ -1605,6 +1614,10 @@ function pushJunctionNoteTags(
     });
     if (!resourceContext) continue;
 
+    // A missing tag field is still a free-text-only provider note and stays
+    // canonical-no-op. An explicit empty tag set is retained so a later replay
+    // can clear the tag state on an existing neutral note spine.
+    if (!Object.hasOwn(entry, "tags")) continue;
     const tags = normalizeJunctionNoteTags(entry.tags);
     const start = firstStringFromPaths(entry, ["start", "startAt", "start_at"]);
     const baseTimestamp = resolveRecordTimestamp(
@@ -1615,20 +1628,45 @@ function pushJunctionNoteTags(
     const timestamp = withTimestampOverride(baseTimestamp, {
       dayKey: baseTimestamp.dayKey ?? extractIsoDatePrefix(start) ?? undefined,
     });
-    if (!timestamp.occurredAt || !timestamp.dayKey || tags.length === 0) continue;
+    if (!timestamp.occurredAt || !timestamp.dayKey) continue;
 
     const stableId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
-    const noteHash = stableId
-      ? shortHash([resourceContext.externalRefResourceType, stableId])
-      : shortHash([
-          resourceContext.externalRefResourceType,
-          timestamp.observedAtRaw ?? timestamp.occurredAt,
-          ...tags,
-        ]);
-    if (seenNoteHashes.has(noteHash)) continue;
-    seenNoteHashes.add(noteHash);
+    const resourceId = buildJunctionNoteResourceId(resourceContext, stableId, timestamp);
+    const spineKey = `${resourceContext.externalRefResourceType}:${resourceId}`;
+    const existing = noteSpines.get(spineKey);
+    if (existing) {
+      if (stableId) {
+        // Duplicate rows with an explicit provider identity describe one note.
+        // Keep the final row's current tag state rather than unioning revisions.
+        existing.entry = entry;
+        existing.resourceContext = resourceContext;
+        existing.tags = new Set(tags);
+        existing.timestamp = timestamp;
+      } else {
+        // Without an upstream id, source + timestamp is the narrowest stable
+        // spine available. Preserve every same-time tag while allowing a later
+        // replay to revise or clear that timestamp's aggregate tag state.
+        for (const tag of tags) existing.tags.add(tag);
+      }
+      continue;
+    }
 
-    const role = `${baseArtifactRole}:${timestamp.dayKey}:${noteHash}`;
+    noteSpines.set(spineKey, {
+      entry,
+      resourceContext,
+      resourceId,
+      tags: new Set(tags),
+      timestamp,
+    });
+  }
+
+  for (const spine of noteSpines.values()) {
+    const tags = [...spine.tags].sort();
+    const dayKey = spine.timestamp.dayKey;
+    const occurredAt = spine.timestamp.occurredAt;
+    if (!dayKey || !occurredAt) continue;
+
+    const role = `${baseArtifactRole}:${dayKey}:${spine.resourceId}`;
     pushEvidencePart(
       context.evidenceParts,
       withJunctionCompactTimeseriesMetadata(
@@ -1640,12 +1678,12 @@ function pushJunctionNoteTags(
             schema: "junction.note_tags.v1",
             provider: "junction",
             resource,
-            dayKey: timestamp.dayKey,
-            sourceProviderSlug: resourceContext.sourceProviderSlug,
-            sourceType: resourceContext.origin.sourceType,
-            sourceInstanceId: resourceContext.origin.sourceInstanceId,
-            occurredAt: timestamp.occurredAt,
-            recordedAt: timestamp.recordedAt,
+            dayKey,
+            sourceProviderSlug: spine.resourceContext.sourceProviderSlug,
+            sourceType: spine.resourceContext.origin.sourceType,
+            sourceInstanceId: spine.resourceContext.origin.sourceInstanceId,
+            occurredAt,
+            recordedAt: spine.timestamp.recordedAt,
             tags,
           }),
         ),
@@ -1653,31 +1691,49 @@ function pushJunctionNoteTags(
       ),
     );
 
-    for (const tag of tags) {
-      context.events.push(stripUndefined({
-        kind: "intervention_session",
-        occurredAt: timestamp.occurredAt,
-        recordedAt: timestamp.recordedAt,
-        dayKey: timestamp.dayKey,
-        source: "device",
-        title: `Wearable tag: ${tag.replaceAll("-", " ")}`,
-        tags: [tag],
-        evidenceRoles: [role],
-        externalRef: makeProviderExternalRef(
-          "junction",
-          resourceContext.externalRefResourceType,
-          noteHash,
-          undefined,
-          `tag-${tag}`,
-        ),
-        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-        fields: {
-          interventionType: tag,
-          sessionStatus: "completed",
-        },
-      }));
-    }
+    context.events.push(stripUndefined({
+      kind: "note",
+      occurredAt,
+      recordedAt: spine.timestamp.recordedAt,
+      dayKey,
+      source: "device",
+      title: "Wearable tags",
+      // The canonical note body is a product-owned marker. Provider free text
+      // never crosses the sanitizer; normalized tag facts live only in `tags`.
+      note: "Wearable tags",
+      tags,
+      evidenceRoles: [role],
+      // This facet is intentionally distinct from the legacy `tag-*`
+      // intervention facets. Core event spines are kind-stable, so any repair
+      // of already-persisted legacy rows must remain explicit.
+      externalRef: makeProviderExternalRef(
+        "junction",
+        spine.resourceContext.externalRefResourceType,
+        spine.resourceId,
+        undefined,
+        JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+      ),
+      dataOrigin: buildDataOrigin(spine.entry, spine.resourceContext, spine.timestamp),
+      fields: {
+        noteType: JUNCTION_WEARABLE_TAG_NOTE_TYPE,
+      },
+    }));
   }
+}
+
+function buildJunctionNoteResourceId(
+  resourceContext: ResourceContext,
+  stableId: string | undefined,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string {
+  if (stableId) {
+    // Preserve PR #1673's opaque provider-note resource id. The new neutral
+    // facet creates a distinct kind-stable spine without obscuring any future
+    // explicit repair relationship to legacy per-tag intervention facets.
+    return shortHash([resourceContext.externalRefResourceType, stableId]);
+  }
+
+  return buildStableTimeseriesResourceId(resourceContext, timestamp);
 }
 
 function normalizeJunctionNoteTags(value: unknown): string[] {
