@@ -22,6 +22,7 @@ import {
   HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
   HOSTED_RETENTION_BATCH_SIZE,
   HOSTED_RETENTION_MAX_BATCHES,
+  HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
   runHostedRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
@@ -268,10 +269,25 @@ describe("hosted retention cleanup", () => {
         `FOR UPDATE OF ${statement.lockAlias} SKIP LOCKED`,
       );
       expect(sql).toContain(`${statement.key} = doomed.`);
-      expect(call.slice(1)).toEqual([
-        now,
-        HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
-      ]);
+      const startedIntentOwner = statement.fragment
+        === 'DELETE FROM "hosted_connected_app_connect_intent"'
+        || statement.fragment === 'DELETE FROM "clinical_record_connect_intent"';
+      if (startedIntentOwner) {
+        expect(sql).toContain(`${statement.lockAlias}."started_at" IS NULL`);
+        expect(sql).toContain(`OR ${statement.lockAlias}."expires_at" <= ?`);
+        expect(call.slice(1)).toEqual([
+          now,
+          new Date(
+            now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+          ),
+          HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
+        ]);
+      } else {
+        expect(call.slice(1)).toEqual([
+          now,
+          HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
+        ]);
+      }
     }
     expect(
       sqlOf(findRetentionCall(
@@ -430,6 +446,37 @@ describe("hosted retention cleanup", () => {
         ],
       },
     });
+  });
+
+  it("keeps started connect intents through one bounded provider-continuation grace", async () => {
+    const now = new Date("2026-04-25T12:00:00.000Z");
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const prisma = createRetentionPrisma({ executeRaw });
+
+    await runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalRuntimeRecheck: vi.fn(),
+    });
+
+    const cutoff = new Date(
+      now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+    );
+    for (const fragment of [
+      'DELETE FROM "hosted_connected_app_connect_intent"',
+      'DELETE FROM "clinical_record_connect_intent"',
+    ]) {
+      const call = findRetentionCall(executeRaw, fragment);
+      const sql = sqlOf(call);
+      expect(sql).toContain('intent."expires_at" <= ?');
+      expect(sql).toContain('intent."started_at" IS NULL');
+      expect(sql).toContain('OR intent."expires_at" <= ?');
+      expect(call.slice(1)).toEqual([
+        now,
+        cutoff,
+        HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
+      ]);
+    }
   });
 
   it("records an explicit policy non-reply instead of silently dropping accepted work", async () => {

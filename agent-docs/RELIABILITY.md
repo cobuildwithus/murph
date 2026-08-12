@@ -374,7 +374,11 @@ Last verified: 2026-08-11
   Clinical Records connect, and Clinical Records OAuth rows never trigger a
   global expiry sweep from foreground creation or provider admission. Exact
   reads and consumes fail closed when the addressed row is expired; the hourly
-  retention owner owns deletion. It deletes expiry-indexed rows serially in
+  retention owner owns backlog deletion. Started connected-app and Clinical
+  Records intents remain non-redeemable but retain their exact completion row
+  for one bounded 30-minute grace past link expiry, covering provider setup and
+  valid OAuth callback finalization without creating another worker or lease
+  table. Retention deletes eligible expiry-indexed rows serially in
   expiry-and-primary-key order under the smaller control-artifact batch and
   max-batch ceilings, with `FOR UPDATE SKIP LOCKED`. The unbound
   sensitive-action lane has a partial expiry-and-token index so durable

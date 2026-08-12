@@ -34,6 +34,10 @@ export const HOSTED_RETENTION_MAX_BATCHES = 4;
 // one hourly pass at 12 statements and 3,000 deleted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
+// Started connect intents remain the completion owner after their bearer link
+// expires. Keep that owner through every bounded provider/OAuth continuation,
+// then let ordinary expiry ordering reclaim it without a second scheduler.
+export const HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS = 30 * 60 * 1_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
@@ -76,8 +80,9 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  // Serial by design: short-lived control-plane artifacts are retired only by
-  // this background owner, never by a member-facing creation transaction.
+  // Serial by design: short-lived control-plane backlog cleanup lives here,
+  // never in a member-facing creation transaction. Exact addressed reads may
+  // still remove their own expired row while failing closed.
   const expiredConnectedAppConnectIntentsDeleted =
     await deleteExpiredConnectedAppConnectIntents({ now, prisma });
   const expiredSensitiveActionChallengesDeleted =
@@ -512,11 +517,18 @@ async function deleteExpiredConnectedAppConnectIntents(input: {
   now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
+  const startedIntentCutoff = new Date(
+    input.now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  );
   return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
     WITH doomed AS MATERIALIZED (
       SELECT intent."claim_hash"
       FROM "hosted_connected_app_connect_intent" AS intent
       WHERE intent."expires_at" <= ${input.now}
+        AND (
+          intent."started_at" IS NULL
+          OR intent."expires_at" <= ${startedIntentCutoff}
+        )
       ORDER BY intent."expires_at" ASC, intent."claim_hash" ASC
       LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
       FOR UPDATE OF intent SKIP LOCKED
@@ -589,11 +601,18 @@ async function deleteExpiredClinicalRecordConnectIntents(input: {
   now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
+  const startedIntentCutoff = new Date(
+    input.now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  );
   return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
     WITH doomed AS MATERIALIZED (
       SELECT intent."claim_hash"
       FROM "clinical_record_connect_intent" AS intent
       WHERE intent."expires_at" <= ${input.now}
+        AND (
+          intent."started_at" IS NULL
+          OR intent."expires_at" <= ${startedIntentCutoff}
+        )
       ORDER BY intent."expires_at" ASC, intent."claim_hash" ASC
       LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
       FOR UPDATE OF intent SKIP LOCKED
