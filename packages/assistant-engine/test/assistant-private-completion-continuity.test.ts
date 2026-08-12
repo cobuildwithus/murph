@@ -75,7 +75,8 @@ describe('private completion continuity', () => {
   it('leaves the ordinary session untouched when delivery authority rejects before provider entry', async () => {
     const fixture = await createContinuityFixture('private-continuity-rejected-')
     const pending = await createPrivateCompletionIntent({
-      detachedSession: fixture.detachedSession,
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
       vault: fixture.vaultRoot,
     })
 
@@ -103,7 +104,8 @@ describe('private completion continuity', () => {
   it('imports a provider-accepted completion exactly once and clears native resume', async () => {
     const fixture = await createContinuityFixture('private-continuity-delivered-')
     const delivered = await createDeliveredPrivateCompletion({
-      detachedSession: fixture.detachedSession,
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
       vault: fixture.vaultRoot,
     })
 
@@ -135,6 +137,10 @@ describe('private completion continuity', () => {
         text: delivered.message,
       }),
     ])
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.detachedSession.sessionId,
+    )).resolves.toEqual([])
     await expect(readAssistantOutboxIntent(
       fixture.vaultRoot,
       delivered.intentId,
@@ -149,7 +155,8 @@ describe('private completion continuity', () => {
   it('recovers a prepared partial write without duplicating transcript or turn count', async () => {
     const fixture = await createContinuityFixture('private-continuity-recovery-')
     const delivered = await createDeliveredPrivateCompletion({
-      detachedSession: fixture.detachedSession,
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
       vault: fixture.vaultRoot,
     })
     const transcriptCreatedAt = delivered.delivery!.sentAt
@@ -213,7 +220,8 @@ describe('private completion continuity', () => {
       'private-continuity-partial-session-',
     )
     const delivered = await createDeliveredPrivateCompletion({
-      detachedSession: fixture.detachedSession,
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
       vault: fixture.vaultRoot,
     })
     const transcriptCreatedAt = delivered.delivery!.sentAt
@@ -274,7 +282,8 @@ describe('private completion continuity', () => {
       vault: vaultRoot,
     })).session
     const delivered = await createDeliveredPrivateCompletion({
-      detachedSession,
+      continuitySessionId: null,
+      deliverySession: detachedSession,
       vault: vaultRoot,
     })
 
@@ -354,7 +363,8 @@ async function createContinuityFixture(prefix: string): Promise<{
 }
 
 async function createPrivateCompletionIntent(input: {
-  detachedSession: AssistantSession
+  continuitySessionId: string | null
+  deliverySession: AssistantSession
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const completionId = 'aask_done_private_continuity_test'
@@ -372,8 +382,9 @@ async function createPrivateCompletionIntent(input: {
     deliveryTransportIdempotent: true,
     identityId: locator.identityId,
     message: 'Exact private completion.',
+    privateCompletionContinuitySessionId: input.continuitySessionId,
     reviewedAssistantAskCompletionExpiresAt: '2099-08-11T18:05:00.000Z',
-    sessionId: input.detachedSession.sessionId,
+    sessionId: input.deliverySession.sessionId,
     threadId: locator.threadId,
     threadIsDirect: true,
     turnId: 'turn_private_continuity_test',
@@ -382,7 +393,8 @@ async function createPrivateCompletionIntent(input: {
 }
 
 async function createDeliveredPrivateCompletion(input: {
-  detachedSession: AssistantSession
+  continuitySessionId: string | null
+  deliverySession: AssistantSession
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const intent = await createPrivateCompletionIntent(input)

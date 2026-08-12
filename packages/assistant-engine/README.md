@@ -67,12 +67,15 @@ An authenticated current-sender private Assistant Ask completion is the narrow
 deterministic exception. It starts no formatter or provider turn and does not
 mutate the member's ordinary conversation when the notification is queued.
 Only after hosted provider acceptance does the durable outbox delivery import
-the exact reviewed assistant text into the matching logical direct session,
-advance that session once, and clear its stale native provider-resume aliases.
-The outbox intent journals an interrupted import, and the next attended direct
-resolution repairs it before provider-resume selection. Rejected completions
-and every generic detached notification remain isolated and cannot claim this
-continuity behavior.
+the exact reviewed assistant text into the exact ordinary direct session bound
+at queue time. If none existed, the intent remains unbound until the first
+canonical attended direct turn; another same-route detached session is never
+inferred as the owner. The import advances that session once and clears its
+stale native provider-resume aliases. The outbox intent journals an interrupted
+import, and nested hosted direct route plus accepted assistant-input authority
+repairs it before provider-resume selection even for text-only payloads.
+Rejected completions, system continuations, and every generic detached
+notification remain isolated and cannot claim this continuity behavior.
 
 The `creative-response` and `creative-response-text` notification prompt
 profiles are isolated system continuations for verified, explicitly requested

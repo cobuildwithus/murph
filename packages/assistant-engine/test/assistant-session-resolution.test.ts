@@ -12,6 +12,7 @@ import {
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 
 const sessionResolutionMocks = vi.hoisted(() => ({
+  reconcilePrivateCompletion: vi.fn(),
   resolveAssistantSession: vi.fn(),
 }))
 
@@ -25,6 +26,11 @@ vi.mock('../src/assistant/store.js', async () => {
     resolveAssistantSession: sessionResolutionMocks.resolveAssistantSession,
   }
 })
+
+vi.mock('../src/assistant/private-completion-continuity.js', () => ({
+  reconcileAssistantPrivateCompletionContinuityForSession:
+    sessionResolutionMocks.reconcilePrivateCompletion,
+}))
 
 import {
   buildResolveAssistantSessionInput,
@@ -45,6 +51,18 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.restoreAllMocks()
 })
+
+sessionResolutionMocks.reconcilePrivateCompletion.mockImplementation(
+  async ({ sessionId }: { sessionId: string }) => {
+    const resolved = sessionResolutionMocks.resolveAssistantSession.mock.results
+      .at(-1)?.value
+    const value = await resolved
+    if (value?.session.sessionId !== sessionId) {
+      throw new Error('Expected the resolved session to match reconciliation.')
+    }
+    return value.session
+  },
+)
 
 function createOperatorDefaults(
   overrides: Partial<AssistantOperatorDefaults> = {},
@@ -491,12 +509,99 @@ describe('assistant session resolution', () => {
         defaults,
         message,
       }),
-    ).resolves.toBe(resolvedSession)
+    ).resolves.toMatchObject(resolvedSession)
 
     expect(sessionResolutionMocks.resolveAssistantSession).toHaveBeenCalledTimes(1)
     expect(sessionResolutionMocks.resolveAssistantSession).toHaveBeenCalledWith(
       buildResolveAssistantSessionInput(message, defaults, boundaryDefaultTarget),
     )
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      sessionId: resolvedSession.session.sessionId,
+      vault: message.vault,
+    })
+  })
+
+  it('repairs hosted direct text from canonical conversation and accepted input authority', async () => {
+    const target = createDefaultLocalAssistantModelTarget()
+    const resolvedSession = createResolvedAssistantSessionForTest({ target })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: target,
+      defaults: null,
+      message: createMessageInput({
+        acceptedTurnInput: {
+          initialInputs: [{
+            id: 'input-hosted-direct-text',
+            source: 'assistant-input',
+          }],
+        },
+        conversation: {
+          alias: null,
+          channel: 'linq',
+          directness: 'direct',
+          identityId: 'identity-hosted-direct-text',
+          participantId: 'participant-hosted-direct-text',
+          sessionId: null,
+          threadId: 'thread-hosted-direct-text',
+        },
+        threadIsDirect: undefined,
+        turnTrigger: 'automation-auto-reply',
+        userMessageContent: null,
+      }),
+    })
+
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      sessionId: resolvedSession.session.sessionId,
+      vault: '/tmp/assistant-session-resolution-vault',
+    })
+  })
+
+  it('does not repair direct system continuation work without accepted input', async () => {
+    const target = createDefaultLocalAssistantModelTarget()
+    const resolvedSession = createResolvedAssistantSessionForTest({ target })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: target,
+      defaults: null,
+      message: createMessageInput({
+        conversation: {
+          alias: null,
+          channel: 'linq',
+          directness: 'direct',
+          identityId: 'identity-system-continuation',
+          participantId: 'participant-system-continuation',
+          sessionId: null,
+          threadId: 'thread-system-continuation',
+        },
+        turnTrigger: 'automation-auto-reply',
+        userMessageContent: null,
+      }),
+    })
+
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).not.toHaveBeenCalled()
+  })
+
+  it('repairs manual direct asks regardless of multimodal payload shape', async () => {
+    const target = createDefaultLocalAssistantModelTarget()
+    const resolvedSession = createResolvedAssistantSessionForTest({ target })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: target,
+      defaults: null,
+      message: createMessageInput({
+        threadIsDirect: true,
+        turnTrigger: 'manual-ask',
+        userMessageContent: [{
+          text: 'Inspect this image.',
+          type: 'text',
+        }],
+      }),
+    })
+
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledOnce()
   })
 
   it('projects a hosted model change while preserving native thread continuity', async () => {

@@ -67,6 +67,7 @@ export interface AssistantSessionResolutionDiagnostics {
 export interface ResolvedAssistantSession {
   created: boolean
   paths: AssistantStatePaths
+  privateCompletionContinuitySessionId?: string | null
   resolutionDiagnostics?: AssistantSessionResolutionDiagnostics
   session: AssistantSession
 }

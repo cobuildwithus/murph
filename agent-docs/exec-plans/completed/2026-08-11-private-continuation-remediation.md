@@ -75,6 +75,12 @@ Updated: 2026-08-11
 - The existing hosted outbox `persistDeliveredIntent` hook is the candidate
   ownership boundary because it runs after provider acceptance and before sent
   finalization.
+- Final round 2 found that same-route sibling inference could choose a detached
+  session and that top-level directness plus multimodal content did not model
+  ordinary hosted text. Both findings are accepted: queue-time resolution now
+  binds only an exact existing ordinary session, otherwise leaves continuity
+  unbound, while repair uses canonical nested directness and accepted inbound
+  input authority rather than payload shape.
 
 ## Verification
 

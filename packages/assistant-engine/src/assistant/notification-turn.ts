@@ -401,6 +401,8 @@ export async function sendAssistantNotificationLocal(
             firstContactDocIds,
             input,
             messageInput,
+            privateCompletionContinuitySessionId:
+              resolved.privateCompletionContinuitySessionId ?? null,
             responseText: responsePolicy.text,
             session: resolved.session,
             sharedPlan,
@@ -894,6 +896,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   firstContactDocIds: readonly string[]
   input: AssistantNotificationInput
   messageInput: AssistantMessageInput
+  privateCompletionContinuitySessionId: string | null
   responseText: string
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
@@ -945,6 +948,10 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input: input.messageInput,
     media: [],
     message: responseText,
+    privateCompletionContinuitySessionId:
+      deferPrivateCompletionContinuity
+        ? input.privateCompletionContinuitySessionId
+        : undefined,
     session: input.session,
     sharedPlan: input.sharedPlan,
     turnId,
@@ -1462,6 +1469,7 @@ async function deliverAssistantNotificationMessage(input: {
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  privateCompletionContinuitySessionId?: string | null
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
@@ -1496,6 +1504,8 @@ async function deliverAssistantNotificationMessage(input: {
     channel: deliveryFields.channel,
     media: requestedMedia,
   })
+  const privateCompletionContinuitySessionId =
+    input.privateCompletionContinuitySessionId ?? null
   const outcome = await state.outbox.deliverMessage({
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
@@ -1512,6 +1522,7 @@ async function deliverAssistantNotificationMessage(input: {
     ...deliveryFields,
     card: input.card ?? null,
     media,
+    privateCompletionContinuitySessionId,
     dispatchMode: input.input.deliveryDispatchMode,
   })
   switch (outcome.kind) {

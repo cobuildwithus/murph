@@ -1,4 +1,5 @@
 import {
+  assistantModelTargetsEqual,
   normalizeAssistantBackendTarget,
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -210,12 +211,24 @@ export async function resolveAssistantSessionForMessage(input: {
     messageOverride,
     resolved,
   })
+  const privateCompletionContinuitySessionId =
+    sessionInput.threadIsDirect === true
+    && hostedDefaultTarget
+    && assistantModelTargetsEqual(resolved.session.target, hostedDefaultTarget)
+      ? resolved.session.sessionId
+      : null
   const effectiveResolved = effectiveTarget
-    ? applyEffectiveTargetToResolvedSession(resolved, effectiveTarget)
-    : resolved
+    ? applyEffectiveTargetToResolvedSession({
+        ...resolved,
+        privateCompletionContinuitySessionId,
+      }, effectiveTarget)
+    : {
+        ...resolved,
+        privateCompletionContinuitySessionId,
+      }
   if (
-    input.message.threadIsDirect !== true
-    || input.message.userMessageContent == null
+    sessionInput.threadIsDirect !== true
+    || !assistantMessageIsAttendedDirectTurn(input.message)
   ) {
     return effectiveResolved
   }
@@ -229,6 +242,23 @@ export async function resolveAssistantSessionForMessage(input: {
   return effectiveTarget
     ? applyEffectiveTargetToResolvedSession(reconciled, effectiveTarget)
     : reconciled
+}
+
+function assistantMessageIsAttendedDirectTurn(
+  input: AssistantMessageInput,
+): boolean {
+  if (
+    input.turnTrigger === undefined
+    || input.turnTrigger === null
+    || input.turnTrigger === 'manual-ask'
+  ) {
+    return true
+  }
+  if (input.turnTrigger !== 'automation-auto-reply') {
+    return false
+  }
+  const initialInputs = input.acceptedTurnInput?.initialInputs ?? []
+  return initialInputs.some((item) => item.source === 'assistant-input')
 }
 
 async function resolveAssistantSessionForMessageInput(input: {

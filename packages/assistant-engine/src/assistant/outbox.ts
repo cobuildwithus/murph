@@ -274,6 +274,7 @@ export type AssistantOutboxCreateIntentInput = {
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   groupEmailAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
+  privateCompletionContinuitySessionId?: string | null
   replyToMessageId?: string | null
   sessionId: string
   subject?: string | null
@@ -484,6 +485,12 @@ export async function createAssistantOutboxIntent(
       answeredMailboxItemIds,
       reviewedAssistantAskCompletionExpiresAt:
         input.reviewedAssistantAskCompletionExpiresAt ?? undefined,
+      ...(input.privateCompletionContinuitySessionId === undefined
+        ? {}
+        : {
+            privateCompletionContinuitySessionId:
+              input.privateCompletionContinuitySessionId,
+          }),
       lastError: null,
     })
     const persistedIntent = assistantOutboxIntentSchema.parse(
@@ -1219,6 +1226,7 @@ export async function deliverAssistantOutboxMessage(input: {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
+  privateCompletionContinuitySessionId?: string | null
   subject?: string | null
   replyToMessageId?: string | null
   signal?: AbortSignal
@@ -1252,6 +1260,12 @@ export async function deliverAssistantOutboxMessage(input: {
     identityId: input.identityId,
     media: input.media,
     message: input.message,
+    ...(input.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            input.privateCompletionContinuitySessionId,
+        }),
     ...(input.nativeReplyRequested === undefined
       ? {}
       : { nativeReplyRequested: input.nativeReplyRequested }),

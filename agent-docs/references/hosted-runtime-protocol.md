@@ -669,11 +669,17 @@ conversation input continues to preempt this pass.
 An authenticated current-sender private exact completion does not mutate the
 member's ordinary conversation when the notification is queued. After the
 hosted provider accepts the live-authorized same-channel delivery, the durable
-outbox intent becomes the recovery journal for one import into the matching
-logical direct session: append the exact reviewed assistant text once, advance
-the session once, and clear both stale native provider-resume aliases. An
-interrupted import converges from that journal, and direct attended resolution
-repairs it before provider-resume selection. The runtime recognizes this
+outbox intent becomes the recovery journal. If queue-time resolution found an
+existing ordinary direct session, the intent binds that exact session ID before
+the notification target is projected read-only; otherwise the target stays
+unbound until the first attended direct turn. No route-sibling heuristic may
+choose the owner. The import appends the exact reviewed assistant text once,
+advances the session once, and clears both stale native provider-resume aliases.
+An interrupted import converges from that journal, and canonical direct
+attended resolution repairs it before provider-resume selection. Hosted text
+turns use their nested direct-conversation route plus accepted assistant-input
+authority; multimodal payload shape is irrelevant, and system work does not
+trigger repair. The runtime recognizes this
 exception only from the complete queue-only, exact-text, one-mailbox-item,
 direct Linq-or-Telegram private-completion proof plus its matching durable
 delivery. Rejected completions, an expiry marker alone, and all generic

@@ -462,6 +462,7 @@ describe('notification audience authority integration', () => {
         dedupeToken: deliveryKey,
         dispatchMode: 'queue-only',
         message: completionText,
+        privateCompletionContinuitySessionId: ordinaryWithResume.sessionId,
         reviewedAssistantAskCompletionExpiresAt: reviewedExpiresAt,
       }),
     )
@@ -480,6 +481,73 @@ describe('notification audience authority integration', () => {
     await expect(
       listAssistantTranscriptEntries(vaultRoot, ordinaryWithResume.sessionId),
     ).resolves.toEqual([])
+  })
+
+  it('leaves private continuity unbound when only a detached route session exists', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'linq-private-completion-unbound-',
+    )
+    cleanupPaths.push(parentRoot)
+    const completionEventId = 'aask_done_private_completion_unbound'
+    const deliveryKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionEventId,
+      )
+    const locator = {
+      actorId: 'h1_dddddddddddddddddddddddd',
+      channel: 'linq',
+      identityId: 'h1_eeeeeeeeeeeeeeeeeeeeeeee',
+      threadId: 'h1_ffffffffffffffffffffffff',
+      threadIsDirect: true,
+    } as const
+    const executionContext = {
+      hosted: {
+        defaultTarget: modelTarget,
+        memberId: 'member-private-completion-unbound',
+        userEnvKeys: [],
+      },
+    } as const
+    await resolveAssistantSession({
+      ...locator,
+      bindingDeliveryTarget: locator.threadId,
+      deliveryKind: 'thread',
+      sandbox: 'read-only',
+      vault: vaultRoot,
+    })
+    boundaries.deliverMessage.mockResolvedValueOnce({
+      delivery: null,
+      deliveryError: null,
+      intent: {
+        intentId: 'intent-private-completion-unbound',
+      },
+      kind: 'queued',
+      session: null,
+    })
+
+    await sendAssistantNotificationLocal({
+      ...locator,
+      answeredMailboxItemIds: [completionEventId],
+      bindingDeliveryTarget: locator.threadId,
+      deliveryDedupeToken: deliveryKey,
+      deliveryDispatchMode: 'queue-only',
+      deliveryIdempotencyKey: deliveryKey,
+      deliveryKind: 'thread',
+      deliveryTarget: locator.threadId,
+      executionContext,
+      instructions: 'Deliver the reviewed private Assistant Ask answer exactly.',
+      responsePolicy: {
+        kind: 'require_send_exact_text',
+        text: 'Here is the private answer for the first attended turn.',
+      },
+      reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
+      vault: vaultRoot,
+    })
+
+    expect(boundaries.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        privateCompletionContinuitySessionId: null,
+      }),
+    )
   })
 
   it('keeps an exact Telegram welcome on the attended conversation session', async () => {

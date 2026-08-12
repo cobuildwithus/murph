@@ -24,7 +24,6 @@ import {
   synchronizeAssistantIndexes,
   writeAssistantSession,
 } from './store/persistence.js'
-import { listAssistantSessionsLocal } from './store.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
 /**
@@ -86,16 +85,14 @@ export async function persistAssistantPrivateCompletionContinuityAfterDelivery(
   await withAssistantTurnLock({
     vault: input.vault,
     run: async () => {
-      const sessions = await listAssistantSessionsLocal(input.vault)
-      const candidates = sessions.filter((session) =>
-        session.sessionId !== input.intent.sessionId
-        && assistantPrivateCompletionRouteMatchesSession(input.intent, session)
+      const sessionId = normalizeNullableString(
+        input.intent.privateCompletionContinuitySessionId,
       )
-      if (candidates.length !== 1) {
+      if (!sessionId) {
         return
       }
       await reconcileAssistantPrivateCompletionContinuityForSession({
-        sessionId: candidates[0]!.sessionId,
+        sessionId,
         vault: input.vault,
       })
     },
@@ -215,6 +212,12 @@ function assistantPrivateCompletionCanJoinSession(input: {
     continuity?.status === 'prepared'
     && continuity.sessionId !== input.session.sessionId
   ) {
+    return false
+  }
+  const boundSessionId = normalizeNullableString(
+    input.intent.privateCompletionContinuitySessionId,
+  )
+  if (boundSessionId && boundSessionId !== input.session.sessionId) {
     return false
   }
   return isDeliveredPrivateAssistantAskCompletion(input.intent)

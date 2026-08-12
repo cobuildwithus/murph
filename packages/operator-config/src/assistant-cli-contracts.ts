@@ -966,6 +966,8 @@ export const assistantOutboxIntentSchema = z
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string(),
     reviewedAssistantAskCompletionExpiresAt: isoTimestampSchema.optional(),
+    privateCompletionContinuitySessionId:
+      assistantSessionIdSchema.nullable().optional(),
     privateCompletionContinuity:
       assistantPrivateCompletionContinuitySchema.nullable().optional(),
     emailHtml: z.string().max(500_000).nullable().optional(),
