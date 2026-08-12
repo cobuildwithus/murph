@@ -336,9 +336,19 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       preparationTarget: "control_root",
       tx: input.prisma,
     });
+    if (!(await tryLockPreparedDirectTelegramMemberRowTx({
+      memberId: existingMember.id,
+      tx: input.prisma,
+    }))) {
+      // Activation and Starter enrollment lock the member before this
+      // authority lock. Never wait here while holding the reciprocal lock:
+      // the outer preparation retry rolls back, releases it, and starts from
+      // a fresh member/access snapshot.
+      throw hostedDirectTelegramPreparationRequired("sender_route");
+    }
+  } else {
+    await lockHostedMemberRow(input.prisma, existingMember.id);
   }
-
-  await lockHostedMemberRow(input.prisma, existingMember.id);
   const lockedMemberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
@@ -649,6 +659,19 @@ async function revalidatePreparedDirectTelegramRouteTx(input: {
       preparationTarget: "sender_route",
     });
   }
+}
+
+async function tryLockPreparedDirectTelegramMemberRowTx(input: {
+  memberId: string;
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "hosted_member"
+    WHERE "id" = ${input.memberId}
+    FOR UPDATE SKIP LOCKED
+  `;
+  return rows.length > 0;
 }
 
 async function revalidatePreparedDirectTelegramRootTx(input: {
