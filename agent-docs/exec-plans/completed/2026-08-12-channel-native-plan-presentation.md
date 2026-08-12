@@ -1,6 +1,6 @@
 # Channel-native plan presentation
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -28,8 +28,8 @@ Updated: 2026-08-12
 1. [x] Inventory current card and media availability by channel and turn type.
 2. [x] Strengthen the owning presentation rules without changing delivery authority.
 3. [x] Add focused direct and scheduled-turn proof.
-4. [ ] Run scoped verification and inspect the complete diff.
-5. [ ] Push the candidate, open the PR, and complete the specialist ReviewGPT and CI gates.
+4. [x] Run scoped verification and inspect the complete diff.
+5. [x] Push the candidate, open the PR, and complete the specialist ReviewGPT and CI gates.
 
 ## Decisions
 
@@ -45,3 +45,6 @@ Updated: 2026-08-12
 - Changelog generation and `git diff --check` pass.
 - Preliminary ReviewGPT found that response media cannot replace routine order, dose, timing, cues, or safety. The corrected contract reserves text replacement for complete cards and keeps concise semantic text with response media.
 - Added opt-in real-model journeys for attended Telegram, scheduled Telegram, and attended Linq routine presentation. Local execution reached the credential gate and stopped because `OPENAI_API_KEY` is unavailable; the exact test remains available to credentialed CI or an operator lane.
+- Corrected-head product revalidation found no remaining product issue. The change uses the smallest complete contract: complete cards replace prose, while incomplete media keeps the concise instructions needed to use it safely.
+- All required GitHub checks pass on the pushed product candidate. Parent final review found no remaining correctness, safety, privacy, or product issue.
+Completed: 2026-08-12
