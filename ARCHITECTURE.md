@@ -1621,21 +1621,21 @@ the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
 Nutrition images retain the calorie ring and metric row while remaining
-rectangular and badge-free so the provider owns the outer mask. The installed
-Messages extension retains its native icon and interactive identity. The
-provider request supplies Murph's canonical App Store id so app-absent cards
-can expose the provider-owned install affordance. That producer change remains
-rollout-blocked until physical no-extension iPhone and macOS proof confirms the
-wide static preview stays legible; if Linq substitutes square artwork for that
-preview, the App Store id must remain omitted until the provider offers a
-treatment that preserves both states.
+rectangular so the provider owns the outer mask. The installed Messages
+extension retains its native icon and interactive identity. The provider
+request omits the optional App Store id, so app-absent static cards receive no
+provider app art; every static bitmap embeds the checked-in canonical Murph
+mark in the native 36×27pt upper-left badge footprint instead.
 Their concise native caption keeps only the date and meal count instead of
-repeating visible totals or target amounts. Each assessed V2 goal keeps one
-concise directional label inside the image without relying on color alone;
-null and unavailable goals stay absent, and a short subcaption appears only
-when some totals are partial. Compact-table images retain the table grid or
-workout progress and exercise rows while keeping the provider's upper-left icon
-footprint clear without drawing that icon into the bitmap. Their provider
+repeating visible totals or target amounts. The static default mirrors the
+native visible hierarchy without repeated direction labels; the safe text
+recovery retains the complete status meaning outside the bitmap.
+Null, incomplete, and unavailable goal states retain a neutral ring, and a
+short subcaption appears only when some totals are partial. Compact-table
+images retain the table grid or workout progress and exercise rows without a
+large empty icon gutter. Stacked generic fields place each measured header
+above its full-width measured value so contract-valid tokens remain contained.
+Their provider
 chrome stays bounded to the title plus an optional generic subtitle or derived
 workout progress rather than repeating the raster's rows and sets. Complete
 semantic text remains available through the deterministic text renderer and
@@ -1643,7 +1643,7 @@ value-free recovery fallback.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension
-URL keeps the immutable V1, V2, V3, or V4 snapshot in a bounded Base64URL
+URL keeps the immutable V1, V2, V3, V4, or V5 snapshot in a bounded Base64URL
 fragment that the extension decodes offline. The static image URL carries that
 same bounded presentation envelope in one queryless path so the Web image route
 can render it and Linq can rehost it. V3 strips its canonical tracking reference
@@ -2863,14 +2863,20 @@ message URL, is not sent to the Web origin by an HTTPS request, and is decoded
 locally by the Messages extension. Recipients without that extension receive a
 provider static layout whose `image_url` carries the exact same authority-free
 envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
-stateless Web renderer accepts only strict V1-V4 presentation envelopes, reads
+stateless Web renderer accepts only strict V1-V5 presentation envelopes, reads
 no database or remote service, logs no card values, and returns private
 no-store/no-index headers. Linq uses that image as its static card fallback;
 Telegram daily-nutrition Rich Messages reuse the same image inside their native
 table-and-details presentation. This is a narrow presentation exception to the
-fixed-URL rule: either URL may contain the same bounded health-related values
-visible in the immutable private-direct message, but never a member identity,
-canonical record reference, credential, tracking reference, or other authority.
+fixed-URL rule: either URL may contain only the bounded values permitted by its
+versioned delivery contract. V1-V4 carry the same private-direct presentation
+values; V5 uses the identity-free public challenge projection. Neither may
+contain a member identity, canonical record reference, credential, tracking
+reference, or other authority.
+Generic V3 tables choose their one shared-header grid solely from the exact
+intrinsic width of every admitted header and cell track plus its gutters. Only
+genuinely overwide content uses repeated full-width field labels; column count
+does not create a second layout authority.
 The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
 delivery. Compact-table provider chrome uses only bounded title, optional
