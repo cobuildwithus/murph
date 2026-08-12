@@ -122,6 +122,35 @@ describe("check-provider-request-boundaries", () => {
     ].join("\n"))).toEqual([3, 7]);
   });
 
+  it("covers Composio typed builders and the generated provider client", () => {
+    expect(blockedLines([
+      "import Composio from '@composio/client';",
+      "import type { ToolExecuteParams } from '@composio/client/resources/tools';",
+      "function buildExecute(): ToolExecuteParams {",
+      "  return { arguments, ...identity };",
+      "}",
+      "const composio = new Composio({ apiKey });",
+      "composio.tools.execute(toolSlug, { arguments, ...identity });",
+    ].join("\n"))).toEqual([4, 7]);
+  });
+
+  it("rejects inferred Composio request variables", () => {
+    expect(
+      findProviderRequestBoundaryViolations(
+        "apps/web/src/example.ts",
+        [
+          "import Composio from '@composio/client';",
+          "const composio = new Composio({ apiKey });",
+          "const params = { arguments, user_id: userId, version };",
+          "composio.tools.execute(toolSlug, params);",
+        ].join("\n"),
+      ).map((violation) => ({
+        kind: violation.kind,
+        line: violation.line,
+      })),
+    ).toEqual([{ kind: "untyped-request-object", line: 3 }]);
+  });
+
   it("blocks spreads in Kernel SDK request arguments", () => {
     expect(blockedLines([
       "import Kernel from '@onkernel/sdk';",

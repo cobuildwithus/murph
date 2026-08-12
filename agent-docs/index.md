@@ -96,8 +96,9 @@ Protected-main Junction wearable canary credential derivation, handling, and
 verification ownership are specified by `agent-docs/SECURITY.md` and
 `agent-docs/references/testing-ci-map.md`.
 
-Spread-free official Stripe SDK request construction and the safe opt-in
-test-mode resume contract probe are jointly specified by
+Spread-free official provider SDK request construction, including the generated
+Composio client boundary, and the safe opt-in Stripe test-mode resume contract
+probe are jointly specified by
 `agent-docs/SECURITY.md` and `agent-docs/references/testing-ci-map.md`.
 
 Private generated-image failure diagnostics, their failure-only scope,

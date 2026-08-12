@@ -287,6 +287,35 @@ describe("Composio connected-app client", () => {
     await client.deleteAccount("ca_work");
   });
 
+  it("preserves repeated query parameters for multi-value account filters", async () => {
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      expect(parsed.searchParams.getAll("connected_account_ids")).toEqual([
+        "ca_personal",
+        "ca_work",
+      ]);
+      expect(parsed.searchParams.getAll("statuses")).toEqual([
+        "ACTIVE",
+        "REVOKED",
+      ]);
+      expect(parsed.searchParams.getAll("toolkit_slugs")).toEqual([
+        "gmail",
+        "googlecalendar",
+      ]);
+      expect(parsed.searchParams.getAll("user_ids")).toEqual(["hbm_member"]);
+      return jsonResponse({ items: [] });
+    });
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    await expect(client.listAccounts({
+      accountIds: ["ca_personal", "ca_work"],
+      statuses: ["ACTIVE", "REVOKED"],
+      userId: "hbm_member",
+    })).resolves.toEqual([]);
+  });
+
   it("paginates unfiltered owned account listing for deletion-time revocation", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
@@ -365,6 +394,7 @@ describe("Composio connected-app client", () => {
     expect(String(error)).not.toContain("member@example.test");
     expect(String(error)).not.toContain("provider-secret");
     expect(String(error)).not.toContain("secret-test-key");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("preserves HTTP status and type when provider error bodies are unusable", async () => {

@@ -1,5 +1,13 @@
 import "server-only";
 
+import Composio, { APIConnectionError, APIError } from "@composio/client";
+import type {
+  SessionCreateParams,
+  SessionExecuteParams,
+  SessionLinkParams,
+  SessionSearchParams,
+} from "@composio/client/resources/tool-router/session/session";
+
 import {
   HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
   type HostedConnectedAppsConfig,
@@ -14,6 +22,21 @@ const COMPOSIO_ERROR_RESPONSE_LIMIT_BYTES = 64 * 1024;
 // stripping markup; rejecting here would discard a payload that compacts to a
 // fraction of its wire size.
 const COMPOSIO_RESPONSE_LIMIT_BYTES = 4 * 1024 * 1024;
+
+type ComposioConnectedAccountStatus = NonNullable<
+  Composio.ConnectedAccountListParams["statuses"]
+>[number];
+
+type ComposioDirectExecuteParams = Composio.ToolExecuteParams & Required<Pick<
+  Composio.ToolExecuteParams,
+  "arguments" | "user_id" | "version"
+>>;
+
+// Composio's high-level Session.search contract supports this filter, while
+// the generated REST request type has not yet surfaced it.
+type ComposioSessionSearchParams = SessionSearchParams & {
+  toolkits?: string[];
+};
 
 export interface ComposioConnectedAccount {
   alias: string | null;
@@ -57,39 +80,44 @@ export function createComposioConnectedAppsClient(input: {
   fetchImpl?: typeof fetch;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
+  const provider = new Composio({
+    apiKey: input.config.apiKey,
+    baseURL: input.config.baseUrl,
+    fetch: createBoundedComposioFetch(fetchImpl),
+    logLevel: "off",
+    maxRetries: 0,
+    timeout: COMPOSIO_REQUEST_TIMEOUT_MS,
+  });
 
   return {
     async createSession(userId: string): Promise<string> {
-      const payload = await requestJson({
-        body: {
-          execute: { enable_multi_execute: false },
-          manage_connections: { enable: false },
-          multi_account: {
-            enable: true,
-            max_accounts_per_toolkit: input.config.maxAccountsPerToolkit,
-            require_explicit_selection: true,
-          },
-          search: { enable: true },
-          tags: {
-            disable: ["destructiveHint"],
-            enable: ["readOnlyHint"],
-          },
-          tools: HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
-          toolkits: {
-            enable: [
-              ...input.config.toolkits,
-              ...Object.keys(HOSTED_CONNECTED_APPS_SERVICE_TOOLS),
-            ],
-          },
-          user_id: userId,
-          workbench: { enable: false },
+      const params: SessionCreateParams = {
+        execute: { enable_multi_execute: false },
+        manage_connections: { enable: false },
+        multi_account: {
+          enable: true,
+          max_accounts_per_toolkit: input.config.maxAccountsPerToolkit,
+          require_explicit_selection: true,
         },
-        config: input.config,
-        fetchImpl,
-        method: "POST",
-        path: "/api/v3.1/tool_router/session",
-      });
-      const sessionId = readString(asRecord(payload), "session_id");
+        search: { enable: true },
+        tags: {
+          disable: ["destructiveHint"],
+          enable: ["readOnlyHint"],
+        },
+        tools: buildComposioSessionTools(),
+        toolkits: {
+          enable: [
+            ...input.config.toolkits,
+            ...Object.keys(HOSTED_CONNECTED_APPS_SERVICE_TOOLS),
+          ],
+        },
+        user_id: userId,
+        workbench: { enable: false },
+      };
+      const payload = await requestComposio(() =>
+        provider.toolRouter.session.create(params)
+      );
+      const sessionId = normalizeNonEmptyString(asRecord(payload)?.session_id);
       if (!sessionId) {
         throw new ComposioConnectedAppsRequestError(
           "Composio returned an invalid session response.",
@@ -103,18 +131,15 @@ export function createComposioConnectedAppsClient(input: {
       sessionId: string;
       toolkits?: readonly string[];
     }): Promise<unknown> {
-      return await requestJson({
-        body: {
-          queries: [{ use_case: inputSearch.query }],
-          ...(inputSearch.toolkits?.length
-            ? { toolkits: [...inputSearch.toolkits] }
-            : {}),
-        },
-        config: input.config,
-        fetchImpl,
-        method: "POST",
-        path: `/api/v3.1/tool_router/session/${encodeURIComponent(inputSearch.sessionId)}/search`,
-      });
+      const params: ComposioSessionSearchParams = {
+        queries: [{ use_case: inputSearch.query }],
+      };
+      if (inputSearch.toolkits?.length) {
+        params.toolkits = [...inputSearch.toolkits];
+      }
+      return await requestComposio(() =>
+        provider.toolRouter.session.search(inputSearch.sessionId, params)
+      );
     },
 
     async execute(inputExecute: {
@@ -123,17 +148,16 @@ export function createComposioConnectedAppsClient(input: {
       sessionId: string;
       toolSlug: string;
     }): Promise<unknown> {
-      return await requestJson({
-        body: {
-          ...(inputExecute.account ? { account: inputExecute.account } : {}),
-          arguments: inputExecute.arguments,
-          tool_slug: inputExecute.toolSlug,
-        },
-        config: input.config,
-        fetchImpl,
-        method: "POST",
-        path: `/api/v3.1/tool_router/session/${encodeURIComponent(inputExecute.sessionId)}/execute`,
-      });
+      const params: SessionExecuteParams = {
+        arguments: inputExecute.arguments,
+        tool_slug: inputExecute.toolSlug,
+      };
+      if (inputExecute.account) {
+        params.account = inputExecute.account;
+      }
+      return await requestComposio(() =>
+        provider.toolRouter.session.execute(inputExecute.sessionId, params)
+      );
     },
 
     async executeDirect(inputExecute: {
@@ -150,23 +174,26 @@ export function createComposioConnectedAppsClient(input: {
       userId: string;
       version: string;
     }): Promise<unknown> {
-      const payload = await requestJson({
-        body: {
-          arguments: inputExecute.arguments,
-          ...(inputExecute.account
-            ? { connected_account_id: inputExecute.account }
-            : {}),
-          ...(inputExecute.customAuthParams
-            ? { custom_auth_params: inputExecute.customAuthParams }
-            : {}),
-          user_id: inputExecute.userId,
-          version: inputExecute.version,
-        },
-        config: input.config,
-        fetchImpl,
-        method: "POST",
-        path: `/api/v3.1/tools/execute/${encodeURIComponent(inputExecute.toolSlug)}`,
-      });
+      const params: ComposioDirectExecuteParams = {
+        arguments: inputExecute.arguments,
+        user_id: inputExecute.userId,
+        version: inputExecute.version,
+      };
+      if (inputExecute.account) {
+        params.connected_account_id = inputExecute.account;
+      }
+      if (inputExecute.customAuthParams) {
+        params.custom_auth_params = {
+          parameters: inputExecute.customAuthParams.parameters.map((parameter) => ({
+            in: parameter.in,
+            name: parameter.name,
+            value: parameter.value,
+          })),
+        };
+      }
+      const payload = await requestComposio(() =>
+        provider.tools.execute(inputExecute.toolSlug, params)
+      );
       return readSuccessfulDirectExecutePayload(payload);
     },
 
@@ -179,20 +206,21 @@ export function createComposioConnectedAppsClient(input: {
       connectedAccountId: string;
       redirectUrl: string;
     }> {
-      const payload = await requestJson({
-        body: {
-          ...(inputLink.alias ? { alias: inputLink.alias } : {}),
-          callback_url: inputLink.callbackUrl,
-          toolkit: inputLink.toolkit,
-        },
-        config: input.config,
-        fetchImpl,
-        method: "POST",
-        path: `/api/v3.1/tool_router/session/${encodeURIComponent(inputLink.sessionId)}/link`,
-      });
+      const params: SessionLinkParams = {
+        callback_url: inputLink.callbackUrl,
+        toolkit: inputLink.toolkit,
+      };
+      if (inputLink.alias) {
+        params.alias = inputLink.alias;
+      }
+      const payload = await requestComposio(() =>
+        provider.toolRouter.session.link(inputLink.sessionId, params)
+      );
       const record = asRecord(payload);
-      const connectedAccountId = readString(record, "connected_account_id");
-      const redirectUrl = readHttpsUrl(record, "redirect_url");
+      const connectedAccountId = normalizeNonEmptyString(
+        record?.connected_account_id,
+      );
+      const redirectUrl = readHttpsUrl(record?.redirect_url);
       if (!connectedAccountId || !redirectUrl) {
         throw new ComposioConnectedAppsRequestError(
           "Composio returned an invalid connection-link response.",
@@ -203,7 +231,7 @@ export function createComposioConnectedAppsClient(input: {
 
     async listAccounts(inputList: {
       accountIds?: readonly string[];
-      statuses?: readonly string[] | null;
+      statuses?: readonly ComposioConnectedAccountStatus[] | null;
       toolkit?: string;
       toolkits?: readonly string[] | null;
       userId: string;
@@ -211,72 +239,86 @@ export function createComposioConnectedAppsClient(input: {
       const accounts: ComposioConnectedAccount[] = [];
       let cursor: string | null = null;
       do {
-        const query = new URLSearchParams();
-        query.set("account_type", "PRIVATE");
-        query.set("limit", "100");
+        const params: Composio.ConnectedAccountListParams = {
+          account_type: "PRIVATE",
+          limit: 100,
+          user_ids: [inputList.userId],
+        };
         if (cursor) {
-          query.set("cursor", cursor);
+          params.cursor = cursor;
         }
         if (inputList.statuses !== null) {
-          appendQueryValues(query, "statuses", inputList.statuses ?? ["ACTIVE"]);
+          params.statuses = inputList.statuses
+            ? [...inputList.statuses]
+            : ["ACTIVE"];
         }
-        appendQueryValues(query, "user_ids", [inputList.userId]);
         if (inputList.accountIds?.length) {
-          appendQueryValues(query, "connected_account_ids", inputList.accountIds);
+          params.connected_account_ids = [...inputList.accountIds];
         }
         const toolkitSlugs = inputList.toolkit
           ? [inputList.toolkit]
           : inputList.toolkits === null
             ? []
             : inputList.toolkits ?? input.config.toolkits;
-        appendQueryValues(query, "toolkit_slugs", toolkitSlugs);
+        if (toolkitSlugs.length > 0) {
+          params.toolkit_slugs = [...toolkitSlugs];
+        }
 
-        const payload = await requestJson({
-          config: input.config,
-          fetchImpl,
-          method: "GET",
-          path: `/api/v3.1/connected_accounts?${query.toString()}`,
-        });
-        const record = asRecord(payload);
-        const items = asArray(record?.items);
+        const payload = await requestComposio(() =>
+          provider.connectedAccounts.list(params)
+        );
+        const payloadRecord = asRecord(payload);
+        const items = Array.isArray(payloadRecord?.items)
+          ? payload.items
+          : [];
         accounts.push(...items.flatMap(parseConnectedAccount));
-        cursor = readNullableString(record, "next_cursor");
+        cursor = normalizeNonEmptyString(payloadRecord?.next_cursor);
       } while (cursor);
 
       return accounts;
     },
 
     async renameAccount(accountId: string, alias: string): Promise<void> {
-      await requestJson({
-        body: { alias },
-        config: input.config,
-        fetchImpl,
-        method: "PATCH",
-        path: `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}`,
-      });
+      const params: Composio.ConnectedAccountPatchParams = { alias };
+      await requestComposio(() =>
+        provider.connectedAccounts.patch(accountId, params)
+      );
     },
 
     async disconnectAccount(accountId: string): Promise<void> {
-      await requestJson({
-        config: input.config,
-        fetchImpl,
-        method: "POST",
-        path: `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}/revoke`,
-      });
+      await requestComposio(() =>
+        provider.post(
+          `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}/revoke`,
+        )
+      );
     },
 
     async deleteAccount(accountId: string): Promise<void> {
-      await requestJson({
-        config: input.config,
-        fetchImpl,
-        method: "DELETE",
-        path: `/api/v3.1/connected_accounts/${encodeURIComponent(accountId)}`,
-      });
+      const params: Composio.ConnectedAccountDeleteParams = {};
+      await requestComposio(() =>
+        provider.connectedAccounts.delete(accountId, params)
+      );
     },
   };
 }
 
-function readSuccessfulDirectExecutePayload(payload: unknown): unknown {
+function buildComposioSessionTools(): NonNullable<SessionCreateParams["tools"]> {
+  return {
+    composio_search: {
+      enable: [...HOSTED_CONNECTED_APPS_SERVICE_TOOLS.composio_search.enable],
+    },
+    instacart: {
+      enable: [...HOSTED_CONNECTED_APPS_SERVICE_TOOLS.instacart.enable],
+    },
+    openweather_api: {
+      enable: [...HOSTED_CONNECTED_APPS_SERVICE_TOOLS.openweather_api.enable],
+    },
+  };
+}
+
+function readSuccessfulDirectExecutePayload(
+  payload: Composio.ToolExecuteResponse,
+): unknown {
   const record = asRecord(payload);
   if (record?.successful !== true) {
     throw new ComposioConnectedAppsRequestError(
@@ -291,93 +333,166 @@ function readSuccessfulDirectExecutePayload(payload: unknown): unknown {
   return Object.hasOwn(record, "data") ? record.data : {};
 }
 
-function parseConnectedAccount(item: unknown): ComposioConnectedAccount[] {
+function parseConnectedAccount(
+  item: Composio.ConnectedAccountListResponse["items"][number],
+): ComposioConnectedAccount[] {
   const record = asRecord(item);
   const toolkit = asRecord(record?.toolkit);
-  const id = readString(record, "id");
-  const toolkitSlug = readString(toolkit, "slug");
+  const id = normalizeNonEmptyString(record?.id);
+  const toolkitSlug = normalizeNonEmptyString(toolkit?.slug);
   if (!id || !toolkitSlug) {
     return [];
   }
   return [{
-    alias: readNullableString(record, "alias"),
+    alias: normalizeNonEmptyString(record?.alias),
     id,
     isDisabled: record?.is_disabled === true,
-    status: readString(record, "status") ?? "UNKNOWN",
+    status: normalizeNonEmptyString(record?.status) ?? "UNKNOWN",
     toolkit: {
+      // Older Composio responses included an undocumented display name. Keep
+      // accepting it without claiming it as part of the provider-owned schema.
       name: readString(toolkit, "name") ?? toolkitSlug,
       slug: toolkitSlug,
     },
-    wordId: readNullableString(record, "word_id"),
+    wordId: normalizeNonEmptyString(record?.word_id),
   }];
 }
 
-async function requestJson(input: {
-  body?: unknown;
-  config: HostedConnectedAppsConfig;
-  fetchImpl: typeof fetch;
-  method: "DELETE" | "GET" | "PATCH" | "POST";
-  path: string;
-  signal?: AbortSignal | null;
-}): Promise<unknown> {
-  const timeoutSignal = AbortSignal.timeout(COMPOSIO_REQUEST_TIMEOUT_MS);
-  const signal = input.signal
-    ? AbortSignal.any([input.signal, timeoutSignal])
-    : timeoutSignal;
-
-  let response: Response;
+async function requestComposio<T>(request: () => Promise<T>): Promise<T> {
   try {
-    response = await input.fetchImpl(`${input.config.baseUrl}${input.path}`, {
-      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-      headers: {
-        accept: "application/json",
-        ...(input.body === undefined ? {} : { "content-type": "application/json" }),
-        "x-api-key": input.config.apiKey,
-      },
-      method: input.method,
-      signal,
-    });
+    return await request();
   } catch (error) {
+    const boundedFailure = findComposioRequestError(error);
+    if (boundedFailure) {
+      throw boundedFailure;
+    }
+    if (error instanceof APIError && typeof error.status === "number") {
+      throw new ComposioConnectedAppsRequestError(
+        withComposioProviderDiagnostic(
+          `Composio request failed with status ${error.status}.`,
+          error.error,
+        ),
+        error.status,
+        { type: "composio_http_error" },
+      );
+    }
     throw new ComposioConnectedAppsRequestError(
       "Composio is temporarily unavailable.",
       null,
       {
-        cause: error,
+        cause: error instanceof APIConnectionError && error.cause
+          ? error.cause
+          : error,
         type: "composio_transport_error",
       },
     );
   }
+}
 
-  if (!response.ok) {
-    const payload = await readBoundedJsonResponse(response, {
-      limitBytes: COMPOSIO_ERROR_RESPONSE_LIMIT_BYTES,
-      signal: AbortSignal.timeout(COMPOSIO_ERROR_RESPONSE_TIMEOUT_MS),
-    }).catch(() => null);
-    throw new ComposioConnectedAppsRequestError(
-      withComposioProviderDiagnostic(
-        `Composio request failed with status ${response.status}.`,
-        payload,
-      ),
-      response.status,
-      { type: "composio_http_error" },
+function createBoundedComposioFetch(fetchImpl: typeof fetch): typeof fetch {
+  return async (request, init) => {
+    const response = await fetchImpl(
+      preserveRepeatedComposioListQueryParams(request),
+      init,
     );
-  }
-
-  try {
-    return await readBoundedJsonResponse(response);
-  } catch (error) {
-    if (error instanceof ComposioConnectedAppsRequestError) {
-      throw error;
+    if (response.status === 204) {
+      return response;
     }
-    throw new ComposioConnectedAppsRequestError(
-      "Composio returned an invalid JSON response.",
-      response.status,
-      {
-        cause: error,
-        type: "composio_invalid_json",
-      },
-    );
+
+    if (!response.ok) {
+      const payload = await readBoundedJsonResponse(response, {
+        limitBytes: COMPOSIO_ERROR_RESPONSE_LIMIT_BYTES,
+        signal: AbortSignal.timeout(COMPOSIO_ERROR_RESPONSE_TIMEOUT_MS),
+      }).catch(() => ({}));
+      return rebuildComposioJsonResponse(response, payload);
+    }
+
+    try {
+      const payload = await readBoundedJsonResponse(response);
+      return rebuildComposioJsonResponse(response, payload);
+    } catch (error) {
+      if (error instanceof ComposioConnectedAppsRequestError) {
+        throw error;
+      }
+      throw new ComposioConnectedAppsRequestError(
+        "Composio returned an invalid JSON response.",
+        response.status,
+        {
+          cause: error,
+          type: "composio_invalid_json",
+        },
+      );
+    }
+  };
+}
+
+const COMPOSIO_REPEATED_LIST_QUERY_FIELDS = [
+  "connected_account_ids",
+  "statuses",
+  "toolkit_slugs",
+  "user_ids",
+] as const;
+
+// The generated client serializes arrays as comma-delimited values. Keep the
+// already-deployed repeated-key shape for this endpoint so installing the SDK
+// cannot alter account scoping or filtering at the provider boundary.
+function preserveRepeatedComposioListQueryParams(
+  request: RequestInfo | URL,
+): RequestInfo | URL {
+  const requestUrl = request instanceof Request ? request.url : String(request);
+  const url = new URL(requestUrl);
+  if (!url.pathname.endsWith("/api/v3.1/connected_accounts")) {
+    return request;
   }
+
+  let changed = false;
+  for (const field of COMPOSIO_REPEATED_LIST_QUERY_FIELDS) {
+    const values = url.searchParams.getAll(field);
+    if (values.length !== 1 || !values[0]?.includes(",")) {
+      continue;
+    }
+    url.searchParams.delete(field);
+    for (const value of values[0].split(",")) {
+      url.searchParams.append(field, value);
+    }
+    changed = true;
+  }
+  if (!changed) {
+    return request;
+  }
+  if (request instanceof Request) {
+    return new Request(url, request);
+  }
+  return request instanceof URL ? url : url.toString();
+}
+
+function rebuildComposioJsonResponse(
+  response: Response,
+  payload: unknown,
+): Response {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Response(JSON.stringify(payload), {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function findComposioRequestError(
+  error: unknown,
+): ComposioConnectedAppsRequestError | null {
+  let current = error;
+  const visited = new Set<unknown>();
+  while (current instanceof Error && !visited.has(current)) {
+    if (current instanceof ComposioConnectedAppsRequestError) {
+      return current;
+    }
+    visited.add(current);
+    current = current.cause;
+  }
+  return null;
 }
 
 async function readBoundedJsonResponse(
@@ -488,10 +603,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 function readString(
   record: Record<string, unknown> | null | undefined,
   field: string,
@@ -517,36 +628,19 @@ function withComposioProviderDiagnostic(message: string, payload: unknown): stri
     : message;
 }
 
-function readNullableString(
-  record: Record<string, unknown> | null | undefined,
-  field: string,
-): string | null {
-  const value = record?.[field];
+function normalizeNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function readHttpsUrl(
-  record: Record<string, unknown> | null,
-  field: string,
-): string | null {
-  const value = readString(record, field);
-  if (!value) {
+function readHttpsUrl(value: unknown): string | null {
+  const normalized = normalizeNonEmptyString(value);
+  if (!normalized) {
     return null;
   }
   try {
-    const url = new URL(value);
+    const url = new URL(normalized);
     return url.protocol === "https:" ? url.toString() : null;
   } catch {
     return null;
-  }
-}
-
-function appendQueryValues(
-  query: URLSearchParams,
-  field: string,
-  values: readonly string[],
-): void {
-  for (const value of values) {
-    query.append(field, value);
   }
 }
