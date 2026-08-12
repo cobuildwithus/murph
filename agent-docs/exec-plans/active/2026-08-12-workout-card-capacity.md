@@ -184,3 +184,34 @@ Updated: 2026-08-12
   remediation. The linked iOS exact-head hosted verification and ReviewGPT
   round 1 also passed; repository Xcode worker/package-loading stalls and a
   physical Messages journey remain explicit downstream release gates.
+
+## ReviewGPT round 4 retrospective
+
+- Trigger: round 4 found the same affected-surface-inventory mechanism as
+  round 3. The Telegram-only remediation followed one named channel instead of
+  deriving every production journey from the channel-independent
+  `responseCardsAvailable` planner and registered adapter graph. The earlier
+  presentation-authority retrospective did not cover this route-inventory
+  mechanism, so a separate retrospective is required.
+- Complete route matrix: private direct and exact scheduled response-card turns
+  reach Linq, Telegram, and email. Linq projects a fitting workout to the native
+  Messages card; Telegram projects it to rich HTML; email intentionally treats
+  the card as transport-inert and sends the same complete deterministic text.
+  Every channel uses complete tracking-free text for genuine measured overflow,
+  while transcript persistence retains the canonical tracking authority.
+- Product decision: keep workout-card semantics channel-independent because the
+  ordinary planner already offers the shared tool on all three private routes.
+  The irreducible promise is complete verified workout meaning, not identical
+  presentation: native or rich interaction where the adapter owns it, complete
+  deterministic text otherwise. Scheduled JSON remains only the send envelope.
+- Architecture decision: retain the existing shared semantic schema, measured
+  admission gate, provider-result presentation authority, outbox, and adapter
+  projectors. Add no channel-specific limit, schema, feature flag, renderer,
+  state owner, queue, lifecycle, or compatibility mechanism.
+- Proof decision: use one route matrix rather than another named-channel patch.
+  Existing shared tests cover malformed input, 16x16 bounds, seventeenth-item
+  rejection, direct Linq card/fallback, strict outbox/hosted readers, and
+  visible-versus-transcript tracking separation. Production-adapter tests cover
+  fitting and overflowing Telegram and email projections; scheduled tests run
+  both response policies across Linq, Telegram, and email and reject skip after
+  runtime presentation.

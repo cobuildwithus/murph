@@ -1531,6 +1531,62 @@ describe('assistant channels runtime seam', () => {
     expect(sendTelegramRich).not.toHaveBeenCalled()
   })
 
+  it.each([
+    {
+      card: EXPANDED_WORKOUT_CARD,
+      caseName: 'a fitting expanded workout',
+      message: renderAssistantResponseCardText(EXPANDED_WORKOUT_CARD),
+    },
+    {
+      card: null,
+      caseName: 'a genuine workout envelope overflow',
+      message: OVERSIZED_WORKOUT_TEXT,
+    },
+  ])('projects $caseName to complete AgentMail text', async ({ card, message }) => {
+    const sendMessage = vi.fn().mockResolvedValue({
+      message_id: 'expanded-workout-email',
+      thread_id: 'expanded-workout-thread',
+    })
+    const emailClient = createAgentmailClient({
+      sendMessage,
+    })
+    runtimeMocks.createAgentmailApiClient.mockReturnValueOnce(emailClient)
+    vi.stubEnv('AGENTMAIL_API_KEY', 'agentmail-key')
+
+    await expect(ASSISTANT_CHANNEL_ADAPTERS.email.send({
+      actorId: null,
+      bindingDelivery: createAssistantBindingDelivery(
+        'participant',
+        'member@example.test',
+      ),
+      card,
+      explicitTarget: null,
+      idempotencyKey: 'expanded-workout-email-idempotency',
+      identityId: 'assistant@example.test',
+      media: [],
+      message,
+      replyToMessageId: null,
+      threadIsDirect: true,
+    }, {})).resolves.toMatchObject({
+      channel: 'email',
+      providerMessageId: 'expanded-workout-email',
+      target: 'member@example.test',
+    })
+
+    const deliveredText = sendMessage.mock.calls[0]?.[0]?.text
+    expect(deliveredText).toBe(message)
+    expect(deliveredText).toContain(
+      card === null ? 'Capacity exercise 1:' : 'Expanded exercise 1:',
+    )
+    expect(deliveredText).toContain(
+      card === null ? 'Capacity exercise 16:' : 'Expanded exercise 11:',
+    )
+    expect(deliveredText).toContain(card === null
+      ? `set 16: pending; target Exercise 16 set 16 target ${'x'.repeat(12)}`
+      : 'set 3: pending; target Set 3')
+    expect(deliveredText).not.toContain('evt_')
+  })
+
   it('sends Telegram image response media through sendPhoto with a caption', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(200, {
