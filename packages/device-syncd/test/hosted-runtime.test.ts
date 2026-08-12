@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
-  addJunctionBloodPressureHistoryBackfillCoverage,
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
-  canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage,
-  hasJunctionBloodPressureHistoryBackfillCoverage,
+  canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   readJunctionHistoricalBackfillEvidence,
 } from "../src/junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
@@ -300,20 +300,30 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
-    const coverage = addJunctionBloodPressureHistoryBackfillCoverage({
-      existingValue: "v2|withings",
+    const metadata = { junctionBloodPressureHistoryBackfillCoverage: "v2|withings" };
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata,
       providerSlug: "omron",
+      resource: "blood_pressure",
       version: 1,
     });
 
-    expect(coverage).toBe("v2|withings");
-    expect(hasJunctionBloodPressureHistoryBackfillCoverage(coverage, "omron", 1)).toBe(false);
-    expect(hasJunctionBloodPressureHistoryBackfillCoverage("v1|omron", "omron", 2)).toBe(false);
-    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(coverage, 1)).toBe(false);
-    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage("v1|omron", 2)).toBe(true);
-    expect(addJunctionBloodPressureHistoryBackfillCoverage({
-      existingValue: coverage,
+    expect(coverage).toBeNull();
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      "blood_pressure",
+      1,
+    )).toBe(false);
+    expect(addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: {},
       providerSlug: "__proto__",
+      resource: "blood_pressure",
       version: 1,
     })).toBeNull();
   });
@@ -328,14 +338,21 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
     });
 
-    expect(result).toEqual({
-      metadata: {
-        hostedOnly: true,
-        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
-        junctionNoteHistoryBackfillCoverage: "v1|oura",
-      },
-      preservedLocalProgress: true,
-    });
+    expect(result.metadata.hostedOnly).toBe(true);
+    expect(result.metadata.junctionNoteHistoryBackfillCoverage).toBeUndefined();
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "oura",
+      "note",
+      1,
+    )).toBe(true);
+    expect(result.preservedLocalProgress).toBe(true);
   });
 
   it("accepts hosted migration metadata after local state is published", () => {
@@ -364,7 +381,18 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
     });
 
-    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe("v1|omron,withings");
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "withings",
+      "blood_pressure",
+      1,
+    )).toBe(true);
     expect(result.preservedLocalProgress).toBe(true);
   });
 
@@ -824,7 +852,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 
 describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
   it("preserves blood-pressure source coverage during guarded replacement", () => {
-    expect(mergeGuardedJunctionHistoricalBackfillMetadata({
+    const result = mergeGuardedJunctionHistoricalBackfillMetadata({
       existingMetadata: {
         junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
         seedOnlyState: "discard",
@@ -832,10 +860,14 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
       replacementMetadata: {
         callbackOutcome: "complete",
       },
-    })).toEqual({
-      callbackOutcome: "complete",
-      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
     });
+    expect(result.callbackOutcome).toBe("complete");
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(true);
   });
 
   it("preserves opaque future historical state without retaining ordinary seed metadata", () => {

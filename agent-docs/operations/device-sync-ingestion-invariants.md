@@ -219,11 +219,15 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    keeps the existing one-day fetch continuation and per-account serialization.
    Rollout-added resources end at the current UTC day so existing connections
    receive one migration; blood pressure remains anchored to source first-seen
-   time. Source-scoped completion is stored in connection metadata. Sparse
-   daily resources share one versioned bit-packed coverage value to stay within
-   the metadata entry bound, while blood pressure retains exact per-reading
-   repair and notes retain complete-fetch semantics. No second queue, retry
-   store, or persisted lifecycle owns this history.
+   time. Source-scoped completion is stored in connection metadata. All extended
+   timeseries resources share one fixed-width, versioned source-by-resource
+   matrix in an existing blood-pressure or note coverage slot. Its append-only
+   route slots cover every configured Junction source within the 256-character
+   scalar bound, and deployed blood-pressure and note values remain legacy read
+   inputs. An unrepresentable route fails before history egress instead of
+   advancing coverage. Blood pressure retains exact per-reading repair and notes
+   retain complete-fetch semantics. No second queue, retry store, or persisted
+   lifecycle owns this history.
 
    The importer is the sole owner of raw summary semantics. Historical coverage
    consumes the bounded `(source provider, resource)` normalization evidence

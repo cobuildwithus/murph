@@ -41,16 +41,14 @@ import {
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
+  canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionHistoricalBackfillEvidence,
-  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
-  JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-  JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
   type JunctionHistoricalBackfillEvidence,
@@ -327,7 +325,6 @@ interface JunctionExtendedTimeseriesBackfillPolicy {
   anchor: "current_day" | "source_first_seen";
   completion: "daily_aggregate" | "exact_records" | "fetch_complete";
   history: "extended";
-  metadataKey: string;
   version: number;
 }
 
@@ -342,8 +339,6 @@ const JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY = Object.freeze({
   anchor: "current_day",
   completion: "daily_aggregate",
   history: "extended",
-  metadataKey:
-    JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   version: 1,
 } as const);
 
@@ -358,7 +353,6 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
     anchor: "source_first_seen",
     completion: "exact_records",
     history: "extended",
-    metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
     version: 1,
   },
   body_temperature: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
@@ -372,7 +366,6 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
     anchor: "current_day",
     completion: "fetch_complete",
     history: "extended",
-    metadataKey: JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
     version: 1,
   },
   respiratory_rate: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
@@ -729,9 +722,8 @@ export function createJunctionDeviceSyncProvider(
       if (!policy) {
         return [];
       }
-      const storedCoverage = account.metadata[policy.metadataKey];
       if (!canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
-        storedCoverage,
+        account.metadata,
         resource,
         policy.version,
       )) {
@@ -748,7 +740,7 @@ export function createJunctionDeviceSyncProvider(
             source.resourceAvailabilitySummary?.[resource],
           )
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-            storedCoverage,
+            account.metadata,
             sourceProviderSlug,
             resource,
             policy.version,
@@ -1977,6 +1969,28 @@ export function createJunctionDeviceSyncProvider(
         const extendedHistoricalPolicy = extendedHistoricalBackfill
           ? resolveJunctionExtendedTimeseriesBackfillPolicy(effectiveResource)
           : null;
+        if (
+          extendedHistoricalBackfill
+          && extendedHistoricalPolicy
+          && !canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            context.account.metadata,
+            effectiveResource,
+            extendedHistoricalPolicy.version,
+          )
+        ) {
+          return {};
+        }
+        if (
+          extendedHistoricalBackfill
+          && sourceProviderSlug
+          && !canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            context.account.metadata,
+            sourceProviderSlug,
+            effectiveResource,
+          )
+        ) {
+          throw buildJunctionExtendedTimeseriesHistoryCoverageError();
+        }
         const historicalWindowStart =
           toIsoTimestampIfValid(normalizeString(job.payload.historicalWindowStart))
           ?? window.windowStart;
@@ -2572,14 +2586,32 @@ export function createJunctionDeviceSyncProvider(
     if (!policy) {
       return {};
     }
+    if (!canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      context.account.metadata,
+      resource,
+      policy.version,
+    )) {
+      return {};
+    }
 
     const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
-      existingValue: context.account.metadata[policy.metadataKey],
+      metadata: context.account.metadata,
       providerSlug: sourceProviderSlug,
       resource,
       version: policy.version,
     });
-    return coverage ? { [policy.metadataKey]: coverage } : {};
+    if (!coverage) {
+      throw buildJunctionExtendedTimeseriesHistoryCoverageError();
+    }
+    return { [coverage.metadataKey]: coverage.value };
+  }
+
+  function buildJunctionExtendedTimeseriesHistoryCoverageError() {
+    return deviceSyncError({
+      code: "JUNCTION_EXTENDED_HISTORY_COVERAGE_UNREPRESENTABLE",
+      message: "Junction extended-history completion could not be retained exactly.",
+      retryable: false,
+    });
   }
 
   function isJunctionExtendedTimeseriesBackfillJob(

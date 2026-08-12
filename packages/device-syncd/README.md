@@ -107,7 +107,11 @@ disturbance, caffeine, water, and mindfulness use the summary-history window,
 day at a time, serialize per account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
-semantics. Every date-mode timeseries fetch preserves one complete provider
+semantics. All extended timeseries completion shares one fixed-width,
+source-by-resource matrix in an existing blood-pressure or note metadata slot;
+legacy values still read, and unsupported route identities fail before history
+egress rather than advancing an unretainable checkpoint. Every date-mode
+timeseries fetch preserves one complete provider
 calendar date during both migration and normal reconcile; a provider-bearing
 date with any row rejected by the canonical aggregate parser retries only that
 date on the existing bounded ladder. Historical-pull status is re-read before

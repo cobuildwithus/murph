@@ -16,6 +16,7 @@ import { test } from "vitest";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 
 import { DeviceSyncError } from "../src/errors.ts";
+import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -4669,8 +4670,15 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     true,
   );
   assert.equal(
-    scheduledResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
-    "v1|garmin,omron",
+    ["garmin", "omron"].every((providerSlug) =>
+      hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        scheduledResult.metadataPatch ?? {},
+        providerSlug,
+        "blood_pressure",
+        1,
+      )
+    ),
+    true,
   );
 });
 

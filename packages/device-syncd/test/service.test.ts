@@ -16,6 +16,7 @@ import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
@@ -1099,10 +1100,12 @@ test("persisted provider-projected disconnects can recover an evidence-bearing p
       "connected",
     );
     assert.equal(importedSnapshots.length > 0, true);
-    assert.equal(
-      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
-      "v1|omron",
-    );
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), true);
   } finally {
     close();
   }
@@ -1282,10 +1285,12 @@ test("hosted listed-only recovery publishes connected before pressure egress res
     }
 
     assert.equal(importedSnapshots.length > 0, true);
-    assert.equal(
-      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
-      "v1|omron",
-    );
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), true);
   } finally {
     close();
   }
