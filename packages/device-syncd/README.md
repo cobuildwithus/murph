@@ -61,7 +61,8 @@ Current providers:
   summary-history backfill window.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
-  reconcile or backfill can prove the configured closed-day collection ran.
+  terminal reconcile or backfill whose window ends at the current closed-day
+  horizon can prove the configured collection ran.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
