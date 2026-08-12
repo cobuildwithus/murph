@@ -359,7 +359,7 @@ function createIMessageCardProbe(): ProbeRoute {
   const payload = `${Buffer.from(JSON.stringify(card)).toString("base64url")}.png`;
   return {
     entry: "server/app/imessage/card/v1/[payload]/route.js",
-    expectedHeight: 509,
+    expectedHeight: 539,
     expectedWidth: 1200,
     params: { payload },
     url: `http://localhost/imessage/card/v1/${payload}`,
