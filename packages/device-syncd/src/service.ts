@@ -1093,9 +1093,24 @@ class DeviceSyncServiceController {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
         nextReconcileAt?: string | null;
+        preserveLastSyncCompletedAt?: boolean;
       } = {
         localConnectionRevision,
       };
+
+      if (
+        provider.provider === "junction"
+        && (
+          !activeJobs.some((activeJob) =>
+            activeJob.kind === "backfill" || activeJob.kind === "reconcile"
+          )
+          || (result.scheduledJobs ?? []).some((scheduledJob) =>
+            scheduledJob.kind === "backfill" || scheduledJob.kind === "reconcile"
+          )
+        )
+      ) {
+        successOptions.preserveLastSyncCompletedAt = true;
+      }
 
       if (Object.prototype.hasOwnProperty.call(result, "metadataPatch")) {
         successOptions.metadataPatch = result.metadataPatch;

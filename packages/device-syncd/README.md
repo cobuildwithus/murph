@@ -50,6 +50,9 @@ Current providers:
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
   per-reading evidence and the existing long summary-history backfill window.
+- Successful Junction resource/webhook jobs preserve the full-sync completion
+  watermark. They still complete and clear their own failures, while only a
+  reconcile or backfill can prove the configured closed-day collection ran.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

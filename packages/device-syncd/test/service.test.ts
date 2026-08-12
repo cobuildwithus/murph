@@ -971,6 +971,243 @@ test("local Junction workers exclude a disconnected source from production-norma
   }
 });
 
+test("Junction resource success preserves the full-reconcile watermark and closed-day opt-ins", async () => {
+  const now = new Date("2026-04-23T00:05:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-resource-watermark");
+  const requests: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { ok: true };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: ["steps", "heartrate"],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+          requests.push(url);
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [{
+                id: "provider-garmin-1",
+                slug: "garmin",
+                name: "Garmin",
+                status: "connected",
+                resource_availability: {
+                  activity: true,
+                  heartrate: true,
+                  steps: true,
+                },
+              }],
+            });
+          }
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({ data: [] });
+          }
+          const timeseriesResource = new URL(url).pathname.match(
+            /^\/v2\/timeseries\/junction-user-1\/(steps|heartrate)\/grouped$/u,
+          )?.[1];
+          if (timeseriesResource) {
+            return createJsonResponse({
+              groups: {
+                garmin: [{
+                  data: [{
+                    timestamp: "2026-04-22T12:00:00.000Z",
+                    unit: timeseriesResource === "steps" ? "count" : "bpm",
+                    value: timeseriesResource === "steps" ? 100 : 72,
+                  }],
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            });
+          }
+          throw new Error(`Unexpected Junction request during watermark test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-20T00:00:00.000Z",
+      nextReconcileAt: "2026-04-23T00:05:00.000Z",
+    });
+    const window = {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    };
+    const reconcile = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: window,
+      priority: 40,
+      availableAt: "2026-04-23T00:05:00.000Z",
+    });
+    const resource = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        ...window,
+        resource: "activity",
+        resourceCategory: "summary",
+      },
+      priority: 65,
+      availableAt: "2026-04-23T00:05:00.000Z",
+    });
+    assert.equal(
+      store.markSyncFailed(
+        account.id,
+        "2026-04-22T23:55:00.000Z",
+        "JUNCTION_API_REQUEST_FAILED",
+        "Temporary Junction failure.",
+        null,
+      ),
+      true,
+    );
+
+    const first = await service.runWorkerOnce();
+    assert.equal(first?.id, resource.id);
+    assert.equal(store.getJobById(resource.id)?.status, "succeeded");
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    assert.equal(store.getAccountById(account.id)?.lastSyncErrorAt, null);
+    assert.equal(store.getAccountById(account.id)?.lastErrorCode, null);
+    assert.equal(
+      store.getAccountById(account.id)?.nextReconcileAt,
+      "2026-04-23T00:05:00.000Z",
+    );
+    assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+
+    const second = await service.runWorkerOnce();
+    assert.equal(second?.id, reconcile.id);
+    assert.equal(store.getJobById(reconcile.id)?.status, "succeeded");
+    assert.equal(
+      store.getAccountById(account.id)?.lastSyncCompletedAt,
+      "2026-04-23T00:05:00.000Z",
+    );
+    assert.deepEqual(
+      requests
+        .flatMap((url) => new URL(url).pathname.match(
+          /^\/v2\/timeseries\/junction-user-1\/(steps|heartrate)\/grouped$/u,
+        )?.[1] ?? [])
+        .sort(),
+      ["heartrate", "steps"],
+    );
+
+    requests.length = 0;
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: window,
+      priority: 40,
+      availableAt: "2026-04-23T00:05:00.000Z",
+    });
+    await service.runWorkerOnce();
+    assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  } finally {
+    close();
+  }
+});
+
+test("Junction yielded full-sync continuations advance the watermark only at terminal completion", async () => {
+  const now = new Date("2026-04-23T00:05:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-yielded-watermark");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider({
+      provider: "junction",
+      descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+      async executeJob(_context, job) {
+        return job.payload.windowStart === "2026-04-21T00:00:00.000Z"
+          ? {
+              scheduledJobs: [{
+                kind: "backfill",
+                availableAt: _context.now,
+                payload: {
+                  windowStart: "2026-04-22T00:00:00.000Z",
+                  windowEnd: "2026-04-23T00:00:00.000Z",
+                },
+              }],
+            }
+          : {};
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-20T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: "2026-04-21T00:00:00.000Z",
+        windowEnd: "2026-04-23T00:00:00.000Z",
+      },
+      availableAt: "2026-04-23T00:05:00.000Z",
+    });
+
+    await service.runWorkerOnce();
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    assert.equal(
+      readJobsForAccountForTesting(store, account.id).filter((job) => job.status === "queued").length,
+      1,
+    );
+
+    await service.runWorkerOnce();
+    assert.equal(
+      store.getAccountById(account.id)?.lastSyncCompletedAt,
+      "2026-04-23T00:05:00.000Z",
+    );
+  } finally {
+    close();
+  }
+});
+
 test("persisted provider-projected disconnects can recover an evidence-bearing pressure job", async () => {
   let now = new Date("2026-09-01T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-pressure-recovery");
