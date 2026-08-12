@@ -179,14 +179,15 @@ Updated: 2026-08-11
   proceed.
 - The prior rollout also cleared legacy snapshots before the pending-aware Web
   reader was deployed. The rollout is now explicit expand/backfill/contract:
-  deploy the runtime parser/retry consumer, deploy a Web compatibility release
-  containing only the pending reader and opaque generation fence, capture the
-  cutoff and drain the backfill, then deploy the consent-copy and
-  reaffirmation/atomic-admission writers. Production count-only proof confirmed
-  that orphaned pending projectable rows are not merely theoretical, so the
-  bounded backfill includes that class. Rotating its ID and appending fresh work
-  is idempotent under the stable cutoff; non-projectable live-derived pending
-  rows remain excluded by projection kind.
+  deploy and converge the runtime consumer, deploy the complete pending-aware
+  Web reader/writer, then capture the cutoff, run the backfill, and drain its
+  durable work. This executable sequence needs no partial release or feature
+  flag and guarantees the truthful reader is live before any old snapshot is
+  cleared. Production count-only proof confirmed that orphaned pending
+  projectable rows are not merely theoretical, so the bounded backfill includes
+  that class. Rotating its ID and appending fresh work is idempotent under the
+  stable cutoff; non-projectable live-derived pending rows remain excluded by
+  projection kind.
 - The delivery path now carries a fixed-width opaque digest of the exact active
   scope generation resolved before the vault read. Web recomputes the digest
   against the active destination set immediately before replacement. A consent

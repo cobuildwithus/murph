@@ -502,12 +502,12 @@ scope read. Raw share IDs and destination cardinality never cross into the
 member runtime. Requests without a digest remain accepted only for the bounded
 old-runtime compatibility window.
 
-The rollout uses an additive reader-first expansion. First deploy the
-runtime/Worker parser and retry consumer. Then deploy the narrow Web read
-compatibility release that maps an active null snapshot to `pending` and adds
-the opaque generation read/write fence; do not enable the new consent copy,
-atomic admission, or reaffirmation writer yet. Capture one stable
-cutoff only after both reader stages are live, then run the bounded recent-date
+The rollout is consumer-first and reader-before-backfill. First deploy the
+runtime/Worker parser, bounded projection owner, retry consumer, and generation
+token client, then prove immediate fleet convergence. Next deploy the complete
+Web release, including the pending-aware reader, opaque generation fence,
+consent copy, atomic admission, and reaffirmation writer. Capture one stable
+cutoff only after both releases are live, then run the bounded recent-date
 generation backfill under the production Web environment until its count-only
 result reports no selected grantors. The configurable command fetches at most
 101 candidate grantors and processes at most 100; each grantor transaction
@@ -515,10 +515,11 @@ rotates at most 25 pre-cutoff group health generations, including orphaned
 pending rows whose original wake is absent, clears their snapshots, and appends
 one durable maintenance row. Exact signaling
 occurs after commit and its failure is recoverable from the row. Wait for that
-maintenance backlog to drain before deploying the Web consent copy and
-reaffirmation/atomic-admission writer. Reusing the same cutoff makes the command
-idempotent and leaves current-state, email, device-status, non-group, and newly
-created grants untouched.
+maintenance backlog to drain before declaring the rollout complete. Reusing the
+same cutoff makes the command idempotent and leaves current-state, email,
+device-status, non-group, and newly created grants untouched. Once the first
+backfill batch commits, the pending-aware Web reader is the rollback floor;
+rolling Web back would recreate false missing states for refreshed generations.
 
 Recent daily and sleep projection owners derive the member's current civil date
 from the validated vault timezone, admit only that date and the prior six civil
@@ -527,10 +528,9 @@ eighth member-local date, including around UTC midnight or daylight-saving
 changes. A missing or invalid vault timezone fails these civil-date scopes
 closed. `workouts.v0` retains its separate global calendar-close semantics.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
-`pending` parser/model status before the Web compatibility release emits
-`pending`. Deploy that compatibility release before any backfill clears a legacy
-snapshot, and do not expose the exact seven-day consent copy or its refresh
-writer until the backfill has drained.
+`pending` parser/model status before Web emits `pending`, exact seven-day consent
+copy, or fresh projection work. Deploy Web before any backfill clears a legacy
+snapshot.
 
 This protocol is a consumer-first hard cut:
 
