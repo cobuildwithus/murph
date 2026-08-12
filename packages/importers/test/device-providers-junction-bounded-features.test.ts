@@ -226,12 +226,25 @@ test("workout features use one independent compact measurement correction identi
       workout_stream: [workoutFeature({
         averageHeartRate: 135,
         distanceMeters: 5_100,
+        startAt: "2026-07-01T12:05:00.000Z",
+        endAt: "2026-07-01T12:35:00.000Z",
       })],
     },
   });
   const replay = normalizeJunctionSnapshot({
     importedAt: "2026-07-02T00:00:00.000Z",
     timeseries: { workout_stream: [workoutFeature(), workoutFeature()] },
+  });
+  const distinct = normalizeJunctionSnapshot({
+    importedAt: "2026-07-02T02:00:00.000Z",
+    timeseries: {
+      workout_stream: [workoutFeature({
+        id: "workout-2",
+        workoutId: "workout-2",
+        startAt: "2026-07-01T12:05:00.000Z",
+        endAt: "2026-07-01T12:35:00.000Z",
+      })],
+    },
   });
 
   const firstEvent = first.events?.[0];
@@ -248,6 +261,7 @@ test("workout features use one independent compact measurement correction identi
     { metric: "max-heart-rate", unit: "bpm", value: 170 },
   ]);
   assert.equal(firstEvent?.externalRef?.resourceId, correctionEvent?.externalRef?.resourceId);
+  assert.notEqual(firstEvent?.externalRef?.resourceId, distinct.events?.[0]?.externalRef?.resourceId);
   assert.equal(first.evidenceParts?.some((part) => part.role === "provider-snapshot"), false);
   assertNoSampleSizedValue(first.evidenceParts?.[0]?.content);
 });
@@ -307,12 +321,24 @@ test("stable ECG recording ids own correction identity without diagnostic synthe
   const correction = normalizeJunctionSnapshot({
     importedAt: "2026-07-02T01:00:00.000Z",
     timeseries: { electrocardiogram_voltage: [ecgFeature({
+      sessionStart: "2026-07-01T10:05:00.000Z",
+      sessionEnd: "2026-07-01T10:06:00.000Z",
       voltageMean: 0.03,
       voltageRms: 0.19,
     })] },
   });
+  const distinct = normalizeJunctionSnapshot({
+    importedAt: "2026-07-02T02:00:00.000Z",
+    timeseries: { electrocardiogram_voltage: [ecgFeature({
+      id: "ecg-2",
+      recordingId: "ecg-2",
+      sessionStart: "2026-07-01T10:05:00.000Z",
+      sessionEnd: "2026-07-01T10:06:00.000Z",
+    })] },
+  });
 
   assert.equal(first.events?.[0]?.externalRef?.resourceId, correction.events?.[0]?.externalRef?.resourceId);
+  assert.notEqual(first.events?.[0]?.externalRef?.resourceId, distinct.events?.[0]?.externalRef?.resourceId);
   assert.equal(JSON.stringify(first.events).includes("classification"), false);
   assert.equal(JSON.stringify(first.events).includes("rhythm"), false);
 });
@@ -325,6 +351,13 @@ test("bounded feature identity requires workout ids and conflicts fail closed", 
   assert.throws(
     () => buildJunctionBoundedFeatureIdentity("workout_stream", idless),
     /lacked identity/u,
+  );
+  assert.notEqual(
+    buildJunctionBoundedFeatureIdentity("workout_stream", workoutFeature()),
+    buildJunctionBoundedFeatureIdentity(
+      "workout_stream",
+      workoutFeature({ sourceInstanceId: "garmin-2" }),
+    ),
   );
 
   assert.throws(() => resolveJunctionBoundedFeatureRecords("workout_stream", [

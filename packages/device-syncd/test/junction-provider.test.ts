@@ -3,6 +3,9 @@ import { createHash, createHmac } from "node:crypto";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import {
+  buildJunctionBoundedFeatureIdentity,
+} from "@murphai/importers/device-providers/junction";
+import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
@@ -298,6 +301,120 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
     logger: {},
     ...overrides,
   };
+}
+
+function createJunctionWorkoutSummary(
+  workoutId: string,
+  startAt = "2026-04-02T10:00:00.000Z",
+): Record<string, unknown> {
+  return {
+    id: workoutId,
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    sourceInstanceId: "watch-1",
+    startAt,
+    endAt: new Date(Date.parse(startAt) + 30 * 60_000).toISOString(),
+  };
+}
+
+function junctionWorkoutCandidateIdentity(workoutId: string): string {
+  return buildJunctionBoundedFeatureIdentity(
+    "workout_stream",
+    createJunctionWorkoutSummary(workoutId),
+  );
+}
+
+function readJunctionWorkoutProgressIdentities(
+  payload: Record<string, unknown> | undefined,
+): string[] {
+  const encoded = payload?.workoutStreamCursor;
+  if (typeof encoded !== "string") {
+    assert.fail("expected encoded workout stream progress");
+  }
+  const parsed = JSON.parse(encoded) as { i?: unknown; v?: unknown };
+  assert.equal(parsed.v, 1);
+  const identities = parsed.i;
+  if (!Array.isArray(identities)) {
+    assert.fail("expected workout stream progress identities");
+  }
+  assert.equal(JSON.stringify(parsed), encoded);
+  for (const identity of identities) {
+    if (typeof identity !== "string") {
+      assert.fail("expected a serialized workout stream identity");
+    }
+    const identityParts = JSON.parse(identity) as unknown;
+    assert.equal(Array.isArray(identityParts), true);
+    assert.equal((identityParts as unknown[]).length, 4);
+  }
+  return identities as string[];
+}
+
+function createJunctionWorkoutStreamTestProvider(input: {
+  listWorkoutIds(indexRequest: number): readonly string[];
+  streamResponse?: (workoutId: string, streamRequest: number) => Promise<Response> | Response;
+}) {
+  let indexRequests = 0;
+  let streamRequestCount = 0;
+  const requestUrls: string[] = [];
+  const streamRequests: string[] = [];
+  const provider = createJunctionProvider(async (request) => {
+    const parsed = new URL(readUrl(request));
+    requestUrls.push(parsed.toString());
+    if (parsed.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
+      indexRequests += 1;
+      return createJsonResponse({
+        data: input.listWorkoutIds(indexRequests).map((workoutId) =>
+          createJunctionWorkoutSummary(workoutId)
+        ),
+      });
+    }
+    if (parsed.pathname.startsWith("/v2/timeseries/workouts/")) {
+      const workoutId = decodeURIComponent(parsed.pathname.split("/")[4] ?? "");
+      streamRequests.push(workoutId);
+      streamRequestCount += 1;
+      return input.streamResponse
+        ? input.streamResponse(workoutId, streamRequestCount)
+        : createJsonResponse({
+            time: [1_775_131_200, 1_775_133_000],
+            heartrate: [100, 160],
+            distance: [0, 5_000],
+          });
+    }
+    throw new Error(`Unexpected request: ${parsed.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["workout_stream"],
+  });
+
+  return {
+    provider,
+    requestUrls,
+    streamRequests,
+  };
+}
+
+function createJunctionWorkoutStreamResourceJob(
+  payload: Record<string, unknown> = {},
+): DeviceSyncJobRecord {
+  return createJob("resource", {
+    resource: "workout_stream",
+    resourceCategory: "timeseries",
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    ...payload,
+  });
+}
+
+function readScheduledWorkoutStreamContinuation(
+  scheduledJobs: readonly DeviceSyncJobInput[] | undefined,
+): DeviceSyncJobInput {
+  return requireValue(
+    scheduledJobs?.find((scheduled) => scheduled.kind === "resource"),
+    "expected a workout stream continuation",
+  );
 }
 
 function createConnectionSource(
@@ -15054,42 +15171,52 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
   assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
-test("Junction workout_stream continuation resumes after the last imported workout", async () => {
-  const streamRequests: string[] = [];
-  const importedWorkoutIds: string[] = [];
-  const provider = createJunctionProvider(async (input) => {
-    const parsed = new URL(readUrl(input));
-    if (parsed.pathname === "/v2/user/providers/junction-user-1") {
-      return createJsonResponse({ providers: [] });
-    }
-    if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
-      return createJsonResponse({
-        data: ["workout-1", "workout-2"].map((id, index) => ({
-          id,
-          sourceProviderSlug: "garmin",
-          time_start: `2026-04-02T1${index}:00:00.000Z`,
-          time_end: `2026-04-02T1${index}:30:00.000Z`,
-        })),
-      });
-    }
-    if (parsed.pathname.startsWith("/v2/timeseries/workouts/")) {
-      streamRequests.push(parsed.pathname);
-      return createJsonResponse({
-        time: [1_775_131_200, 1_775_133_000],
-        heartrate: [100, 160],
-        distance: [0, 5_000],
-      });
-    }
-    throw new Error(`Unexpected request: ${parsed.toString()}`);
-  }, {
-    summaryResources: [],
-    timeseriesResources: ["workout_stream"],
+test("Junction workout_stream continuation metadata fails closed before provider egress", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1"],
   });
-  const job = createJob("resource", {
-    resource: "workout_stream",
-    resourceCategory: "timeseries",
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
+
+  const sortedIdentities = [
+    junctionWorkoutCandidateIdentity("workout-1"),
+    junctionWorkoutCandidateIdentity("workout-2"),
+  ].sort();
+  const invalidProgressValues = [
+    "garmin:workout-1",
+    JSON.stringify({ v: 1, i: [] }),
+    JSON.stringify({ v: 1, i: [...sortedIdentities].reverse() }),
+    JSON.stringify({
+      v: 1,
+      i: Array.from({ length: 33 }, (_, index) =>
+        junctionWorkoutCandidateIdentity(`workout-${index}`)
+      ).sort(),
+    }),
+  ];
+
+  for (const workoutStreamCursor of invalidProgressValues) {
+    await assert.rejects(
+      () => executeJunctionJob(
+        harness.provider,
+        createJunctionJobContext(),
+        createJunctionWorkoutStreamResourceJob({ workoutStreamCursor }),
+      ),
+      (error) => {
+        assert.ok(error instanceof DeviceSyncError);
+        assert.equal(error.code, "DEVICE_SYNC_JOB_PAYLOAD_INVALID");
+        assert.equal(error.retryable, false);
+        return true;
+      },
+    );
+  }
+  assert.deepEqual(harness.requestUrls, []);
+  assert.deepEqual(harness.streamRequests, []);
+});
+
+test("Junction workout_stream exact progress survives comparator-adversarial insertion and reordering", async () => {
+  const importedWorkoutIds: string[] = [];
+  let interrupted = false;
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: (indexRequest) =>
+      indexRequest === 1 ? ["workout-2", "workout-3"] : ["workout-3", "workout-10", "workout-2"],
   });
   const importSnapshot = async (snapshot: {
     timeseries?: Record<string, unknown[]>;
@@ -15097,41 +15224,245 @@ test("Junction workout_stream continuation resumes after the last imported worko
     const feature = snapshot.timeseries?.workout_stream?.[0] as
       | Record<string, unknown>
       | undefined;
-    importedWorkoutIds.push(String(feature?.workoutId));
+    const workoutId = String(feature?.workoutId);
+    if (workoutId === "workout-3" && !interrupted) {
+      interrupted = true;
+      throw new DeviceSyncError({
+        code: "TEST_RETRYABLE_IMPORT_FAILURE",
+        message: "retry this candidate",
+        retryable: true,
+      });
+    }
+    importedWorkoutIds.push(workoutId);
     return { imported: true };
   };
 
   const first = await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      importSnapshot,
-      now: "2026-04-03T12:00:00.000Z",
-      shouldYield: () => importedWorkoutIds.length === 1,
-    }),
-    job,
+    harness.provider,
+    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamResourceJob(),
   );
-  const continuation = requireValue(
-    first.scheduledJobs?.find((scheduled) => scheduled.kind === "resource"),
-    "same-day workout continuation",
-  );
-  assert.equal(continuation.payload?.workoutStreamCursor, "garmin:workout-1");
-  assert.deepEqual(streamRequests, ["/v2/timeseries/workouts/workout-1/stream"]);
+  const continuation = readScheduledWorkoutStreamContinuation(first.scheduledJobs);
+  assert.deepEqual(readJunctionWorkoutProgressIdentities(continuation.payload), [
+    junctionWorkoutCandidateIdentity("workout-2"),
+  ]);
+  const progress = String(continuation.payload?.workoutStreamCursor);
+  assert.doesNotMatch(progress, /(?:samples|stream|timestamps|heartrate|startAt|endAt)/u);
 
-  await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      importSnapshot,
-      now: "2026-04-03T12:05:00.000Z",
-    }),
+  const second = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ importSnapshot }),
     {
-      ...createJob("resource", continuation.payload ?? {}),
+      ...createJunctionWorkoutStreamResourceJob(continuation.payload ?? {}),
       dedupeKey: continuation.dedupeKey ?? null,
       priority: continuation.priority ?? 50,
     },
   );
-  assert.deepEqual(streamRequests, [
-    "/v2/timeseries/workouts/workout-1/stream",
-    "/v2/timeseries/workouts/workout-2/stream",
+
+  assert.deepEqual(importedWorkoutIds, ["workout-2", "workout-10", "workout-3"]);
+  assert.deepEqual(harness.streamRequests, [
+    "workout-2",
+    "workout-3",
+    "workout-10",
+    "workout-3",
   ]);
-  assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2"]);
+  assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+});
+
+test("Junction workout_stream retires first and middle optional 404/422 candidates only", async () => {
+  const importedWorkoutIds: string[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2", "workout-3"],
+    streamResponse: (workoutId) => {
+      if (workoutId === "workout-1") {
+        return createJsonResponse({ error: "not found" }, 404);
+      }
+      if (workoutId === "workout-2") {
+        return createJsonResponse({ error: "not ready" }, 422);
+      }
+      return createJsonResponse({
+        time: [1_775_131_200, 1_775_133_000],
+        heartrate: [100, 160],
+        distance: [0, 5_000],
+      });
+    },
+  });
+
+  const result = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+        const feature = snapshot.timeseries?.workout_stream?.[0] as
+          | Record<string, unknown>
+          | undefined;
+        importedWorkoutIds.push(String(feature?.workoutId));
+        return { imported: true };
+      },
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2", "workout-3"]);
+  assert.deepEqual(importedWorkoutIds, ["workout-3"]);
+  assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+  assert.equal(result.metadataPatch?.junctionSkippedTimeseriesTotal, 2);
+});
+
+test("Junction workout_stream yields before and after exact candidate progress", async () => {
+  const beforeImported: string[] = [];
+  const beforeHarness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2"],
+  });
+  const importBefore = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    beforeImported.push(String(feature?.workoutId));
+    return { imported: true };
+  };
+  const beforeYield = await executeJunctionJob(
+    beforeHarness.provider,
+    createJunctionJobContext({
+      importSnapshot: importBefore,
+      shouldYield: () => true,
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+  const beforeContinuation = readScheduledWorkoutStreamContinuation(beforeYield.scheduledJobs);
+  assert.equal(beforeContinuation.payload?.workoutStreamCursor, undefined);
+  assert.deepEqual(beforeHarness.streamRequests, []);
+
+  const beforeCompleted = await executeJunctionJob(
+    beforeHarness.provider,
+    createJunctionJobContext({ importSnapshot: importBefore }),
+    createJunctionWorkoutStreamResourceJob(beforeContinuation.payload ?? {}),
+  );
+  assert.deepEqual(beforeImported, ["workout-1", "workout-2"]);
+  assert.equal(beforeCompleted.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+
+  const afterImported: string[] = [];
+  const afterHarness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2"],
+  });
+  const importAfter = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    afterImported.push(String(feature?.workoutId));
+    return { imported: true };
+  };
+  const afterYield = await executeJunctionJob(
+    afterHarness.provider,
+    createJunctionJobContext({
+      importSnapshot: importAfter,
+      shouldYield: () => afterImported.length === 1,
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+  const afterContinuation = readScheduledWorkoutStreamContinuation(afterYield.scheduledJobs);
+  assert.deepEqual(readJunctionWorkoutProgressIdentities(afterContinuation.payload), [
+    junctionWorkoutCandidateIdentity("workout-1"),
+  ]);
+  assert.deepEqual(afterHarness.streamRequests, ["workout-1"]);
+
+  const completed = await executeJunctionJob(
+    afterHarness.provider,
+    createJunctionJobContext({ importSnapshot: importAfter }),
+    createJunctionWorkoutStreamResourceJob(afterContinuation.payload ?? {}),
+  );
+  assert.deepEqual(afterImported, ["workout-1", "workout-2"]);
+  assert.equal(completed.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+});
+
+test("Junction workout_stream carries terminal progress across retryable interruption", async () => {
+  const importedWorkoutIds: string[] = [];
+  let interrupted = false;
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2", "workout-3"],
+  });
+  const importSnapshot = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    const workoutId = String(feature?.workoutId);
+    if (workoutId === "workout-2" && !interrupted) {
+      interrupted = true;
+      throw new DeviceSyncError({
+        code: "TEST_RETRYABLE_IMPORT_FAILURE",
+        message: "retry this candidate",
+        retryable: true,
+      });
+    }
+    importedWorkoutIds.push(workoutId);
+    return { imported: true };
+  };
+
+  const first = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+  const continuation = readScheduledWorkoutStreamContinuation(first.scheduledJobs);
+  assert.deepEqual(readJunctionWorkoutProgressIdentities(continuation.payload), [
+    junctionWorkoutCandidateIdentity("workout-1"),
+  ]);
+  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2"]);
+
+  const second = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamResourceJob(continuation.payload ?? {}),
+  );
+  assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2", "workout-3"]);
+  assert.deepEqual(harness.streamRequests, [
+    "workout-1",
+    "workout-2",
+    "workout-2",
+    "workout-3",
+  ]);
+  assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+});
+
+test("Junction workout_stream carries terminal progress across cancellation", async () => {
+  const importedWorkoutIds: string[] = [];
+  const abortController = new AbortController();
+  const cancellation = new Error("cancel workout sync");
+  let cancelled = false;
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2", "workout-3"],
+  });
+  const importSnapshot = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    const workoutId = String(feature?.workoutId);
+    if (workoutId === "workout-2" && !cancelled) {
+      cancelled = true;
+      abortController.abort(cancellation);
+      throw cancellation;
+    }
+    importedWorkoutIds.push(workoutId);
+    return { imported: true };
+  };
+
+  const first = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({
+      importSnapshot,
+      signal: abortController.signal,
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+  const continuation = readScheduledWorkoutStreamContinuation(first.scheduledJobs);
+  assert.deepEqual(readJunctionWorkoutProgressIdentities(continuation.payload), [
+    junctionWorkoutCandidateIdentity("workout-1"),
+  ]);
+
+  const second = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamResourceJob(continuation.payload ?? {}),
+  );
+  assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2", "workout-3"]);
+  assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
 });

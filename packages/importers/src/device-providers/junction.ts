@@ -6770,6 +6770,12 @@ function buildStableTimeseriesResourceId(
   resourceContext: ResourceContext,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
+  if (resourceContext.fallbackIdentityDisambiguator) {
+    return `${resourceContext.resourceSlug}-${shortHash([
+      resourceContext.fallbackIdentityDisambiguator,
+    ])}`;
+  }
+
   return `${resourceContext.resourceSlug}-${shortHash([
     resourceContext.resourceSlug,
     resourceContext.sourceProviderSlug,

@@ -32,7 +32,7 @@ export interface JunctionElectrocardiogramVoltageReductionLimits {
 }
 
 export interface JunctionWorkoutStreamCandidate {
-  readonly cursor: string;
+  readonly identity: string;
   readonly summary: PlainObject;
   readonly workoutId: string;
 }
@@ -101,17 +101,19 @@ export function selectJunctionWorkoutStreamCandidates(
     const workoutId = consistentId(summary, WORKOUT_IDS, "workout index");
     const provider = resolveJunctionOrigin(summary).sourceProviderSlug;
     if (!workoutId || !provider) invalid("workout index lacked identity");
-    const key = `${provider}:${workoutId}`;
+    const key = buildJunctionBoundedFeatureIdentity("workout_stream", summary);
     const existing = selected.get(key);
     if (existing && stableStringify(existing.summary) !== stableStringify(summary)) {
       invalid(`workout index contained conflicting workout ${workoutId}`);
     }
-    selected.set(key, { cursor: key, summary, workoutId });
+    selected.set(key, { identity: key, summary, workoutId });
   });
   if (selected.size > maxWorkouts) {
     invalid(`workout index exceeded ${maxWorkouts} workouts`);
   }
-  return [...selected.values()].sort((left, right) => left.cursor.localeCompare(right.cursor));
+  return [...selected.values()].sort((left, right) =>
+    left.identity < right.identity ? -1 : left.identity > right.identity ? 1 : 0,
+  );
 }
 
 export function reduceJunctionWorkoutStreamPayload(
@@ -216,7 +218,6 @@ export function buildJunctionBoundedFeatureIdentity(
     invalid(`${resource} feature lacked identity`);
   }
   return stableStringify([
-    resource,
     origin.sourceProviderSlug,
     origin.sourceType ?? null,
     origin.sourceInstanceId ?? null,

@@ -723,6 +723,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   timeseriesCursor: "isoTimestamp",
   timeseriesPhase: "string",
   webhookDataJson: "string",
+  workoutStreamCursor: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });
