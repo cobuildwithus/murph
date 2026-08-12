@@ -4943,11 +4943,26 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
       unit: "mg/dL",
     },
     {
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "junction",
+        originConfidence: "medium",
+        sourceProviderSlug: "garmin",
+      },
       id: "evt_metric_observation_stress_variation_01",
       occurredAt: "2026-04-02T08:05:00Z",
       source: "device",
       title: "Junction stress mean absolute successive difference",
       metric: "stress-mean-absolute-successive-difference",
+      qualifiers: {
+        derived: true,
+        evidenceConfidence: "medium",
+        evidenceMethod: "distinct-instant-mean-median-gap-2.5x-absolute-cap.v2",
+        maxAdjacentGapSeconds: 900,
+        qualifyingPairCount: 3,
+        sampleCount: 4,
+        sampleIntervalSeconds: 300,
+      },
       value: 12.5,
       unit: "score",
     },
@@ -4985,6 +5000,16 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
     assert.equal(stressVariation[0]?.value, 12.5);
     assert.equal(stressVariation[0]?.unit, "score");
     assert.equal(stressVariation[0]?.source.kind, "observation");
+    assert.equal(stressVariation[0]?.confidence, "medium");
+    assert.deepEqual(stressVariation[0]?.context.qualifiers, {
+      derived: true,
+      evidenceConfidence: "medium",
+      evidenceMethod: "distinct-instant-mean-median-gap-2.5x-absolute-cap.v2",
+      maxAdjacentGapSeconds: 900,
+      qualifyingPairCount: 3,
+      sampleCount: 4,
+      sampleIntervalSeconds: 300,
+    });
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

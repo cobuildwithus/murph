@@ -89,6 +89,7 @@ import {
   JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY,
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY,
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
+  type JunctionTemporalFeatureObservationQualifiers,
   type JunctionTemporalFeatureResult,
   type JunctionTemporalFeatureSample,
 } from "./junction-timeseries-features.ts";
@@ -2138,7 +2139,9 @@ function pushJunctionDailyTimeseriesObservation(
   context: NormalizationContext,
   aggregate: JunctionDailyTimeseriesAggregate,
   observation: {
+    confidence?: "low" | "medium";
     metric: string;
+    qualifiers?: JunctionTemporalFeatureObservationQualifiers;
     title: string;
     unit: string;
     value: number;
@@ -2158,6 +2161,7 @@ function pushJunctionDailyTimeseriesObservation(
     aggregate,
     observation.metric,
   );
+  const dataOrigin = buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp);
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -2175,10 +2179,13 @@ function pushJunctionDailyTimeseriesObservation(
       observation.metric,
     ),
     legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
-    dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
+    dataOrigin: observation.confidence
+      ? { ...dataOrigin, originConfidence: observation.confidence }
+      : dataOrigin,
     fields: {
       metric,
       observationGrain: "summary",
+      ...(observation.qualifiers ? { qualifiers: observation.qualifiers } : {}),
       value: roundJunctionDailyAggregateValue(observation.value),
       unit: observation.unit,
     },
