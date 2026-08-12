@@ -1776,6 +1776,7 @@ model HostedGroupMember {
   @@unique([groupId, memberId])
   @@index([memberId])
   @@index([groupId])
+  @@index([groupId, createdAt, id], map: "hosted_group_member_group_created_id_idx")
   @@map("hosted_group_member")
 }
 
