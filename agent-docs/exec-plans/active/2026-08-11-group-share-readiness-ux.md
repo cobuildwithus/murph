@@ -242,7 +242,8 @@ Updated: 2026-08-12
   bounds. The finding was accepted.
 - The remediation adds no durable owner or cursor. The existing null snapshot is
   the progress cursor: maintenance requests an acknowledged
-  `first-materialization` mode, Web ignores materialized rows, and one
+  `first-materialization` mode, Web excludes materialized rows at the source
+  query, and one
   deterministic page contains complete exact-scope generations totaling at most
   25 null destinations. Delivery reselects and conditionally replaces only exact
   null rows. A page with progress and more work continues after one second; only

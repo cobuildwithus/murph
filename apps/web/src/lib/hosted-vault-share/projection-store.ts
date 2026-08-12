@@ -117,6 +117,8 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
   supportedProjectionScopeKeys?: ReadonlySet<string>;
 }): Promise<DeliverableHostedVaultShareProjectionScopeGenerations> {
   const prisma = input.prisma ?? getPrisma();
+  const firstMaterializationOnly = input.projectionMode
+    === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
   const shares = await prisma.hostedVaultShare.findMany({
     orderBy: [{ projectionScopeKey: "asc" }, { id: "asc" }],
     select: {
@@ -130,6 +132,9 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     take: HOSTED_VAULT_SHARE_ACTIVE_ALL_SCOPES_MAX + 1,
     where: {
       grantorMemberId: input.grantorMemberId,
+      ...(firstMaterializationOnly
+        ? { projectionSnapshotCiphertext: null }
+        : {}),
       status: "granted",
     },
   });
@@ -146,8 +151,6 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     shareIds: string[];
   }>();
   let hasDeferredProjectionWork = false;
-  const firstMaterializationOnly = input.projectionMode
-    === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
   const supportedProjectionScopeKeys = input.supportedProjectionScopeKeys
     ?? new Set(
       HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.map(

@@ -487,7 +487,7 @@ the mailbox obligation only when every current granted runtime-projectable
 generation is materialized or revoked. This durable first pass uses the
 `first-materialization` projection mode. Web must acknowledge that exact mode;
 an old Web response that omits the acknowledgment fails before any private vault
-read. Discovery ignores already-materialized rows and chooses a deterministic
+read. Discovery selects only null-snapshot rows at the source and chooses a deterministic
 page of complete exact-scope generations containing at most 25 active null
 snapshots total. One pass therefore performs at most 25 private scope reads, 25
 delivery requests, and 25 destination replacement transactions even at the

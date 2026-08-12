@@ -395,7 +395,8 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     expect(rows).toHaveLength(2_450);
     expect(rows.filter((row) => row.projectionSnapshotCiphertext !== null))
       .toHaveLength(2_449);
-    const findMany = vi.fn().mockResolvedValue(rows);
+    const pendingRows = rows.filter((row) => row.projectionSnapshotCiphertext === null);
+    const findMany = vi.fn().mockResolvedValue(pendingRows);
     const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
     const supportedProjectionScopeKeys = new Set(
       runtimeScopes.map(buildHostedVaultShareProjectionScopeKey),
@@ -413,6 +414,17 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
       generations: [],
       hasDeferredProjectionWork: true,
     });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        grantorMemberId: SHARE.grantorMemberId,
+        projectionSnapshotCiphertext: null,
+        status: "granted",
+      }),
+    }));
+    expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenNthCalledWith(1, {
+      memberIds: [inactiveId],
+      prisma,
+    });
 
     mocks.readActiveHostedMemberAccessIds.mockResolvedValueOnce(new Set(
       rows.map((row) => row.destinationMemberId),
@@ -428,6 +440,10 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         projectionScope: firstRuntimeScope,
       }],
       hasDeferredProjectionWork: false,
+    });
+    expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenNthCalledWith(2, {
+      memberIds: [inactiveId],
+      prisma,
     });
   });
 
