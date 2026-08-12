@@ -1,5 +1,6 @@
 import { FamilySetupAuthRequiredView } from "@/src/components/family/family-setup-auth-required";
 import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
+import { SettingsDataPrivacyAuthRequiredView } from "../(dashboard)/settings/data-privacy/settings-data-privacy-auth-required";
 import { SettingsAuthRequiredView } from "../(dashboard)/settings/settings-auth-required";
 
 export function SettingsAuthRequiredStudy() {
@@ -51,6 +52,19 @@ export function SettingsAuthRequiredStudy() {
           label="Open Family billing"
           variant="secondary"
         />
+      </div>
+
+      <div
+        className="overflow-hidden rounded-2xl border border-border bg-background lg:col-span-2"
+        data-design-section="settings-data-privacy-auth-required"
+        data-design-state="signed-out-account-deletion-handoff"
+        id="settings-data-privacy-auth-required-section"
+        inert
+      >
+        <p className="border-b border-border px-5 py-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Account deletion without the Android app
+        </p>
+        <SettingsDataPrivacyAuthRequiredView />
       </div>
     </div>
   );

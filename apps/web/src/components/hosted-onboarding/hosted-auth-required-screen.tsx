@@ -8,6 +8,7 @@ import { Button } from "@/src/components/ui/button";
 
 interface HostedAuthRequiredScreenProps {
   description: ReactNode;
+  details?: ReactNode;
   eyebrow: string;
   eyebrowIcon: LucideIcon;
   footer?: ReactNode;
@@ -32,6 +33,7 @@ export function HostedAuthRequiredScreen(props: HostedAuthRequiredScreenProps) {
  */
 export function HostedAuthRequiredScreenView({
   description,
+  details,
   eyebrow,
   eyebrowIcon: EyebrowIcon,
   footer,
@@ -54,6 +56,12 @@ export function HostedAuthRequiredScreenView({
         <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground text-pretty">
           {description}
         </p>
+
+        {details ? (
+          <div className="mt-6 w-full max-w-lg rounded-xl border border-border bg-card p-5 text-left text-sm leading-6 text-muted-foreground">
+            {details}
+          </div>
+        ) : null}
 
         <div className="mt-8 flex flex-col items-center gap-3">
           <Button type="button" size="lg" onClick={onLogin}>

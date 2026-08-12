@@ -614,8 +614,11 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
 
   assert.match(markup, /Sign in to manage your data/);
-  assert.match(markup, /Data &amp; privacy section/);
-  assert.match(markup, /After sign-in, this link opens the deletion controls directly in settings\./);
+  assert.match(markup, /Choose Delete account, review the details, and confirm\./);
+  assert.match(markup, /Active hosted systems target removal within 30 days/);
+  assert.match(markup, /backups within 90 days/);
+  assert.match(markup, /mailto:legal@justco\.build/);
+  assert.match(markup, /href="\/legal\/privacy"/);
 });
 
 test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
