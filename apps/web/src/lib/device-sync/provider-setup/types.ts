@@ -130,6 +130,7 @@ export type MemberOwnedProviderSetupConnectionDisposition<
       binding: DeviceProviderApplicationBinding<TProvider>;
       connectionId: string;
       kind: "exact";
+      status: "active" | "reauthorization_required";
     }
   | { connectionId: string; kind: "conflict" };
 

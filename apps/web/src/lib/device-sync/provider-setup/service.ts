@@ -28,6 +28,7 @@ import {
   readMemberOwnedProviderSetupBinding,
   toMemberOwnedProviderSetupView,
   type MemberOwnedProviderSetupAdvanceResult,
+  type MemberOwnedProviderSetupConnectionDisposition,
   type MemberOwnedProviderSetupOAuthResult,
   type MemberOwnedProviderSetupRecord,
   type MemberOwnedProviderSetupStatus,
@@ -196,14 +197,11 @@ export class MemberOwnedProviderSetupService {
         });
         return { setup: this.toView(setup) };
       }
-      if (disposition.kind === "exact") {
-        setup = await this.persistConnectionDerivedStatus(setup, "connected", "advance");
-        return { setup: this.toView(setup) };
-      }
-      if (disposition.kind === "conflict") {
+      const connectionStatus = resolveConnectionTruthStatus(disposition);
+      if (connectionStatus) {
         setup = await this.persistConnectionDerivedStatus(
           setup,
-          "disconnect_first",
+          connectionStatus,
           "advance",
         );
         return { setup: this.toView(setup) };
@@ -947,15 +945,11 @@ export class MemberOwnedProviderSetupService {
       return setup;
     }
     const disposition = await this.store.readConnectionDisposition(setup);
-    if (disposition.kind === "exact") {
+    const connectionStatus = resolveConnectionTruthStatus(disposition);
+    if (connectionStatus) {
       return persist
-        ? this.persistConnectionDerivedStatus(setup, "connected", operation)
-        : deriveConnectionStatus(setup, "connected", this.now());
-    }
-    if (disposition.kind === "conflict") {
-      return persist
-        ? this.persistConnectionDerivedStatus(setup, "disconnect_first", operation)
-        : deriveConnectionStatus(setup, "disconnect_first", this.now());
+        ? this.persistConnectionDerivedStatus(setup, connectionStatus, operation)
+        : deriveConnectionStatus(setup, connectionStatus, this.now());
     }
     if (setup.status === "connected" || setup.status === "disconnect_first") {
       const desired = readMemberOwnedProviderSetupBinding(setup)
@@ -1107,6 +1101,24 @@ function deriveConnectionStatus(
     status,
     updatedAt: now,
   };
+}
+
+function resolveConnectionTruthStatus(
+  disposition: MemberOwnedProviderSetupConnectionDisposition,
+): "connected" | "disconnect_first" | "oauth_ready" | null {
+  switch (disposition.kind) {
+    case "none":
+      return null;
+    case "conflict":
+      return "disconnect_first";
+    case "exact":
+      switch (disposition.status) {
+        case "active":
+          return "connected";
+        case "reauthorization_required":
+          return "oauth_ready";
+      }
+  }
 }
 
 function logProjectionFailure(

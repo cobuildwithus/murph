@@ -434,38 +434,100 @@ describe("member-owned provider setup store bounds", () => {
     }));
   });
 
-  it("reads at most two active connections to distinguish exact from conflict", async () => {
+  it.each(["active", "reauthorization_required"] as const)(
+    "reads an exact %s connection with its application binding",
+    async (status) => {
+      const findMany = vi.fn(async (input: object) => {
+        void input;
+        return [{
+          id: "dc_synthetic",
+          providerApplicationId: "dpa_synthetic",
+          providerApplicationRevision: 2,
+          status,
+        }];
+      });
+      const store = new PrismaDeviceProviderSetupStore(createPrismaStoreStub({
+        deviceConnection: { findMany },
+      }));
+
+      await expect(store.readConnectionDisposition(buildSetup())).resolves.toEqual({
+        binding: {
+          applicationId: "dpa_synthetic",
+          provider: "strava",
+          revision: 2,
+        },
+        connectionId: "dc_synthetic",
+        kind: "exact",
+        status,
+      });
+
+      expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+        orderBy: { connectedAt: "desc" },
+        select: {
+          id: true,
+          providerApplicationId: true,
+          providerApplicationRevision: true,
+          status: true,
+        },
+        take: 2,
+        where: {
+          provider: "strava",
+          status: { not: "disconnected" },
+          userId: "member_synthetic",
+        },
+      }));
+    },
+  );
+
+  it.each([
+    {
+      connections: [
+        {
+          id: "dc_exact",
+          providerApplicationId: "dpa_synthetic",
+          providerApplicationRevision: 2,
+          status: "active",
+        },
+        {
+          id: "dc_foreign",
+          providerApplicationId: "dpa_foreign",
+          providerApplicationRevision: 1,
+          status: "active",
+        },
+      ],
+      name: "multiple non-disconnected rows",
+    },
+    {
+      connections: [{
+        id: "dc_foreign",
+        providerApplicationId: "dpa_foreign",
+        providerApplicationRevision: 2,
+        status: "reauthorization_required",
+      }],
+      name: "a foreign application binding",
+    },
+    {
+      connections: [{
+        id: "dc_mismatched_revision",
+        providerApplicationId: "dpa_synthetic",
+        providerApplicationRevision: 3,
+        status: "active",
+      }],
+      name: "a mismatched application revision",
+    },
+  ])("treats $name as a connection conflict", async ({ connections }) => {
     const findMany = vi.fn(async (input: object) => {
       void input;
-      return [{
-        id: "dc_synthetic",
-        providerApplicationId: "dpa_synthetic",
-        providerApplicationRevision: 2,
-      }];
+      return connections;
     });
     const store = new PrismaDeviceProviderSetupStore(createPrismaStoreStub({
       deviceConnection: { findMany },
     }));
 
     await expect(store.readConnectionDisposition(buildSetup())).resolves.toEqual({
-      binding: {
-        applicationId: "dpa_synthetic",
-        provider: "strava",
-        revision: 2,
-      },
-      connectionId: "dc_synthetic",
-      kind: "exact",
+      connectionId: connections[0]?.id,
+      kind: "conflict",
     });
-
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: { connectedAt: "desc" },
-      take: 2,
-      where: {
-        provider: "strava",
-        status: { not: "disconnected" },
-        userId: "member_synthetic",
-      },
-    }));
   });
 });
 

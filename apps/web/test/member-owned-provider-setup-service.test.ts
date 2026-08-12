@@ -391,6 +391,138 @@ describe("member-owned provider setup service", () => {
     expect(createAdapter).not.toHaveBeenCalled();
   });
 
+  it("keeps an exact active application-bound connection as a connected no-op", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      completedAt: NOW,
+      providerApplicationId: APPLICATION.applicationId,
+      providerApplicationRevision: APPLICATION.revision,
+      status: "connected",
+    });
+    store.disposition = {
+      binding: {
+        applicationId: APPLICATION.applicationId,
+        provider: "strava",
+        revision: APPLICATION.revision,
+      },
+      connectionId: "dsc_exact_active",
+      kind: "exact",
+      status: "active",
+    };
+    const fake = createFakeAdapter();
+    const service = createService({ adapter: fake.adapter, store });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      action: "none",
+      applicationRevision: APPLICATION.revision,
+      connected: true,
+      status: "connected",
+    });
+    await expect(service.advance(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      setup: {
+        action: "none",
+        applicationRevision: APPLICATION.revision,
+        connected: true,
+        status: "connected",
+      },
+    });
+    expect(store.transitionStatuses).toEqual([]);
+    expect(fake.ensureBrowserRun).not.toHaveBeenCalled();
+    expect(fake.createOwnedApplication).not.toHaveBeenCalled();
+    expect(fake.captureAndSealOwnedApplication).not.toHaveBeenCalled();
+  });
+
+  it("reuses an exact reauthorization-required binding through OAuth without replacing it", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      completedAt: NOW,
+      providerApplicationId: APPLICATION.applicationId,
+      providerApplicationRevision: APPLICATION.revision,
+      status: "connected",
+    });
+    store.disposition = {
+      binding: {
+        applicationId: APPLICATION.applicationId,
+        provider: "strava",
+        revision: APPLICATION.revision,
+      },
+      connectionId: "dsc_exact_reauthorization",
+      kind: "exact",
+      status: "reauthorization_required",
+    };
+    const fake = createFakeAdapter();
+    const startConnection = vi.fn(async () => ({
+      authorizationUrl: "https://www.strava.com/oauth/authorize?reauthorize=1",
+      state: "synthetic_reauthorization_state_1234567890",
+    }));
+    const service = createService({
+      adapter: fake.adapter,
+      createIngress: () => ({
+        startConnectionWithProviderApplication: startConnection,
+      }),
+      store,
+    });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      action: "continue_oauth",
+      applicationRevision: APPLICATION.revision,
+      connected: false,
+      status: "oauth_ready",
+    });
+    await expect(service.advance(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      setup: {
+        action: "continue_oauth",
+        applicationRevision: APPLICATION.revision,
+        connected: false,
+        status: "oauth_ready",
+      },
+    });
+    await expect(service.advance(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      setup: {
+        action: "continue_oauth",
+        applicationRevision: APPLICATION.revision,
+        connected: false,
+        status: "oauth_ready",
+      },
+    });
+    await expect(service.startOAuth({
+      memberId: MEMBER_ID,
+      request: new Request("https://web.example.test/api/setup/oauth"),
+      returnTo: "/connect",
+      sessionId: "session_synthetic",
+      setupId: SETUP_ID,
+    })).resolves.toMatchObject({
+      authorizationUrl: "https://www.strava.com/oauth/authorize?reauthorize=1",
+      setup: {
+        action: "continue_oauth",
+        applicationRevision: APPLICATION.revision,
+        status: "oauth_in_progress",
+      },
+    });
+    expect(startConnection).toHaveBeenCalledWith(
+      MEMBER_ID,
+      {
+        applicationId: APPLICATION.applicationId,
+        provider: "strava",
+        revision: APPLICATION.revision,
+      },
+      "/connect",
+      {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        sourceProviderSlug: null,
+      },
+    );
+    expect(store.setup).toMatchObject({
+      providerApplicationId: APPLICATION.applicationId,
+      providerApplicationRevision: APPLICATION.revision,
+      status: "oauth_in_progress",
+    });
+    expect(fake.ensureBrowserRun).not.toHaveBeenCalled();
+    expect(fake.createOwnedApplication).not.toHaveBeenCalled();
+    expect(fake.captureAndSealOwnedApplication).not.toHaveBeenCalled();
+  });
+
   it("persists a signed-out handoff and resumes the exact setup-owned run", async () => {
     const store = new MemorySetupStore();
     const fake = createFakeAdapter({
@@ -956,8 +1088,16 @@ describe("member-owned provider setup service", () => {
       connectionId: "dsc_conflicting",
       kind: "conflict",
     };
+    const fake = createFakeAdapter();
+    const startConnection = vi.fn(async () => ({
+      authorizationUrl: "https://www.strava.com/oauth/authorize?synthetic=1",
+      state: "synthetic_state_1234567890",
+    }));
     const service = createService({
-      adapter: createFakeAdapter().adapter,
+      adapter: fake.adapter,
+      createIngress: () => ({
+        startConnectionWithProviderApplication: startConnection,
+      }),
       resolveApplication: async () => {
         throw new DeviceProviderApplicationError(
           "DEVICE_PROVIDER_APPLICATION_INVALID",
@@ -970,6 +1110,19 @@ describe("member-owned provider setup service", () => {
     await expect(service.advance(MEMBER_ID)).resolves.toMatchObject({
       setup: { action: "disconnect_first", status: "disconnect_first" },
     });
+    await expect(service.startOAuth({
+      memberId: MEMBER_ID,
+      request: new Request("https://web.example.test/api/setup/oauth"),
+      returnTo: "/connect",
+      sessionId: "session_synthetic",
+      setupId: SETUP_ID,
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_DISCONNECT_FIRST",
+    });
+    expect(startConnection).not.toHaveBeenCalled();
+    expect(fake.ensureBrowserRun).not.toHaveBeenCalled();
+    expect(fake.createOwnedApplication).not.toHaveBeenCalled();
+    expect(fake.captureAndSealOwnedApplication).not.toHaveBeenCalled();
   });
 
   it("transitions before issuing exact-revision OAuth state and leaves ambiguous ingress retryable", async () => {
@@ -1057,6 +1210,7 @@ describe("member-owned provider setup service", () => {
       },
       connectionId: "dsc_exact",
       kind: "exact",
+      status: "active",
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const service = createService({ adapter: createFakeAdapter().adapter, store });

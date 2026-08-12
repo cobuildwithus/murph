@@ -222,6 +222,7 @@ export class PrismaDeviceProviderSetupStore {
         id: true,
         providerApplicationId: true,
         providerApplicationRevision: true,
+        status: true,
       },
       take: 2,
       where: {
@@ -242,11 +243,16 @@ export class PrismaDeviceProviderSetupStore {
         )
       : null;
     if (binding && exact && connections.length === 1) {
-      return {
-        binding,
-        connectionId: exact.id,
-        kind: "exact",
-      };
+      switch (exact.status) {
+        case "active":
+        case "reauthorization_required":
+          return {
+            binding,
+            connectionId: exact.id,
+            kind: "exact",
+            status: exact.status,
+          };
+      }
     }
     return {
       connectionId: connections[0]?.id ?? "unknown",
