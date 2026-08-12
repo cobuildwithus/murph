@@ -31,6 +31,16 @@ export interface JunctionTimeseriesResourcePolicy {
   readonly resource: string;
 }
 
+// Dense scalar records keep provider values atomic. A documented point
+// timestamp wins; otherwise the interval start owns the entire scalar and its
+// UTC day/hour bucket, with interval end used only as a final fallback.
+export function usesJunctionTimeseriesIntervalStartOwnership(
+  policy: Pick<JunctionTimeseriesResourcePolicy, "normalizationMode"> | null | undefined,
+): boolean {
+  return policy?.normalizationMode === "daily_aggregate"
+    || policy?.normalizationMode === "hourly_or_session_feature";
+}
+
 // Static, code-owned resource policy shared by config admission, fetch-window
 // selection, webhook recognition, and importer sanitization. Default entries
 // retain their established order. Opt-ins are appended so existing members and

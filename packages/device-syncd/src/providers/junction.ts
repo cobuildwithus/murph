@@ -11,6 +11,7 @@ import {
   JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
   resolveJunctionTimeseriesResourcePolicy,
+  usesJunctionTimeseriesIntervalStartOwnership,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
@@ -5655,8 +5656,9 @@ function filterJunctionTimeseriesRecordsToWindow(
     return [...records];
   }
 
-  const preferIntervalStart =
-    resolveJunctionTimeseriesResourcePolicy(resource)?.normalizationMode === "daily_aggregate";
+  const preferIntervalStart = usesJunctionTimeseriesIntervalStartOwnership(
+    resolveJunctionTimeseriesResourcePolicy(resource),
+  );
   return records.filter((record) => {
     const entry = readPlainObject(record);
     if (!entry) {

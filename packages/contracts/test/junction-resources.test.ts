@@ -9,6 +9,7 @@ import {
   JUNCTION_TIMESERIES_RESOURCE_POLICIES,
   JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES,
   resolveJunctionTimeseriesResourcePolicy,
+  usesJunctionTimeseriesIntervalStartOwnership,
 } from "../src/junction-resources.ts";
 
 const EXPECTED_DEFAULTS = [
@@ -176,6 +177,15 @@ describe("Junction timeseries resource policy", () => {
       historyWindow: "summary_history",
       normalizationMode: "sparse_alert",
     });
+    expect(usesJunctionTimeseriesIntervalStartOwnership(
+      resolveJunctionTimeseriesResourcePolicy("steps"),
+    )).toBe(true);
+    expect(usesJunctionTimeseriesIntervalStartOwnership(
+      resolveJunctionTimeseriesResourcePolicy("workout_duration"),
+    )).toBe(true);
+    expect(usesJunctionTimeseriesIntervalStartOwnership(
+      resolveJunctionTimeseriesResourcePolicy("fall"),
+    )).toBe(false);
   });
 
   it("fails closed for unknown names and preserves public aliases", () => {

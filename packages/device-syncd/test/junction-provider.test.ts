@@ -14651,9 +14651,15 @@ test("Junction mixed sparse and dense backfills resume the longest history befor
 });
 
 test("Junction opt-in dense webhooks wait for a closed UTC day before importing", async () => {
-  for (const resource of ["calories_basal", "handwashing", "stand_hour"] as const) {
+  for (const resource of [
+    "calories_basal",
+    "handwashing",
+    "stand_hour",
+    "workout_duration",
+  ] as const) {
     const requests: URL[] = [];
     const importedSnapshots: unknown[] = [];
+    const preparedImports: Awaited<ReturnType<typeof prepareDeviceProviderSnapshotImport>>[] = [];
     const provider = createJunctionProvider(async (input) => {
       const url = new URL(readUrl(input));
       requests.push(url);
@@ -14680,6 +14686,13 @@ test("Junction opt-in dense webhooks wait for a closed UTC day before importing"
                       unit: "count",
                       value: 1,
                     }]
+                  : resource === "workout_duration"
+                    ? [{
+                        end: "2026-04-03T00:00:00.000Z",
+                        start: "2026-04-02T23:12:00.000Z",
+                        unit: "minutes",
+                        value: 48,
+                      }]
                   : [{
                       timestamp: "2026-04-02T12:00:00.000Z",
                       unit: resource === "calories_basal" ? "kcal" : "count",
@@ -14739,7 +14752,15 @@ test("Junction opt-in dense webhooks wait for a closed UTC day before importing"
         account: createAccount({ sources: [sourceSummary] }),
         importSnapshot: async (snapshot) => {
           importedSnapshots.push(snapshot);
-          return { durableDeliveryAccepted: true };
+          const prepared = await prepareDeviceProviderSnapshotImport({
+            provider: "junction",
+            snapshot,
+          });
+          preparedImports.push(prepared);
+          return {
+            canonicalEventCount: prepared.events?.length ?? 0,
+            durableDeliveryAccepted: true,
+          };
         },
         now,
       }),
@@ -14775,6 +14796,32 @@ test("Junction opt-in dense webhooks wait for a closed UTC day before importing"
     assert.equal(resourceRequests[2]?.searchParams.get("start_date"), "2026-04-02", resource);
     assert.equal(resourceRequests[2]?.searchParams.get("end_date"), "2026-04-02", resource);
     assert.equal(importedSnapshots.length, 1, resource);
+    assert.equal(preparedImports.length, 1, resource);
+
+    if (resource === "workout_duration") {
+      const prepared = requireValue(preparedImports[0], "workout duration compact import");
+      const artifacts = prepared.evidenceParts?.filter((part) =>
+        part.metadata?.resource === "workout_duration"
+        && part.metadata?.resourceCategory === "timeseries_feature_aggregate"
+      ) ?? [];
+      const events = prepared.events?.filter((candidate) =>
+        candidate.fields?.metric === "workout-minutes"
+      ) ?? [];
+      assert.equal(artifacts.length, 1);
+      assert.equal(events.length, 1);
+      const artifact = requireValue(artifacts[0], "workout duration compact feature artifact");
+      const content = artifact.content as Record<string, unknown>;
+      const event = requireValue(events[0], "workout duration canonical observation");
+
+      assert.equal(content.bucketStartAt, "2026-04-02T23:00:00.000Z");
+      assert.equal(content.dayKey, "2026-04-02");
+      assert.equal(content.firstSampleAt, "2026-04-02T23:12:00.000Z");
+      assert.equal(content.lastSampleAt, "2026-04-02T23:12:00.000Z");
+      assert.equal(content.sumValue, 48);
+      assert.equal(event.occurredAt, "2026-04-02T23:12:00.000Z");
+      assert.equal(event.dayKey, "2026-04-02");
+      assert.equal(event.fields?.value, 48);
+    }
   }
 });
 

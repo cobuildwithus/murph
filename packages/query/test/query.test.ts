@@ -6676,6 +6676,41 @@ test("Junction activity resource metrics remain queryable through exact opt-in n
   }
 });
 
+test("Junction interval-owned workout duration stays on its UTC start day in query projection", async () => {
+  const vaultRoot = await createMetricObservationVault([{
+    id: "evt_junction_workout_duration_midnight_boundary",
+    metric: "workout-minutes",
+    observationGrain: "derived_fact",
+    occurredAt: "2026-04-02T23:12:00Z",
+    dayKey: "2026-04-02",
+    source: "device",
+    title: "Junction workout duration",
+    unit: "minutes",
+    value: 48,
+    externalRef: {
+      system: "junction",
+      resourceType: "garmin-workout-duration",
+      resourceId: "workout-duration-start-owned-hour",
+      facet: "workout-minutes",
+    },
+  }]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const points = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "workout_duration",
+    });
+
+    assert.equal(points.length, 1);
+    assert.equal(points[0]?.metricKey, "workout-minutes");
+    assert.equal(points[0]?.effectiveDate, "2026-04-02");
+    assert.equal(points[0]?.value, 48);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("listMetricPointsRuntime rebuilds v15 wearable-summary projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
