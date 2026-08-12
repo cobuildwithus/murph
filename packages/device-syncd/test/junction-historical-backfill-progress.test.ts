@@ -5,6 +5,7 @@ import {
   addJunctionHistoricalBackfillEvidence,
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage,
   encodeJunctionHistoricalBackfillStatus,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
@@ -302,6 +303,43 @@ describe("Junction extended timeseries history coverage", () => {
       "note",
       1,
     )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      merged,
+      "omron",
+      "caffeine",
+      1,
+    )).toBe(true);
+  });
+
+  it("rejects a full metadata envelope without a reusable coverage slot", () => {
+    const metadata = Object.fromEntries(
+      Array.from({ length: 16 }, (_, index) => [`capacityFact${index}`, index]),
+    );
+
+    expect(canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      "omron",
+      "caffeine",
+    )).toBe(false);
+    expect(addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata,
+      providerSlug: "omron",
+      resource: "caffeine",
+      version: 1,
+    })).toBeNull();
+  });
+
+  it("adds the first coverage slot when one metadata entry remains", () => {
+    const metadata = Object.fromEntries(
+      Array.from({ length: 15 }, (_, index) => [`capacityFact${index}`, index]),
+    );
+    const update = requireCoverageUpdate(metadata, "omron", "caffeine");
+    const merged = mergeStoredDeviceSyncMetadataPatch(metadata, {
+      [update.metadataKey]: update.value,
+    });
+
+    expect(Object.keys(merged)).toHaveLength(16);
+    expect(Object.keys(metadata).every((key) => Object.hasOwn(merged, key))).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       merged,
       "omron",

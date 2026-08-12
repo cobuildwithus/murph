@@ -1175,6 +1175,45 @@ test("unwritable legacy slots fail before extended-history provider egress", asy
   assert.equal(requests.length, 0);
 });
 
+test("a full metadata envelope without a coverage slot fails before provider egress", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const metadata = Object.fromEntries(
+    Array.from({ length: 16 }, (_, index) => [`capacityFact${index}`, index]),
+  );
+  const job = findResourceJob(
+    createScheduledJobs(createStoredAccount({ metadata, sources }), NOW).jobs,
+    "caffeine",
+  );
+
+  await assert.rejects(
+    requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ account: createAccount({ metadata, sources }) }),
+      toJobRecord(job, 1),
+    ),
+    (error) =>
+      isDeviceSyncError(error)
+      && error.code === "JUNCTION_EXTENDED_HISTORY_COVERAGE_UNREPRESENTABLE",
+  );
+  assert.equal(requests.length, 0);
+});
+
 test("a stale job leaves newer extended-history coverage untouched without egress", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({

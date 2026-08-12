@@ -1,6 +1,10 @@
 import { resolveJunctionDeviceConnectRouteByProviderSlug } from "./config/connect-routes.ts";
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "./config/junction-connect-sources.ts";
-import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "./metadata.ts";
+import {
+  DEVICE_SYNC_METADATA_MAX_STRING_LENGTH,
+  mergeStoredDeviceSyncMetadataPatch,
+  sanitizeStoredDeviceSyncMetadata,
+} from "./metadata.ts";
 
 export type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 
@@ -453,7 +457,14 @@ export function addJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
   const coverage = readJunctionExtendedTimeseriesHistoryCoverageFacts(input.metadata);
   setJunctionExtendedTimeseriesHistoryCoverageBit(coverage.bytes, bitIndex);
   const value = encodeJunctionExtendedTimeseriesHistoryCoverageMatrix(coverage);
-  return value ? { metadataKey, value } : null;
+  if (!value) {
+    return null;
+  }
+
+  const update = { metadataKey, value };
+  return canRetainJunctionExtendedTimeseriesHistoryCoverageUpdate(input.metadata, update)
+    ? update
+    : null;
 }
 
 export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -481,11 +492,24 @@ export function canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
   providerSlug: string,
   resource: string,
 ): boolean {
-  return resolveJunctionExtendedTimeseriesHistoryCoverageBitIndex(
+  return addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata,
     providerSlug,
     resource,
-  ) !== null
-    && selectJunctionExtendedTimeseriesHistoryCoverageMetadataKey([metadata]) !== null;
+    version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION,
+  }) !== null;
+}
+
+function canRetainJunctionExtendedTimeseriesHistoryCoverageUpdate(
+  metadata: Record<string, unknown>,
+  update: JunctionExtendedTimeseriesHistoryCoverageUpdate,
+): boolean {
+  const existing = sanitizeStoredDeviceSyncMetadata(metadata);
+  const merged = mergeStoredDeviceSyncMetadataPatch(existing, {
+    [update.metadataKey]: update.value,
+  });
+  return merged[update.metadataKey] === update.value
+    && Object.keys(existing).every((key) => Object.hasOwn(merged, key));
 }
 
 export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
