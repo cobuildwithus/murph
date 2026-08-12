@@ -846,6 +846,35 @@ function buildHostedIngressTerminalNonReplyPhaseBreakdownSql(input: {
   )`;
 }
 
+function buildHostedIngressCheckpointPublicationPhaseBreakdownSql(): Prisma.Sql {
+  const stored = Prisma.sql`trace.phase_breakdown_json`;
+  const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
+  const object = Prisma.sql`sanitized.object`;
+  const assistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${object} -> 'assistant'`,
+  );
+  const checkpointPublicationExpectedBy =
+    buildHostedIngressLatencyMaxEpochMsValueSql({
+      assistant,
+      incomingEpochMs: Prisma.sql`input.expected_by_epoch_ms`,
+      leafKey: "checkpointPublicationExpectedByEpochMs",
+    });
+  return Prisma.sql`(
+    SELECT ${object}
+      || ${buildHostedIngressLatencySchemaPatchSql(object)}
+      || jsonb_build_object(
+        'assistant',
+        ${assistant} || jsonb_build_object(
+          'checkpointPublicationExpectedByEpochMs',
+          ${checkpointPublicationExpectedBy},
+          'runtimeLeaseGeneration',
+          input.runtime_lease_generation
+        )
+      )
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
+}
+
 function buildHostedIngressTerminalNonReplyRuntimeAttemptSql(): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
   const object = buildHostedIngressLatencyJsonObjectSql(stored);
@@ -2005,31 +2034,13 @@ async function updateHostedIngressLatencyRuntimeMilestone(
   },
 ): Promise<number> {
   if (input.milestone === "checkpoint_publication_expected_by") {
-    const rows = await prisma.hostedIngressLatencyTrace.findMany({
-      select: { id: true },
-      where: {
-        assistantInputId: { not: null },
-        mailboxItem: {
-          consumedAt: null,
-        },
-        source: input.source,
-        userId: input.userId,
-      },
+    return updateHostedIngressCheckpointPublicationExpectedBySetBased(prisma, {
+      expectedBy: input.at,
+      runtimeAttemptId: input.runtimeAttemptId,
+      runtimeLeaseGeneration: input.runtimeLeaseGeneration,
+      source: input.source,
+      userId: input.userId,
     });
-    let matchedCount = 0;
-    for (const row of rows) {
-      if (
-        await updateHostedIngressCheckpointPublicationExpectedByLocked(prisma, {
-          expectedBy: input.at,
-          runtimeAttemptId: input.runtimeAttemptId,
-          runtimeLeaseGeneration: input.runtimeLeaseGeneration,
-          traceId: row.id,
-        })
-      ) {
-        matchedCount += 1;
-      }
-    }
-    return matchedCount;
   }
 
   const baseWhere = {
@@ -2050,6 +2061,109 @@ async function updateHostedIngressLatencyRuntimeMilestone(
     },
   });
   return result.count;
+}
+
+async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    expectedBy: Date;
+    runtimeAttemptId: string;
+    runtimeLeaseGeneration: string;
+    source: HostedIngressLatencySource;
+    userId: string;
+  },
+): Promise<number> {
+  const storedObject = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`trace.phase_breakdown_json`,
+  );
+  const storedAssistant = buildHostedIngressLatencyJsonObjectSql(
+    Prisma.sql`${storedObject} -> 'assistant'`,
+  );
+  const storedLeaseGeneration = buildHostedIngressLatencyStoredLeaseGenerationSql(
+    storedAssistant,
+  );
+  const terminalNonReplyLeaf = Prisma.sql`
+    ${storedAssistant} -> 'terminalNonReplyCommittedAtEpochMs'
+  `;
+  const hasTerminalNonReplyEvidence =
+    buildHostedIngressLatencySafeJsonIntegerPredicateSql(terminalNonReplyLeaf);
+  const nextPhaseBreakdown =
+    buildHostedIngressCheckpointPublicationPhaseBreakdownSql();
+
+  const rows = await prisma.$queryRaw<Array<{ matchedCount: bigint }>>(Prisma.sql`
+    /* hosted_ingress_checkpoint_publication_expected_by_set_based */
+    WITH input AS (
+      SELECT
+        ${input.userId}::text AS user_id,
+        ${input.source}::text AS source,
+        ${input.runtimeAttemptId}::text AS runtime_attempt_id,
+        ${input.runtimeLeaseGeneration}::text AS runtime_lease_generation,
+        ${input.expectedBy.getTime()}::bigint AS expected_by_epoch_ms,
+        1::integer AS phase_schema_version,
+        ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
+    ),
+    eligible AS MATERIALIZED (
+      SELECT
+        trace.id,
+        trace.phase_breakdown_json,
+        trace.runtime_attempt_id,
+        ${storedLeaseGeneration} AS stored_lease_generation
+      FROM hosted_ingress_latency_trace AS trace
+      JOIN hosted_mailbox_item AS mailbox_item
+        ON mailbox_item.id = trace.mailbox_item_id
+       AND mailbox_item.consumed_at IS NULL
+      CROSS JOIN input
+      WHERE trace.assistant_input_id IS NOT NULL
+        AND trace.user_id = input.user_id
+        AND trace.source = input.source
+        AND (
+          ${hasTerminalNonReplyEvidence}
+          OR trace.runtime_attempt_id = input.runtime_attempt_id
+        )
+        AND (
+          ${storedLeaseGeneration} IS NULL
+          OR ${storedLeaseGeneration} < input.runtime_lease_generation::numeric
+          OR (
+            ${storedLeaseGeneration} = input.runtime_lease_generation::numeric
+            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+        )
+      ORDER BY trace.id ASC
+      FOR UPDATE OF trace
+    ),
+    next_value AS MATERIALIZED (
+      SELECT
+        trace.id,
+        CASE
+          WHEN trace.stored_lease_generation IS NULL
+            OR trace.stored_lease_generation
+              < input.runtime_lease_generation::numeric
+          THEN input.runtime_attempt_id
+          ELSE trace.runtime_attempt_id
+        END AS runtime_attempt_id,
+        ${nextPhaseBreakdown} AS phase_breakdown_json
+      FROM eligible AS trace
+      CROSS JOIN input
+    ),
+    updated AS (
+      UPDATE hosted_ingress_latency_trace AS trace
+      SET
+        runtime_attempt_id = next_value.runtime_attempt_id,
+        phase_breakdown_json = next_value.phase_breakdown_json,
+        updated_at = statement_timestamp() AT TIME ZONE 'UTC'
+      FROM next_value
+      WHERE trace.id = next_value.id
+        AND (
+          trace.runtime_attempt_id IS DISTINCT FROM next_value.runtime_attempt_id
+          OR trace.phase_breakdown_json IS DISTINCT FROM next_value.phase_breakdown_json
+        )
+      RETURNING trace.id
+    )
+    SELECT COUNT(*)::bigint AS "matchedCount"
+    FROM eligible
+  `);
+
+  return Number(rows[0]?.matchedCount ?? 0n);
 }
 
 function readHostedIngressLatencyRuntimeMilestoneField(
@@ -2236,80 +2350,6 @@ async function updateHostedIngressAssistantInputStagedLocked(
   });
 }
 
-async function updateHostedIngressCheckpointPublicationExpectedByLocked(
-  prisma: HostedIngressLatencyPrismaClient,
-  input: {
-    expectedBy: Date;
-    runtimeAttemptId: string;
-    runtimeLeaseGeneration: string;
-    traceId: string;
-  },
-): Promise<boolean> {
-  return await prisma.$transaction(async (tx) => {
-    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
-    if (!trace) {
-      return false;
-    }
-    const hasTerminalNonReplyEvidence =
-      readHostedRuntimeTerminalNonReplyCommittedAtEpochMs(
-        trace.phaseBreakdownJson,
-      ) !== null;
-    if (
-      !hasTerminalNonReplyEvidence
-      && trace.runtimeAttemptId !== input.runtimeAttemptId
-    ) {
-      return false;
-    }
-
-    const storedRuntimeLeaseGeneration =
-      readHostedRuntimeLatencyLeaseGeneration(trace.phaseBreakdownJson);
-    const leaseGenerationComparison = storedRuntimeLeaseGeneration === null
-      ? 1
-      : compareHostedRuntimeLeaseGenerations(
-          input.runtimeLeaseGeneration,
-          storedRuntimeLeaseGeneration,
-        );
-    if (
-      leaseGenerationComparison < 0
-      || (
-        leaseGenerationComparison === 0
-        && trace.runtimeAttemptId !== input.runtimeAttemptId
-      )
-    ) {
-      return false;
-    }
-
-    const phaseBreakdownUpdate = readTerminalNonReplyPhaseBreakdownMergeUpdate(
-      trace.phaseBreakdownJson,
-      {
-        schemaVersion: 1,
-        assistant: {
-          checkpointPublicationExpectedByEpochMs: input.expectedBy.getTime(),
-          runtimeLeaseGeneration: input.runtimeLeaseGeneration,
-        },
-      },
-    );
-    const shouldTransferRuntimeAttempt =
-      leaseGenerationComparison > 0
-      && trace.runtimeAttemptId !== input.runtimeAttemptId;
-    if (
-      shouldTransferRuntimeAttempt
-      || Object.keys(phaseBreakdownUpdate).length > 0
-    ) {
-      await tx.hostedIngressLatencyTrace.update({
-        data: {
-          ...phaseBreakdownUpdate,
-          ...(shouldTransferRuntimeAttempt
-            ? { runtimeAttemptId: input.runtimeAttemptId }
-            : {}),
-        },
-        where: { id: trace.id },
-      });
-    }
-    return true;
-  });
-}
-
 function isLegacyLinqEgressGuardOnlyProviderStart(
   phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
 ): boolean {
@@ -2377,123 +2417,6 @@ function readPhaseBreakdownMergeUpdate(
     return {};
   }
   return { phaseBreakdownJson: merged.value };
-}
-
-// Terminal suppression may be recomputed after crash recovery, and the live
-// runtime may extend its checkpoint-publication expectation when new dirty work
-// restarts the idle window. Max-merge only those two leaves; all other
-// diagnostic leaves retain assign-once semantics.
-function readTerminalNonReplyPhaseBreakdownMergeUpdate(
-  existingValue: unknown,
-  incoming: HostedRuntimeLatencyPhaseBreakdown,
-): { phaseBreakdownJson?: Prisma.InputJsonValue } {
-  const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
-    existing: existingValue,
-    incoming,
-    phases: ["assistant"],
-  });
-  const assistant =
-    typeof merged.value.assistant === "object"
-    && merged.value.assistant !== null
-    && !Array.isArray(merged.value.assistant)
-      ? merged.value.assistant
-      : {};
-  let changed = merged.changed;
-  const nextAssistant = { ...assistant };
-  for (
-    const leaf of [
-      "terminalNonReplyCommittedAtEpochMs",
-      "checkpointPublicationExpectedByEpochMs",
-    ] as const
-  ) {
-    const incomingValue = incoming.assistant?.[leaf];
-    const storedValue = assistant[leaf];
-    if (
-      incomingValue !== undefined
-      && typeof storedValue === "number"
-      && incomingValue > storedValue
-    ) {
-      nextAssistant[leaf] = incomingValue;
-      changed = true;
-    }
-  }
-  const incomingRuntimeLeaseGeneration =
-    incoming.assistant?.runtimeLeaseGeneration;
-  const storedRuntimeLeaseGeneration =
-    readHostedRuntimeLatencyLeaseGeneration(merged.value);
-  if (
-    incomingRuntimeLeaseGeneration !== undefined
-    && (
-      storedRuntimeLeaseGeneration === null
-      || compareHostedRuntimeLeaseGenerations(
-        incomingRuntimeLeaseGeneration,
-        storedRuntimeLeaseGeneration,
-      ) > 0
-    )
-  ) {
-    nextAssistant.runtimeLeaseGeneration =
-      incomingRuntimeLeaseGeneration;
-    changed = true;
-  }
-  if (changed) {
-    return {
-      phaseBreakdownJson: {
-        ...merged.value,
-        assistant: nextAssistant,
-      },
-    };
-  }
-  return {};
-}
-
-function readHostedRuntimeLatencyLeaseGeneration(
-  value: unknown,
-): string | null {
-  const assistant = readHostedRuntimeLatencyAssistantRecord(value);
-  const generation = assistant?.runtimeLeaseGeneration;
-  return typeof generation === "string"
-    && /^(?:0|[1-9]\d{0,19})$/u.test(generation)
-    ? generation
-    : null;
-}
-
-function readHostedRuntimeTerminalNonReplyCommittedAtEpochMs(
-  value: unknown,
-): number | null {
-  const assistant = readHostedRuntimeLatencyAssistantRecord(value);
-  const epochMs = assistant?.terminalNonReplyCommittedAtEpochMs;
-  return typeof epochMs === "number"
-    && Number.isSafeInteger(epochMs)
-    && epochMs >= 0
-    ? epochMs
-    : null;
-}
-
-function readHostedRuntimeLatencyAssistantRecord(
-  value: unknown,
-): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-  const assistant = Reflect.get(value, "assistant");
-  return typeof assistant === "object"
-    && assistant !== null
-    && !Array.isArray(assistant)
-    ? assistant as Record<string, unknown>
-    : null;
-}
-
-function compareHostedRuntimeLeaseGenerations(
-  left: string,
-  right: string,
-): number {
-  const leftGeneration = BigInt(left);
-  const rightGeneration = BigInt(right);
-  return leftGeneration < rightGeneration
-    ? -1
-    : leftGeneration > rightGeneration
-      ? 1
-      : 0;
 }
 
 function normalizeHostedRuntimeLeaseGeneration(value: string): string {

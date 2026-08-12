@@ -1276,6 +1276,13 @@ Last verified: 2026-08-11
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
+- The best-effort ingress-latency checkpoint-publication milestone updates every
+  currently staged, unconsumed trace for the authenticated member and source in
+  one set-based statement. PostgreSQL owns row serialization while the write
+  preserves attempt and monotonic lease-generation authority, max-merges the
+  publication deadline, sanitizes stored diagnostic JSON, and changes
+  `updated_at` only when state changes. It must not select trace ids into the
+  application or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event

@@ -1423,6 +1423,8 @@ describe("hosted runtime latency dashboard store", () => {
       recorded: true,
       unmatchedCount: 0,
     });
+    const transactionCountBeforeCheckpointPublication =
+      prisma.readTransactionCallCount();
     await expect(recordHostedIngressRuntimeMilestone({
       at: instant("2026-06-02T19:50:00.000Z"),
       authenticatedUserId: "member_latency_1",
@@ -1492,6 +1494,22 @@ describe("hosted runtime latency dashboard store", () => {
     });
     expect(prisma.readTrace()?.runtimeAttemptId).toBe(
       "attempt_terminal_recovery_2",
+    );
+    const checkpointPublicationSql = prisma.readSetBasedMutationSql().filter(
+      (sql) => sql.includes(
+        "hosted_ingress_checkpoint_publication_expected_by_set_based",
+      ),
+    );
+    expect(checkpointPublicationSql).toHaveLength(3);
+    expect(checkpointPublicationSql[0]).toContain(
+      "JOIN hosted_mailbox_item AS mailbox_item",
+    );
+    expect(checkpointPublicationSql[0]).toContain("eligible AS MATERIALIZED");
+    expect(checkpointPublicationSql[0]).toContain(
+      "UPDATE hosted_ingress_latency_trace AS trace",
+    );
+    expect(prisma.readTransactionCallCount()).toBe(
+      transactionCountBeforeCheckpointPublication,
     );
   });
 
@@ -2551,15 +2569,31 @@ function createLatencyWritePrisma(input: {
         if (
           sql.includes("hosted_ingress_provider_started_set_based")
           || sql.includes("hosted_ingress_assistant_milestone_set_based")
+          || sql.includes(
+            "hosted_ingress_checkpoint_publication_expected_by_set_based",
+          )
         ) {
           setBasedMutationSql.push(sql);
           setBasedMutationValues.push([...query.values]);
           if (input.setBasedProjectionRows) {
             return [...input.setBasedProjectionRows];
           }
-          return sql.includes("hosted_ingress_provider_started_set_based")
-            ? applyHostedIngressProviderStartedSetBasedMutation(trace, query.values)
-            : applyHostedIngressAssistantMilestoneSetBasedMutation(trace, query.values);
+          if (sql.includes("hosted_ingress_provider_started_set_based")) {
+            return applyHostedIngressProviderStartedSetBasedMutation(
+              trace,
+              query.values,
+            );
+          }
+          if (sql.includes("hosted_ingress_assistant_milestone_set_based")) {
+            return applyHostedIngressAssistantMilestoneSetBasedMutation(
+              trace,
+              query.values,
+            );
+          }
+          return applyHostedIngressCheckpointPublicationSetBasedMutation(
+            trace,
+            query.values,
+          );
         }
         if (
           !sql.includes("INSERT INTO hosted_ingress_latency_trace")
@@ -2868,6 +2902,80 @@ function applyHostedIngressAssistantMilestoneSetBasedMutation(
     }
     return { assistantInputId, matched: true, traced: true };
   });
+}
+
+function applyHostedIngressCheckpointPublicationSetBasedMutation(
+  trace: MutableLatencyTrace | null,
+  values: readonly unknown[],
+): Array<{ matchedCount: bigint }> {
+  const userId = readSqlString(values[0], "checkpoint publication user id");
+  const source = readSqlString(values[1], "checkpoint publication source");
+  const runtimeAttemptId = readSqlString(
+    values[2],
+    "checkpoint publication runtime attempt id",
+  );
+  const runtimeLeaseGeneration = readSqlString(
+    values[3],
+    "checkpoint publication runtime lease generation",
+  );
+  const expectedByEpochMs = readSqlNumber(
+    values[4],
+    "checkpoint publication expected-by epoch milliseconds",
+  );
+  if (
+    !trace
+    || trace.assistantInputId === null
+    || trace.userId !== userId
+    || trace.source !== source
+  ) {
+    return [{ matchedCount: 0n }];
+  }
+
+  const phaseBreakdown = readJsonRecord(trace.phaseBreakdownJson) ?? {};
+  const assistant = readJsonRecord(phaseBreakdown.assistant) ?? {};
+  const hasTerminalNonReplyEvidence = isSafeLatencyJsonInteger(
+    assistant.terminalNonReplyCommittedAtEpochMs,
+  );
+  if (
+    !hasTerminalNonReplyEvidence
+    && trace.runtimeAttemptId !== runtimeAttemptId
+  ) {
+    return [{ matchedCount: 0n }];
+  }
+  const storedRuntimeLeaseGeneration = readLatencyLeaseGeneration(
+    assistant.runtimeLeaseGeneration,
+  );
+  const comparison = storedRuntimeLeaseGeneration === null
+    ? 1
+    : compareLatencyLeaseGenerations(
+        runtimeLeaseGeneration,
+        storedRuntimeLeaseGeneration,
+      );
+  if (
+    comparison < 0
+    || (comparison === 0 && trace.runtimeAttemptId !== runtimeAttemptId)
+  ) {
+    return [{ matchedCount: 0n }];
+  }
+
+  const nextPhaseBreakdown: Record<string, unknown> = { ...phaseBreakdown };
+  if (!isSafeLatencyJsonInteger(nextPhaseBreakdown.schemaVersion)) {
+    nextPhaseBreakdown.schemaVersion = 1;
+  }
+  nextPhaseBreakdown.assistant = {
+    ...assistant,
+    checkpointPublicationExpectedByEpochMs: maxLatencyEpochMs(
+      assistant.checkpointPublicationExpectedByEpochMs,
+      expectedByEpochMs,
+    ),
+    runtimeLeaseGeneration,
+  };
+  trace.phaseBreakdownJson = nextPhaseBreakdown;
+  if (comparison > 0) {
+    trace.runtimeAttemptId = runtimeAttemptId;
+  }
+  trace.updatedAt = instant("2026-06-02T12:00:00.000Z");
+  return [{ matchedCount: 1n }];
 }
 
 function applyOrdinaryAssistantMilestoneMutation(
