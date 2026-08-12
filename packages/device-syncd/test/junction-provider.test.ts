@@ -5,6 +5,7 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
+import { normalizeJunctionSnapshot } from "@murphai/importers/device-providers/junction";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
@@ -8022,13 +8023,21 @@ test("Junction direct dense resource jobs reuse closed calendar-day ownership", 
   );
 });
 
-test("Junction direct sparse fidelity jobs retain precise interval windows", async () => {
+test("Junction sparse sub-day corrections refresh the provider-owned calendar date", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-      return createJsonResponse({ providers: [] });
+      return createJsonResponse({
+        providers: [{
+          id: "provider-apple-health-kit-1",
+          name: "Apple Health",
+          resource_availability: { caffeine: true },
+          slug: "apple_health_kit",
+          status: "connected",
+        }],
+      });
     }
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/caffeine/grouped")) {
       const precise = new URL(url).searchParams.get("start_date")?.includes("T") === true;
@@ -8037,10 +8046,16 @@ test("Junction direct sparse fidelity jobs retain precise interval windows", asy
           apple_health_kit: [{
             data: [{
               id: "caffeine-reading-1",
-              start: "2026-04-02T14:30:00.000Z",
-              end: "2026-04-02T14:35:00.000Z",
-              unit: "mg",
-              value: precise ? 95 : 105,
+              start: "2026-04-02T23:30:00-04:00",
+              end: "2026-04-02T23:35:00-04:00",
+              unit: "g",
+              value: precise ? 0.095 : 0.105,
+            }, {
+              id: "caffeine-reading-2",
+              start: "2026-04-02T23:40:00-04:00",
+              end: "2026-04-02T23:45:00-04:00",
+              unit: "g",
+              value: precise ? 0.025 : 0.035,
             }],
             source: { provider: "apple_health_kit", type: "phone" },
           }],
@@ -8050,22 +8065,52 @@ test("Junction direct sparse fidelity jobs retain precise interval windows", asy
     throw new Error(`Unexpected request: ${url}`);
   }, { timeseriesResources: ["caffeine"] });
   const importedSnapshots: unknown[] = [];
+  const importSnapshot = async (snapshot: unknown) => {
+    importedSnapshots.push(snapshot);
+    const normalized = normalizeJunctionSnapshot(snapshot as Parameters<
+      typeof normalizeJunctionSnapshot
+    >[0], { defaultTimeZone: "America/New_York" });
+    assert.ok((normalized.events?.length ?? 0) > 0);
+    return {
+      canonicalEventCount: normalized.events?.length ?? 0,
+      canonicalEventDayKeys: [...new Set((normalized.events ?? []).flatMap((event) =>
+        typeof event.dayKey === "string" ? [event.dayKey] : []
+      ))],
+      durableDeliveryAccepted: true,
+    };
+  };
+  const job = createJob("resource", {
+    resource: "caffeine",
+    resourceCategory: "timeseries",
+    windowStart: "2026-04-03T03:25:00.000Z",
+    windowEnd: "2026-04-03T03:50:00.000Z",
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T11:59:59.999Z",
+      importSnapshot,
+    }),
+    job,
+  );
+
+  assert.equal(
+    requests.filter((url) => url.includes("/v2/timeseries/")).length,
+    1,
+    "The provider-local April 2 day must remain unpublished before its UTC-12 close boundary.",
+  );
+  assert.equal(importedSnapshots.length, 1);
+  requests.length = 0;
+  importedSnapshots.length = 0;
 
   await executeJunctionJob(
     provider,
     createJunctionJobContext({
       now: "2026-04-03T12:00:00.000Z",
-      importSnapshot: async (snapshot) => {
-        importedSnapshots.push(snapshot);
-        return { imported: true };
-      },
+      importSnapshot,
     }),
-    createJob("resource", {
-      resource: "caffeine",
-      resourceCategory: "timeseries",
-      windowStart: "2026-04-02T12:00:00.000Z",
-      windowEnd: "2026-04-03T12:00:00.000Z",
-    }),
+    job,
   );
 
   assert.deepEqual(importedSnapshots.map((snapshot) => {
@@ -8076,19 +8121,19 @@ test("Junction direct sparse fidelity jobs retain precise interval windows", asy
     };
     return [entry.windowStart, entry.windowEnd, entry.timeseriesWindowKind];
   }), [
-    ["2026-04-02T12:00:00.000Z", "2026-04-03T12:00:00.000Z", "precise"],
+    ["2026-04-03T03:25:00.000Z", "2026-04-03T03:50:00.000Z", "precise"],
     ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z", "calendar_day"],
   ]);
   assert.deepEqual(importedSnapshots.map((snapshot) =>
     (snapshot as { timeseries?: { caffeine?: Array<{ value?: number }> } })
-      .timeseries?.caffeine?.[0]?.value
-  ), [95, 105]);
+      .timeseries?.caffeine?.map((record) => record.value)
+  ), [[0.095, 0.025], [0.105, 0.035]]);
   const [preciseRequest, dailyRequest] = requests.filter((url) => url.includes("/v2/timeseries/"));
   const request = requireValue(preciseRequest, "Junction sparse resource job should issue a precise request.");
   assertJunctionWindowQuery(
     request,
-    "2026-04-02T12:00:00.000Z",
-    "2026-04-03T12:00:00.000Z",
+    "2026-04-03T03:25:00.000Z",
+    "2026-04-03T03:50:00.000Z",
   );
   assertJunctionWindowQuery(
     requireValue(dailyRequest, "Junction sparse resource job should refresh its closed daily total."),

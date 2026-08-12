@@ -1306,7 +1306,12 @@ test("device sync service reports canonical counts separately from durable deliv
       async importDeviceProviderSnapshot() {
         importAttempt += 1;
         return importAttempt === 1
-          ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
+          ? {
+              events: [
+                { dayKey: "2026-04-02", kind: "activity" },
+                { dayKey: "2026-04-03", kind: "sleep" },
+              ],
+            }
           : { applied: false, events: [] };
       },
     },
@@ -1332,11 +1337,13 @@ test("device sync service reports canonical counts separately from durable deliv
     assert.deepEqual(importReceipts, [
       {
         canonicalEventCount: 2,
+        canonicalEventDayKeys: ["2026-04-02", "2026-04-03"],
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
       {
         canonicalEventCount: 0,
+        canonicalEventDayKeys: [],
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },

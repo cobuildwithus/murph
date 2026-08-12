@@ -737,6 +737,7 @@ export interface ProviderScheduleResult {
 
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
+  canonicalEventDayKeys?: readonly string[];
   canonicalEventExternalRefResourceIds?: readonly string[];
   durableDeliveryAccepted: boolean;
 }

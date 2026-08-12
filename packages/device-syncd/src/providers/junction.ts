@@ -163,6 +163,7 @@ interface JunctionTimeseriesImportResult {
 }
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  canonicalEventDayKeys: readonly string[];
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
   fetchComplete: boolean;
@@ -1968,6 +1969,7 @@ export function createJunctionDeviceSyncProvider(
               importResult: {
                 canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
+                canonicalEventDayKeys: [],
                 fetchComplete: false,
                 providerRecordCount: 0,
                 unresolvedProviderRecordIdentities: [],
@@ -2014,6 +2016,7 @@ export function createJunctionDeviceSyncProvider(
             importResult: {
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
+              canonicalEventDayKeys: [],
               fetchComplete: false,
               providerRecordCount: 0,
               unresolvedProviderRecordIdentities: [],
@@ -2146,13 +2149,12 @@ export function createJunctionDeviceSyncProvider(
           timeseriesImport.fetchComplete
           && JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(effectiveResource)
         ) {
-          const dailyImport = await importTimeseriesDailySnapshots(
+          const dailyImport = await importTimeseriesDailySnapshotDays(
             context,
             sourceProviders,
-            window.windowStart,
-            window.windowEnd,
             skippedOptionalResources,
             [effectiveResource],
+            timeseriesImport.canonicalEventDayKeys,
             sourceProviderSlug,
           );
           if (dailyImport.yieldedAt) {
@@ -2801,6 +2803,7 @@ export function createJunctionDeviceSyncProvider(
     let executionWindowStart: string | null = null;
     let fetchComplete = true;
     let yieldedAt: string | null = null;
+    let canonicalEventDayKeys: readonly string[] = [];
     let canonicalProviderRecordIdentities: readonly string[] = [];
     let canonicalEventCount = 0;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
@@ -2916,6 +2919,7 @@ export function createJunctionDeviceSyncProvider(
             return {
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
+              canonicalEventDayKeys: [],
               fetchComplete: false,
               postFetchSourceAdmission,
               providerRecordCount,
@@ -2947,6 +2951,7 @@ export function createJunctionDeviceSyncProvider(
             timeseries: preparedImport.snapshots,
           });
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+          canonicalEventDayKeys = readProviderSnapshotCanonicalEventDayKeys(receipt);
           if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
               resolveJunctionBloodPressureProviderRecordResolutionEvidence({
@@ -2986,6 +2991,7 @@ export function createJunctionDeviceSyncProvider(
           return {
             canonicalProviderRecordIdentities: [],
             canonicalEventCount: 0,
+            canonicalEventDayKeys: [],
             fetchComplete: false,
             providerRecordCount,
             unresolvedProviderRecordIdentities,
@@ -2999,6 +3005,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return {
+      canonicalEventDayKeys,
       canonicalProviderRecordIdentities,
       canonicalEventCount,
       fetchComplete,
@@ -3074,6 +3081,33 @@ export function createJunctionDeviceSyncProvider(
     return {
       yieldedAt: null,
     };
+  }
+
+  async function importTimeseriesDailySnapshotDays(
+    context: ProviderJobContext,
+    sourceProviders: readonly JunctionProviderConnection[],
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources: readonly string[],
+    dayKeys: readonly string[],
+    sourceProviderSlug?: string | null,
+  ): Promise<JunctionTimeseriesImportResult> {
+    for (const dayKey of [...new Set(dayKeys)].sort()) {
+      const windowStart = `${dayKey}T00:00:00.000Z`;
+      const windowEnd = addMilliseconds(windowStart, TIMESERIES_CHUNK_MS);
+      const result = await importTimeseriesDailySnapshots(
+        context,
+        sourceProviders,
+        windowStart,
+        windowEnd,
+        skippedOptionalResources,
+        resources,
+        sourceProviderSlug,
+      );
+      if (result.yieldedAt) {
+        return result;
+      }
+    }
+    return { yieldedAt: null };
   }
 
   async function importJunctionDirectResourceSnapshot(
@@ -7995,6 +8029,24 @@ function readProviderSnapshotCanonicalEventCount(value: unknown): number {
       && canonicalEventCount >= 0
     ? canonicalEventCount
     : 0;
+}
+
+function readProviderSnapshotCanonicalEventDayKeys(value: unknown): readonly string[] {
+  const dayKeys = readPlainObject(value)?.canonicalEventDayKeys;
+  if (!Array.isArray(dayKeys)) {
+    return [];
+  }
+  return [...new Set(dayKeys.filter((dayKey): dayKey is string =>
+    isCanonicalEventDayKey(dayKey)
+  ))].sort();
+}
+
+function isCanonicalEventDayKey(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function readProviderSnapshotCanonicalEventExternalRefResourceIds(

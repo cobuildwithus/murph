@@ -49,9 +49,10 @@ Updated: 2026-08-12
    decision before any eighth ReviewGPT round.
 8. [x] Land the bounded PR-schema and runner-bundle budget corrections and run
    round eight against the exact pushed head.
-9. [ ] Resolve round eight's sparse-correction and hourly-fanout findings,
-   obtain exact-head green CI and a ReviewGPT PASS, then merge and retire the
-   task worktree.
+9. [x] Resolve round eight's sparse-correction and hourly-fanout findings, then
+   run round nine against the exact pushed head.
+10. [ ] Resolve round nine's provider-day correction finding, obtain exact-head
+    green CI and a ReviewGPT PASS, then merge and retire the task worktree.
 
 ## Decisions
 
@@ -59,9 +60,9 @@ Updated: 2026-08-12
   two bounded cadences: one latest-closed-day pass for the six fidelity
   resources every reconcile, and the prior seven-day all-resource correction
   sweep only after the account crosses a UTC day.
-- Successful sparse fidelity resource jobs reuse the calendar-day importer for
-  closed dates intersecting their precise window; no second aggregate owner or
-  correction queue is required.
+- Successful sparse fidelity resource jobs return the canonical importer's
+  provider-local day keys and reuse the calendar-day importer for each closed
+  corrected date; no second aggregate owner or correction queue is required.
 - A child-row timestamp cannot order the complete resource/day collection.
   Serialized canonical event-spine reconciliation is the existing owner for
   unversioned daily and dense feature facts.
@@ -104,6 +105,11 @@ Updated: 2026-08-12
   daily broad-sweep gate and reusing the existing calendar importer for hourly
   fidelity catch-up and sparse correction adds no state owner, queue, cursor,
   watermark, dependency, or service.
+- Round nine's review-induced finding is accepted. Precise sparse corrections
+  now select calendar refreshes from transient canonical provider-day evidence
+  instead of UTC execution-window dates. The existing import receipt and
+  calendar importer carry the evidence and perform the refresh, so the fix adds
+  no persisted state, queue, cursor, watermark, dependency, or service.
 
 ## Verification
 
@@ -141,5 +147,15 @@ Updated: 2026-08-12
   importer, and 21 normalized wearable query tests; the device-sync typecheck,
   docs drift, scenario integrity, and production runner assembly also pass. The
   final runner bundle is 9,955,082B against the 9,985,718B budget.
+- Round nine found that a UTC-normalized sparse correction window could refresh
+  no date or the wrong date when the corrected interval belonged to a
+  negative-offset provider day. The regression now proves that canonical
+  provider-day evidence selects April 2 for an April 3 UTC execution window,
+  deduplicates two corrected rows on that date, and waits until the exact UTC-12
+  closure boundary before issuing the daily refresh.
+- Passed the exact remediation's 223 Junction provider and 105 device-sync
+  service tests, the device-sync typecheck, docs drift, scenario integrity, and
+  production runner assembly. The runner bundle is 9,956,920B against the
+  9,985,718B budget.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS, merge, and worktree
   retirement.

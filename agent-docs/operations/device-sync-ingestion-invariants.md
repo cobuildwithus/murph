@@ -153,9 +153,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    episode facts, allowing a complete response to clear older temporal facts.
    Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
    retain precise windows because each admitted interval has its own exact-start
-   identity, but those precise snapshots emit intervals only, then refresh the
-   intersecting globally closed dates through the calendar-day path. That path
-   is the sole writer of their daily sums, so a growing precise set cannot
+   identity, but those precise snapshots emit intervals only. The canonical
+   import receipt returns the provider-local day keys that own those intervals;
+   the resource job refreshes each such date through the calendar-day path only
+   after the UTC-12 close boundary. That path is the sole writer of their daily
+   sums, so a UTC-normalized execution window cannot select the wrong provider
+   date and a growing precise set cannot
    create an immutable partial aggregate or block a later interval. Every
    scheduled reconcile refreshes the latest globally closed date for the six
    fidelity resources. The account's existing UTC-day gate retains the broader

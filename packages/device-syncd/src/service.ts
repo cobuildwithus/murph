@@ -987,6 +987,7 @@ class DeviceSyncServiceController {
           });
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
+            canonicalEventDayKeys: readCanonicalDeviceImportEventDayKeys(importResult),
             canonicalEventExternalRefResourceIds:
               readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
             durableDeliveryAccepted: true,
@@ -2111,6 +2112,20 @@ function toPlainRecord(value: unknown): Record<string, unknown> | null {
 function readCanonicalDeviceImportEventCount(value: unknown): number {
   const record = toPlainRecord(value);
   return record && Array.isArray(record.events) ? record.events.length : 0;
+}
+
+function readCanonicalDeviceImportEventDayKeys(value: unknown): string[] {
+  const record = toPlainRecord(value);
+  if (!record || !Array.isArray(record.events)) {
+    return [];
+  }
+
+  return [...new Set(record.events.flatMap((event) => {
+    const dayKey = toPlainRecord(event)?.dayKey;
+    return typeof dayKey === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(dayKey)
+      ? [dayKey]
+      : [];
+  }))].sort();
 }
 
 function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): string[] {
