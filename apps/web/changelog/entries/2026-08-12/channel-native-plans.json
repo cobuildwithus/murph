@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 335,
+  "item": {
+    "id": "channel-native-plans",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Plans use the best format for each chat",
+    "summary": "Exercise routines, training plans, schedules, and other structured answers now use the available card or movement media instead of a long plain-text layout.",
+    "details": "Telegram uses Rich Messages when a suitable card can carry the complete answer. Messages pairs its available card or ordered movement media with the concise instructions needed to complete the plan safely. Murph uses concise text alone only when the current channel has no suitable presentation.",
+    "relevanceTags": ["assistant", "telegram", "imessage", "workouts", "cards"],
+    "sourcePullRequests": [1727]
+  }
+}

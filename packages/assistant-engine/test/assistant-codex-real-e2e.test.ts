@@ -39,6 +39,9 @@ import {
   MURPH_SUBSCRIPTION_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+} from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
 } from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import {
@@ -1036,6 +1039,128 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ).not.toMatch(
               /your (?:saved|stored|private) (?:history|record|context)|I (?:found|read|checked) your (?:vault|private|personal) (?:history|record|context)/iu,
             )
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'uses complete routine cards on Telegram and semantic text with media on Linq',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-routine-presentation-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const scenarios = [
+          {
+            channel: 'telegram' as const,
+            expected: 'card' as const,
+            label: 'attended Telegram',
+            scheduledOccurrenceAt: undefined,
+          },
+          {
+            channel: 'telegram' as const,
+            expected: 'card' as const,
+            label: 'scheduled Telegram',
+            scheduledOccurrenceAt: '2026-08-12T11:30:00.000Z',
+          },
+          {
+            channel: 'linq' as const,
+            expected: 'media' as const,
+            label: 'attended Linq',
+            scheduledOccurrenceAt: undefined,
+          },
+        ]
+
+        for (const scenario of scenarios) {
+          const result = await executeRealCodexAppServerTurn({
+            approvalPolicy: 'never',
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions: [
+              buildRoutinePresentationDeveloperInstructions({
+                channel: scenario.channel,
+                scheduledOccurrenceAt: scenario.scheduledOccurrenceAt,
+              }),
+              exerciseGuidance,
+            ].join('\n\n'),
+            dynamicTools: scenario.expected === 'card'
+              ? [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL]
+              : [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+            env: {
+              ...config.env,
+              PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+            },
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: scenario.scheduledOccurrenceAt
+              ? 'Teach the saved one-movement doorway stretch routine now. It is 8 repetitions over 60 seconds. Stop if pain increases.'
+              : 'Teach me a one-movement doorway stretch routine now. Use 8 repetitions over 60 seconds. Stop if pain increases.',
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+          if (scenario.expected === 'card') {
+            expect(
+              actions.filter((action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name
+              ),
+              `${scenario.label} routine-card calls`,
+            ).toHaveLength(1)
+            expect(result.responseCard, `${scenario.label} card`).toMatchObject({
+              kind: 'exercise_routine',
+              safety: expect.stringMatching(/pain/iu),
+              totalSeconds: 60,
+            })
+            expect(result.responseMedia, `${scenario.label} media`).toEqual([])
+            expect(
+              result.finalMessage.trim(),
+              `${scenario.label} duplicate text`,
+            ).toBe('')
+          } else {
+            expect(
+              actions.filter((action) =>
+                action.kind === 'dynamic'
+                && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+              ),
+              `${scenario.label} response-media calls`,
+            ).toHaveLength(1)
+            expect(result.responseCard, `${scenario.label} card`).toBeNull()
+            expect(result.responseMedia, `${scenario.label} media`).toEqual([
+              expect.objectContaining({
+                alt: 'Person with a forearm resting on a door frame.',
+                source: 'exercise_catalog:ST170:1',
+              }),
+            ])
+            expect(result.finalMessage, `${scenario.label} dose`).toMatch(/8/iu)
+            expect(result.finalMessage, `${scenario.label} time`).toMatch(
+              /60|minute/iu,
+            )
+            expect(result.finalMessage, `${scenario.label} safety`).toMatch(/pain/iu)
           }
         }
       } finally {
@@ -7975,6 +8100,64 @@ function buildCapabilityRoutingDeveloperInstructions(): string {
     onboardingGuidance: false,
     turnTrigger: null,
   })
+}
+
+function buildRoutinePresentationDeveloperInstructions(input: {
+  channel: 'linq' | 'telegram'
+  scheduledOccurrenceAt?: string
+}): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: 'vault-cli exercise show <id-or-slug> --format json',
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: input.channel,
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-12',
+    currentTimeZone: 'Europe/Warsaw',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: input.scheduledOccurrenceAt === undefined,
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt,
+    turnTrigger: input.scheduledOccurrenceAt
+      ? 'automation-cron'
+      : 'automation-auto-reply',
+  })
+}
+
+async function materializeRoutinePresentationVaultCli(
+  binDirectory: string,
+): Promise<void> {
+  await mkdir(binDirectory, { recursive: true })
+  const executablePath = path.join(binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      'case "$*" in',
+      '  *"exercise list"*)',
+      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"}]}\'',
+      '    ;;',
+      '  "exercise show doorway-stretch --format json"|"exercise show ST170 --format json")',
+      '    printf \'%s\\n\' \'{"id":"ST170","name":"Doorway stretch","level":"beginner","instructions":["Take a small step forward.","Keep the ribs quiet."],"images":[{"url":"https://cdn.example.test/doorway-stretch.png","alt":"Person with a forearm resting on a door frame.","step":"Setup"}],"safetyNotes":["Stop if pain increases."]}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unsupported routine fixture command\' >&2',
+      '    exit 2',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
 }
 
 type CapabilityRoutingAction =

@@ -1,4 +1,8 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -8,14 +12,26 @@ const mocks = vi.hoisted(() => ({
   }) =>
     buildPublicConnection({
       ...input.record,
-      externalAccountId: input.record.externalAccountId ?? input.fallback?.externalAccountId ?? null,
+      externalAccountId: input.record.externalAccountId
+        ?? input.fallback?.externalAccountId
+        ?? `opaque:${input.record.id}`,
     })),
   createHostedDeviceSyncControlPlane: vi.fn(),
   lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
   mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => ({
     ...record,
+    createdAt: toTestIsoTimestamp(record.createdAt),
     externalAccountId: null,
+    updatedAt: toTestIsoTimestamp(record.updatedAt),
   })),
+  mapHostedRuntimeRedactedConnectionRecord: vi.fn(
+    (record: ReturnType<typeof buildHostedRecord>) => ({
+      ...record,
+      createdAt: toTestIsoTimestamp(record.createdAt),
+      externalAccountId: null,
+      updatedAt: toTestIsoTimestamp(record.updatedAt),
+    }),
+  ),
   resolveDeviceProviderApplication: vi.fn(),
   writeHostedRuntimeLogs: vi.fn(),
 }));
@@ -34,8 +50,20 @@ vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
-  hostedConnectionRecordArgs: {},
+  hostedConnectionRecordArgs: {
+    select: {
+      accessTokenEncrypted: true,
+      externalAccountIdEncrypted: true,
+      refreshTokenEncrypted: true,
+    },
+  },
+  hostedRuntimeRedactedConnectionRecordArgs: {
+    select: {
+      id: true,
+    },
+  },
   mapHostedConnectionRecord: mocks.mapHostedConnectionRecord,
+  mapHostedRuntimeRedactedConnectionRecord: mocks.mapHostedRuntimeRedactedConnectionRecord,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
@@ -52,10 +80,10 @@ vi.mock("@/src/lib/device-sync/provider-applications", () => ({
 
 function buildHostedRecord(
   overrides: Partial<{
-    accessTokenEncrypted: string | null;
     accessTokenExpiresAt: string | null;
+    accessTokenEncrypted: string | null;
     connectedAt: string;
-    createdAt: string;
+    createdAt: Date | string;
     credentialKind: "oauth_tokens" | "provider_config" | "none";
     credentialMetadata: Record<string, unknown>;
     credentialMetadataJson: Record<string, unknown>;
@@ -78,23 +106,23 @@ function buildHostedRecord(
     providerApplicationRevision: number | null;
     providerConfigKey: string | null;
     providerAccountBlindIndex: string | null;
-    refreshTokenEncrypted: string | null;
     refreshLeaseExpiresAt: string | null;
     refreshLeaseOwner: string | null;
     refreshLeaseTokenVersion: number | null;
+    refreshTokenEncrypted: string | null;
     scopes: string[];
     scopesJson: string[];
     setupExpiresAt: string | null;
     setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
     status: "active" | "reauthorization_required" | "disconnected";
     tokenVersion: number | null;
-    updatedAt: string | undefined;
+    updatedAt: Date | string | undefined;
     userId: string;
   }> = {},
 ) {
   return {
-    accessTokenEncrypted: "encrypted-access-token",
     accessTokenExpiresAt: null,
+    accessTokenEncrypted: "encrypted-access-token",
     connectedAt: "2026-04-06T09:00:00.000Z",
     createdAt: "2026-04-06T09:00:00.000Z",
     credentialKind: "oauth_tokens" as const,
@@ -104,7 +132,7 @@ function buildHostedRecord(
     externalAccountId: "acct_123",
     externalAccountIdEncrypted: "encrypted-external-account-id",
     id: "conn_123",
-    keyVersion: "hosted-device-secure-box:v1",
+    keyVersion: "kv_stored",
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSyncCompletedAt: null,
@@ -123,10 +151,10 @@ function buildHostedRecord(
     providerApplicationRevision: null,
     providerConfigKey: null,
     providerAccountBlindIndex: "blind:acct_123",
-    refreshTokenEncrypted: "encrypted-refresh-token",
     refreshLeaseExpiresAt: null,
     refreshLeaseOwner: null,
     refreshLeaseTokenVersion: null,
+    refreshTokenEncrypted: "encrypted-refresh-token",
     scopes: ["daily"],
     scopesJson: ["daily"],
     setupExpiresAt: null,
@@ -143,7 +171,7 @@ function buildPublicConnection(record: ReturnType<typeof buildHostedRecord>) {
   return {
     accessTokenExpiresAt: record.accessTokenExpiresAt ?? null,
     connectedAt: record.connectedAt,
-    createdAt: record.createdAt,
+    createdAt: toTestIsoTimestamp(record.createdAt)!,
     displayName: record.displayName,
     externalAccountId: record.externalAccountId,
     id: record.id,
@@ -160,8 +188,12 @@ function buildPublicConnection(record: ReturnType<typeof buildHostedRecord>) {
     setupExpiresAt: record.setupExpiresAt,
     setupPhase: record.setupPhase,
     status: record.status,
-    updatedAt: record.updatedAt,
+    updatedAt: toTestIsoTimestamp(record.updatedAt),
   };
+}
+
+function toTestIsoTimestamp(value: Date | string | undefined): string | undefined {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 function buildStoredAccount(
@@ -374,7 +406,9 @@ function createAuthorityHarness(input: {
     currentStoredAccount = null;
     return currentRecord;
   });
-  const providerApplicationFindFirst = vi.fn(async () => null);
+  const providerApplicationFindFirst = vi.fn(
+    async (): Promise<{ id: string } | null> => null,
+  );
   const activeTokenRootRead = vi.fn(async () => {
     authorityEvents.push("lock-and-read-root");
     return input.activeTokenRootKeyId ?? null;
@@ -397,6 +431,28 @@ function createAuthorityHarness(input: {
   let connectionSources = (input.connectionSources ?? []).map((source) =>
     buildConnectionSource(source)
   );
+  const readRuntimeConnectionSecretMaterial = vi.fn(async (secretInput: {
+    records: ReturnType<typeof buildHostedRecord>[];
+    tokenConnectionIds: ReadonlySet<string>;
+  }) => new Map(secretInput.records.map((record) => {
+    const storedAccount = record.id === currentRecord.id
+      ? currentStoredAccount
+      : buildStoredAccount(record);
+    const tokenBundle = secretInput.tokenConnectionIds.has(record.id)
+      && storedAccount?.credential.kind === "oauth_tokens"
+      ? {
+          accessToken: storedAccount.credential.tokens.accessToken,
+          accessTokenExpiresAt: storedAccount.credential.tokens.accessTokenExpiresAt,
+          keyVersion: storedAccount.keyVersion ?? "kv_stored",
+          refreshToken: storedAccount.credential.tokens.refreshToken,
+          tokenVersion: storedAccount.tokenVersion ?? record.tokenVersion ?? 1,
+        }
+      : null;
+    return [record.id, {
+      externalAccountId: storedAccount?.externalAccountId ?? record.externalAccountId ?? null,
+      tokenBundle,
+    }] as const;
+  })));
   const store = {
     getConnectionForUser: vi.fn(async () =>
       buildPublicConnection({
@@ -408,7 +464,16 @@ function createAuthorityHarness(input: {
     listConnectionSourcesForConnections: vi.fn(async (connectionIds: readonly string[]) =>
       connectionSources.filter((source) => connectionIds.includes(source.connectionId))
     ),
-    listRuntimeSnapshotConnectionSources: vi.fn(async () => connectionSources),
+    listBoundedConnectionSourcesForConnections: vi.fn(async (sourceInput: {
+      connectionIds: readonly string[];
+      sourceProviderSlugs?: readonly string[] | null;
+    }) => connectionSources.filter((source) =>
+      sourceInput.connectionIds.includes(source.connectionId)
+      && (
+        sourceInput.sourceProviderSlugs == null
+        || sourceInput.sourceProviderSlugs.includes(source.sourceProviderSlug)
+      )
+    )),
     materializeDurableConnectionRecord: vi.fn(async (record: ReturnType<typeof buildHostedRecord>) =>
       buildPublicConnection({
         ...record,
@@ -428,7 +493,10 @@ function createAuthorityHarness(input: {
     readRuntimeApplyConnectionSecretMaterial,
     prisma: {
       deviceConnection: {
-        findMany: vi.fn(async ({ where }: { where?: { id?: { in?: string[] } } }) =>
+        findMany: vi.fn(async ({ where }: {
+          select?: Record<string, unknown>;
+          where?: { id?: { in?: string[] } };
+        }) =>
           !input.omitPreparedRecord
           && (!where?.id?.in || where.id.in.includes(currentRecord.id))
             ? [{ ...currentRecord }]
@@ -440,6 +508,7 @@ function createAuthorityHarness(input: {
       },
     },
     syncDurableConnectionState,
+    readRuntimeConnectionSecretMaterial,
     upsertConnectionSource,
     withConnectionMutationLock: vi.fn(async (
       _connectionId: string,
@@ -471,6 +540,7 @@ function createAuthorityHarness(input: {
     persistStoredConnectionTokenBundle: persistPreparedRuntimeApplyTokenWrite,
     prepareRuntimeApplyTokenWrites,
     readRuntimeApplyConnectionSecretMaterial,
+    readRuntimeConnectionSecretMaterial,
     store,
     syncDurableConnectionState,
     upsertConnectionSource,
@@ -3305,6 +3375,107 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
+  it("resolves one shared app binding once across a 32-connection credential page", async () => {
+    const harness = createAuthorityHarness();
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
+      (_, index) => buildHostedRecord({
+        createdAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
+        id: `conn_app_bound_${String(index + 1).padStart(2, "0")}`,
+        provider: "strava",
+        providerApplicationId: "dpa_shared",
+        providerApplicationRevision: 7,
+      }),
+    );
+    mocks.resolveDeviceProviderApplication.mockResolvedValue({
+      applicationId: "dpa_shared",
+      provider: "strava",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+        },
+      },
+      revision: 7,
+    });
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledOnce();
+    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledWith({
+      applicationId: "dpa_shared",
+      expectedRevision: 7,
+      memberId: "user_123",
+      prisma: harness.store.prisma,
+      provider: "strava",
+    });
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledOnce();
+    expect(response.connections).toHaveLength(32);
+    expect(response.connections.every(
+      (entry) => entry.credential.kind === "oauth_tokens",
+    )).toBe(true);
+    expect(response.providerConfigs).toEqual({
+      strava: {
+        clientId: "member-client",
+        clientSecret: "member-secret",
+      },
+    });
+  });
+
+  it("checks one shared app binding once across a 32-connection redacted page", async () => {
+    const harness = createAuthorityHarness();
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
+      (_, index) => buildHostedRecord({
+        createdAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
+        id: `conn_app_bound_redacted_${String(index + 1).padStart(2, "0")}`,
+        provider: "strava",
+        providerApplicationId: "dpa_shared",
+        providerApplicationRevision: 7,
+      }),
+    );
+    harness.store.providerApplicationFindFirst.mockResolvedValue({ id: "dpa_shared" });
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: false,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.providerApplicationFindFirst).toHaveBeenCalledOnce();
+    expect(mocks.resolveDeviceProviderApplication).not.toHaveBeenCalled();
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledOnce();
+    expect(response.connections).toHaveLength(32);
+    expect(response.connections.every(
+      (entry) => entry.credential.kind === "oauth_tokens_redacted",
+    )).toBe(true);
+    expect(response.providerConfigs).toBeUndefined();
+  });
+
   it("does not project client credentials for a non-active app-bound connection", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
@@ -3434,7 +3605,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     })).rejects.toBe(storageError);
   });
 
-  it("reads a tokenless hosted snapshot from the durable external account binding", async () => {
+  it("reads 32 redacted hosted rows without selecting or opening device secrets", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         externalAccountId: null,
@@ -3444,12 +3615,19 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const { readHostedDeviceSyncRuntimeState } = await import(
       "@/src/lib/device-sync/hosted-runtime-authority"
     );
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
+      (_, index) => buildHostedRecord({
+        accessTokenEncrypted: `encrypted-access-token-${index}`,
+        externalAccountId: null,
+        externalAccountIdEncrypted: `encrypted-external-account-id-${index}`,
+        id: `conn_${String(index + 1).padStart(2, "0")}`,
+        refreshTokenEncrypted: `encrypted-refresh-token-${index}`,
+        updatedAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
+      }),
+    );
 
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-    harness.store.materializeDurableConnectionRecord.mockResolvedValue({
-      ...buildPublicConnection(buildHostedRecord()),
-      externalAccountId: "acct_123",
-    });
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
 
     const response = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
@@ -3461,29 +3639,40 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       trustedUserId: "user_123",
     });
 
-    expect(harness.store.materializeDurableConnectionRecord).toHaveBeenCalledWith(harness.record);
-    expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
-    expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
-    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledWith(["conn_123"]);
-    expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
-    expect(mocks.buildHostedPublicDeviceSyncAccount).toHaveBeenCalledWith(
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        fallback: expect.objectContaining({
-          externalAccountId: "acct_123",
-        }),
+        select: { id: true },
       }),
     );
-    expect(response).toMatchObject({
-      connections: [
-        expect.objectContaining({
-          connection: expect.objectContaining({
-            externalAccountId: "acct_123",
-            id: "conn_123",
-          }),
-        }),
-      ],
-      userId: "user_123",
+    const selectedColumns = harness.store.prisma.deviceConnection.findMany.mock.calls[0]?.[0]
+      ?.select as Record<string, unknown>;
+    expect(selectedColumns).not.toHaveProperty("externalAccountIdEncrypted");
+    expect(selectedColumns).not.toHaveProperty("accessTokenEncrypted");
+    expect(selectedColumns).not.toHaveProperty("refreshTokenEncrypted");
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+    expect(harness.store.materializeDurableConnectionRecord).not.toHaveBeenCalled();
+    expect(harness.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+    expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
+    expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+      connectionIds: records.map((record) => record.id),
+      excludeDisconnected: false,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+      sourceProviderSlugs: null,
     });
+    expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
+    expect(response.connections).toHaveLength(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+    );
+    expect(response.connections.every((entry) =>
+      entry.connection.externalAccountId === `opaque:${entry.connection.id}`
+    )).toBe(true);
+    expect(response.nextCursor).toBeNull();
+    expect(response.userId).toBe("user_123");
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain("encrypted-external-account-id");
+    expect(serialized).not.toContain("encrypted-access-token");
+    expect(serialized).not.toContain("encrypted-refresh-token");
   });
 
   it("uses one set-based source read and no connection re-reads for unscoped snapshots", async () => {
@@ -3511,10 +3700,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     }));
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
-    harness.store.materializeStoredConnectionAccount.mockImplementation(async (record) =>
-      buildStoredAccount(record)
-    );
-    harness.store.listConnectionSourcesForConnections.mockResolvedValue(sources);
+    harness.store.listBoundedConnectionSourcesForConnections.mockResolvedValue(sources);
 
     const response = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
@@ -3527,17 +3713,19 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledTimes(1);
-    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
-    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledWith([
-      "conn_a",
-      "conn_b",
-      "conn_c",
-    ]);
-    expect(harness.store.materializeStoredConnectionAccount).toHaveBeenCalledTimes(3);
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+      connectionIds: ["conn_a", "conn_b", "conn_c"],
+      excludeDisconnected: false,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+      sourceProviderSlugs: null,
+    });
+    expect(harness.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
     expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
     expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
-    expect(harness.store.listRuntimeSnapshotConnectionSources).not.toHaveBeenCalled();
+    expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();
     expect(response.connections).toHaveLength(3);
     expect(response.connections.map((connection) => ({
       connectionId: connection.connection.id,
@@ -3545,10 +3733,95 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         (source) => source.sourceProviderSlug,
       ),
     }))).toEqual([
-      { connectionId: "conn_a", sourceProviderSlugs: ["source_1"] },
-      { connectionId: "conn_b", sourceProviderSlugs: ["source_2"] },
       { connectionId: "conn_c", sourceProviderSlugs: ["source_3"] },
+      { connectionId: "conn_b", sourceProviderSlugs: ["source_2"] },
+      { connectionId: "conn_a", sourceProviderSlugs: ["source_1"] },
     ]);
+  });
+
+  it("uses a hard 32-row stable keyset page regardless of the caller limit", async () => {
+    const harness = createAuthorityHarness();
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    const baseTime = Date.parse("2026-04-06T12:00:00.000Z");
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1 },
+      (_, index) => buildHostedRecord({
+        createdAt: new Date(baseTime - index * 1_000),
+        id: `conn_${String(32 - index).padStart(3, "0")}`,
+        updatedAt: new Date(baseTime + index * 1_000),
+      }),
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValueOnce(records);
+
+    const firstPage = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          limit: 10_000,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(firstPage.connections).toHaveLength(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+    );
+    expect(firstPage.connections.map((entry) => entry.connection.id)).toEqual(
+      records.slice(0, 32).map((record) => record.id),
+    );
+    expect(firstPage.nextCursor).toEqual({
+      createdAt: (records[31]!.createdAt as Date).toISOString(),
+      id: records[31]!.id,
+    });
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1,
+        where: expect.objectContaining({
+          userId: "user_123",
+        }),
+      }),
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValueOnce([records[32]!]);
+    const secondPage = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          cursor: firstPage.nextCursor,
+          limit: 10_000,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(secondPage.connections.map((entry) => entry.connection.id)).toEqual([
+      records[32]!.id,
+    ]);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        take: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1,
+        where: expect.objectContaining({
+          AND: [{
+            OR: [
+              { createdAt: { lt: new Date(firstPage.nextCursor!.createdAt) } },
+              {
+                createdAt: new Date(firstPage.nextCursor!.createdAt),
+                id: { lt: firstPage.nextCursor!.id },
+              },
+            ],
+          }],
+          userId: "user_123",
+        }),
+      }),
+    );
   });
 
   it("filters hosted snapshots by direct providers and aggregator-backed source aliases", async () => {
@@ -3574,7 +3847,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        take: 4,
+        take: 5,
         where: expect.objectContaining({
           OR: [
             { provider: { in: ["whoop", "whoop_v2", "whoop-v2"] } },
@@ -3640,9 +3913,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       trustedUserId: "user_123",
     });
 
-    expect(harness.store.listRuntimeSnapshotConnectionSources).toHaveBeenCalledWith({
-      connectionId: "conn_123",
-      limit: 4,
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+      connectionIds: ["conn_123"],
+      excludeDisconnected: true,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
       sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
     });
     expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();
@@ -3708,6 +3982,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
     expect(JSON.stringify(tokenlessResponse)).not.toContain("stored-access-token");
     expect(JSON.stringify(tokenlessResponse)).not.toContain("stored-refresh-token");
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        select: { id: true },
+      }),
+    );
 
     const runtimeResponse = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
@@ -3727,6 +4008,44 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         refreshToken: "stored-refresh-token",
       },
     });
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        select: {
+          accessTokenEncrypted: true,
+          externalAccountIdEncrypted: true,
+          refreshTokenEncrypted: true,
+        },
+      }),
+    );
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledTimes(1);
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledWith({
+      records: [harness.record],
+      tokenConnectionIds: new Set(["conn_123"]),
+    });
+    expect(harness.store.materializeDurableConnectionRecord).not.toHaveBeenCalled();
+    expect(harness.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+  });
+
+  it("propagates runtime device-secret outages instead of converting them to reauthorization", async () => {
+    const harness = createAuthorityHarness();
+    const secretError = new Error("kms unavailable");
+    harness.readRuntimeConnectionSecretMaterial.mockRejectedValue(secretError);
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    await expect(readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toBe(secretError);
   });
 
   it("withholds runtime OAuth material while a refresh lease covers the current token", async () => {
@@ -3827,13 +4146,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-    harness.store.materializeDurableConnectionRecord.mockResolvedValue({
-      ...buildPublicConnection(buildHostedRecord({
-        provider: "junction",
-      })),
-      externalAccountId: "junction-user-123",
-    });
-
     const response = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
         body: JSON.stringify({
@@ -3847,7 +4159,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(response.connections[0]).not.toHaveProperty("tokenBundle");
     expect(response.connections[0]).toMatchObject({
       connection: expect.objectContaining({
-        externalAccountId: "junction-user-123",
+        externalAccountId: "opaque:conn_123",
         provider: "junction",
         setupExpiresAt: "2026-04-06T09:30:00.000Z",
         setupPhase: "pending_link",
@@ -3985,6 +4297,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         refreshTokenEncrypted: null,
         tokenVersion: null,
       }),
+      select: {
+        accessTokenEncrypted: true,
+        externalAccountIdEncrypted: true,
+        refreshTokenEncrypted: true,
+      },
     });
   });
 
@@ -4078,6 +4395,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         },
         providerConfigKey: null,
       }),
+      select: {
+        accessTokenEncrypted: true,
+        externalAccountIdEncrypted: true,
+        refreshTokenEncrypted: true,
+      },
     });
   });
 

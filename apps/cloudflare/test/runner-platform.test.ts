@@ -5612,6 +5612,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("forwards hosted device-sync snapshot cursors without owning pagination policy", async () => {
+    const cursor = {
+      createdAt: "2026-08-11T12:00:00.000Z",
+      id: "conn_032",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.json()).resolves.toEqual({
+        cursor,
+        includeCredentialMaterial: true,
+        limit: 32,
+        userId: "member_123",
+      });
+      return new Response(JSON.stringify({
+        connections: [],
+        generatedAt: "2026-08-11T12:01:00.000Z",
+        nextCursor: null,
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.deviceSyncPort!.fetchSnapshot({
+      cursor,
+      includeCredentialMaterial: true,
+      limit: 32,
+    })).resolves.toMatchObject({ nextCursor: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("records hosted usage through the signed web callback seam", async () => {
     const usageRecord = createAssistantUsageRecord();
     const noticeDeliveryTarget = {
@@ -5869,6 +5912,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("forwards cancellation into hosted device-sync dirty acknowledgement", async () => {
+    const requestStarted = createDeferred<void>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requestStarted.resolve();
+      return await new Promise<Response>((_resolve, reject) => {
+        const abort = () => reject(
+          request.signal.reason instanceof Error
+            ? request.signal.reason
+            : new DOMException("Synthetic dirty acknowledgement aborted.", "AbortError"),
+        );
+        if (request.signal.aborted) {
+          abort();
+          return;
+        }
+        request.signal.addEventListener("abort", abort, { once: true });
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const abortController = new AbortController();
+    const acknowledgement = platform.deviceSyncPort!.ackDirtyStateProcessed({
+      connectionId: "dsc_abort",
+      processedRevision: "22",
+      signal: abortController.signal,
+    });
+
+    await requestStarted.promise;
+    const abortReason = new Error("synthetic exact wake");
+    abortController.abort(abortReason);
+
+    await expect(acknowledgement).rejects.toMatchObject({
+      hostedRuntimeFetchCallerSignalAborted: true,
+      hostedRuntimeFetchCauseKind: "abort",
+      hostedRuntimeFetchRequestSignalAborted: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("forces hosted device-sync connect-link creation through the signed POST callback route", async () => {

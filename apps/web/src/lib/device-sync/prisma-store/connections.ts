@@ -31,7 +31,10 @@ import {
 } from "../../legal/consent";
 import { lockHostedMemberRow } from "../../hosted-onboarding/shared";
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
-import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
+import {
+  buildHostedPublicDeviceSyncAccount,
+  type HostedStaticDeviceSyncConnectionRecord,
+} from "../internal-runtime";
 import {
   maybeDate,
   toIsoTimestamp,
@@ -69,8 +72,10 @@ import {
   encryptHostedConnectionSecret,
   prepareHostedRuntimeApplyTokenWrites,
   readHostedRuntimeApplyConnectionSecretMaterial,
+  readHostedRuntimeConnectionSecretMaterial,
   readHostedStoredExternalAccountId,
   readHostedStoredTokenBundle,
+  type HostedRuntimeConnectionSecretMaterial,
   type HostedDeviceSyncSecretTestCodec,
   type HostedRuntimeApplyConnectionSecretMaterial,
   type HostedRuntimeApplyPreparedTokenWrite,
@@ -84,10 +89,14 @@ import { toPrismaJsonObject } from "./prisma-json";
 
 export {
   hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
   mapHostedConnectionRecord,
+  mapHostedRuntimeRedactedConnectionRecord,
 } from "./connection-records";
 export type {
   HostedConnectionRecord,
+  HostedRuntimeConnectionRecord,
+  HostedRuntimeRedactedConnectionRecord,
   HostedStoredDeviceSyncAccount,
 } from "./connection-records";
 
@@ -118,6 +127,11 @@ type HostedConnectionSetupWrite = {
 
 const DEFAULT_HOSTED_DEVICE_SYNC_SETUP_TTL_MS = 30 * 60_000;
 const HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS = 2;
+
+export interface HostedMemberDeviceConnectionStatus {
+  id: string;
+  status: HostedStaticDeviceSyncConnectionRecord["status"];
+}
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -614,6 +628,52 @@ export class PrismaHostedConnectionStore {
     return Promise.all(records.map((record) => this.buildDurableConnectionRecord(record)));
   }
 
+  async listMemberConnectionStatuses(input: {
+    limit: number;
+    provider: string;
+    status: "active" | "not_disconnected";
+    userId: string;
+  }): Promise<HostedMemberDeviceConnectionStatus[]> {
+    const provider = normalizeNullableString(input.provider);
+    const userId = normalizeNullableString(input.userId);
+    if (!provider || !userId) {
+      throw new TypeError("Hosted device-sync member connection status query requires member and provider ids.");
+    }
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+      throw new TypeError("Hosted device-sync member connection status query requires a positive safe limit.");
+    }
+
+    const records = await this.prisma.deviceConnection.findMany({
+      where: {
+        provider,
+        status: input.status === "active"
+          ? "active"
+          : { not: "disconnected" },
+        userId,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: input.limit + 1,
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (records.length > input.limit) {
+      throw deviceSyncError({
+        code: "MEMBER_CONNECTION_STATUS_SNAPSHOT_SATURATED",
+        httpStatus: 503,
+        message: `Hosted device-sync member connection status authority exceeds the ${input.limit}-connection bound.`,
+        retryable: false,
+      });
+    }
+
+    return records.map((record) => ({
+      id: record.id,
+      status: normalizeHostedDeviceSyncLifecycleStatus(record.status),
+    }));
+  }
+
   async getConnectionForUser(
     userId: string,
     connectionId: string,
@@ -672,6 +732,20 @@ export class PrismaHostedConnectionStore {
       entries,
       prisma: this.prisma,
       testCodec: this.testCodec,
+    });
+  }
+
+  async readRuntimeConnectionSecretMaterial(input: {
+    records: readonly HostedConnectionRecord[];
+    tokenConnectionIds: ReadonlySet<string>;
+  }, prisma: HostedSecureBoxPrismaClient = this.prisma): Promise<
+    Map<string, HostedRuntimeConnectionSecretMaterial>
+  > {
+    return readHostedRuntimeConnectionSecretMaterial({
+      prisma,
+      records: input.records,
+      testCodec: this.testCodec,
+      tokenConnectionIds: input.tokenConnectionIds,
     });
   }
 

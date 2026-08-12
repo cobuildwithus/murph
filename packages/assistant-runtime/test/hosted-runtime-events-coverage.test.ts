@@ -179,7 +179,6 @@ describe("hosted runtime event coverage", () => {
       platformEnv: {},
       runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
-      signal: null,
       timeoutMs: null,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake: deviceSyncWake,
@@ -191,10 +190,10 @@ describe("hosted runtime event coverage", () => {
     );
   });
 
-  it("passes foreground-yield hooks to device-sync wake handling", async () => {
+  it("passes foreground-yield and abort signals to device-sync wake handling", async () => {
     const runtime = createRuntime();
     const shouldYieldDeviceSync = vi.fn(() => true);
-    const controller = new AbortController();
+    const signal = new AbortController().signal;
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake_yield",
       occurredAt: "2026-04-08T00:10:00.000Z",
@@ -207,15 +206,15 @@ describe("hosted runtime event coverage", () => {
       executionContext,
       runtime,
       runtimeEnv: {},
+      signal,
       shouldYieldDeviceSync,
-      signal: controller.signal,
       vaultRoot: "/tmp/assistant-runtime-events-coverage-yield",
     });
 
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
       expect.objectContaining({
         shouldYieldDeviceSync,
-        signal: controller.signal,
+        signal,
       }),
     );
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();

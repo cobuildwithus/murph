@@ -24,6 +24,7 @@ import type {
   HostedMaintenanceMetrics,
 } from "./models.ts";
 import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   reconcileHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
   syncHostedDeviceSyncControlPlaneState,
@@ -1266,7 +1267,8 @@ async function preloadHostedDeviceSyncRuntimeSnapshot(input: {
     return undefined;
   }
 
-  return input.deviceSyncPort.fetchSnapshot({
+  return fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+    deviceSyncPort: input.deviceSyncPort,
     includeCredentialMaterial: true,
     signal: input.signal,
   });
