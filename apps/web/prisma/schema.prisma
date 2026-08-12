@@ -1294,6 +1294,7 @@ model HostedAccountGroupInvite {
   acceptedBy                      HostedMember?       @relation("HostedAccountGroupInviteAcceptor", fields: [acceptedByMemberId], references: [id], onDelete: SetNull)
 
   @@index([groupId, status, createdAt])
+  @@index([groupId, status, expiresAt, id], map: "hagi_group_status_expires_id_idx")
   @@index([targetPhoneLookupKey])
   @@index([targetTelegramUsernameLookupKey], map: "hagi_target_telegram_username_lookup_key_idx")
   @@index([targetEmailLookupKey], map: "hagi_target_email_lookup_key_idx")

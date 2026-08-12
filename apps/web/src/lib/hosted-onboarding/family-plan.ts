@@ -813,6 +813,14 @@ export async function readHostedFamilyAccessForMember(input: {
   });
 }
 
+function compareHostedFamilyOwnerSnapshotRows(
+  left: { createdAt: Date; id: string },
+  right: { createdAt: Date; id: string },
+): number {
+  return left.createdAt.getTime() - right.createdAt.getTime()
+    || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+}
+
 export async function readHostedFamilyOwnerSnapshotForMember(input: {
   memberId: string;
   now?: Date;
@@ -839,10 +847,9 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
 
   const [memberships, invites, paidCapacities] = await Promise.all([
     prisma.hostedAccountGroupMembership.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
       select: {
+        createdAt: true,
+        id: true,
         joinedAt: true,
         memberId: true,
         pendingPlanCode: true,
@@ -857,9 +864,10 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
       },
     }),
     prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
+      orderBy: [
+        { expiresAt: "asc" },
+        { id: "asc" },
+      ],
       select: hostedAccountGroupInviteSelect,
       take: HOSTED_FAMILY_MAX_SEATS + 1,
       where: {
@@ -887,6 +895,11 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
       message: "Family membership exceeds the supported seat capacity.",
     });
   }
+
+  // Keep pre-limit work on query-shaped indexes, then restore the prior
+  // presentation order only after cardinality is proven to be at most six.
+  memberships.sort(compareHostedFamilyOwnerSnapshotRows);
+  invites.sort(compareHostedFamilyOwnerSnapshotRows);
 
   const acceptedInvites = await readFirstAcceptedHostedFamilyInvitesForMembers({
     group,
