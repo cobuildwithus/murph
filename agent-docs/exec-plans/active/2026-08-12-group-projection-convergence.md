@@ -59,9 +59,12 @@ Updated: 2026-08-12
    Mitigation: keep the existing durable dirty acknowledgement pending until
    the checkpointed projection opportunity; use wakes only to reduce latency.
 4. Risk: repeated imports create a projection loop.
-   Mitigation: allow exactly one best-effort opportunity per clean checkpoint,
-   then continue through the existing acknowledgement and mailbox owners with
-   no projection watermark or second retry loop.
+   Mitigation: allow exactly one opportunity per clean checkpoint and reuse the
+   existing dirty/recording continuation after failure, with no projection
+   watermark or second retry loop.
+5. Risk: a wake-preempted older publication finishes after a newer checkpoint.
+   Mitigation: carry the committed source workspace version and serialize the
+   final Web replacement against that existing row; stale work becomes a no-op.
 
 ## Tasks
 
@@ -85,8 +88,10 @@ Updated: 2026-08-12
 - Reject direct group wakes: each group read already queries the current
   Web-owned encrypted snapshot, so recipient fanout adds cost without freshness.
 - Use the existing checkpoint and dirty-record acknowledgement as the sole
-  convergence boundary; projection errors remain fail-soft terminal outcomes
-  for that bounded opportunity.
+  convergence boundary; projection errors stay fail-soft to imports and replies
+  but cannot consume the existing acknowledgement obligation.
+- Fence final Web replacement with the committed workspace version instead of
+  adding a share watermark, generation table, or projection-specific state.
 - Normalize Junction cadence once in its existing runtime-config owner and make
   the runtime descriptor report the same effective interval.
 
@@ -94,15 +99,18 @@ Updated: 2026-08-12
 
 - Local proof completed:
   - `@murphai/assistant-runtime` typecheck and full Vitest suite: 86 files,
-    2,206 passed and 4 skipped.
+    2,209 passed and 4 skipped.
   - `@murphai/device-syncd` typecheck and full Vitest suite: 46 files and 979
     passed.
-  - Web projection-store and hosted group shared-read proof: 2 files and 30
-    passed after generating the worktree-local Prisma client.
-  - Web changelog fragment proof: 2 files and 45 passed; full Web typecheck
-    passed.
-  - `git diff --check`: clean.
-- The in-app Browser was unavailable, so changelog rendered evidence remains an
-  explicit preliminary-specialist gap rather than an inferred visual pass.
+  - `@murphai/hosted-execution` full Vitest suite: 45 files and 502 passed.
+  - Canonical Web suite: 723 files passed and 47 skipped; 9,706 tests passed
+    and 398 skipped. Focused source-version, stale-writer, signed-route, and
+    group-read proof: 3 files and 52 passed.
+  - Canonical Cloudflare node suite: 141 files passed; 2,405 tests passed and 2
+    skipped.
+  - Full workspace typecheck, Web typecheck, assistant-runtime typecheck,
+    documentation drift/gardening, privacy search, and `git diff --check` pass.
+  - Desktop and mobile changelog renders were captured and inspected at the
+    exact authored entry.
 - Remaining proof: exact-head preliminary specialists, final ReviewGPT rounds,
   required GitHub Actions, and current-base merge-tree verification.

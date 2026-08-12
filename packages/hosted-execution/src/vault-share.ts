@@ -610,6 +610,7 @@ export interface HostedVaultShareDeliverRequest {
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   records: HostedVaultShareDeliveryRecord[];
+  sourceWorkspaceVersion: string;
 }
 
 /**
@@ -2043,6 +2044,9 @@ export function parseHostedVaultShareDeliverRequest(
   value: unknown,
 ): HostedVaultShareDeliverRequest {
   const request = requireObject(value, "Vault share deliver request");
+  const sourceWorkspaceVersion = requireHostedVaultShareSourceWorkspaceVersion(
+    request.sourceWorkspaceVersion,
+  );
   const projectionScope = parseHostedVaultShareRequestProjectionScope(
     request,
     "Vault share deliver request",
@@ -2086,7 +2090,24 @@ export function parseHostedVaultShareDeliverRequest(
     projectionKind,
     projectionScope,
     records: parsedRecords,
+    sourceWorkspaceVersion,
   };
+}
+
+function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
+  const sourceWorkspaceVersion = requireString(
+    value,
+    "Vault share deliver request sourceWorkspaceVersion",
+  );
+  if (
+    !/^(?:0|[1-9]\d{0,18})$/u.test(sourceWorkspaceVersion)
+    || BigInt(sourceWorkspaceVersion) > 9_223_372_036_854_775_807n
+  ) {
+    throw new TypeError(
+      "Vault share deliver request sourceWorkspaceVersion must be a canonical PostgreSQL bigint version.",
+    );
+  }
+  return sourceWorkspaceVersion;
 }
 
 export function parseHostedVaultShareDeliverResponse(

@@ -28,6 +28,25 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Vault-Share Source-Version Fence Rollout
+
+Deploy the Cloudflare Worker and runner bundle first with
+`container_rollout=immediate`, and require managed-container smoke to report the
+exact new bundle fingerprint before deploying Web's required
+`sourceWorkspaceVersion` parser and conditional replacement writer. Old Web
+ignores the additive runner field, so the first phase keeps projection working;
+the source-version fence becomes authoritative only after Web deploys. Do not
+deploy Web first: an older runner omits the required version and its projection
+delivery fails closed, retaining the existing device-sync continuation until a
+compatible runner handles it.
+
+After both deploys, checkpoint one device-sync update with an active share,
+confirm the replacement is readable through the ordinary group shared-data
+path, and confirm the managed runner fingerprint still matches the deployed
+bundle. Once Web requires the field, the compatible runner is the rollback
+floor. Roll back Web before the runner only if necessary; otherwise forward-fix
+the pair. Do not add a second retry owner or compatibility watermark.
+
 ## Generic Group-Email Cutover
 
 The newsletter deletion is a hard public-runtime and private-skill cutover.

@@ -56,6 +56,7 @@ import {
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
+  deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
   readHostedSystemMailboxCheckpointRollbackState,
@@ -2619,6 +2620,56 @@ describe("hosted system mailbox notification execution context", () => {
         }),
       );
     } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("backs off a recording item when vault-share projection fails", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:projection-failure",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(Date.parse(FIXED_NOW));
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const pending = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+      assert.ok(pending);
+
+      await expect(
+        deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
+          item: {
+            ...pending,
+            postCheckpointRecord: {
+              connectionId: "device_sync_connection_projection_failure",
+              kind: "device-sync.dirty-processed",
+              processedRevision: "7",
+            },
+            status: "recording",
+          },
+          vaultRoot: workspace.vaultRoot,
+        }),
+      ).resolves.toEqual({
+        at: "2026-04-27T00:01:00.000Z",
+        reason: "device-sync.reconcile",
+      });
+
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves.toMatchObject({
+        pending: [{
+          lastErrorCode: "HOSTED_VAULT_SHARE_PROJECTION_FAILED",
+          nextAttemptAt: "2026-04-27T00:01:00.000Z",
+          status: "recording",
+        }],
+      });
+    } finally {
+      dateNow.mockRestore();
       await workspace.cleanup();
     }
   });

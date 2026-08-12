@@ -73,6 +73,7 @@ export const POST = withJsonError(async (request: Request) => {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         records,
         share,
+        sourceWorkspaceVersion: body.sourceWorkspaceVersion,
       });
       delivered ||= outcome === "replaced";
     } catch (error) {

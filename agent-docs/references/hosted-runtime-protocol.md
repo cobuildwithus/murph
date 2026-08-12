@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Decision
 
@@ -338,7 +338,19 @@ immediate `mailbox` wake so the existing replacement-runtime reconciliation owns
 the durable row. The dedicated system-mailbox device lane uses the same durable
 ordering: successful checkpoint, one wake-raced projection opportunity, then
 browser publication and dirty acknowledgement. A foreground wake during that
-opportunity retains the recording item and yields without acknowledging it.
+opportunity retains the recording item and yields without acknowledging it. A
+projection error is likewise nonterminal for that existing recording or dirty
+acknowledgement owner: it reuses the bounded device-sync continuation while the
+already-committed personal import and conversation path remain available.
+
+Each replacement request carries the committed grantor workspace version that
+produced its complete snapshot. Web performs encryption before taking a short
+`hosted_workspace` row lock, then replaces the exact active share generation
+only when the locked version still matches. The workspace lock serializes the
+final replacement with checkpoint CAS: an older request either commits before
+the newer checkpoint or becomes a no-op after it. No projection watermark is
+stored on the share, and the group runtime is not woken; its next ordinary read
+continues to query the current Web-owned replacement snapshot.
 
 `murph.group action="read_shared"` accepts one to three unique exact selectable
 projection scopes. The signed Web handler captures the current group roster and
@@ -480,6 +492,17 @@ This protocol is a consumer-first hard cut:
    path and forward-fix; do not roll back to a consumer that restores or reads
    legacy local projections. No mailbox drain or local cleanup proof can lower
    this floor.
+
+The later source-workspace-version fence is a producer-first hard cut. Deploy its
+additive Cloudflare/runner request field with immediate container rollout and
+prove fleet convergence before Web requires that field and conditionally
+replaces a share snapshot under the source workspace row lock. Old Web ignores
+the additive field; new Web rejects an older runner's unversioned delivery and
+leaves the existing device-sync continuation pending. After Web deploys, the
+version-capable runner is the rollback floor. Keep the runner-first/Web-second
+window short because stale-writer rejection becomes authoritative only in the
+Web phase; do not preserve a second wire version, retry owner, or projection
+watermark for rollout convenience.
 
 ## Current Protocol
 

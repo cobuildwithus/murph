@@ -25,10 +25,23 @@ import {
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliveryRecord,
-  parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   parseHostedVaultShareDeliverResponse,
   parseHostedVaultShareProjectionScopeKey,
 } from "../src/vault-share.ts";
+
+const TEST_SOURCE_WORKSPACE_VERSION = "7";
+
+function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
+  const {
+    sourceWorkspaceVersion: _sourceWorkspaceVersion,
+    ...request
+  } = parseHostedVaultShareDeliverRequestContract({
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    ...value,
+  });
+  return request;
+}
 
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const ACTIVITY_SCOPE = { projectionKind: "activity-days.v0" } as const;
@@ -228,6 +241,29 @@ const VALID_REVOKE = {
 };
 
 describe("vault-share contracts", () => {
+  it("requires one canonical source workspace version per replacement", () => {
+    expect(parseHostedVaultShareDeliverRequestContract({
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    })).toMatchObject({
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
+
+    for (const sourceWorkspaceVersion of [
+      undefined,
+      "-1",
+      "07",
+      "9223372036854775808",
+    ]) {
+      expect(() => parseHostedVaultShareDeliverRequestContract({
+        projectionKind: "sleep-times.v0",
+        records: [VALID_RECORD],
+        sourceWorkspaceVersion,
+      })).toThrow(/sourceWorkspaceVersion/u);
+    }
+  });
+
   it("registers vault-share kinds in the mailbox kind registry", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.delivery");
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");

@@ -104,15 +104,24 @@ export async function readDeliverableHostedVaultShareProjectionScopes(input: {
  * Replaces the encrypted snapshot on the exact active share generation. Encryption uses
  * the destination member's runtime-ingress root, and the row id is part of authenticated
  * data, so ciphertext cannot be replayed across a revoke/regrant generation. The final
- * conditional update is the linearization point: a stale writer cannot overwrite a
- * revoked or newly granted share.
+ * source-workspace lock and conditional update are the linearization point: a delivery
+ * captured before a newer checkpoint cannot overwrite that checkpoint's projection, and
+ * a stale writer cannot overwrite a revoked or newly granted share. Root unwrap and
+ * encryption finish before the short database-only replacement transaction starts.
  */
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
   prisma?: PrismaClient;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: ActiveHostedVaultShare;
+  sourceWorkspaceVersion: string;
 }): Promise<"replaced" | "no-active-share"> {
   const prisma = input.prisma ?? getPrisma();
+  const projectionSnapshotCiphertext =
+    await encryptHostedVaultShareProjectionSnapshot({
+      prisma,
+      records: input.records,
+      share: input.share,
+    });
 
   return prisma.$transaction(async (tx) => {
     if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
@@ -129,12 +138,13 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       return "no-active-share";
     }
 
-    const projectionSnapshotCiphertext =
-      await encryptHostedVaultShareProjectionSnapshot({
-        prisma: tx,
-        records: input.records,
-        share: input.share,
-      });
+    if (!await lockCurrentHostedVaultShareSourceWorkspaceTx({
+      grantorMemberId: input.share.grantorMemberId,
+      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
+      tx,
+    })) {
+      return "no-active-share";
+    }
     const replaced = await tx.hostedVaultShare.updateMany({
       data: { projectionSnapshotCiphertext },
       where: {
@@ -148,6 +158,22 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
     });
     return replaced.count === 1 ? "replaced" : "no-active-share";
   });
+}
+
+async function lockCurrentHostedVaultShareSourceWorkspaceTx(input: {
+  grantorMemberId: string;
+  sourceWorkspaceVersion: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ version: bigint }>>`
+    SELECT version
+    FROM hosted_workspace
+    WHERE user_id = ${input.grantorMemberId}
+    FOR UPDATE
+  `;
+
+  return rows.length === 1
+    && rows[0]?.version === BigInt(input.sourceWorkspaceVersion);
 }
 
 async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(

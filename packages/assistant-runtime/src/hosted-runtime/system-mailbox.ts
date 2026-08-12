@@ -53,10 +53,12 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
+  type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
+const HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS = 60_000;
 
 export {
   resolveHostedSystemMailboxNextWakeAt,
@@ -413,7 +415,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       });
     }
     const normalized = normalizeHostedSystemMailboxError(error);
-    const nextWakeAt = new Date(Date.parse(startedAt) + 60_000).toISOString();
+    const nextWakeAt = new Date(
+      Date.parse(startedAt) + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
+    ).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
         ...prepared,
@@ -703,7 +707,9 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       throw input.signal.reason instanceof Error ? input.signal.reason : error;
     }
     const normalized = normalizeHostedSystemMailboxError(error);
-    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    const nextWakeAt = new Date(
+      Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
+    ).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
         ...input.item,
@@ -721,6 +727,29 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       recorded: 0,
     };
   }
+}
+
+export async function deferHostedSystemMailboxItemAfterVaultShareProjectionFailure(input: {
+  item: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<HostedRuntimeWakeCandidate> {
+  const nextWakeAt = new Date(
+    Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
+  ).toISOString();
+  await updateHostedSystemMailboxPendingItem({
+    item: {
+      ...input.item,
+      lastErrorCode: "HOSTED_VAULT_SHARE_PROJECTION_FAILED",
+      lastErrorMessage: "Vault-share projection failed before device-sync acknowledgement.",
+      nextAttemptAt: nextWakeAt,
+      status: "recording",
+    },
+    vaultRoot: input.vaultRoot,
+  });
+  return createHostedRuntimeWakeCandidate(
+    nextWakeAt,
+    resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
+  );
 }
 
 function isHostedDeviceSyncDirtyPostCheckpointRecord(

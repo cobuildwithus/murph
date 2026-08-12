@@ -183,6 +183,7 @@ export interface HostedVaultShareProjectionOfferResult {
  * that disappeared from the member vault cannot remain visible as current data.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
+  sourceWorkspaceVersion: string;
   vaultRoot: string;
   vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
 }): Promise<HostedVaultShareProjectionOfferResult> {
@@ -218,6 +219,7 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
       port,
       projectionScope,
       readRecords,
+      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
       vaultRoot: input.vaultRoot,
     }));
   }
@@ -245,6 +247,7 @@ async function offerHostedVaultShareScopeBestEffort(input: {
   port: HostedRuntimeVaultSharePort;
   projectionScope: HostedVaultShareProjectionScope;
   readRecords: ProjectableRecordReader;
+  sourceWorkspaceVersion: string;
   vaultRoot: string;
 }): Promise<HostedVaultShareOfferOutcome> {
   try {
@@ -257,6 +260,7 @@ async function offerHostedVaultShareScopeBestEffort(input: {
       projectionKind: input.projectionScope.projectionKind,
       projectionScope: input.projectionScope,
       records,
+      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
     });
 
     return response.status === "delivered" ? "delivered" : "no-active-share";

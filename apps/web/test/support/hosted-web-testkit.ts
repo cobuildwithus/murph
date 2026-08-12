@@ -223,6 +223,7 @@ interface HostedVaultShareProjectionStoreForTestModule {
       projectionScope: HostedVaultShareProjectionScope;
       projectionScopeKey: string;
     };
+    sourceWorkspaceVersion: string;
   }): Promise<"no-active-share" | "replaced">;
 }
 
@@ -1405,6 +1406,13 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
     });
 
     for (const participant of input.participants) {
+      const sourceWorkspace = await deps.prisma.hostedWorkspace.findUnique({
+        select: { version: true },
+        where: { userId: participant.memberId },
+      });
+      if (!sourceWorkspace) {
+        throw new Error("Hosted-local group email participant workspace was not created.");
+      }
       if (participant.verifiedEmail) {
         await memberStore.syncHostedMemberVerifiedEmailAuthorization({
           address: participant.verifiedEmail,
@@ -1428,6 +1436,7 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
           prisma: deps.prisma,
           records: [],
           share,
+          sourceWorkspaceVersion: sourceWorkspace.version.toString(),
         });
         if (replaced !== "replaced") {
           throw new Error("Hosted-local group email projection snapshot was not replaced.");

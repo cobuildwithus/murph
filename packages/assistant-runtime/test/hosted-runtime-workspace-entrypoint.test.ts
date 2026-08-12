@@ -12047,6 +12047,208 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("wake-interrupted vault-share projection retains dirty recording for a later system pass", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const projectionStarted = createDeferred<void>();
+    const releaseProjection = createDeferred<void>();
+    const firstProjectionFinished = createDeferred<void>();
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:projection-interrupt-recording",
+      id: "mailbox_item_system_mailbox_projection_interrupt_recording",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
+    let dirtyAckCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async ackDirtyStateProcessed(request) {
+        dirtyAckCalls += 1;
+        events.push("device-sync.dirty-ack");
+        return {
+          connectionId: request.connectionId,
+          dirtyRevision: request.processedRevision,
+          nextWakeAt: null,
+          processedRevision: request.processedRevision,
+          recorded: true,
+          stillDirty: false,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+    let projectionCalls = 0;
+    const projectedWorkspaceVersions: string[] = [];
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValue([]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === deviceItem.id
+            ? {
+                ...item,
+                postCheckpointRecord: {
+                  connectionId: "device_sync_connection_projection_interrupt",
+                  kind: "device-sync.dirty-processed" as const,
+                  processedDirtyPayloadIds: ["dirty_payload_projection_interrupt"],
+                  processedRevision: "8",
+                },
+                status: "recording" as const,
+              }
+            : item
+        ),
+      }));
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-projection-interrupt-before.bundle.json",
+        vaultRoot,
+      });
+      const artifactBytesByHash = new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]);
+      let snapshotIndex = 0;
+      const createRunOptions = (
+        wakeSignal: RuntimeWakeSignal,
+        workspace: HostedWorkspaceState,
+      ) => ({
+        async createCheckpointSnapshot() {
+          snapshotIndex += 1;
+          const snapshot = await createVaultSnapshotBundle({
+            key: `users/bundles/member-synthetic/system-mailbox-projection-interrupt-after-${snapshotIndex}.bundle.json`,
+            vaultRoot,
+          });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+          return { snapshotRef: snapshot.snapshotRef };
+        },
+        async importItem() {
+          throw new Error("Already-imported recording work should not import a new row.");
+        },
+        platform: createPlatform({
+          artifactBytesByHash,
+          deviceSyncPort,
+          mailboxPort: createMailboxPort({ events, items: [] }),
+          vaultSharePort: {
+            async listActiveProjectionScopes() {
+              return [{ projectionKind: "sleep-times.v0" as const }];
+            },
+            async deliver(request) {
+              projectionCalls += 1;
+              projectedWorkspaceVersions.push(request.sourceWorkspaceVersion);
+              events.push(`vault-share.deliver:start:${projectionCalls}`);
+              if (projectionCalls === 1) {
+                projectionStarted.resolve();
+                await releaseProjection.promise;
+              }
+              events.push(`vault-share.deliver:done:${projectionCalls}`);
+              if (projectionCalls === 1) {
+                firstProjectionFinished.resolve();
+              }
+              return { status: "delivered" as const };
+            },
+          },
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace,
+          }),
+        }),
+        runtimeWakeSignal: wakeSignal,
+        async runAssistantPhase() {
+          throw new Error("System mailbox recording must not enter assistant phase.");
+        },
+        vaultRoot,
+      });
+      const createRuntimeInput = (attemptId: string, workspaceVersion: string) =>
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId,
+            processingMode: "system_mailbox",
+            workspaceVersion,
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        });
+      const initialWorkspace = createWorkspaceState({
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+
+      const interruptedRun = runHostedWorkspaceRuntimeJobInProcess(
+        createRuntimeInput(
+          "attempt_synthetic_system_mailbox_projection_interrupt_recording",
+          "0",
+        ),
+        createRunOptions(runtimeWakeSignal, initialWorkspace),
+      );
+      await projectionStarted.promise;
+      runtimeWakeSignal.notify();
+      const interruptedResult = await withRealTimeout(
+        interruptedRun,
+        1_000,
+        () => "System mailbox did not release promptly after a wake interrupted projection.",
+      );
+
+      assert.equal(interruptedResult.immediateRecheckRequested, true);
+      assert.equal(dirtyAckCalls, 0);
+      assert.equal(events.includes("device-sync.dirty-ack"), false);
+      const interruptedState = await readHostedSystemMailboxState(vaultRoot);
+      const retainedItem = interruptedState.pending.find((item) => item.itemId === deviceItem.id);
+      assert.equal(retainedItem?.status, "recording");
+      assert.ok(retainedItem?.postCheckpointRecord);
+      assert.equal(checkpointRequests.length, 1);
+
+      releaseProjection.resolve();
+      await withRealTimeout(
+        firstProjectionFinished.promise,
+        1_000,
+        () => "The detached synthetic projection did not finish after release.",
+      );
+      const durableRecordingCheckpoint = checkpointRequests[0];
+      assert.ok(durableRecordingCheckpoint);
+      const resumedWorkspace = createWorkspaceState({
+        inboxMediaRetentionWakeAt:
+          durableRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,
+        nextWakeAt: durableRecordingCheckpoint.nextWakeAt ?? null,
+        nextWakeReason: durableRecordingCheckpoint.nextWakeReason ?? null,
+        redactedStatus: durableRecordingCheckpoint.redactedStatus ?? null,
+        snapshotRef: durableRecordingCheckpoint.snapshotRef,
+        version: "1",
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createRuntimeInput(
+          "attempt_synthetic_system_mailbox_projection_resume_recording",
+          "1",
+        ),
+        createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
+      );
+
+      assert.equal(projectionCalls, 2);
+      assert.deepEqual(projectedWorkspaceVersions, ["1", "2"]);
+      assert.equal(dirtyAckCalls, 1);
+      assert.ok(
+        requireEventIndex(events, "vault-share.deliver:done:2")
+          < requireEventIndex(events, "device-sync.dirty-ack"),
+        events.join(","),
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+    } finally {
+      releaseProjection.resolve();
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -23278,6 +23480,127 @@ describe("hosted workspace runtime entrypoint", () => {
         );
       }
       mocks.runAssistantAutomationPass.mockImplementation(originalAutomationPass);
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("projection failure withholds its checkpoint effect and schedules the existing retry wake", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-vault-share-projection-retry-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const retryAt = "2026-04-27T00:02:00.000Z";
+    let activeScopeReads = 0;
+    let assistantPhaseCalls = 0;
+    let checkpointEffectCalls = 0;
+    const projectedWorkspaceVersions: string[] = [];
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValue([]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_projection_retry",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-projection-retry.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Projection retry proof should not import mailbox work.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            vaultSharePort: {
+              async listActiveProjectionScopes() {
+                activeScopeReads += 1;
+                return activeScopeReads === 1
+                  ? [{ projectionKind: "sleep-times.v0" as const }]
+                  : [];
+              },
+              async deliver(request) {
+                projectedWorkspaceVersions.push(request.sourceWorkspaceVersion);
+                events.push("vault-share.deliver:error");
+                throw new Error("Synthetic projection failure.");
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            if (assistantPhaseCalls === 1) {
+              const afterDurableCheckpoint = Object.assign(
+                async () => {
+                  checkpointEffectCalls += 1;
+                  events.push("device-sync.dirty-ack");
+                },
+                {
+                  vaultShareProjectionFailureWake: {
+                    nextWakeAt: retryAt,
+                    nextWakeReason: "device-sync.reconcile" as const,
+                    requiresFollowUpCheckpoint: true,
+                  },
+                },
+              );
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint,
+                  checkpointReason: "assistant_runtime_commit" as const,
+                }),
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: { hostedAssistantProgressed: true },
+              };
+            }
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: { hostedAssistantProgressed: false },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(checkpointEffectCalls, 0);
+      assert.equal(events.includes("device-sync.dirty-ack"), false);
+      assert.deepEqual(projectedWorkspaceVersions, ["5"]);
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "vault-share.deliver:error"),
+        events.join(","),
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, retryAt);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+      assert.ok(checkpointRequests.some((request) =>
+        request.nextWakeAt === retryAt
+        && request.nextWakeReason === "device-sync.reconcile"
+      ));
+    } finally {
       mocks.summarizeWearableSleepRuntime.mockClear();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

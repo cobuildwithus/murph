@@ -17,7 +17,7 @@ import {
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
-  parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDeliverRequest,
   type HostedVaultShareWorkoutsDayData,
@@ -32,7 +32,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
-  offerHostedVaultShareProjectionBestEffort,
+  offerHostedVaultShareProjectionBestEffort as offerHostedVaultShareProjectionBestEffortContract,
   readProjectableActivityDistanceDays,
   readProjectableActivityMinutesDays,
   readProjectableActivitySessionCountDays,
@@ -61,6 +61,27 @@ import {
   setMemoryDisplayName,
   upsertMemoryRecord,
 } from "@murphai/contracts";
+
+const TEST_SOURCE_WORKSPACE_VERSION = "7";
+
+function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
+  return parseHostedVaultShareDeliverRequestContract({
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    ...value,
+  });
+}
+
+function offerHostedVaultShareProjectionBestEffort(
+  input: Omit<
+    Parameters<typeof offerHostedVaultShareProjectionBestEffortContract>[0],
+    "sourceWorkspaceVersion"
+  >,
+) {
+  return offerHostedVaultShareProjectionBestEffortContract({
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    ...input,
+  });
+}
 
 const NIGHT = {
   date: "2026-06-09",
@@ -484,6 +505,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         recordKey: "profile-name",
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });
 
@@ -531,6 +553,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records: [],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });
 
@@ -2089,6 +2112,7 @@ describe("selectProjectableMealNutritionDays", () => {
         projectionKind: "protein-days.v0",
         projectionScope: PROTEIN_SCOPE,
         records: selected,
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
       });
     } finally {
       dateNow.mockRestore();
@@ -4210,6 +4234,7 @@ describe("readProjectableProfileName", () => {
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records,
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });
 
@@ -4340,6 +4365,7 @@ describe("readProjectableProfileName", () => {
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records: [],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });
 });

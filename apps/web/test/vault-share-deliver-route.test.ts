@@ -102,6 +102,7 @@ const STALE_RECORD = {
 const VALID_BODY = {
   projectionKind: "sleep-times.v0",
   records: [recentRecord(1)],
+  sourceWorkspaceVersion: "7",
 };
 
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
@@ -134,8 +135,11 @@ const SECOND_SHARE = {
 };
 
 function buildRequest(body: unknown): Request {
+  const versionedBody = body !== null && typeof body === "object" && !Array.isArray(body)
+    ? { sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion, ...body }
+    : body;
   return new Request("https://web.test/api/internal/hosted-runtime/vault-share/deliver", {
-    body: JSON.stringify(body),
+    body: JSON.stringify(versionedBody),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
@@ -171,6 +175,7 @@ function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRe
         };
       },
     ),
+    sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
   };
 }
 
@@ -223,6 +228,7 @@ function sourceAwareSleepDeliveryBody(
         };
       },
     ),
+    sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
   };
 }
 
@@ -255,11 +261,11 @@ describe("vault-share deliver route", () => {
       new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
     );
     expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
-    expect(bodyBytes).toBe(18_375);
+    expect(bodyBytes).toBe(18_404);
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
-    expect(nextBoundBodyBytes).toBe(19_583);
+    expect(nextBoundBodyBytes).toBe(19_612);
     expect(nextBoundBodyBytes).toBeGreaterThan(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
@@ -309,6 +315,7 @@ describe("vault-share deliver route", () => {
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
 			records: VALID_BODY.records,
 			share: ACTIVE_SHARE,
+			sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
 		});
   });
 
@@ -336,6 +343,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [record],
       share: activityShare,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
 
@@ -372,6 +380,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [record],
       share: workoutShare,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
 
@@ -432,6 +441,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [],
       share: ACTIVE_SHARE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
 
@@ -452,6 +462,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [],
       share: ACTIVE_SHARE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
 
@@ -470,6 +481,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [freshRecord],
       share: ACTIVE_SHARE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
 
@@ -499,6 +511,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [record],
       share: profileShare,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
 
@@ -528,6 +541,7 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [],
       share: expect.objectContaining({ projectionKind: "profile-name.v0" }),
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });
 
