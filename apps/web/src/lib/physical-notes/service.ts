@@ -142,6 +142,14 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     const reconciledCurrent = await prisma.hostedPhysicalNote.findUniqueOrThrow({
       where: { id: current.id },
     });
+    if (current.id === legacy.id) {
+      if (reconciledCurrent.status === "accepted") {
+        return toResponse(reconciledCurrent, "accepted");
+      }
+      return reconciledCurrent.failureReason === null
+        ? toResponse(reconciledCurrent, "pending")
+        : toResponse(reconciledCurrent, "failed");
+    }
     const replay = await resolveHostedPhysicalNoteReplay({
       memberId: input.memberId,
       prisma,

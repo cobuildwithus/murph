@@ -778,6 +778,67 @@ describe("createHostedPhysicalNote", () => {
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
+  it("does not reconstruct paid usage for a restored legacy acceptance", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime(
+      [
+        { kind: "accepted", providerLetterId: "ltr_complimentary" },
+        {
+          kind: "definite_failure",
+          reason: "unknown",
+          status: 422,
+        },
+      ],
+      [{ kind: "accepted", providerLetterId: "ltr_legacy_paid_unknown" }],
+    );
+    const complimentary = await createHostedPhysicalNote({
+      ...buildRequest(65),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    const legacyRequest = buildRequest(66);
+    const failed = await createHostedPhysicalNote({
+      ...legacyRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    store.setFailureReason(failed.physicalNoteId!, null);
+    store.setCreatedAt(
+      failed.physicalNoteId!,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    provider.create.mockClear();
+
+    const response = await createHostedPhysicalNote({
+      ...legacyRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(response).toMatchObject({
+      complimentary: false,
+      physicalNoteId: failed.physicalNoteId,
+      status: "accepted",
+    });
+    expect(store.allRows()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+        id: complimentary.physicalNoteId,
+        status: "accepted",
+      }),
+      expect.objectContaining({
+        complimentaryOfferCode: null,
+        id: failed.physicalNoteId,
+        providerLetterId: "ltr_legacy_paid_unknown",
+        status: "accepted",
+      }),
+    ]));
+    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
+  });
+
   it("keeps ambiguous provider authority pending and reserves the offer", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();

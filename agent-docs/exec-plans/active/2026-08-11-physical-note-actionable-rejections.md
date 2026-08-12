@@ -86,6 +86,8 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Web service tests prove persistence, replay parity, complimentary release only
   for definite rejection, legacy accepted/absent/indeterminate recovery, and
   current-request identity plus zero provider calls across suppression replay.
+  Restored legacy acceptance bypasses ordinary paid finalization and records no
+  usage even when another note already owns the complimentary claim.
 - Assistant tool tests prove each member-facing recovery path and preserve the
   pending no-retry instruction.
 - Focused Hosted Execution, Web, Assistant Engine, and Cloudflare tests pass:
