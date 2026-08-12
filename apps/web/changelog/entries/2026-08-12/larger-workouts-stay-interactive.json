@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 100,
+  "item": {
+    "id": "larger-workouts-stay-interactive",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Larger workouts stay interactive",
+    "summary": "Longer live workouts can now return their refreshed Messages card instead of asking you to shorten the session.",
+    "details": "The complete saved workout is attempted against the real card-size limit. If it is genuinely too large, Murph returns the full workout as text without dropping exercises or sets.",
+    "relevanceTags": ["workouts", "imessage", "cards", "reliability"],
+    "sourcePullRequests": [1730]
+  }
+}
