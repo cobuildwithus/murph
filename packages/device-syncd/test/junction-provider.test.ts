@@ -14114,7 +14114,12 @@ test("Junction sparse-history policy anchors rollout resources at scheduling tim
     environment: "sandbox",
     region: "us",
     summaryResources: ["activity"],
-    timeseriesResources: ["blood_pressure", "caffeine"],
+    timeseriesResources: [
+      "blood_pressure",
+      "caffeine",
+      "carbohydrates",
+      "insulin_injection",
+    ],
     fetchImpl: async (input) => {
       throw new Error(`Unexpected request: ${readUrl(input)}`);
     },
@@ -14123,8 +14128,13 @@ test("Junction sparse-history policy anchors rollout resources at scheduling tim
     sourceProviderSlug: "garmin",
     displayName: null,
     status: "connected" as const,
-    resourceCount: 2,
-    resourceAvailabilitySummary: { blood_pressure: true, caffeine: true },
+    resourceCount: 4,
+    resourceAvailabilitySummary: {
+      blood_pressure: true,
+      caffeine: true,
+      carbohydrates: true,
+      insulin_injection: true,
+    },
     lastErrorCode: null,
     lastErrorMessage: null,
     firstSeenAt: "2026-04-03T12:00:00.000Z",
@@ -14139,9 +14149,17 @@ test("Junction sparse-history policy anchors rollout resources at scheduling tim
     job.payload?.resource === "blood_pressure"
   ));
   const caffeine = requireValue(jobs.find((job) => job.payload?.resource === "caffeine"));
+  const carbohydrates = requireValue(jobs.find((job) =>
+    job.payload?.resource === "carbohydrates"
+  ));
+  const insulinInjection = requireValue(jobs.find((job) =>
+    job.payload?.resource === "insulin_injection"
+  ));
 
   assert.equal(bloodPressure.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
   assert.equal(caffeine.payload?.windowEnd, "2026-08-11T00:00:00.000Z");
+  assert.equal(carbohydrates.payload?.windowEnd, "2026-08-11T00:00:00.000Z");
+  assert.equal(insulinInjection.payload?.windowEnd, "2026-08-11T00:00:00.000Z");
 });
 
 test("Junction sparse-history scheduling and live admission honor raw availability aliases", async () => {
