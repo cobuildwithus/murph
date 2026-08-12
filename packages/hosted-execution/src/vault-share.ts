@@ -343,6 +343,9 @@ export const HOSTED_VAULT_SHARE_RECENT_DATE_PROJECTION_KINDS =
 export type HostedVaultShareProjectionKind =
   (typeof HOSTED_VAULT_SHARE_PROJECTION_KINDS)[number];
 
+/** Maximum active destinations one grantor may authorize for one exact scope. */
+export const HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX = 25;
+
 export interface HostedVaultShareFixedProjectionScope {
   projectionKind: HostedVaultShareFixedProjectionKind;
 }

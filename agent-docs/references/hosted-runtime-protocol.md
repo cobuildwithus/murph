@@ -496,6 +496,13 @@ into permanently consumed work.
 Before reading a projection, the runtime receives one fixed-width opaque digest
 of the active row generations for that exact scope. It returns the digest with
 the offer, and Web re-derives it from the active destination set before writing.
+A destination is active under the same participant-aware owner-or-current-
+participant rule used by the live group runtime, never the owner-only query
+approximation. Both active-scope discovery and delivery resolve that authority
+with one bounded member query plus at most one bounded current-participant
+query, with no per-destination reads. Exact-scope delivery admits at most the
+existing 25 grantor destinations; all-scope discovery composes that limit with
+the finite known projection registry and fails closed if the bound is exceeded.
 A mismatch returns the ordinary `no-active-share` result, retains no stale
 records, and lets the durable maintenance obligation retry from a fresh active
 scope read. Raw share IDs and destination cardinality never cross into the

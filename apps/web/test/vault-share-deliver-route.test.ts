@@ -308,6 +308,10 @@ describe("vault-share deliver route", () => {
   });
 
   it("replaces the snapshot for every active share", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue([
+      ACTIVE_SHARE,
+      SECOND_SHARE,
+    ]);
     const request = buildRequest(VALID_BODY);
     const response = await deliverRoute.POST(request);
 
@@ -321,9 +325,13 @@ describe("vault-share deliver route", () => {
       grantorMemberId: "member_grantor",
       projectionScope: SLEEP_SCOPE,
     });
-		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenNthCalledWith(1, {
 			records: VALID_BODY.records,
 			share: ACTIVE_SHARE,
+		});
+		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenNthCalledWith(2, {
+			records: VALID_BODY.records,
+			share: SECOND_SHARE,
 		});
   });
 
@@ -401,7 +409,10 @@ describe("vault-share deliver route", () => {
   });
 
   it("rejects a tokenless previous runtime before resolving or replacing shares", async () => {
-    const { expectedGenerationToken: _omitted, ...tokenlessBody } = VALID_BODY;
+    const tokenlessBody = {
+      projectionKind: VALID_BODY.projectionKind,
+      records: VALID_BODY.records,
+    };
     const response = await deliverRoute.POST(buildRawRequest(tokenlessBody));
 
     expect(response.status).toBeGreaterThanOrEqual(400);
@@ -420,6 +431,24 @@ describe("vault-share deliver route", () => {
     expect(mocks.buildHostedVaultShareGenerationToken).toHaveBeenCalledWith([
       ACTIVE_SHARE.id,
     ]);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects records when participant access changes the active destination set", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
+    mocks.buildHostedVaultShareGenerationToken.mockReturnValue(
+      CURRENT_GENERATION_TOKEN,
+    );
+
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      // This token represented the earlier owner-plus-participant destination
+      // set; delivery now sees only the still-active owner-backed destination.
+      expectedGenerationToken: STALE_GENERATION_TOKEN,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "no-active-share" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 

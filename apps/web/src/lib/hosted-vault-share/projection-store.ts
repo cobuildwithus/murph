@@ -4,7 +4,9 @@ import { createHash } from "node:crypto";
 
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
@@ -12,13 +14,20 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
+import { readActiveHostedMemberAccessIds } from "../hosted-onboarding/member-access";
 import {
   isHostedRuntimeInactiveAccessError,
   requireHostedRuntimeActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
 import { encryptHostedVaultShareProjectionSnapshot } from "./projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
+
+// Group admission permits at most 25 destinations for one grantor and exact
+// scope. The all-scope discovery bound composes that limit with the finite
+// projection registry so these reads remain fail-closed as the registry grows.
+const HOSTED_VAULT_SHARE_ACTIVE_ALL_SCOPES_MAX =
+  HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX
+  * HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length;
 
 export interface ActiveHostedVaultShare {
   destinationMemberId: string;
@@ -48,15 +57,27 @@ export async function findActiveHostedVaultShares(input: {
       projectionScopeJson: true,
       projectionScopeKey: true,
     },
+    take: HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX + 1,
     where: {
-      destination: activeHostedMemberAccessWhere(),
       grantorMemberId: input.grantorMemberId,
       projectionScopeKey,
       status: "granted",
     },
   });
+  assertHostedVaultShareCandidateBound(
+    rows.length,
+    HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX,
+  );
+
+  const activeDestinationMemberIds = await readActiveHostedMemberAccessIds({
+    memberIds: rows.map((row) => row.destinationMemberId),
+    prisma,
+  });
 
   return rows.flatMap((row) => {
+    if (!activeDestinationMemberIds.has(row.destinationMemberId)) {
+      return [];
+    }
     const projectionScope = parseHostedVaultShareRowProjectionScope(row);
     if (!projectionScope) {
       return [];
@@ -85,22 +106,34 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
   const shares = await prisma.hostedVaultShare.findMany({
     orderBy: [{ projectionScopeKey: "asc" }, { id: "asc" }],
     select: {
+      destinationMemberId: true,
       id: true,
       projectionKind: true,
       projectionScopeJson: true,
       projectionScopeKey: true,
     },
+    take: HOSTED_VAULT_SHARE_ACTIVE_ALL_SCOPES_MAX + 1,
     where: {
-      destination: activeHostedMemberAccessWhere(),
       grantorMemberId: input.grantorMemberId,
       status: "granted",
     },
+  });
+  assertHostedVaultShareCandidateBound(
+    shares.length,
+    HOSTED_VAULT_SHARE_ACTIVE_ALL_SCOPES_MAX,
+  );
+  const activeDestinationMemberIds = await readActiveHostedMemberAccessIds({
+    memberIds: shares.map((share) => share.destinationMemberId),
+    prisma,
   });
   const generations = new Map<string, {
     projectionScope: HostedVaultShareProjectionScope;
     shareIds: string[];
   }>();
   for (const share of shares) {
+    if (!activeDestinationMemberIds.has(share.destinationMemberId)) {
+      continue;
+    }
     const projectionScope = parseHostedVaultShareRowProjectionScope(share);
     if (
       !projectionScope
@@ -132,6 +165,15 @@ export function buildHostedVaultShareGenerationToken(
   return createHash("sha256")
     .update(JSON.stringify([...shareIds].sort()))
     .digest("base64url");
+}
+
+function assertHostedVaultShareCandidateBound(
+  count: number,
+  maximum: number,
+): void {
+  if (count > maximum) {
+    throw new Error("Hosted vault-share candidate read exceeded its admitted bound.");
+  }
 }
 
 /**

@@ -10,7 +10,12 @@ const mocks = vi.hoisted(() => ({
     void error;
     return false;
   }),
+  readActiveHostedMemberAccessIds: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccessIds: mocks.readActiveHostedMemberAccessIds,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -24,6 +29,7 @@ import {
 } from "@/src/lib/hosted-crypto/secure-box";
 import {
   buildHostedVaultShareGenerationToken,
+  findActiveHostedVaultShares,
   readDeliverableHostedVaultShareProjectionScopeGenerations,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
@@ -58,6 +64,9 @@ afterEach(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.isHostedRuntimeInactiveAccessError.mockImplementation(() => false);
+  mocks.readActiveHostedMemberAccessIds.mockImplementation(
+    async ({ memberIds }: { memberIds: readonly string[] }) => new Set(memberIds),
+  );
   mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
 });
 
@@ -235,45 +244,62 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
 });
 
 describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
-  it("returns only valid active projection rows grouped into opaque generations", async () => {
+  it("hashes owner- and participant-backed destinations together while excluding inactive rows", async () => {
     const profileScope = hostedVaultShareProjectionKindToScope("profile-name.v0");
     const deviceScope = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
     const findMany = vi.fn().mockResolvedValue([
       {
+        destinationMemberId: "member_participant_backed",
         id: "share_sleep_2",
         projectionKind: SLEEP_SCOPE.projectionKind,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
       {
+        destinationMemberId: "member_owner_backed",
         id: "share_invalid",
         projectionKind: "unknown.v0",
         projectionScopeJson: { projectionKind: "unknown.v0" },
         projectionScopeKey: "unknown.v0",
       },
       {
+        destinationMemberId: "member_owner_backed",
         id: "share_device",
         projectionKind: deviceScope.projectionKind,
         projectionScopeJson: deviceScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(deviceScope),
       },
       {
+        destinationMemberId: "member_inactive",
+        id: "share_inactive",
+        projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionScopeJson: SLEEP_SCOPE,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+      },
+      {
+        destinationMemberId: "member_owner_backed",
         id: "share_profile",
         projectionKind: profileScope.projectionKind,
         projectionScopeJson: profileScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(profileScope),
       },
       {
+        destinationMemberId: "member_owner_backed",
         id: "share_sleep_1",
         projectionKind: SLEEP_SCOPE.projectionKind,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
     ]);
+    mocks.readActiveHostedMemberAccessIds.mockResolvedValue(new Set([
+      "member_owner_backed",
+      "member_participant_backed",
+    ]));
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
 
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
       grantorMemberId: SHARE.grantorMemberId,
-      prisma: createPrismaClientTestDouble({ hostedVaultShare: { findMany } }),
+      prisma,
     })).resolves.toEqual([
       {
         generationToken: buildHostedVaultShareGenerationToken([
@@ -289,5 +315,70 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     ]);
     expect(buildHostedVaultShareGenerationToken(["share_b", "share_a"]))
       .toBe(buildHostedVaultShareGenerationToken(["share_a", "share_b"]));
+    expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenCalledWith({
+      memberIds: [
+        "member_participant_backed",
+        "member_owner_backed",
+        "member_owner_backed",
+        "member_inactive",
+        "member_owner_backed",
+        "member_owner_backed",
+      ],
+      prisma,
+    });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: expect.any(Number),
+      where: {
+        grantorMemberId: SHARE.grantorMemberId,
+        status: "granted",
+      },
+    }));
+  });
+});
+
+describe("findActiveHostedVaultShares", () => {
+  it("discovers a participant-backed destination and excludes an inactive one", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        destinationMemberId: "member_participant_backed",
+        grantorMemberId: SHARE.grantorMemberId,
+        id: "share_participant",
+        projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionScopeJson: SLEEP_SCOPE,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+      },
+      {
+        destinationMemberId: "member_inactive",
+        grantorMemberId: SHARE.grantorMemberId,
+        id: "share_inactive",
+        projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionScopeJson: SLEEP_SCOPE,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+      },
+    ]);
+    mocks.readActiveHostedMemberAccessIds.mockResolvedValue(
+      new Set(["member_participant_backed"]),
+    );
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+
+    await expect(findActiveHostedVaultShares({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+    })).resolves.toEqual([{
+      destinationMemberId: "member_participant_backed",
+      grantorMemberId: SHARE.grantorMemberId,
+      id: "share_participant",
+      projectionKind: SLEEP_SCOPE.projectionKind,
+      projectionScope: SLEEP_SCOPE,
+      projectionScopeKey: SLEEP_SCOPE_KEY,
+    }]);
+    expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenCalledWith({
+      memberIds: ["member_participant_backed", "member_inactive"],
+      prisma,
+    });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 26,
+    }));
   });
 });

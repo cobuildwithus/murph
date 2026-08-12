@@ -202,3 +202,18 @@ Updated: 2026-08-11
   runner fleet is the hard rollback floor before Web promotion, and the
   pending-aware Web reader becomes its own rollback floor as soon as the Web
   writer begins admitting fresh null-snapshot generations.
+- Final ReviewGPT round 6 found that generation discovery and delivery still
+  used an owner-only access approximation. A non-suspended room with an
+  inactive owner but a current active participant could therefore remain live
+  while its approved share stayed pending forever. Both candidate reads now
+  use one participant-aware set resolver with the canonical owner-or-current-
+  participant semantics. Exact-scope reads are capped by the existing 25-
+  destination admission invariant; all-scope reads compose that limit with the
+  finite known projection registry, participant rows compose the candidate set
+  with the 32-person roster limit, and every overflow fails closed. Focused
+  proof covers mixed owner-backed and participant-backed generation hashing,
+  participant-only discovery, inactive exclusion, both-recipient replacement,
+  access-change token rejection, and set-based query counts.
+- Round-6 remediation proof passes 137 focused Web tests, 9 Hosted Execution
+  contract tests, and Web plus Hosted Execution typechecks. The required final
+  ReviewGPT remediation round remains pending.
