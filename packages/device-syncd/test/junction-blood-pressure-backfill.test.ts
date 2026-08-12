@@ -895,7 +895,7 @@ test("weight receives summary-history backfill while dense opt-ins stay bounded"
       resourceAvailability: {
         heartrate: true,
         steps: true,
-        weight: true,
+        body_weight: true,
       },
       slug: "withings",
     }],
@@ -916,7 +916,7 @@ test("weight receives summary-history backfill while dense opt-ins stay bounded"
     "withings",
     "2026-01-01T12:00:00.000Z",
     "connected",
-    { heartrate: true, steps: true, weight: true },
+    { body_weight: true, heartrate: true, steps: true },
   )];
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
   const weight = requireValue(scheduled.jobs.find((job) =>
@@ -981,6 +981,94 @@ test("weight receives summary-history backfill while dense opt-ins stay bounded"
     completed.jobs.some((job) =>
       job.kind === "resource" && job.payload?.resource === "weight"
     ),
+    false,
+  );
+});
+
+test("weight history terminalizes validation rejects and preserves distinct same-timestamp readings", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { body_weight: true },
+      slug: "withings",
+    }],
+    requests,
+    summaryBackfillDays: 1,
+    timeseriesResources: ["weight"],
+    weightRecords: [
+      { id: "weight-a", timestamp: "2026-06-10T08:00:00.000Z", unit: "kg", value: 80 },
+      { id: "weight-a", timestamp: "2026-06-10T08:00:00.000Z", unit: "kg", value: 80 },
+      { providerId: "weight-b", timestamp: "2026-06-10T08:00:00.000Z", unit: "kg", value: 80 },
+      { timestamp: "2026-06-10T08:00:00.000Z", unit: "kg", value: 82 },
+      { timestamp: "2026-06-10T08:00:00.000Z", unit: "kg", value: 83 },
+      { id: "weight-invalid-value", timestamp: "2026-06-10T08:00:00.000Z", unit: "kg", value: 501 },
+      { id: "weight-invalid-time", timestamp: "2026-06-10Tbad", unit: "kg", value: 84 },
+    ],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "withings",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { body_weight: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const weight = requireValue(scheduled.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "weight"
+  ));
+  const normalizedWeightValues: number[][] = [];
+  let normalizedJson = "";
+
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: async (snapshot) => {
+        const parsedSnapshot = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
+        const normalized = await requireValue(junctionProviderAdapter.normalizeSnapshot)(parsedSnapshot);
+        normalizedJson = JSON.stringify(normalized);
+        normalizedWeightValues.push(
+          (normalized.events ?? []).flatMap((event) => {
+            const measurements = event.fields?.measurements;
+            return Array.isArray(measurements)
+              ? measurements.flatMap((measurement) => {
+                  if (
+                    typeof measurement !== "object"
+                    || measurement === null
+                    || !("value" in measurement)
+                    || typeof measurement.value !== "number"
+                  ) {
+                    return [];
+                  }
+                  return [measurement.value];
+                })
+              : [];
+          }),
+        );
+        return {
+          canonicalEventCount: normalized.events?.length ?? 0,
+          canonicalEventExternalRefResourceIds: (normalized.events ?? []).flatMap(
+            (event) => event.externalRef?.resourceId ? [event.externalRef.resourceId] : [],
+          ),
+          durableDeliveryAccepted: true,
+        };
+      },
+    }),
+    toJobRecord(weight, 1),
+  );
+
+  assert.equal(requests.filter((request) => request.resource === "body_weight").length, 1);
+  assert.deepEqual(
+    normalizedWeightValues[0]?.sort((left, right) => left - right),
+    [80, 80, 82, 83],
+  );
+  assert.equal(normalizedJson.includes("501"), false);
+  assert.equal(normalizedJson.includes("weight-invalid-time"), false);
+  assert.equal(result.metadataPatch?.[WEIGHT_HISTORY_COVERAGE_KEY], "v1|withings");
+  assert.equal(
+    result.scheduledJobs?.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "weight"
+    ) ?? false,
     false,
   );
 });

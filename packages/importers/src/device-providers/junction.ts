@@ -2534,7 +2534,10 @@ function pushJunctionFeatureTimeseriesObservation(
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
       metric: observation.metric,
-      observationGrain: "summary",
+      // Hour/session aggregates are compact derived features, not competing
+      // representations of one provider day. Keeping them non-summary stops
+      // daily and sleep selectors from promoting a single bucket as a day fact.
+      observationGrain: "derived_fact",
       value: roundJunctionDailyAggregateValue(value),
       unit,
     },
@@ -2738,10 +2741,8 @@ function pushJunctionWeightReadings(
       continue;
     }
 
-    const weightKilograms = normalizeWeightKilograms(
-      firstNumberFromPaths(entry, JUNCTION_WEIGHT_VALUE_PATHS),
-      entry,
-    );
+    const { providerReadingId, weightKilograms } =
+      resolveJunctionWeightProviderRecordIdentity(entry);
     const rawOccurredAt = firstValueFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
     const occurredAt = resolveSafeTimestamp(rawOccurredAt, resourceContext.sourceProviderSlug);
     if (weightKilograms === undefined || !occurredAt) {
@@ -2762,10 +2763,6 @@ function pushJunctionWeightReadings(
       continue;
     }
 
-    const providerReadingId = trimOptionalToLength(
-      firstStringFromPaths(entry, JUNCTION_READING_STABLE_ID_PATHS),
-      160,
-    );
     const readingIdentityHash = providerReadingId
       ? shortHash([
           resourceSlug,
@@ -6663,6 +6660,24 @@ function normalizeHeartRateBpm(value: unknown, entry: PlainObject): number | und
   }
 
   return roundJunctionDailyAggregateValue(numeric);
+}
+
+export function resolveJunctionWeightProviderRecordIdentity(
+  entry: Record<string, unknown>,
+): {
+  providerReadingId: string | undefined;
+  weightKilograms: number | undefined;
+} {
+  return {
+    providerReadingId: trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_READING_STABLE_ID_PATHS),
+      160,
+    ),
+    weightKilograms: normalizeWeightKilograms(
+      firstNumberFromPaths(entry, JUNCTION_WEIGHT_VALUE_PATHS),
+      entry,
+    ),
+  };
 }
 
 function normalizeWeightKilograms(value: unknown, entry: PlainObject): number | undefined {

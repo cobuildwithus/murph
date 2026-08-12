@@ -20,6 +20,7 @@ import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
+  resolveJunctionWeightProviderRecordIdentity,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -685,8 +686,9 @@ export function createJunctionDeviceSyncProvider(
         if (
           !sourceProviderSlug
           || !isDeviceSyncSourceAdmitted(account.sources ?? [], sourceProviderSlug)
-          || !isJunctionResourceAdvertisedAvailable(
-            source.resourceAvailabilitySummary?.[resource],
+          || !isJunctionResourceAvailableInSummary(
+            source.resourceAvailabilitySummary,
+            resource,
           )
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
             storedCoverage,
@@ -2221,12 +2223,20 @@ export function createJunctionDeviceSyncProvider(
       ?? input.window.windowStart;
     const recordsSeen =
       input.job.payload.historicalRecordsSeen === true
-      || input.importResult.canonicalEventCount > 0;
-    const unresolvedProviderRecords =
-      resolveJunctionHistoricalUnresolvedProviderRecords(
-        input.job,
-        input.importResult,
+      || input.importResult.canonicalEventCount > 0
+      || (
+        input.resource === "weight"
+        && input.importResult.providerRecordCount > 0
       );
+    const unresolvedProviderRecords =
+      input.resource === "weight"
+        && input.importResult.fetchComplete
+        && input.importResult.unresolvedProviderRecordCount === 0
+        ? { identities: [], withoutStableIdentity: false }
+        : resolveJunctionHistoricalUnresolvedProviderRecords(
+            input.job,
+            input.importResult,
+          );
     const unresolvedProviderRecordCount =
       countJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordIdentitiesJson =
@@ -2777,6 +2787,8 @@ export function createJunctionDeviceSyncProvider(
           windowEnd: executionWindowEnd,
         })
         : null;
+    const successfulImportTerminatesWeightRows =
+      resources.length === 1 && resources[0] === "weight";
     if (fetchedProviderRecordIdentityEvidence) {
       unresolvedProviderRecordIdentities = uniqueJunctionProviderRecordIdentities(
         fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds,
@@ -2853,6 +2865,13 @@ export function createJunctionDeviceSyncProvider(
             unresolvedProviderRecordCount =
               unresolvedProviderRecordIdentities.length
               + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+          } else if (successfulImportTerminatesWeightRows) {
+            // A resolved import receipt means the weight normalizer examined
+            // every delivered row. Valid readings became canonical events and
+            // deterministic validation rejects are terminal; delivery errors
+            // throw before this branch and retain the retry obligation.
+            unresolvedProviderRecordCount = 0;
+            unresolvedProviderRecordsWithoutStableIdentity = false;
           } else {
             unresolvedProviderRecordCount =
               canonicalEventCount >= providerRecordCount ? 0 : providerRecordCount;
@@ -5091,14 +5110,22 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
   ]);
 }
 
-// Blood-pressure readings carry their paired values as part of identity
-// (the importer keeps distinct same-second readings as distinct events), so
-// the pre-import dedupe key must not collapse same-timestamp rows whose
-// values differ. A stable provider row id wins when present.
+// Sparse readings carry provider identity or normalized values as part of
+// identity, so pre-import dedupe must not collapse distinct same-timestamp
+// rows before the importer can assign replay-stable events.
 function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
 ): string[] {
+  if (resource === "weight") {
+    const { providerReadingId, weightKilograms } =
+      resolveJunctionWeightProviderRecordIdentity(entry);
+    if (providerReadingId) {
+      return [`id:${providerReadingId}`];
+    }
+    return weightKilograms === undefined ? [] : [`kg:${weightKilograms}`];
+  }
+
   if (resource !== "blood_pressure" && resource !== "note") {
     return [];
   }
@@ -5645,6 +5672,20 @@ function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
     || normalizeString(record.status)?.toLowerCase() === "available";
 }
 
+function isJunctionResourceAvailableInSummary(
+  summary: Record<string, unknown> | null | undefined,
+  resource: string,
+): boolean {
+  if (!summary) {
+    return false;
+  }
+
+  return Object.entries(summary).some(([rawResource, availability]) =>
+    normalizeJunctionResourceName(rawResource) === resource
+    && isJunctionResourceAdvertisedAvailable(availability)
+  );
+}
+
 function isJunctionSourceResourceCurrentlyAvailable(input: {
   connectionId: string;
   providers: readonly JunctionProviderConnection[];
@@ -5661,8 +5702,9 @@ function isJunctionSourceResourceCurrentlyAvailable(input: {
   ).some((source) =>
     source.sourceProviderSlug === input.sourceProviderSlug
     && source.status === "connected"
-    && isJunctionResourceAdvertisedAvailable(
-      source.resourceAvailabilitySummary[input.resource],
+    && isJunctionResourceAvailableInSummary(
+      source.resourceAvailabilitySummary,
+      input.resource,
     )
   );
 }

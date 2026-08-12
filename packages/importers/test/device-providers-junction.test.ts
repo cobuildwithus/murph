@@ -2824,10 +2824,10 @@ test("Junction opt-in heart rate and active calories emit only bounded hourly or
     ),
   );
   assert.ok(
-    heartRateEvents.every((event) => event.fields?.observationGrain === "summary"),
+    heartRateEvents.every((event) => event.fields?.observationGrain === "derived_fact"),
   );
   assert.ok(
-    calorieEvents.every((event) => event.fields?.observationGrain === "summary"),
+    calorieEvents.every((event) => event.fields?.observationGrain === "derived_fact"),
   );
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
