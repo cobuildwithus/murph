@@ -39,6 +39,7 @@ import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import type { JunctionDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
+import { JunctionWorkoutStreamProgressError } from "../junction-workout-stream-progress.ts";
 import {
   isHostedRuntimeIdShapedDiagnosticToken,
   sanitizeHostedRuntimeDiagnosticText,
@@ -81,7 +82,6 @@ import {
 } from "../configured-provider-runtime-descriptors.ts";
 import {
   addMilliseconds,
-  computeRetryDelayMs,
   normalizeString,
   sha256Text,
   subtractDays,
@@ -176,7 +176,6 @@ interface JunctionTimeseriesImportResult {
 }
 
 interface JunctionDailyTimeseriesImportResult extends JunctionTimeseriesImportResult {
-  retryableFailure?: DeviceSyncError;
   workoutStreamCursor: string | null;
 }
 
@@ -1234,9 +1233,6 @@ export function createJunctionDeviceSyncProvider(
                 && wideChunkTimeseriesResources.length > 0
                 ? "dense"
                 : null,
-              ...(denseTimeseriesImport.retryableFailure
-                ? { retryableFailure: denseTimeseriesImport.retryableFailure }
-                : {}),
               workoutStreamCursor: denseTimeseriesImport.workoutStreamCursor,
             }),
             profileMetadataPatch,
@@ -2113,9 +2109,6 @@ export function createJunctionDeviceSyncProvider(
               ? buildYieldedJunctionJobResult({
                   context,
                   job,
-                  ...(dailyImport.retryableFailure
-                    ? { retryableFailure: dailyImport.retryableFailure }
-                    : {}),
                   windowEnd: window.windowEnd,
                   windowStart: dailyImport.yieldedAt,
                   workoutStreamCursor: dailyImport.workoutStreamCursor,
@@ -3250,13 +3243,13 @@ export function createJunctionDeviceSyncProvider(
         };
       }
       if (completedIdentities.size > 0 && isRetryableDeviceSyncFailure(error)) {
-        return {
-          retryableFailure: error,
-          workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(
-            completedIdentities,
-          ),
-          yieldedAt: input.windowStart,
-        };
+        const workoutStreamCursor = encodeJunctionWorkoutStreamCompletedIdentities(
+          completedIdentities,
+        );
+        if (!workoutStreamCursor) {
+          throw error;
+        }
+        throw new JunctionWorkoutStreamProgressError(error, workoutStreamCursor);
       }
       throw error;
     };
@@ -3477,7 +3470,6 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordIdentitiesJson?: string;
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
-    retryableFailure?: DeviceSyncError;
     timeseriesCursor?: string | null;
     timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
     workoutStreamCursor?: string | null;
@@ -3485,25 +3477,6 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
-    if (input.retryableFailure) {
-      const remainingAttempts = input.job.maxAttempts - input.job.attempts;
-      if (!followUp || remainingAttempts <= 0) {
-        throw input.retryableFailure;
-      }
-      return {
-        scheduledJobs: [{
-          ...followUp,
-          availableAt: addMilliseconds(
-            input.context.now,
-            computeRetryDelayMs(input.job.attempts),
-          ),
-          maxAttempts: remainingAttempts,
-        }],
-        nextReconcileAt: input.job.kind === "resource"
-          ? clampWebhookJobNextReconcileAt(input.context)
-          : addMilliseconds(input.context.now, reconcileIntervalMs),
-      };
-    }
     return {
       ...(followUp
         ? {

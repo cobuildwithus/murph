@@ -24,8 +24,8 @@ import { test } from "vitest";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 
 import { DeviceSyncError } from "../src/errors.ts";
+import { JunctionWorkoutStreamProgressError } from "../src/junction-workout-stream-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
-import { computeRetryDelayMs } from "../src/shared.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
@@ -15342,6 +15342,11 @@ test("Junction workout_stream continuation metadata fails closed before provider
 test("Junction workout_stream exact progress survives comparator-adversarial insertion and reordering", async () => {
   const importedWorkoutIds: string[] = [];
   let interrupted = false;
+  const failure = new DeviceSyncError({
+    code: "TEST_RETRYABLE_IMPORT_FAILURE",
+    message: "retry this candidate",
+    retryable: true,
+  });
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: (indexRequest) =>
       indexRequest === 1 ? ["workout-2", "workout-3"] : ["workout-3", "workout-10", "workout-2"],
@@ -15355,36 +15360,44 @@ test("Junction workout_stream exact progress survives comparator-adversarial ins
     const workoutId = String(feature?.workoutId);
     if (workoutId === "workout-3" && !interrupted) {
       interrupted = true;
-      throw new DeviceSyncError({
-        code: "TEST_RETRYABLE_IMPORT_FAILURE",
-        message: "retry this candidate",
-        retryable: true,
-      });
+      throw failure;
     }
     importedWorkoutIds.push(workoutId);
     return { imported: true };
   };
 
-  const first = await executeJunctionJob(
-    harness.provider,
-    createJunctionJobContext({ importSnapshot }),
-    createJunctionWorkoutStreamResourceJob(),
+  let progressCursor: string | null = null;
+  await assert.rejects(
+    () => executeJunctionJob(
+      harness.provider,
+      createJunctionJobContext({ importSnapshot }),
+      createJunctionWorkoutStreamResourceJob(),
+    ),
+    (error) => {
+      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.equal(error.failure, failure);
+      progressCursor = error.workoutStreamCursor;
+      return true;
+    },
   );
-  const continuation = readScheduledWorkoutStreamContinuation(first.scheduledJobs);
-  assert.deepEqual(readJunctionWorkoutProgressIdentities(continuation.payload), [
+  const progressPayload = {
+    workoutStreamCursor: requireValue(
+      progressCursor,
+      "retryable workout stream progress should carry the exact cursor",
+    ),
+  };
+  assert.deepEqual(readJunctionWorkoutProgressIdentities(progressPayload), [
     junctionWorkoutCandidateIdentity("workout-2"),
   ]);
-  const progress = String(continuation.payload?.workoutStreamCursor);
-  assert.doesNotMatch(progress, /(?:samples|stream|timestamps|heartrate|startAt|endAt)/u);
+  assert.doesNotMatch(
+    progressPayload.workoutStreamCursor,
+    /(?:samples|stream|timestamps|heartrate|startAt|endAt)/u,
+  );
 
   const second = await executeJunctionJob(
     harness.provider,
     createJunctionJobContext({ importSnapshot }),
-    {
-      ...createJunctionWorkoutStreamResourceJob(continuation.payload ?? {}),
-      dedupeKey: continuation.dedupeKey ?? null,
-      priority: continuation.priority ?? 50,
-    },
+    createJunctionWorkoutStreamResourceJob(progressPayload),
   );
 
   assert.deepEqual(importedWorkoutIds, ["workout-2", "workout-10", "workout-3"]);
@@ -15527,7 +15540,7 @@ test("Junction workout_stream leaves retryable failure before progress on the cu
   assert.deepEqual(harness.streamRequests, ["workout-1"]);
 });
 
-test("Junction workout_stream delays retryable provider interruption after exact progress", async () => {
+test("Junction workout_stream carries exact progress with its retryable provider failure", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1", "workout-2"],
@@ -15546,98 +15559,38 @@ test("Junction workout_stream delays retryable provider interruption after exact
         }),
   });
 
-  const result = await executeJunctionJob(
-    harness.provider,
-    createJunctionJobContext({
-      importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
-        const feature = snapshot.timeseries?.workout_stream?.[0] as
-          | Record<string, unknown>
-          | undefined;
-        importedWorkoutIds.push(String(feature?.workoutId));
-        return { imported: true };
-      },
-    }),
-    {
-      ...createJunctionWorkoutStreamResourceJob(),
-      attempts: 1,
-      maxAttempts: 4,
+  await assert.rejects(
+    () => executeJunctionJob(
+      harness.provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+          const feature = snapshot.timeseries?.workout_stream?.[0] as
+            | Record<string, unknown>
+            | undefined;
+          importedWorkoutIds.push(String(feature?.workoutId));
+          return { imported: true };
+        },
+      }),
+      createJunctionWorkoutStreamResourceJob(),
+    ),
+    (error) => {
+      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.ok(error.failure instanceof DeviceSyncError);
+      assert.equal(error.failure.retryable, true);
+      assert.deepEqual(readJunctionWorkoutProgressIdentities({
+        workoutStreamCursor: error.workoutStreamCursor,
+      }), [junctionWorkoutCandidateIdentity("workout-1")]);
+      return true;
     },
   );
 
-  const continuation = readScheduledWorkoutStreamContinuation(result.scheduledJobs);
   assert.deepEqual(importedWorkoutIds, ["workout-1"]);
-  assert.deepEqual(readJunctionWorkoutProgressIdentities(continuation.payload), [
-    junctionWorkoutCandidateIdentity("workout-1"),
-  ]);
-  assert.equal(continuation.maxAttempts, 3);
-  assert.equal(
-    continuation.availableAt,
-    new Date(Date.parse("2026-04-03T00:00:00.000Z") + computeRetryDelayMs(1)).toISOString(),
-  );
   assert.deepEqual(harness.streamRequests, [
     "workout-1",
     "workout-2",
     "workout-2",
     "workout-2",
   ]);
-});
-
-test("Junction workout_stream carries terminal progress across retryable interruption", async () => {
-  const importedWorkoutIds: string[] = [];
-  let interrupted = false;
-  const harness = createJunctionWorkoutStreamTestProvider({
-    listWorkoutIds: () => ["workout-1", "workout-2", "workout-3"],
-  });
-  const importSnapshot = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
-    const feature = snapshot.timeseries?.workout_stream?.[0] as
-      | Record<string, unknown>
-      | undefined;
-    const workoutId = String(feature?.workoutId);
-    if (workoutId === "workout-2" && !interrupted) {
-      interrupted = true;
-      throw new DeviceSyncError({
-        code: "TEST_RETRYABLE_IMPORT_FAILURE",
-        message: "retry this candidate",
-        retryable: true,
-      });
-    }
-    importedWorkoutIds.push(workoutId);
-    return { imported: true };
-  };
-
-  const first = await executeJunctionJob(
-    harness.provider,
-    createJunctionJobContext({ importSnapshot }),
-    {
-      ...createJunctionWorkoutStreamResourceJob(),
-      attempts: 2,
-      maxAttempts: 5,
-    },
-  );
-  const continuation = readScheduledWorkoutStreamContinuation(first.scheduledJobs);
-  assert.deepEqual(readJunctionWorkoutProgressIdentities(continuation.payload), [
-    junctionWorkoutCandidateIdentity("workout-1"),
-  ]);
-  assert.equal(continuation.maxAttempts, 3);
-  assert.equal(
-    continuation.availableAt,
-    new Date(Date.parse("2026-04-03T00:00:00.000Z") + computeRetryDelayMs(2)).toISOString(),
-  );
-  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2"]);
-
-  const second = await executeJunctionJob(
-    harness.provider,
-    createJunctionJobContext({ importSnapshot }),
-    createJunctionWorkoutStreamResourceJob(continuation.payload ?? {}),
-  );
-  assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2", "workout-3"]);
-  assert.deepEqual(harness.streamRequests, [
-    "workout-1",
-    "workout-2",
-    "workout-2",
-    "workout-3",
-  ]);
-  assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
 });
 
 test("Junction workout_stream carries terminal progress across cancellation", async () => {

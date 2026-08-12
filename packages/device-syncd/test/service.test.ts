@@ -1301,12 +1301,14 @@ test("Junction yielded full-sync continuations advance the watermark only at ter
 });
 
 test.each(["resource", "reconcile", "backfill"] as const)(
-  "Junction workout-stream %s failures keep exact progress inside one finite delayed retry budget",
+  "Junction workout-stream %s failures keep exact progress on one cumulatively retried job",
   async (jobKind: JunctionWorkoutStreamServiceJobKind) => {
     let now = new Date("2030-04-03T12:00:00.000Z");
     const vaultRoot = await makeTempDirectory(`murph-device-syncd-workout-stream-bounded-${jobKind}`);
     const streamRequests: string[] = [];
     const importedWorkoutIds: string[] = [];
+    const observedRetryDelays: number[] = [];
+    let persistedWorkoutStreamCursor: string | null = null;
     const { service, store, close } = createServiceFixture({
       secret: "secret-for-tests",
       clock: { now: () => now },
@@ -1350,7 +1352,7 @@ test.each(["resource", "reconcile", "backfill"] as const)(
         connectedAt: "2026-01-01T00:00:00.000Z",
       });
       const input = buildJunctionWorkoutStreamServiceJob(jobKind);
-      let activeJob = store.enqueueJob({
+      const activeJob = store.enqueueJob({
         ...input,
         accountId: account.id,
         provider: "junction",
@@ -1358,63 +1360,70 @@ test.each(["resource", "reconcile", "backfill"] as const)(
         maxAttempts: 5,
       });
 
-      for (let remainingBudget = 5; remainingBudget >= 1; remainingBudget -= 1) {
+      for (let attempt = 1; attempt <= 5; attempt += 1) {
+        const attemptStartedAt = now.getTime();
         const executed = await service.runWorkerOnce();
         assert.equal(executed?.id, activeJob.id);
 
         const storedActiveJob = store.getJobById(activeJob.id);
-        assert.equal(storedActiveJob?.attempts, 1);
-        assert.equal(storedActiveJob?.maxAttempts, remainingBudget);
+        assert.ok(storedActiveJob);
+        assert.equal(storedActiveJob.attempts, attempt);
+        assert.equal(storedActiveJob.maxAttempts, 5);
+        assert.equal(typeof storedActiveJob.payload.workoutStreamCursor, "string");
+        const workoutStreamCursor = String(storedActiveJob.payload.workoutStreamCursor);
+        persistedWorkoutStreamCursor ??= workoutStreamCursor;
+        assert.equal(workoutStreamCursor, persistedWorkoutStreamCursor);
+        assert.doesNotMatch(
+          workoutStreamCursor,
+          /(?:samples|stream|timestamps|heartrate|startAt|endAt)/u,
+        );
+        assert.deepEqual(
+          readJobsForAccountForTesting(store, account.id).map((candidate) => candidate.id),
+          [activeJob.id],
+        );
 
-        if (remainingBudget === 1) {
-          assert.equal(storedActiveJob?.status, "dead");
-          assert.equal(storedActiveJob?.lastErrorCode, "TEST_WORKOUT_STREAM_RETRYABLE");
+        if (attempt === 5) {
+          assert.equal(storedActiveJob.status, "dead");
+          assert.equal(storedActiveJob.lastErrorCode, "TEST_WORKOUT_STREAM_RETRYABLE");
           break;
         }
 
-        assert.equal(storedActiveJob?.status, "succeeded");
-        const queued = readJobsForAccountForTesting(store, account.id)
-          .filter((candidate) => candidate.status === "queued");
-        assert.equal(queued.length, 1);
-        const continuation = store.getJobById(queued[0]!.id);
-        assert.ok(continuation);
-        assert.equal(continuation.maxAttempts, remainingBudget - 1);
-        assert.equal(continuation.attempts, 0);
+        assert.equal(storedActiveJob.status, "queued");
+        const expectedDelay = computeRetryDelayMs(attempt);
+        observedRetryDelays.push(Date.parse(storedActiveJob.availableAt) - attemptStartedAt);
         assert.equal(
-          continuation.availableAt,
-          new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
-        );
-        assert.equal(typeof continuation.payload.workoutStreamCursor, "string");
-        assert.doesNotMatch(
-          String(continuation.payload.workoutStreamCursor),
-          /(?:samples|stream|timestamps|heartrate|startAt|endAt)/u,
+          storedActiveJob.availableAt,
+          new Date(attemptStartedAt + expectedDelay).toISOString(),
         );
         assert.equal(await service.runWorkerOnce(), null);
-
-        now = new Date(continuation.availableAt);
-        activeJob = continuation;
+        now = new Date(storedActiveJob.availableAt);
       }
 
       const jobs = readJobsForAccountForTesting(store, account.id)
         .map((job) => store.getJobById(job.id))
         .filter((job): job is DeviceSyncJobRecord => job !== null);
-      assert.deepEqual(
-        jobs.map((job) => job.maxAttempts).sort((left, right) => right - left),
-        [5, 4, 3, 2, 1],
-      );
-      assert.equal(jobs.reduce((total, job) => total + job.attempts, 0), 5);
-      assert.equal(jobs.filter((job) => job.status === "dead").length, 1);
+      assert.deepEqual(observedRetryDelays, [15_000, 60_000, 5 * 60_000, 30 * 60_000]);
+      assert.equal(jobs.length, 1);
+      assert.equal(jobs[0]?.id, activeJob.id);
+      assert.equal(jobs[0]?.status, "dead");
+      assert.equal(jobs[0]?.attempts, 5);
+      assert.equal(store.summarize().jobsDead, 1);
       assert.equal(
         jobs.some((job) => job.status === "queued" || job.status === "running"),
         false,
       );
+      assert.equal(await service.runWorkerOnce(), null);
       assert.deepEqual(importedWorkoutIds, ["workout-a"]);
       assert.equal(streamRequests.filter((workoutId) => workoutId === "workout-a").length, 1);
       assert.equal(streamRequests.filter((workoutId) => workoutId === "workout-b").length, 5);
-      assert.equal(service.listJobFailureDiagnostics().length, 1);
-      assert.equal(
-        service.listJobFailureDiagnostics()[0]?.code,
-        "TEST_WORKOUT_STREAM_RETRYABLE",
+      assert.deepEqual(
+        service.listJobFailureDiagnostics().map((diagnostic) => diagnostic.attempts),
+        [1, 2, 3, 4, 5],
+      );
+      assert.ok(
+        service.listJobFailureDiagnostics().every((diagnostic) =>
+          diagnostic.code === "TEST_WORKOUT_STREAM_RETRYABLE"
+        ),
       );
     } finally {
       close();
@@ -1422,12 +1431,13 @@ test.each(["resource", "reconcile", "backfill"] as const)(
   },
 );
 
-test("Junction workout-stream transient failure resumes once after backoff without refetching completed work", async () => {
-  let now = new Date("2030-04-03T12:00:00.000Z");
+test("Junction workout-stream transient failure recovers on the same pending third attempt after two minutes", async () => {
+  const startedAt = new Date("2030-04-03T12:00:00.000Z");
+  let now = startedAt;
   const vaultRoot = await makeTempDirectory("murph-device-syncd-workout-stream-transient");
   const streamRequests: string[] = [];
   const importedWorkoutIds: string[] = [];
-  let failedWorkoutB = false;
+  let workoutBFailures = 0;
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     clock: { now: () => now },
@@ -1442,8 +1452,8 @@ test("Junction workout-stream transient failure resumes once after backoff witho
         if (!workoutId) {
           return { ok: true };
         }
-        if (workoutId === "workout-b" && !failedWorkoutB) {
-          failedWorkoutB = true;
+        if (workoutId === "workout-b" && workoutBFailures < 2) {
+          workoutBFailures += 1;
           throw new DeviceSyncError({
             code: "TEST_WORKOUT_STREAM_TRANSIENT",
             message: "Synthetic transient workout import failure.",
@@ -1472,7 +1482,7 @@ test("Junction workout-stream transient failure resumes once after backoff witho
       connectedAt: "2026-01-01T00:00:00.000Z",
     });
     const input = buildJunctionWorkoutStreamServiceJob("resource");
-    const initial = store.enqueueJob({
+    const activeJob = store.enqueueJob({
       ...input,
       accountId: account.id,
       provider: "junction",
@@ -1481,31 +1491,45 @@ test("Junction workout-stream transient failure resumes once after backoff witho
     });
 
     await service.runWorkerOnce();
-    assert.equal(store.getJobById(initial.id)?.status, "succeeded");
-    const continuationRow = readJobsForAccountForTesting(store, account.id)
-      .find((job) => job.status === "queued");
-    assert.ok(continuationRow);
-    const continuation = store.getJobById(continuationRow.id);
-    assert.ok(continuation);
-    assert.equal(continuation.maxAttempts, 4);
+    const firstRetry = store.getJobById(activeJob.id);
+    assert.ok(firstRetry);
+    assert.equal(firstRetry.status, "queued");
+    assert.equal(firstRetry.attempts, 1);
     assert.equal(
-      continuation.availableAt,
-      new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
+      firstRetry.availableAt,
+      new Date(startedAt.getTime() + computeRetryDelayMs(1)).toISOString(),
     );
-    assert.equal(await service.runWorkerOnce(), null);
 
-    now = new Date(continuation.availableAt);
+    now = new Date(firstRetry.availableAt);
+    await service.runWorkerOnce();
+    const secondRetry = store.getJobById(activeJob.id);
+    assert.ok(secondRetry);
+    assert.equal(secondRetry.status, "queued");
+    assert.equal(secondRetry.attempts, 2);
+    assert.equal(
+      secondRetry.availableAt,
+      new Date(now.getTime() + computeRetryDelayMs(2)).toISOString(),
+    );
+
+    now = new Date(startedAt.getTime() + 2 * 60_000);
+    assert.ok(now.getTime() >= Date.parse(secondRetry.availableAt));
+    assert.equal(store.getJobById(activeJob.id)?.attempts, 2);
     await service.runWorkerOnce();
 
-    assert.equal(store.getJobById(continuation.id)?.status, "succeeded");
-    assert.deepEqual(importedWorkoutIds, ["workout-a", "workout-b"]);
-    assert.deepEqual(streamRequests, ["workout-a", "workout-b", "workout-b"]);
-    assert.equal(
-      readJobsForAccountForTesting(store, account.id)
-        .some((job) => job.status === "queued" || job.status === "running"),
-      false,
+    const completed = store.getJobById(activeJob.id);
+    assert.ok(completed);
+    assert.equal(completed.status, "succeeded");
+    assert.equal(completed.attempts, 3);
+    assert.deepEqual(
+      readJobsForAccountForTesting(store, account.id).map((candidate) => candidate.id),
+      [activeJob.id],
     );
-    assert.deepEqual(service.listJobFailureDiagnostics(), []);
+    assert.deepEqual(importedWorkoutIds, ["workout-a", "workout-b"]);
+    assert.deepEqual(streamRequests, ["workout-a", "workout-b", "workout-b", "workout-b"]);
+    assert.deepEqual(
+      service.listJobFailureDiagnostics().map((diagnostic) => diagnostic.attempts),
+      [1, 2],
+    );
   } finally {
     close();
   }
@@ -1594,7 +1618,10 @@ test("Junction workout-stream cooperative yield stays immediate without consumin
     assert.ok(continuationRow);
     const continuation = store.getJobById(continuationRow.id);
     assert.ok(continuation);
+    assert.notEqual(continuation.id, initial.id);
+    assert.equal(continuation.attempts, 0);
     assert.equal(continuation.maxAttempts, 2);
+    assert.equal(typeof continuation.payload.workoutStreamCursor, "string");
     assert.ok(Date.parse(continuation.availableAt) <= now.getTime());
 
     shouldYield = false;

@@ -6,6 +6,7 @@ import {
 } from "./provider-job-definitions.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { JunctionWorkoutStreamProgressError } from "./junction-workout-stream-progress.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -1161,7 +1162,23 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
-      const failure = normalizeExecutionError(error);
+      const workoutStreamProgress = error instanceof JunctionWorkoutStreamProgressError
+        ? error
+        : null;
+      const failure = normalizeExecutionError(workoutStreamProgress?.failure ?? error);
+      const replacementPayload = workoutStreamProgress
+        ? normalizeConfiguredDeviceSyncJobRecord(
+            provider.provider,
+            {
+              ...job,
+              payload: {
+                ...job.payload,
+                workoutStreamCursor: workoutStreamProgress.workoutStreamCursor,
+              },
+            },
+            "retry progress",
+          ).payload
+        : undefined;
       const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
         && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
       const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
@@ -1192,6 +1209,7 @@ class DeviceSyncServiceController {
             retryAt,
             retainedFailureRetryable,
             retainsAcceptedCompanionHrvUntilSuccess,
+            activeJob.id === job.id ? replacementPayload : undefined,
           );
         })
         .some(Boolean);
