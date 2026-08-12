@@ -17,6 +17,7 @@ import {
   createImporters,
   importDeviceProviderSnapshot,
   prepareDeviceProviderSnapshotImport,
+  reduceJunctionWorkoutStream,
   type DeviceBatchImportPayload,
   type DeviceProviderAdapter,
   type DeviceProviderSnapshotImportPayload,
@@ -1601,6 +1602,72 @@ test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of 
 
   assert.match(compactBloodOxygenPart.content, /"meanValue":96/u);
   assert.doesNotMatch(compactBloodOxygenPart.content, /dense_provider_timeseries_pruned|70|72\.4/u);
+});
+
+test("importDeviceProviderSnapshot persists bounded Junction workout features through the real core port", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-features");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-04-22T00:00:00.000Z",
+    vaultRoot,
+  });
+  const feature = reduceJunctionWorkoutStream({
+    cadence: [80, 82, 84],
+    distance: [0, 500, 1_000],
+    heartrate: [120, 130, 140],
+    power: [180, 200, 220],
+    time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
+  }, {
+    workoutId: "workout-core-roundtrip-1",
+    sourceProviderSlug: "garmin",
+    sourceInstanceId: "source-0123456789abcdef01234567",
+    sourceType: "watch",
+    sport: "running",
+  });
+  assert.ok(feature);
+
+  const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-workout-feature-user",
+        importedAt: "2026-04-22T13:00:00.000Z",
+        summaries: {
+          workouts: [{
+            id: "workout-core-roundtrip-1",
+            time_start: "2026-04-22T12:00:00.000Z",
+            time_end: "2026-04-22T12:30:00.000Z",
+            sourceInstanceId: "source-0123456789abcdef01234567",
+            sourceProviderSlug: "garmin",
+            sourceType: "watch",
+            sport: { slug: "running" },
+          }],
+        },
+        workoutFeatures: [feature],
+      },
+    },
+    { corePort: coreRuntime },
+  );
+
+  assert.ok(result.applied);
+  const records = (
+    await Promise.all(result.eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat();
+  const liveRecords = latestLiveRecords(records);
+  const session = liveRecords.find((record) => record.kind === "activity_session");
+  const workoutFeatureFacts = liveRecords.filter((record) =>
+    record.kind === "measurement"
+    && storedExternalRefResourceId(record) === storedExternalRefResourceId(session)
+  );
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
+  const evidenceText = JSON.stringify(ingest.parts);
+
+  assert.ok(session);
+  assert.ok(workoutFeatureFacts.length >= 2);
+  assert.equal(result.sampleShardPaths.length, 0);
+  assert.doesNotMatch(evidenceText, /"lat"|"lng"|"time"\s*:\s*\[/u);
 });
 
 test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate legacy aliases", async () => {

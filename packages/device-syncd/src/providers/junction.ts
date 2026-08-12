@@ -12,6 +12,8 @@ import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
+  JunctionWorkoutStreamLimitError,
+  reduceJunctionWorkoutStream,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -249,6 +251,7 @@ interface JunctionWindowFetchOptions {
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
+const JUNCTION_WORKOUT_STREAM_RESOURCE = "workout_stream";
 const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
 
 // `profile` is deliberately excluded: it is a current-state snapshot, so
@@ -312,6 +315,7 @@ const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   ...JUNCTION_TIMESERIES_RESOURCE_NAMES,
+  JUNCTION_WORKOUT_STREAM_RESOURCE,
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
@@ -1797,6 +1801,117 @@ export function createJunctionDeviceSyncProvider(
       return sourceProviders;
     };
 
+    if (resource === JUNCTION_WORKOUT_STREAM_RESOURCE) {
+      const workoutId = normalizeString(job.payload.objectId);
+      if (!workoutId || workoutId.length > 200) {
+        throw deviceSyncError({
+          code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+          message: "Junction workout stream job did not include a bounded workout id.",
+          retryable: false,
+        });
+      }
+
+      const sourceProviders = await loadAndProjectSourceProviders();
+      const matchingProviders = sourceProviderSlug
+        ? sourceProviders.filter((provider) =>
+            normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug) === sourceProviderSlug
+            && provider.status.trim().toLowerCase() === "connected"
+          )
+        : [];
+      if (sourceProviderSlug && matchingProviders.length === 0) {
+        return {};
+      }
+
+      const projectedSourceInstanceIds = [
+        ...new Set(
+          matchingProviders
+            .map((provider) => normalizeString(provider.origin.sourceInstanceId))
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ];
+      const webhookSourceInstanceId = normalizeString(job.payload.sourceInstanceId);
+      const sourceInstanceId =
+        webhookSourceInstanceId && projectedSourceInstanceIds.includes(webhookSourceInstanceId)
+          ? webhookSourceInstanceId
+          : projectedSourceInstanceIds.length === 1
+            ? projectedSourceInstanceIds[0]
+            : undefined;
+      const streamPayload = await client.getWorkoutStream(workoutId, {
+        signal: context.signal ?? null,
+      });
+      let workoutFeatures;
+      try {
+        workoutFeatures = reduceJunctionWorkoutStream(streamPayload, {
+          workoutId,
+          sourceProviderSlug: sourceProviderSlug ?? undefined,
+          sourceInstanceId,
+          sourceType: normalizeString(job.payload.sourceType) ?? undefined,
+          sport: normalizeString(job.payload.sport) ?? undefined,
+        });
+      } catch (error) {
+        if (error instanceof JunctionWorkoutStreamLimitError) {
+          throw deviceSyncError({
+            code: "JUNCTION_WORKOUT_STREAM_POINT_LIMIT",
+            message: "Junction workout stream exceeded the configured point limit.",
+            retryable: false,
+            httpStatus: 502,
+            cause: error,
+          });
+        }
+        throw error;
+      }
+      if (!workoutFeatures) {
+        throw deviceSyncError({
+          code: "JUNCTION_WORKOUT_STREAM_RESPONSE_INVALID",
+          message: "Junction workout stream did not contain attributable bounded features.",
+          retryable: true,
+          httpStatus: 502,
+        });
+      }
+      if (
+        sourceProviderSlug
+        && normalizeProviderSlug(workoutFeatures.sourceProviderSlug) !== sourceProviderSlug
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_WORKOUT_STREAM_SOURCE_MISMATCH",
+          message: "Junction workout stream source did not match its shallow webhook.",
+          retryable: false,
+          httpStatus: 502,
+        });
+      }
+
+      // Re-list after the potentially large fetch so a disconnect that raced
+      // the request fences the import. Only the compact feature envelope
+      // crosses into the importer; the stream payload is never attached to a
+      // snapshot or retained as provider evidence.
+      const postFetchProviders = await client.listUserProviders(context.account.externalAccountId, {
+        signal: context.signal ?? null,
+      });
+      await projectJunctionSources(context, postFetchProviders);
+      const sourceStillConnected = postFetchProviders.some((provider) =>
+        normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug)
+          === normalizeProviderSlug(workoutFeatures.sourceProviderSlug)
+        && provider.status.trim().toLowerCase() === "connected"
+      );
+      if (!sourceStillConnected) {
+        return {};
+      }
+
+      await context.importSnapshot({
+        provider: "junction",
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+        connectionId: context.account.id,
+        importedAt: context.now,
+        windowStart: window.windowStart,
+        windowEnd: window.windowEnd,
+        connections: sanitizeJunctionImportConnections(postFetchProviders),
+        summaries: {},
+        timeseries: {},
+        workoutFeatures: [workoutFeatures],
+      });
+      return { nextReconcileAt: clampWebhookJobNextReconcileAt(context) };
+    }
+
     const summaries: Record<string, unknown[]> = {};
 
     if (resource) {
@@ -2467,7 +2582,18 @@ export function createJunctionDeviceSyncProvider(
     const externalAccountSelection = requireJunctionWebhookUserIdSelection(verified.payload, data);
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
-    const objectId = extractJunctionWebhookObjectId(data);
+    const webhookOrigin = resolveJunctionOrigin(data ?? undefined);
+    const objectId = resource?.name === JUNCTION_WORKOUT_STREAM_RESOURCE
+      ? extractJunctionWorkoutStreamId(data)
+      : extractJunctionWebhookObjectId(data);
+    if (resource?.name === JUNCTION_WORKOUT_STREAM_RESOURCE && !objectId) {
+      throw deviceSyncError({
+        code: "JUNCTION_WORKOUT_STREAM_WEBHOOK_INVALID",
+        message: "Junction workout stream webhook did not include a bounded workout_id.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
     const eventOccurredAt = extractJunctionWebhookOccurredAt(data);
     const occurredAt = eventOccurredAt ?? context.now;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
@@ -2484,7 +2610,10 @@ export function createJunctionDeviceSyncProvider(
       objectId,
       occurredAt,
       resource,
+      sourceInstanceId: webhookOrigin.sourceInstanceId ?? null,
       sourceProviderSlug,
+      sourceType: webhookOrigin.sourceType ?? null,
+      sport: extractJunctionWebhookSport(data),
       summaryBackfillDays,
       webhookDataJsons,
       window,
@@ -6144,7 +6273,10 @@ function buildJunctionWebhookJobs(input: {
   objectId: string | null;
   occurredAt: string;
   resource: { name: string; category: "summary" | "timeseries" } | null;
+  sourceInstanceId: string | null;
   sourceProviderSlug: string | null;
+  sourceType: string | null;
+  sport: string | null;
   summaryBackfillDays: number;
   webhookDataJsons: readonly string[];
   window: { windowStart: string; windowEnd: string };
@@ -6186,7 +6318,10 @@ function buildJunctionWebhookJobs(input: {
         occurredAt: input.occurredAt,
         resource: input.resource?.name ?? "",
         resourceCategory: input.resource?.category ?? "",
+        sourceInstanceId: input.sourceInstanceId ?? "",
         sourceProviderSlug: input.sourceProviderSlug ?? "",
+        sourceType: input.sourceType ?? "",
+        sport: input.sport ?? "",
         ...(webhookDataJson ? { webhookDataJson } : {}),
         windowStart: input.window.windowStart,
         windowEnd: input.window.windowEnd,
@@ -6210,8 +6345,9 @@ function buildJunctionWebhookJobs(input: {
             input.sourceProviderSlug,
             input.resource?.category,
             input.resource?.name,
-            input.window.windowStart,
-            input.window.windowEnd,
+            ...(input.resource?.name === JUNCTION_WORKOUT_STREAM_RESOURCE
+              ? [input.objectId ?? ""]
+              : [input.window.windowStart, input.window.windowEnd]),
           ])),
     }));
   }
@@ -6648,6 +6784,19 @@ function extractJunctionWebhookObjectId(data: Record<string, unknown> | null): s
     ?? normalizeString(readPlainObject(data?.data)?.id)
     ?? null
   );
+}
+
+function extractJunctionWorkoutStreamId(data: Record<string, unknown> | null): string | null {
+  const workoutId = normalizeString(data?.workout_id) ?? normalizeString(data?.workoutId);
+  return workoutId && workoutId.length <= 200 ? workoutId : null;
+}
+
+function extractJunctionWebhookSport(data: Record<string, unknown> | null): string | null {
+  const sport = readPlainObject(data?.sport);
+  const value = normalizeString(sport?.slug)
+    ?? normalizeString(sport?.name)
+    ?? normalizeString(data?.sport);
+  return value ? value.slice(0, 80) : null;
 }
 
 function extractJunctionWebhookRootTimestamp(data: Record<string, unknown> | null): string | null {

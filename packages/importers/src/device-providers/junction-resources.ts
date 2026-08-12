@@ -42,6 +42,9 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
   "glucose",
   "blood_pressure",
   "note",
+  "workout_duration",
+  "workout_distance",
+  "workout_swimming_stroke",
 ] as const);
 
 export type JunctionTimeseriesResource =
@@ -58,7 +61,10 @@ export type JunctionTimeseriesResource =
 // lands as one `measurement` event plus one compact ~350-byte
 // `junction.blood_pressure_reading.v1` artifact. `note` is another sparse
 // exception: each tag lands as a completed intervention, while free text is
-// dropped. Intraday `heartrate` and
+// dropped. The workout interval resources also bypass daily aggregation:
+// duration remains an exact interval fact, while distance and swimming stroke
+// facts require Junction's explicit workout-id and sport attributions.
+// Intraday `heartrate` and
 // `hypnogram` stay deliberately excluded from defaults: their raw sample
 // streams are unbounded (thousands of samples per day) and the vault must
 // not accumulate giant raw timeseries dumps. Sleep-grain heart rate and

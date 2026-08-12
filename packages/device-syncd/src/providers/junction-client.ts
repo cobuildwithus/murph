@@ -1,7 +1,7 @@
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 
 import { normalizeJunctionProviderSlug } from "../config/connect-routes.ts";
-import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
+import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
 import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
 import {
@@ -153,6 +153,7 @@ const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
+export const JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
 // (not datetimes) in the Junction API reference.
 const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["electrocardiogram", "menstrual_cycle", "sleep_cycle"]);
@@ -394,6 +395,27 @@ export class JunctionClient {
     );
   }
 
+  async getWorkoutStream(
+    workoutId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<unknown> {
+    const normalizedWorkoutId = normalizeString(workoutId);
+    if (!normalizedWorkoutId || normalizedWorkoutId.length > 200) {
+      throw new TypeError("Junction workout stream fetch requires a bounded workout id.");
+    }
+
+    return this.requestJson<unknown>(
+      "GET",
+      `/v2/timeseries/workouts/${encodeURIComponent(normalizedWorkoutId)}/stream`,
+      undefined,
+      {
+        endpointKind: "junction_workout_stream",
+        maxResponseBytes: JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES,
+        signal: options.signal ?? null,
+      },
+    );
+  }
+
   async introspectResources(input: JunctionIntrospectionInput): Promise<unknown> {
     return this.requestJson<unknown>(
       "GET",
@@ -554,7 +576,12 @@ export class JunctionClient {
     method: "DELETE" | "GET" | "POST",
     path: string,
     body?: Record<string, unknown>,
-    options: { endpointKind?: string; optional404?: boolean; signal?: AbortSignal | null } = {},
+    options: {
+      endpointKind?: string;
+      maxResponseBytes?: number;
+      optional404?: boolean;
+      signal?: AbortSignal | null;
+    } = {},
   ): Promise<T> {
     const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
     let lastError: unknown;
@@ -596,7 +623,7 @@ export class JunctionClient {
           return null as T;
         }
 
-        const text = await response.text();
+        const text = await readJunctionResponseText(response, options.maxResponseBytes);
         if (!response.ok) {
           const retryable = method === "GET" && (response.status === 429 || response.status >= 500);
           if (retryable && attempt < attempts) {
@@ -654,6 +681,53 @@ export class JunctionClient {
       cause: lastError,
     });
   }
+}
+
+async function readJunctionResponseText(response: Response, maxBytes: number | undefined): Promise<string> {
+  if (maxBytes === undefined) {
+    return response.text();
+  }
+
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw junctionWorkoutStreamResponseLimitError(maxBytes);
+  }
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let byteCount = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      byteCount += value.byteLength;
+      if (byteCount > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw junctionWorkoutStreamResponseLimitError(maxBytes);
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join("");
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function junctionWorkoutStreamResponseLimitError(maxBytes: number): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_WORKOUT_STREAM_RESPONSE_LIMIT",
+    message: `Junction workout stream response exceeded the ${maxBytes}-byte limit.`,
+    retryable: false,
+    httpStatus: 502,
+  });
 }
 
 function buildProviderApiError(input: {

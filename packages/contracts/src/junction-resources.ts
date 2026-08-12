@@ -20,4 +20,7 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "glucose",
   "blood_pressure",
   "note",
+  "workout_duration",
+  "workout_distance",
+  "workout_swimming_stroke",
 ] as const);

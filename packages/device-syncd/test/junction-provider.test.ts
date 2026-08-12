@@ -47,6 +47,7 @@ import {
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
+  JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES,
   JunctionClient,
   parseJunctionHistoricalPullSnapshot,
 } from "../src/providers/junction-client.ts";
@@ -13804,4 +13805,215 @@ test("Junction import accountId is stable across local account row re-registrati
   assert.ok(importedAccountIds.length >= 2, "expected reconcile runs to import snapshots");
   assert.match(importedAccountIds[0] ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
   assert.equal(new Set(importedAccountIds).size, 1);
+});
+
+test("Junction client fetches an exact workout stream with bounded bytes and three GET attempts", async () => {
+  const requests: string[] = [];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input) => {
+      requests.push(readUrl(input));
+      return createJsonResponse({ distance: [0, 1_000], time: [1_776_859_200, 1_776_859_260] });
+    },
+  });
+
+  assert.deepEqual(await client.getWorkoutStream("workout/id 1"), {
+    distance: [0, 1_000],
+    time: [1_776_859_200, 1_776_859_260],
+  });
+  assert.deepEqual(requests, [
+    "https://api.sandbox.us.junction.com/v2/timeseries/workouts/workout%2Fid%201/stream",
+  ]);
+
+  let oversizedAttempts = 0;
+  const oversizedClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      oversizedAttempts += 1;
+      return new Response("{}", {
+        headers: { "content-length": String(JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES + 1) },
+      });
+    },
+  });
+  await assert.rejects(
+    () => oversizedClient.getWorkoutStream("workout-over-limit"),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_WORKOUT_STREAM_RESPONSE_LIMIT"
+      && error.retryable === false,
+  );
+  assert.equal(oversizedAttempts, 1);
+
+  let streamedOversizedAttempts = 0;
+  const streamedOversizedClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      streamedOversizedAttempts += 1;
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES));
+          controller.enqueue(new Uint8Array(1));
+          controller.close();
+        },
+      }));
+    },
+  });
+  await assert.rejects(
+    () => streamedOversizedClient.getWorkoutStream("workout-streamed-over-limit"),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_WORKOUT_STREAM_RESPONSE_LIMIT"
+      && error.retryable === false,
+  );
+  assert.equal(streamedOversizedAttempts, 1);
+
+  let retryAttempts = 0;
+  const retryClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      retryAttempts += 1;
+      return createJsonResponse({ detail: "temporary" }, 503);
+    },
+  });
+  await assert.rejects(() => retryClient.getWorkoutStream("workout-retry-limit"));
+  assert.equal(retryAttempts, 3);
+});
+
+test("Junction shallow workout stream webhook imports only a bounded feature envelope", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: Array<Record<string, unknown>> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-synthetic",
+          slug: "garmin",
+          status: "connected",
+          source: { device_id: "device-synthetic-1" },
+          resource_availability: { workouts: true },
+        }],
+      });
+    }
+    if (url === "https://api.sandbox.us.junction.com/v2/timeseries/workouts/workout-stream-1/stream") {
+      return createJsonResponse({
+        altitude: [10, 11, 12],
+        cadence: [80, 82, 84],
+        distance: [0, 500, 1_000],
+        heartrate: [120, 130, 140],
+        lat: [40, 40.001, 40.002],
+        lng: [-73, -73.001, -73.002],
+        power: [180, 200, 220],
+        time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.workout_stream.created",
+      user_id: "junction-user-1",
+      data: {
+        message: "Workout stream is ready.",
+        workout_id: "workout-stream-1",
+        source_id: "source-synthetic-1",
+        source: { provider: "garmin", type: "watch" },
+        sport: { slug: "running" },
+      },
+    },
+    messageId: "msg_workout_stream_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const job = requireValue(parsed.jobs[0], "Workout stream webhook should enqueue one resource job.");
+  const jobPayload = job.payload ?? {};
+  const account = createAccount({
+    sources: [{
+      displayName: "Garmin",
+      firstSeenAt: "2026-04-01T00:00:00.000Z",
+      lastDataAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      resourceCount: 1,
+      resourceAvailabilitySummary: { workouts: true },
+      sourceProviderSlug: "garmin",
+      status: "connected" as const,
+    }],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot as Record<string, unknown>);
+        return { imported: true };
+      },
+    }),
+    createJob(job.kind, jobPayload),
+  );
+
+  assert.equal(jobPayload.objectId, "workout-stream-1");
+  assert.equal(jobPayload.resource, "workout_stream");
+  assert.equal(Object.hasOwn(jobPayload, "webhookDataJson"), false);
+  assert.equal(
+    requests.filter((url) => url.includes("/v2/timeseries/workouts/workout-stream-1/stream")).length,
+    1,
+  );
+  assert.equal(requests.some((url) => url.includes("/v2/summary/workout_stream/")), false);
+  assert.equal(importedSnapshots.length, 1);
+  const importedConnections = importedSnapshots[0]?.connections as Array<Record<string, unknown>> | undefined;
+  const importedWorkoutFeatures = importedSnapshots[0]?.workoutFeatures as Array<Record<string, unknown>> | undefined;
+  assert.equal(importedWorkoutFeatures?.[0]?.sourceInstanceId, importedConnections?.[0]?.sourceInstanceId);
+  assert.notEqual(importedWorkoutFeatures?.[0]?.sourceInstanceId, jobPayload.sourceInstanceId);
+  const importedText = JSON.stringify(importedSnapshots[0]);
+  assert.match(importedText, /junction\.workout_features\.v1/u);
+  assert.doesNotMatch(importedText, /"lat"|"lng"|"time"\s*:\s*\[|"cadence"\s*:\s*\[/u);
+});
+
+test("Junction rejects a shallow workout stream webhook without workout_id before any fetch", async () => {
+  let fetched = false;
+  const provider = createJunctionProvider(async () => {
+    fetched = true;
+    return createJsonResponse({});
+  }, {
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.workout_stream.created",
+      user_id: "junction-user-1",
+      data: {
+        source: { provider: "garmin", type: "watch" },
+      },
+    },
+    messageId: "msg_workout_stream_missing_id",
+    timestamp: "1775174400",
+  });
+
+  await assert.rejects(
+    () => requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    }),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_WORKOUT_STREAM_WEBHOOK_INVALID"
+      && error.retryable === false,
+  );
+  assert.equal(fetched, false);
 });

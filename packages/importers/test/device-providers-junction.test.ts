@@ -23,11 +23,16 @@ import {
   JUNCTION_OPT_IN_SUMMARY_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  JUNCTION_WORKOUT_FEATURE_MAX_MEASUREMENTS,
+  JUNCTION_WORKOUT_FEATURE_MAX_SPLITS,
+  JUNCTION_WORKOUT_STREAM_MAX_POINTS,
+  JunctionWorkoutStreamLimitError,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
+  reduceJunctionWorkoutStream,
   resolveJunctionOrigin,
   type DeviceBatchImportPayload,
   type WearableRawIngestReceipt,
@@ -234,7 +239,8 @@ function findJunctionCompactTimeseriesArtifacts(
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
     (payload.evidenceParts ?? []).some((artifact) =>
-      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note):)/u.test(artifact.role)
+      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note|workout-duration|workout-distance|workout-swimming-stroke):)/u
+        .test(artifact.role)
     ),
     false,
   );
@@ -4189,6 +4195,9 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "glucose",
     "blood_pressure",
     "note",
+    "workout_duration",
+    "workout_distance",
+    "workout_swimming_stroke",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
@@ -4742,7 +4751,7 @@ test("Junction partial profiles land height-only and reject non-boolean wheelcha
   assert.equal(demographics?.note, "Birth date: 1990-05-14.");
 });
 
-test("Junction normalizer ignores unsupported timeseries and workout stream resources", () => {
+test("Junction normalizer ignores raw workout stream summaries and unattributed workout facts", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -4765,12 +4774,188 @@ test("Junction normalizer ignores unsupported timeseries and workout stream reso
   });
 
   assert.deepEqual(payload.provenance?.summaryResources, []);
-  assert.deepEqual(payload.provenance?.timeseriesResources, []);
+  assert.deepEqual(payload.provenance?.timeseriesResources, [
+    "workout_distance",
+    "workout_swimming_stroke",
+  ]);
   assert.deepEqual(payload.events, []);
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-workout-stream"), false);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-distance"), false);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-swimming-stroke"), false);
+});
+
+test("Junction sparse workout facts require exact linkage and never infer duration from overlap", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T13:00:00.000Z",
+    summaries: {
+      workouts: [{
+        id: "workout-linked-1",
+        time_start: "2026-04-22T12:00:00.000Z",
+        time_end: "2026-04-22T12:30:00.000Z",
+        source: { device_id: "device-synthetic-1", provider: "apple_health_kit", type: "watch" },
+        sport: { name: "Pool Swim", slug: "pool_swimming" },
+      }],
+    },
+    timeseries: {
+      workout_duration: {
+        groups: {
+          apple_health_kit: [{
+            source: { device_id: "device-synthetic-1", provider: "apple_health_kit", type: "watch" },
+            data: [{
+              start: "2026-04-22T12:00:00.000Z",
+              end: "2026-04-22T12:30:00.000Z",
+              unit: "min",
+              value: 30,
+            }],
+          }],
+        },
+      },
+      workout_distance: {
+        groups: {
+          apple_health_kit: [{
+            source: {
+              device_id: "device-synthetic-1",
+              provider: "apple_health_kit",
+              sport: "pool_swimming",
+              type: "watch",
+              workout_id: "workout-linked-1",
+            },
+            data: [{
+              start: "2026-04-22T12:00:00.000Z",
+              end: "2026-04-22T12:10:00.000Z",
+              unit: "m",
+              value: 400,
+            }],
+          }],
+        },
+      },
+      workout_swimming_stroke: {
+        groups: {
+          apple_health_kit: [{
+            source: {
+              device_id: "device-synthetic-1",
+              provider: "apple_health_kit",
+              sport: "pool_swimming",
+              type: "watch",
+              workout_id: "workout-linked-1",
+            },
+            data: [{
+              start: "2026-04-22T12:00:00.000Z",
+              end: "2026-04-22T12:10:00.000Z",
+              unit: "count",
+              value: 180,
+            }],
+          }],
+        },
+      },
+    },
+  });
+
+  const session = payload.events?.find((event) => event.kind === "activity_session");
+  const measurements = payload.events?.filter((event) => event.kind === "measurement") ?? [];
+  const distance = measurements.find((event) =>
+    (event.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0]?.metric === "workout-distance"
+  );
+  const strokes = measurements.find((event) =>
+    (event.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0]?.metric === "workout-swimming-strokes"
+  );
+  const duration = measurements.find((event) =>
+    (event.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0]?.metric === "workout-duration"
+  );
+
+  assert.ok(session?.externalRef);
+  assert.equal(distance?.externalRef?.resourceType, session?.externalRef?.resourceType);
+  assert.equal(distance?.externalRef?.resourceId, session?.externalRef?.resourceId);
+  assert.equal(strokes?.externalRef?.resourceId, session?.externalRef?.resourceId);
+  assert.equal(duration?.externalRef?.resourceType, "junction-apple-health-kit-workout-duration");
+  assert.notEqual(duration?.externalRef?.resourceId, session?.externalRef?.resourceId);
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction workout stream reduction emits only capped derived features and fixed-distance splits", () => {
+  const feature = reduceJunctionWorkoutStream({
+    altitude: [10, 11, 12, 13, 14],
+    cadence: [80, 82, 84, 86, 88],
+    distance: [0, 500, 1_000, 1_500, 2_000],
+    heartrate: [120, 125, 130, 135, 140],
+    lat: [40, 40.001, 40.002, 40.003, 40.004],
+    lng: [-73, -73.001, -73.002, -73.003, -73.004],
+    power: [180, 190, 200, 210, 220],
+    time: [1_776_859_200, 1_776_859_210, 1_776_859_220, 1_776_859_230, 1_776_859_240],
+    velocity_smooth: [3, 3.1, 3.2, 3.3, 3.4],
+  }, {
+    workoutId: "workout-stream-1",
+    sourceProviderSlug: "garmin",
+    sourceInstanceId: "source-0123456789abcdef01234567",
+    sourceType: "watch",
+    sport: "running",
+  });
+
+  assert.ok(feature);
+  assert.equal(feature.pointCount, 5);
+  assert.equal(feature.splitDistanceMeters, 1_000);
+  assert.equal(feature.splits.length, 2);
+  assert.ok(feature.measurements.length <= JUNCTION_WORKOUT_FEATURE_MAX_MEASUREMENTS);
+  assert.ok(feature.splits.length <= JUNCTION_WORKOUT_FEATURE_MAX_SPLITS);
+  assert.equal(feature.splits[0]?.durationSeconds, 20);
+  assert.equal(feature.splits[1]?.durationSeconds, 20);
+  assert.doesNotMatch(JSON.stringify(feature), /altitude|cadence"\s*:|distance"\s*:|heartrate|lat|lng|power"\s*:|time"\s*:|velocity_smooth/u);
+
+  assert.throws(
+    () => reduceJunctionWorkoutStream({
+      time: Array.from({ length: JUNCTION_WORKOUT_STREAM_MAX_POINTS + 1 }, (_, index) => 1_776_859_200 + index),
+    }, {
+      workoutId: "workout-stream-over-limit",
+      sourceProviderSlug: "garmin",
+    }),
+    JunctionWorkoutStreamLimitError,
+  );
+});
+
+test("Junction workout feature envelopes persist as siblings of the existing activity session", () => {
+  const feature = reduceJunctionWorkoutStream({
+    cadence: [80, 82, 84],
+    distance: [0, 500, 1_000],
+    heartrate: [120, 130, 140],
+    time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
+  }, {
+    workoutId: "workout-stream-sibling-1",
+    sourceProviderSlug: "garmin",
+    sourceInstanceId: "source-0123456789abcdef01234567",
+    sourceType: "watch",
+    sport: "running",
+  });
+  assert.ok(feature);
+
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T13:00:00.000Z",
+    summaries: {
+      workouts: [{
+        id: "workout-stream-sibling-1",
+        time_start: "2026-04-22T12:00:00.000Z",
+        time_end: "2026-04-22T12:30:00.000Z",
+        sourceInstanceId: "source-0123456789abcdef01234567",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        sport: { slug: "running" },
+      }],
+    },
+    workoutFeatures: [feature],
+  });
+  const session = payload.events?.find((event) => event.kind === "activity_session");
+  const featureEvents = payload.events?.filter((event) => event.kind === "measurement") ?? [];
+
+  const sessionExternalRef = session?.externalRef;
+  assert.ok(sessionExternalRef);
+  assert.ok(featureEvents.length >= 2);
+  assert.ok(featureEvents.every((event) =>
+    event.externalRef?.resourceType === sessionExternalRef.resourceType
+    && event.externalRef?.resourceId === sessionExternalRef.resourceId
+    && event.externalRef?.facet !== sessionExternalRef.facet
+  ));
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"lat"|"lng"|"time"\s*:\s*\[/u);
 });
 
 test("Junction import receipt does not retain unsupported-only clinical summaries", async () => {
@@ -4832,7 +5017,6 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
       timeseries: {
         electrocardiogram_voltage: [{ timestamp: "2026-04-22T18:00:00Z", value: 0.2 }],
         heartrate: [{ timestamp: "2026-04-22T18:00:00Z", value: 64 }],
-        workout_distance: [{ timestamp: "2026-04-22T18:00:00Z", value: 1200 }],
       },
     },
   });
@@ -4851,7 +5035,6 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
     "workout_stream",
     "electrocardiogram_voltage",
     "heartrate",
-    "workout_distance",
     "\"value\":64",
     "\"value\":1200",
   ]);
@@ -4888,7 +5071,6 @@ test("Junction raw receipt hash ignores unsupported resources mixed with support
       },
       timeseries: {
         heartrate: [{ timestamp: "2026-04-22T18:00:00Z", value: 64 }],
-        workout_distance: [{ timestamp: "2026-04-22T18:00:00Z", value: 1200 }],
       },
     },
   });
@@ -4905,7 +5087,6 @@ test("Junction raw receipt hash ignores unsupported resources mixed with support
     "unsupported_clinical_value",
     "workout_stream",
     "heartrate",
-    "workout_distance",
     "\"value\":64",
     "\"value\":1200",
   ]);
