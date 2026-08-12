@@ -37,6 +37,14 @@ Current providers:
 - Junction fetches the sparse `note` timeseries by default. Oura note tags become
   completed intervention events for Personal Patterns. Free-text note values are
   dropped before raw snapshot and compact evidence retention.
+- Junction resource admission derives from the static 57-resource policy in
+  `@murphai/contracts`. Sparse supported VO2 max, temperature, caffeine,
+  one-minute heart-rate recovery, sleep-breathing-disturbance, and AFib-burden
+  resources use the existing per-source history owner for a 180-day initial
+  scan. That scan advances in one bounded 30-day provider window per resource
+  job, schedules at most eight resource/source pairs per reconcile pass, and
+  retains only the existing compact daily facts. It never persists full
+  provider timeseries arrays or emits canonical sample rows.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
