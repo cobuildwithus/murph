@@ -237,9 +237,16 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // extend the existing hosted callback output without adding a forbidden boot
 // input. Exact current-main assembly measured 9,846,997B total on 2026-08-11,
 // so ratchet the total only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_846_997 + 32_768;
+//
+// Bounded Junction timeseries fidelity extends the existing device-sync,
+// importer, and core outputs without adding a forbidden boot input. Ubuntu PR
+// assembly measured 9,908,525B total; exact local production assembly measured
+// 9,952,950B total and a 7,927,638B static closure on 2026-08-12. Ratchet both
+// baselines to the higher cross-platform measurements and retain the existing
+// narrow allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_952_950 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_927_638;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

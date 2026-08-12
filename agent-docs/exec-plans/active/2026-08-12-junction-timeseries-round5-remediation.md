@@ -41,10 +41,13 @@ Updated: 2026-08-12
 4. [x] Align the architecture, importer, and ingestion-invariant owners.
 5. [x] Reproduce and reject round six's proposed output-cap correction as a
    pre-existing integration-ingest limit, then clarify the durable contract.
-6. [ ] Remove round seven's synthetic-midnight temporal derivation, complete
+6. [x] Remove round seven's synthetic-midnight temporal derivation, complete
    local proof, commit and push the exact candidate, then run required CI.
-7. [ ] Record the hard-cap retrospective and obtain an explicit continuation
+7. [x] Record the hard-cap retrospective and obtain an explicit continuation
    decision before any eighth ReviewGPT round.
+8. [ ] Land the bounded PR-schema and runner-bundle budget corrections, obtain
+   exact-head green CI and a round-eight ReviewGPT PASS, then merge and retire
+   the task worktree.
 
 ## Decisions
 
@@ -84,6 +87,10 @@ Updated: 2026-08-12
 - Decision: continue with this bounded correction, then pause at the seven-round
   hard cap. Do not start round eight until the user explicitly chooses to
   continue after reviewing this retrospective.
+- The user explicitly authorized round eight on 2026-08-12 while directing the
+  agent to make CI green and merge. The known CI corrections remain metadata
+  schema completion plus measured bundle-budget ratchets; neither adds product
+  behavior or a runtime owner.
 
 ## Verification
 
@@ -104,5 +111,13 @@ Updated: 2026-08-12
   fact removal.
 - Passed the final scoped importer/query suites, affected typechecks and importer
   build, docs drift, scenario integrity, privacy scan, and `git diff --check`.
-- Pending: final commit/push, exact-head CI, and the explicit post-hard-cap
-  ReviewGPT continuation decision.
+- The mechanically merged candidate passed 223 provider, 171 importer, 21 query,
+  105 device-sync service, and 32 core reconciliation tests; affected package
+  typechecks/builds and required CI also passed. A current-main merge-tree proof
+  remained clean after the base advanced again.
+- The PR architecture schema now passes with its explicit complexity-avoidance
+  item. The runner bundle budget-policy suite passes 42 tests, and exact local
+  production assembly passes at 9,952,950B total and 7,927,638B static closure
+  with the existing narrow allowances retained.
+- Pending: commit/push, exact-head CI, round-eight ReviewGPT PASS, merge, and
+  worktree retirement.
