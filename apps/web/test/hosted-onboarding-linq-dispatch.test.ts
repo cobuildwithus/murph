@@ -166,6 +166,8 @@ const mocks = vi.hoisted(() => {
     ),
     resolveHostedLinqTypingPrewarmMemberId:
       vi.fn(async (): Promise<string | null> => null),
+    unwrapHostedDomainRootForWebByRootKeyId: vi.fn(),
+    unwrapHostedDomainRootsForWebByRootKeyIds: vi.fn(),
   };
 
   return state;
@@ -428,6 +430,10 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
         rootKey: Uint8Array.from(root.rootKey),
       };
     }),
+    unwrapHostedDomainRootForWebByRootKeyId:
+      mocks.unwrapHostedDomainRootForWebByRootKeyId,
+    unwrapHostedDomainRootsForWebByRootKeyIds:
+      mocks.unwrapHostedDomainRootsForWebByRootKeyIds,
   };
 });
 
@@ -634,7 +640,9 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
   return handleHostedOnboardingLinqWebhookImpl(input as HostedOnboardingLinqWebhookInput);
 }
 
-async function createDirectRootPreparationFailureFixture() {
+async function createDirectRootPreparationFailureFixture(input: {
+  failureDomain?: "control" | "ingress";
+} = {}) {
   mocks.enforceDirectMailboxPreparation = true;
   mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
     "member_123",
@@ -645,7 +653,22 @@ async function createDirectRootPreparationFailureFixture() {
   if (!defaultUnwrapRoot) {
     throw new Error("Expected the default hosted root unwrap mock.");
   }
-  unwrapRoot.mockRejectedValueOnce(preparationError);
+  let transactionOpen = false;
+  let failureDelivered = false;
+  const providerDomains: string[] = [];
+  const providerDomainsAfterTransactionStart: string[] = [];
+  unwrapRoot.mockImplementation(async (...args) => {
+    const domain = args[0].domain;
+    providerDomains.push(domain);
+    if (transactionOpen) {
+      providerDomainsAfterTransactionStart.push(domain);
+    }
+    if (!failureDelivered && domain === (input.failureDomain ?? "ingress")) {
+      failureDelivered = true;
+      throw preparationError;
+    }
+    return defaultUnwrapRoot(...args);
+  });
   const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
     linqChatIdEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-routing.home-linq-chat-id",
@@ -666,6 +689,18 @@ async function createDirectRootPreparationFailureFixture() {
     telegramUserLookupKey: null,
   });
   const prisma = asPrismaTransactionClient({
+    hostedGroupMember: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    hostedLinqDelivery: {
+      create: vi.fn().mockResolvedValue({ id: "delivery_created" }),
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      upsert: vi.fn().mockResolvedValue({ id: "delivery_upserted" }),
+    },
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       findMany: vi.fn().mockResolvedValue([]),
@@ -689,12 +724,21 @@ async function createDirectRootPreparationFailureFixture() {
   });
   prisma.$transaction = vi.fn(async (
     callback: (transaction: typeof prisma) => Promise<unknown>,
-  ) => callback(prisma));
+  ) => {
+    transactionOpen = true;
+    try {
+      return await callback(prisma);
+    } finally {
+      transactionOpen = false;
+    }
+  });
 
   return {
     hostedMemberRouting,
     preparationError,
     prisma,
+    providerDomains,
+    providerDomainsAfterTransactionStart,
     restoreRootMock: () => {
       unwrapRoot.mockReset();
       unwrapRoot.mockImplementation(defaultUnwrapRoot);
@@ -714,6 +758,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue(
       "root-control-active",
     );
+    mocks.unwrapHostedDomainRootForWebByRootKeyId.mockResolvedValue({
+      envelope: {
+        domain: "control",
+        rootKeyId: "root-control-historical",
+        userId: "member_123",
+      },
+      rootKey: new Uint8Array(32),
+    });
+    mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mockResolvedValue([]);
     const actualReadHostedRuntimeAiAccessDecision =
       mocks.readHostedRuntimeAiAccessDecisionActual;
     if (!actualReadHostedRuntimeAiAccessDecision) {
@@ -4927,6 +4980,83 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           shouldSend ? 1 : 0,
         );
         expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+        expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+        expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+      } finally {
+        restoreRootMock();
+      }
+    },
+  );
+
+  it.each(["control", "ingress"] as const)(
+    "rethrows a %s root preparation failure before Family or group owners",
+    async (failureDomain) => {
+      const {
+        hostedMemberRouting,
+        preparationError,
+        prisma,
+        providerDomains,
+        providerDomainsAfterTransactionStart,
+        restoreRootMock,
+      } = await createDirectRootPreparationFailureFixture({ failureDomain });
+      mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+        inboundCount: 1,
+      }));
+      prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([{
+        groupJoinOutreach: {
+          id: "outreach_eligible_but_unread",
+          offer: {
+            group: {
+              id: "group_eligible_but_unread",
+              joinCode: "join_eligible_but_unread",
+              runtimeMember: { suspendedAt: null },
+              runtimeMemberId: "member_group_runtime",
+            },
+            revokedAt: null,
+          },
+        },
+        groupJoinOutreachId: "outreach_eligible_but_unread",
+        id: "delivery_eligible_but_unread",
+        linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+        phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      }]);
+
+      try {
+        await expect(handleHostedOnboardingLinqWebhook({
+          prisma,
+          rawBody: buildHostedLinqWebhookBody({
+            data: {
+              parts: [{ type: "text", value: "family_phone_token" }],
+            },
+            eventId: `evt_direct_${failureDomain}_failure_owner_boundary`,
+          }),
+          signature: null,
+          timestamp: null,
+        })).rejects.toBe(preparationError);
+
+        expect(providerDomains.sort()).toEqual(["control", "ingress"]);
+        expect(providerDomainsAfterTransactionStart).toEqual([]);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.$executeRaw.mock.calls[0]?.[1]).toBe(
+          "phone:+15551234567",
+        );
+        expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
+        expect(mocks.readHostedLinqDailyState).toHaveBeenCalledTimes(1);
+        expect(mocks.unwrapHostedDomainRootForWebByRootKeyId)
+          .not.toHaveBeenCalled();
+        expect(mocks.unwrapHostedDomainRootsForWebByRootKeyIds)
+          .not.toHaveBeenCalled();
+        expect(mocks.resolveHostedFamilyInviteTokenForInbound)
+          .not.toHaveBeenCalled();
+        expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+        expect(prisma.hostedLinqDelivery.findMany).not.toHaveBeenCalled();
+        expect(prisma.hostedLinqDelivery.findFirst).not.toHaveBeenCalled();
+        expect(prisma.hostedGroupMember.findUnique).not.toHaveBeenCalled();
+        expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+        expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+        expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
         expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
         expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
       } finally {

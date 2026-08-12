@@ -1686,6 +1686,50 @@ export async function planHostedOnboardingLinqWebhook(input: {
       );
     }
 
+    if (directMailboxPreparationFailureProvided) {
+      // A carried crypto failure may cross only exact duplicate, consent, and
+      // already-at-limit quota owners. Resolve the quota decision here, before
+      // Family or group classification can traverse collections, decrypt
+      // private routing, or mutate a route under the transaction.
+      const existingDailyState = await readHostedLinqDailyState({
+        memberId: existingMember.id,
+        occurredAt,
+        prisma: input.prisma,
+      });
+      if (
+        existingDailyState
+        && existingDailyState.inboundCount >= HOSTED_LINQ_DAILY_TEXT_LIMIT
+      ) {
+        const dailyState = await incrementHostedLinqInboundDailyState({
+          memberId: existingMember.id,
+          occurredAt,
+          prisma: input.prisma,
+        });
+        const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
+          context,
+          dailyState,
+          dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
+          event: input.event,
+          logDetails: {
+            existingMemberActive: true,
+            existingMemberMatch,
+          },
+          memberId: existingMember.id,
+          routeStages: {
+            dailyQuotaReached: "active-member-daily-quota-reached",
+            dailyQuotaReply: "active-member-daily-quota-reply",
+          },
+        });
+        if (admissionPlan) {
+          return {
+            ...admissionPlan,
+            postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+          };
+        }
+      }
+      throw input.directMailboxPreparationFailure;
+    }
+
   }
 
   const buildUnassignableHomeLinePlan = (routeStage: string) =>
@@ -2116,7 +2160,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && existingMemberEffectiveActive) {
-    if (!groupJoinContext && !directMailboxPreparationFailureProvided) {
+    if (!groupJoinContext) {
       const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
         dedupeKey: input.event.event_id,
         prisma: input.prisma,
@@ -2130,51 +2174,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
           memberId: existingMember.id,
         });
       }
-    }
-
-    if (directMailboxPreparationFailureProvided) {
-      // Preserve the existing route-before-count ordering for ordinary input.
-      // Only a member already at the limit is known to have a terminal quota
-      // outcome without consulting or mutating private routing.
-      const existingDailyState = groupJoinContext
-        ? null
-        : await readHostedLinqDailyState({
-            memberId: existingMember.id,
-            occurredAt,
-            prisma: input.prisma,
-          });
-      if (
-        existingDailyState
-        && existingDailyState.inboundCount >= HOSTED_LINQ_DAILY_TEXT_LIMIT
-      ) {
-        const dailyState = await incrementHostedLinqInboundDailyState({
-          memberId: existingMember.id,
-          occurredAt,
-          prisma: input.prisma,
-        });
-        const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
-          context,
-          dailyState,
-          dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
-          event: input.event,
-          logDetails: {
-            existingMemberActive: true,
-            existingMemberMatch,
-          },
-          memberId: existingMember.id,
-          routeStages: {
-            dailyQuotaReached: "active-member-daily-quota-reached",
-            dailyQuotaReply: "active-member-daily-quota-reply",
-          },
-        });
-        if (admissionPlan) {
-          return {
-            ...admissionPlan,
-            postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
-          };
-        }
-      }
-      throw input.directMailboxPreparationFailure;
     }
 
     const preparedDirectMailbox = directMailboxPreparationProvided

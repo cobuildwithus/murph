@@ -82,6 +82,11 @@ Updated: 2026-08-12
    Mitigation: exact duplicates retain first precedence; stable consent and
    already-at-limit quota owners settle without crypto, while the first branch
    that still needs private routing or append rethrows the original error.
+9. Risk: moving the quota terminal owner too late can carry the failure through
+   Family and group classification first, reopening collection scans, private
+   routing projection, and uncached KMS while the transaction is open.
+   Mitigation: perform the one bounded daily-state read immediately after
+   duplicate/access handling and rethrow before every Family or group owner.
 
 ## Tasks
 
@@ -114,6 +119,9 @@ Updated: 2026-08-12
   consent-withdrawn, and already-at-limit quota owners. It is not a new policy
   authority: eligible append, group join, and other private-route work retain
   the exact original failure.
+- The quota exception sits before Family token resolution and group-outreach
+  classification. Neither owner is consulted when direct preparation failed;
+  a below-limit message rethrows immediately after one exact daily-state read.
 
 ## Review retrospective
 
@@ -145,6 +153,14 @@ Updated: 2026-08-12
   keeps exact duplicate precedence, allows stable consent and quota reply or
   suppression to settle without private routing, and preserves the identical
   failure object for an eligible append.
+- ReviewGPT round 4 found the first quota correction at the wrong boundary: it
+  ran after Family and group owners. That review-induced ordering could perform
+  group collection fanout and private routing/KMS under transaction locks.
+- The correction moves bounded quota admission directly after exact duplicate
+  and consent handling. Control- and ingress-root failure proofs seed an
+  otherwise eligible group delivery and a valid Family token, then assert the
+  exact original error, zero Family/group traversal, zero post-`BEGIN` provider
+  work, and no route, mailbox, daily-count, invite, or response mutation.
 
 ## Verification
 
