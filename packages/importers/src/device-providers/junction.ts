@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   extractIsoDatePrefix,
+  formatTimeZoneDateTimeParts,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
   parseCompanionHrvRmssdAdmissionId,
@@ -687,6 +688,7 @@ const JUNCTION_GLUCOSE_VALUE_PATHS = [
   "bloodGlucose",
   "blood_glucose",
 ] as const;
+const JUNCTION_METABOLIC_INTERVAL_VALUE_PATHS = ["value"] as const;
 const JUNCTION_BLOOD_PRESSURE_SYSTOLIC_PATHS = [
   "systolic",
 ] as const;
@@ -746,6 +748,8 @@ const JUNCTION_CONTRACT_ID_CROCKFORD_BASE32_ALPHABET =
   "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
 const APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG = "apple-health-kit";
+const JUNCTION_GLUCOSE_TEMPORAL_SHAPE_MAX_BYTES = 4096;
+const JUNCTION_GLUCOSE_TEMPORAL_SHAPE_MAX_HOURLY_BUCKETS = 24;
 const HRV_SDNN_METRIC = "hrv-sdnn";
 const WHOOP_BLE_OVERNIGHT_PRV_RMSSD_METRIC = "whoop-ble-overnight-prv-rmssd";
 const SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES = new Set([
@@ -775,12 +779,22 @@ interface JunctionDailyTimeseriesAggregate {
   legacyDayKeys: Set<string>;
   maxValue: number;
   minValue: number;
+  hourlyBuckets: Map<number, JunctionDailyTimeseriesHourlyBucket>;
   evidencePartRole: string;
   resourceContext: ResourceContext;
   sampleCount: number;
   sum: number;
+  sumSquares: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
+}
+
+interface JunctionDailyTimeseriesHourlyBucket {
+  hour: number;
+  maxValue: number;
+  minValue: number;
+  sampleCount: number;
+  sum: number;
 }
 
 interface JunctionSleepStageAggregate {
@@ -1385,8 +1399,9 @@ function buildJunctionMealFallbackIdentityDisambiguators(input: {
 
 interface JunctionDailyTimeseriesObservationDescriptor {
   metric: string;
-  statistic: "mean" | "min" | "max" | "sum";
+  statistic: "coefficient_of_variation" | "max" | "mean" | "min" | "standard_deviation" | "sum";
   title: string;
+  unit?: string;
 }
 
 interface JunctionDailyTimeseriesDescriptor {
@@ -1535,6 +1550,17 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
       { metric: "glucose", statistic: "mean", title: "Junction glucose average" },
       { metric: "lowest-glucose", statistic: "min", title: "Junction glucose minimum" },
       { metric: "highest-glucose", statistic: "max", title: "Junction glucose maximum" },
+      {
+        metric: "glucose-standard-deviation",
+        statistic: "standard_deviation",
+        title: "Junction glucose standard deviation",
+      },
+      {
+        metric: "glucose-coefficient-of-variation",
+        statistic: "coefficient_of_variation",
+        title: "Junction glucose coefficient of variation",
+        unit: "%",
+      },
     ],
     unit: "mg/dL",
     valuePaths: JUNCTION_GLUCOSE_VALUE_PATHS,
@@ -1550,14 +1576,23 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTi
 // Readings are sparse (10s-100s per member-year): each one lands as a paired
 // `measurement` event plus one compact per-reading evidence part.
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
+// Junction documents both metabolic resources as intervals. Insulin uses
+// `start`/`end`/`value`, exact unit `unit`, required non-exhaustive `type`, and
+// optional delivery qualifiers. Carbohydrates use `start`/`end`/`value` with
+// exact unit `g`; their documented `type` is always null.
+const JUNCTION_CARBOHYDRATES_RESOURCE = "carbohydrates";
+const JUNCTION_INSULIN_INJECTION_RESOURCE = "insulin_injection";
 const JUNCTION_NOTE_RESOURCE = "note";
 
-// Derived from the descriptor entries (plus the sparse paired blood-pressure
-// resource) so the raw-snapshot sanitization allowlist cannot drift from the
-// bounded normalization set.
+// Derived from every bounded timeseries handler so receipt hashing cannot drift
+// from normalization. Inclusion here does not authorize array retention: every
+// handler emits either compact facts/readings or a no-valid-samples artifact,
+// preventing the sanitized provider snapshot fallback from being staged.
 const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
   ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
   JUNCTION_BLOOD_PRESSURE_RESOURCE,
+  JUNCTION_CARBOHYDRATES_RESOURCE,
+  JUNCTION_INSULIN_INJECTION_RESOURCE,
   JUNCTION_NOTE_RESOURCE,
 ]);
 
@@ -1573,6 +1608,16 @@ function normalizeTimeseries(
 
     if (resource === JUNCTION_BLOOD_PRESSURE_RESOURCE) {
       pushJunctionBloodPressureReadings(payload, resource, slugify(resource, "timeseries"), context);
+      continue;
+    }
+
+    if (resource === JUNCTION_INSULIN_INJECTION_RESOURCE) {
+      pushJunctionInsulinInjectionReadings(payload, resource, slugify(resource, "timeseries"), context);
+      continue;
+    }
+
+    if (resource === JUNCTION_CARBOHYDRATES_RESOURCE) {
+      pushJunctionCarbohydrateReadings(payload, resource, slugify(resource, "timeseries"), context);
       continue;
     }
 
@@ -1691,6 +1736,314 @@ function normalizeJunctionNoteTags(value: unknown): string[] {
   )].sort();
 }
 
+interface JunctionSparseMetabolicInterval {
+  dayKey: string;
+  endAt: string;
+  occurredAt: string;
+  recordedAt?: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+  value: number;
+}
+
+function pushJunctionInsulinInjectionReadings(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  const seenReadingIdentityHashes = new Set<string>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+    if (!resourceContext) continue;
+
+    const interval = resolveJunctionSparseMetabolicInterval({
+      context,
+      entry,
+      expectedUnit: "unit",
+      resourceContext,
+    });
+    const insulinType = normalizeJunctionDocumentedLabel(entry.type);
+    if (!interval || !insulinType) continue;
+
+    const deliveryMode = normalizeJunctionDocumentedLabel(entry.delivery_mode);
+    const deliveryForm = normalizeJunctionDocumentedLabel(entry.delivery_form);
+    const bolusPurpose = normalizeJunctionDocumentedLabel(entry.bolus_purpose);
+    const readingIdentityHash = buildJunctionSparseMetabolicReadingIdentityHash({
+      entry,
+      resourceContext,
+      fallbackParts: [
+        interval.occurredAt,
+        interval.endAt,
+        interval.value,
+        insulinType,
+        deliveryMode,
+        deliveryForm,
+        bolusPurpose,
+      ],
+    });
+    if (seenReadingIdentityHashes.has(readingIdentityHash)) continue;
+    seenReadingIdentityHashes.add(readingIdentityHash);
+
+    const role = `${baseArtifactRole}:${interval.dayKey}:${readingIdentityHash}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.insulin_injection_reading.v1",
+            provider: "junction",
+            resource,
+            dayKey: interval.dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            occurredAt: interval.occurredAt,
+            endAt: interval.endAt,
+            recordedAt: interval.recordedAt,
+            insulinType,
+            deliveryMode,
+            deliveryForm,
+            bolusPurpose,
+            dose: interval.value,
+            unit: "unit",
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    context.events.push(stripUndefined({
+      kind: "medication_intake",
+      occurredAt: interval.occurredAt,
+      recordedAt: interval.recordedAt,
+      dayKey: interval.dayKey,
+      timeZone: interval.timeZone,
+      source: "device",
+      title: "Junction insulin injection",
+      tags: [
+        `insulin-type-${insulinType}`,
+        ...(deliveryMode ? [`insulin-delivery-${deliveryMode}`] : []),
+        ...(deliveryForm ? [`insulin-form-${deliveryForm}`] : []),
+        ...(bolusPurpose ? [`insulin-purpose-${bolusPurpose}`] : []),
+      ],
+      evidenceRoles: [role],
+      externalRef: makeProviderExternalRef(
+        "junction",
+        resourceContext.externalRefResourceType,
+        `${resourceSlug}-${readingIdentityHash}`,
+        undefined,
+        "insulin-injection",
+      ),
+      dataOrigin: buildDataOrigin(entry, resourceContext, interval.timestamp),
+      fields: {
+        medicationName: `Insulin (${insulinType.replaceAll("-", " ")})`,
+        dose: interval.value,
+        unit: "unit",
+      },
+    }));
+  }
+
+  if (seenReadingIdentityHashes.size === 0) {
+    pushJunctionEmptySparseTimeseriesArtifact(context, resource, resourceSlug, "junction.insulin_injection_reading.v1");
+  }
+}
+
+function pushJunctionCarbohydrateReadings(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  const seenReadingIdentityHashes = new Set<string>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+    if (!resourceContext) continue;
+
+    const interval = resolveJunctionSparseMetabolicInterval({
+      context,
+      entry,
+      expectedUnit: "g",
+      resourceContext,
+    });
+    if (!interval) continue;
+
+    const readingIdentityHash = buildJunctionSparseMetabolicReadingIdentityHash({
+      entry,
+      resourceContext,
+      fallbackParts: [interval.occurredAt, interval.endAt, interval.value],
+    });
+    if (seenReadingIdentityHashes.has(readingIdentityHash)) continue;
+    seenReadingIdentityHashes.add(readingIdentityHash);
+
+    const role = `${baseArtifactRole}:${interval.dayKey}:${readingIdentityHash}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.carbohydrate_reading.v1",
+            provider: "junction",
+            resource,
+            dayKey: interval.dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            occurredAt: interval.occurredAt,
+            endAt: interval.endAt,
+            recordedAt: interval.recordedAt,
+            value: interval.value,
+            unit: "g",
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt: interval.occurredAt,
+      recordedAt: interval.recordedAt,
+      dayKey: interval.dayKey,
+      timeZone: interval.timeZone,
+      source: "device",
+      title: "Junction carbohydrate intake",
+      evidenceRoles: [role],
+      externalRef: makeProviderExternalRef(
+        "junction",
+        resourceContext.externalRefResourceType,
+        `${resourceSlug}-${readingIdentityHash}`,
+        undefined,
+        "carbohydrate-intake",
+      ),
+      dataOrigin: buildDataOrigin(entry, resourceContext, interval.timestamp),
+      fields: {
+        metric: "carbohydrate-intake",
+        observationGrain: "sample",
+        value: interval.value,
+        unit: "g",
+      },
+    }));
+  }
+
+  if (seenReadingIdentityHashes.size === 0) {
+    pushJunctionEmptySparseTimeseriesArtifact(context, resource, resourceSlug, "junction.carbohydrate_reading.v1");
+  }
+}
+
+function resolveJunctionSparseMetabolicInterval(input: {
+  context: NormalizationContext;
+  entry: PlainObject;
+  expectedUnit: "g" | "unit";
+  resourceContext: ResourceContext;
+}): JunctionSparseMetabolicInterval | null {
+  const startRaw = firstStringFromPaths(input.entry, ["start"]);
+  const endRaw = firstStringFromPaths(input.entry, ["end"]);
+  const unit = firstStringFromPaths(input.entry, ["unit"]);
+  const value = finiteNumber(firstValueFromPaths(input.entry, JUNCTION_METABOLIC_INTERVAL_VALUE_PATHS));
+  if (!startRaw || !endRaw || unit !== input.expectedUnit || value === undefined || value <= 0) {
+    return null;
+  }
+
+  const occurredAt = resolveSafeTimestamp(startRaw, input.resourceContext.sourceProviderSlug);
+  const endAt = resolveSafeTimestamp(endRaw, input.resourceContext.sourceProviderSlug);
+  if (!occurredAt || !endAt || Date.parse(endAt) < Date.parse(occurredAt)) {
+    return null;
+  }
+
+  const timestamp = resolveRecordTimestamp(
+    { ...input.entry, observedAtRaw: startRaw },
+    input.context,
+    input.resourceContext.sourceProviderSlug,
+  );
+  const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+    input.entry,
+    timestamp,
+    occurredAt,
+    input.context.defaultTimeZone,
+  );
+  if (!dayKey) return null;
+
+  return {
+    dayKey,
+    endAt,
+    occurredAt,
+    recordedAt: timestamp.recordedAt,
+    timestamp: withTimestampOverride(timestamp, { occurredAt, observedAtRaw: startRaw }),
+    timeZone: firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
+    value: roundJunctionDailyAggregateValue(value),
+  };
+}
+
+function normalizeJunctionDocumentedLabel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = slugify(value, "").slice(0, 80).replace(/-+$/u, "");
+  return normalized || undefined;
+}
+
+function buildJunctionSparseMetabolicReadingIdentityHash(input: {
+  entry: PlainObject;
+  fallbackParts: readonly unknown[];
+  resourceContext: ResourceContext;
+}): string {
+  const providerRecordId = firstStringFromPaths(input.entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  return shortHash([
+    input.resourceContext.externalRefResourceType,
+    ...(providerRecordId ? ["provider-id", providerRecordId] : ["content", ...input.fallbackParts]),
+  ]);
+}
+
+function pushJunctionEmptySparseTimeseriesArtifact(
+  context: NormalizationContext,
+  resource: string,
+  resourceSlug: string,
+  schema: string,
+): void {
+  const role = `junction-timeseries-reading-${resourceSlug}:no-valid-samples`;
+  pushEvidencePart(
+    context.evidenceParts,
+    withJunctionCompactTimeseriesMetadata(
+      resource,
+      createEvidencePart(role, `${role}.json`, {
+        schema,
+        provider: "junction",
+        resource,
+        readingCount: 0,
+        status: "no_valid_samples",
+      }),
+      "timeseries_reading",
+    ),
+  );
+}
+
 function pushJunctionDailyTimeseriesObservations(
   payload: unknown,
   resource: string,
@@ -1710,7 +2063,7 @@ function pushJunctionDailyTimeseriesObservations(
       pushJunctionDailyTimeseriesObservation(context, aggregate, {
         metric: observation.metric,
         title: observation.title,
-        unit: descriptor.unit,
+        unit: observation.unit ?? descriptor.unit,
         value: junctionDailyTimeseriesStatisticValue(aggregate, observation.statistic),
       });
     }
@@ -1730,7 +2083,29 @@ function junctionDailyTimeseriesStatisticValue(
       return aggregate.sum;
     case "mean":
       return aggregate.sum / aggregate.sampleCount;
+    case "standard_deviation":
+      return junctionDailyTimeseriesStandardDeviation(aggregate);
+    case "coefficient_of_variation":
+      return junctionDailyTimeseriesCoefficientOfVariation(aggregate);
   }
+}
+
+function junctionDailyTimeseriesStandardDeviation(
+  aggregate: JunctionDailyTimeseriesAggregate,
+): number {
+  const mean = aggregate.sum / aggregate.sampleCount;
+  const populationVariance = Math.max(
+    0,
+    aggregate.sumSquares / aggregate.sampleCount - mean * mean,
+  );
+  return Math.sqrt(populationVariance);
+}
+
+function junctionDailyTimeseriesCoefficientOfVariation(
+  aggregate: JunctionDailyTimeseriesAggregate,
+): number {
+  const mean = aggregate.sum / aggregate.sampleCount;
+  return mean === 0 ? 0 : junctionDailyTimeseriesStandardDeviation(aggregate) / mean * 100;
 }
 
 function buildJunctionDailyTimeseriesAggregates(input: {
@@ -1779,6 +2154,19 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const existing = aggregates.get(key);
     const recordedAt = timestamp.recordedAt ?? sampleAt;
     const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+    const hourlyBuckets = new Map<number, JunctionDailyTimeseriesHourlyBucket>();
+    const localHour = input.resource === "glucose"
+      ? resolveJunctionTimeseriesAggregateHour(entry, timestamp, sampleAt, input.context.defaultTimeZone)
+      : undefined;
+    if (localHour !== undefined) {
+      hourlyBuckets.set(localHour, {
+        hour: localHour,
+        maxValue: value,
+        minValue: value,
+        sampleCount: 1,
+        sum: value,
+      });
+    }
     const legacyDayKeys = new Set<string>();
     if (legacyDayKey && legacyDayKey !== dayKey) {
       legacyDayKeys.add(legacyDayKey);
@@ -1794,10 +2182,12 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         legacyDayKeys,
         maxValue: value,
         minValue: value,
+        hourlyBuckets,
         evidencePartRole,
         resourceContext,
         sampleCount: 1,
         sum: value,
+        sumSquares: value * value,
         timestamp,
         timeZone,
       });
@@ -1806,6 +2196,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     existing.sampleCount += 1;
     existing.sum += value;
+    existing.sumSquares += value * value;
+    if (localHour !== undefined) {
+      addJunctionDailyTimeseriesHourlyValue(existing.hourlyBuckets, localHour, value);
+    }
     if (legacyDayKey && legacyDayKey !== dayKey) {
       existing.legacyDayKeys.add(legacyDayKey);
     }
@@ -1836,6 +2230,29 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
   pushJunctionDailyTimeseriesAggregateArtifacts(input.context, input.resource, sortedAggregates);
   return sortedAggregates;
+}
+
+function addJunctionDailyTimeseriesHourlyValue(
+  buckets: Map<number, JunctionDailyTimeseriesHourlyBucket>,
+  hour: number,
+  value: number,
+): void {
+  const existing = buckets.get(hour);
+  if (!existing) {
+    buckets.set(hour, {
+      hour,
+      maxValue: value,
+      minValue: value,
+      sampleCount: 1,
+      sum: value,
+    });
+    return;
+  }
+
+  existing.sampleCount += 1;
+  existing.sum += value;
+  existing.minValue = Math.min(existing.minValue, value);
+  existing.maxValue = Math.max(existing.maxValue, value);
 }
 
 function pushJunctionEmptyDailyTimeseriesAggregateArtifact(
@@ -1888,7 +2305,9 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
           role,
           `${role}.json`,
           stripUndefined({
-            schema: "junction.timeseries_daily_aggregate.v1",
+            schema: resource === "glucose"
+              ? "junction.glucose_daily_aggregate.v2"
+              : "junction.timeseries_daily_aggregate.v1",
             provider: "junction",
             resource,
             dayKey: aggregate.dayKey,
@@ -1905,12 +2324,61 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
             minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
             maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
+            temporalShape: resource === "glucose"
+              ? buildJunctionGlucoseDailyTemporalShape(aggregate)
+              : undefined,
             unit: junctionDailyTimeseriesAggregateUnit(resource),
           }),
         ),
       ),
     );
   }
+}
+
+function buildJunctionGlucoseDailyTemporalShape(
+  aggregate: JunctionDailyTimeseriesAggregate,
+): Record<string, unknown> {
+  const hourlyBuckets = [...aggregate.hourlyBuckets.values()]
+    .sort((left, right) => left.hour - right.hour)
+    .slice(0, JUNCTION_GLUCOSE_TEMPORAL_SHAPE_MAX_HOURLY_BUCKETS)
+    .map((bucket) => ({
+      hour: bucket.hour,
+      sampleCount: bucket.sampleCount,
+      meanValue: roundJunctionDailyAggregateValue(bucket.sum / bucket.sampleCount),
+      minValue: roundJunctionDailyAggregateValue(bucket.minValue),
+      maxValue: roundJunctionDailyAggregateValue(bucket.maxValue),
+    }));
+
+  const baseShape = {
+    schema: "junction.glucose_daily_temporal_shape.v1",
+    varianceMethod: "population",
+    hourlyBucketLimit: JUNCTION_GLUCOSE_TEMPORAL_SHAPE_MAX_HOURLY_BUCKETS,
+    serializedByteLimit: JUNCTION_GLUCOSE_TEMPORAL_SHAPE_MAX_BYTES,
+    standardDeviation: roundJunctionDailyAggregateValue(
+      junctionDailyTimeseriesStandardDeviation(aggregate),
+    ),
+    coefficientOfVariationPercent: roundJunctionDailyAggregateValue(
+      junctionDailyTimeseriesCoefficientOfVariation(aggregate),
+    ),
+  };
+  const shape = {
+    ...baseShape,
+    hourlyBucketsStatus: "complete",
+    hourlyBuckets,
+  };
+
+  if (Buffer.byteLength(JSON.stringify(shape), "utf8") <= JUNCTION_GLUCOSE_TEMPORAL_SHAPE_MAX_BYTES) {
+    return shape;
+  }
+
+  // The surrounding daily aggregate keeps mean/min/max and the canonical
+  // SD/CV observations. Only the optional hourly detail is suppressed if a
+  // future shape change would cross the explicit evidence budget.
+  return {
+    ...baseShape,
+    hourlyBucketsStatus: "suppressed_size_limit",
+    hourlyBuckets: [],
+  };
 }
 
 function roundJunctionTimeseriesAggregateValue(resource: string, value: number): number {
@@ -5544,6 +6012,43 @@ function resolveJunctionDailyAggregateSampleAt(
       ? `${timestamp.dayKey}T00:00:00.000Z`
       : undefined
   );
+}
+
+function resolveJunctionTimeseriesAggregateHour(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  sampleAt: string,
+  defaultTimeZone: string | undefined,
+): number | undefined {
+  if (
+    (timestamp.timestampSemantics === "offset" || timestamp.timestampSemantics === "floating")
+    && timestamp.observedAtRaw
+  ) {
+    const rawHour = /[T ](\d{2}):/u.exec(timestamp.observedAtRaw)?.[1];
+    const hour = rawHour === undefined ? undefined : Number(rawHour);
+    if (hour !== undefined && Number.isInteger(hour) && hour >= 0 && hour <= 23) {
+      return hour;
+    }
+  }
+
+  const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+  if (offsetSeconds !== null && offsetSeconds !== undefined) {
+    const timestampMs = Date.parse(sampleAt);
+    if (Number.isFinite(timestampMs) && Math.abs(offsetSeconds) <= 24 * 60 * 60) {
+      return new Date(timestampMs + offsetSeconds * 1000).getUTCHours();
+    }
+  }
+
+  if (defaultTimeZone) {
+    try {
+      return formatTimeZoneDateTimeParts(sampleAt, defaultTimeZone).hour;
+    } catch {
+      // Fall through to UTC when the configured zone cannot format this sample.
+    }
+  }
+
+  const sampleAtMs = Date.parse(sampleAt);
+  return Number.isFinite(sampleAtMs) ? new Date(sampleAtMs).getUTCHours() : undefined;
 }
 
 function resolveVaultLocalDayKey(timestamp: string, defaultTimeZone: string | undefined): string | undefined {

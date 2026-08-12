@@ -128,6 +128,9 @@ test("metric catalog resolves the Junction tier-1 timeseries metric keys", () =>
     ["glucose", "glucose"],
     ["lowest-glucose", "lowestGlucose"],
     ["highest-glucose", "highestGlucose"],
+    ["glucose-standard-deviation", "glucoseStandardDeviation"],
+    ["glucose-coefficient-of-variation", "glucoseCoefficientOfVariation"],
+    ["carbohydrate-intake", "carbohydrateIntake"],
     ["systolic-blood-pressure", "systolicBloodPressure"],
     ["diastolic-blood-pressure", "diastolicBloodPressure"],
   ];
@@ -150,6 +153,16 @@ test("metric catalog resolves the Junction tier-1 timeseries metric keys", () =>
     key: "glucose",
     unit: "mg/dL",
     value: 99.1001,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("carbohydrate-intake", 25, "g"), {
+    key: "carbohydrateIntake",
+    unit: "g",
+    value: 25,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("glucose-coefficient-of-variation", 16.6667, "%"), {
+    key: "glucoseCoefficientOfVariation",
+    unit: "%",
+    value: 16.6667,
   });
 });
 

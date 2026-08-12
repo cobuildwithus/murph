@@ -40,6 +40,11 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
   "sleep_breathing_disturbance",
   "afib_burden",
   "glucose",
+  // Temporary compatibility entries for the metabolic importer lane. The
+  // shared Junction resource-policy lane will own their final catalog/history
+  // classification before these branches are integrated.
+  "insulin_injection",
+  "carbohydrates",
   "blood_pressure",
   "note",
 ] as const);

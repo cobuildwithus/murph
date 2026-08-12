@@ -37,6 +37,12 @@ Current providers:
 - Junction fetches the sparse `note` timeseries by default. Oura note tags become
   completed intervention events for Personal Patterns. Free-text note values are
   dropped before raw snapshot and compact evidence retention.
+- Junction metabolic normalization preserves no provider timeseries arrays. Glucose
+  becomes daily mean/min/max, population standard deviation, coefficient of
+  variation, and at most 24 local-hour buckets under a 4,096-byte temporal-shape
+  budget. Sparse `insulin_injection` records become medication-intake events and
+  timed `carbohydrates` records become sample-grain observations rather than meals;
+  both retain only compact allowlisted per-record evidence.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

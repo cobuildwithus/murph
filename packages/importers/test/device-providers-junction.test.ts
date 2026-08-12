@@ -234,7 +234,9 @@ function findJunctionCompactTimeseriesArtifacts(
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
     (payload.evidenceParts ?? []).some((artifact) =>
-      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note):)/u.test(artifact.role)
+      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|carbohydrates|insulin-injection|note):)/u.test(
+        artifact.role,
+      )
     ),
     false,
   );
@@ -248,6 +250,14 @@ function findJunctionBloodPressureReadingArtifacts(payload: DeviceBatchImportPay
 function findJunctionNoteArtifacts(payload: DeviceBatchImportPayload) {
   return (payload.evidenceParts ?? [])
     .filter((artifact) => artifact.role.startsWith("junction-timeseries-reading-note:"));
+}
+
+function findJunctionSparseMetabolicArtifacts(
+  payload: DeviceBatchImportPayload,
+  resourceSlug: "carbohydrates" | "insulin-injection",
+) {
+  return (payload.evidenceParts ?? [])
+    .filter((artifact) => artifact.role.startsWith(`junction-timeseries-reading-${resourceSlug}:`));
 }
 
 function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, unknown> {
@@ -264,6 +274,27 @@ function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, u
       end: base.timestamp,
       tags: ["sauna"],
       value: "SENSITIVE_VALUE_SENTINEL",
+    };
+  }
+
+  if (resource === "insulin_injection") {
+    return {
+      ...base,
+      start: "2026-04-22T12:00:00Z",
+      end: "2026-04-22T12:01:00Z",
+      type: "rapid_acting",
+      unit: "unit",
+      value: 4,
+    };
+  }
+
+  if (resource === "carbohydrates") {
+    return {
+      ...base,
+      start: "2026-04-22T12:00:00Z",
+      end: "2026-04-22T12:01:00Z",
+      unit: "g",
+      value: 25,
     };
   }
 
@@ -830,15 +861,35 @@ test("Junction timeseries aggregates trust embedded offset timestamps before sep
           }],
         },
       },
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [
+              { timestamp: "2026-06-25T00:30:00+02:00", timezone_offset: -14_400, unit: "mmol/L", value: 5 },
+            ],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
     },
   });
 
   const stressEvent = payload.events?.find((event) => event.fields?.metric === "stress-level");
+  const glucoseArtifact = findJunctionCompactTimeseriesArtifacts(payload, "glucose")[0];
+  const glucoseTemporalShape = (glucoseArtifact?.content as Record<string, unknown>).temporalShape as
+    Record<string, unknown>;
 
   assert.equal(stressEvent?.occurredAt, "2026-06-24T22:30:00.000Z");
   assert.equal(stressEvent?.dayKey, "2026-06-25");
   assert.equal(stressEvent?.dataOrigin?.timeZoneOffsetMinutes, -240);
   assert.equal(stressEvent?.dataOrigin?.timestampSemantics, "offset");
+  assert.deepEqual(glucoseTemporalShape.hourlyBuckets, [{
+    hour: 0,
+    sampleCount: 1,
+    meanValue: 90.091,
+    minValue: 90.091,
+    maxValue: 90.091,
+  }]);
 });
 
 test("Junction daily aggregates repair legacy calendar-date resource ids through core replay", async () => {
@@ -3245,9 +3296,9 @@ test("Junction normalizer compacts tier-1 timeseries resources into bounded dail
   }
 });
 
-test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/min/max facts", () => {
+test("Junction normalizer compacts dense CGM glucose into daily facts and bounded temporal shape", () => {
   // A full CGM day: 288 five-minute samples must reduce to one compact
-  // daily-aggregate artifact plus three daily observations, never raw dumps.
+  // daily-aggregate artifact plus five daily observations, never raw dumps.
   const samples = Array.from({ length: 288 }, (_, index) => ({
     timestamp: new Date(Date.UTC(2026, 3, 22, 0, 0, 0) + index * 5 * 60_000).toISOString(),
     unit: "mmol/L",
@@ -3277,12 +3328,20 @@ test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/
   const mean = glucoseEvents.find((event) => event.fields?.metric === "glucose");
   const min = glucoseEvents.find((event) => event.fields?.metric === "lowest-glucose");
   const max = glucoseEvents.find((event) => event.fields?.metric === "highest-glucose");
+  const standardDeviation = glucoseEvents.find(
+    (event) => event.fields?.metric === "glucose-standard-deviation",
+  );
+  const coefficientOfVariation = glucoseEvents.find(
+    (event) => event.fields?.metric === "glucose-coefficient-of-variation",
+  );
   const artifacts = findJunctionCompactTimeseriesArtifacts(payload, "glucose");
   const artifactContent = artifacts[0]?.content as Record<string, unknown>;
+  const temporalShape = artifactContent.temporalShape as Record<string, unknown>;
+  const hourlyBuckets = temporalShape.hourlyBuckets as Array<Record<string, unknown>>;
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.equal(glucoseEvents.length, 3);
+  assert.equal(glucoseEvents.length, 5);
   assert.equal(artifacts.length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
@@ -3291,12 +3350,364 @@ test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/
   assert.equal(mean?.fields?.unit, "mg/dL");
   assert.equal(min?.fields?.value, 90.091);
   assert.equal(max?.fields?.value, 126.1274);
+  assert.equal(standardDeviation?.fields?.value, 18.0182);
+  assert.equal(standardDeviation?.fields?.unit, "mg/dL");
+  assert.equal(coefficientOfVariation?.fields?.value, 16.6667);
+  assert.equal(coefficientOfVariation?.fields?.unit, "%");
   assert.equal(mean?.dayKey, "2026-04-22");
+  assert.equal(artifactContent.schema, "junction.glucose_daily_aggregate.v2");
   assert.equal(artifactContent.sampleCount, 288);
   assert.equal(artifactContent.minValue, 90.091);
   assert.equal(artifactContent.maxValue, 126.1274);
-  // Size bound: a whole CGM day stays one sub-kilobyte compact artifact.
-  assert.ok(JSON.stringify(artifactContent).length < 1024);
+  assert.equal(temporalShape.schema, "junction.glucose_daily_temporal_shape.v1");
+  assert.equal(temporalShape.varianceMethod, "population");
+  assert.equal(temporalShape.hourlyBucketLimit, 24);
+  assert.equal(temporalShape.serializedByteLimit, 4096);
+  assert.equal(temporalShape.hourlyBucketsStatus, "complete");
+  assert.equal(hourlyBuckets.length, 24);
+  assert.ok(Buffer.byteLength(JSON.stringify(temporalShape), "utf8") <= 4096);
+  assert.doesNotMatch(JSON.stringify(artifactContent), /"samples"|"data"\s*:/u);
+});
+
+test("Junction glucose temporal shape distinguishes days with identical daily mean, min, and max", () => {
+  const makePayload = (values: readonly number[]) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: values.map((value, hour) => ({
+              timestamp: `2026-04-22T${String(hour).padStart(2, "0")}:00:00Z`,
+              unit: "mmol/L",
+              value,
+            })),
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
+  const first = makePayload([5, 7, 5, 7]);
+  const second = makePayload([5, 5, 7, 7]);
+  const dailyFields = (payload: DeviceBatchImportPayload) => (payload.events ?? [])
+    .filter((event) => ["glucose", "lowest-glucose", "highest-glucose"].includes(String(event.fields?.metric)))
+    .map((event) => [event.fields?.metric, event.fields?.value]);
+  const temporalShape = (payload: DeviceBatchImportPayload) => {
+    const artifact = findJunctionCompactTimeseriesArtifacts(payload, "glucose")[0];
+    return (artifact?.content as Record<string, unknown>).temporalShape;
+  };
+
+  assert.deepEqual(dailyFields(first), dailyFields(second));
+  assert.notDeepEqual(temporalShape(first), temporalShape(second));
+  assert.equal(first.samples?.length ?? 0, 0);
+  assert.equal(second.samples?.length ?? 0, 0);
+  assertNoFullJunctionTimeseriesArtifacts(first);
+  assertNoFullJunctionTimeseriesArtifacts(second);
+});
+
+test("Junction normalizer lands sparse insulin and timed carbohydrates as compact non-meal facts", async () => {
+  const insulin = {
+    start: "2026-04-22T12:05:00-05:00",
+    end: "2026-04-22T12:06:00-05:00",
+    type: "rapid_acting",
+    unit: "unit",
+    value: 4,
+    delivery_mode: "bolus",
+    delivery_form: "standard",
+    bolus_purpose: "meal",
+    private_provider_array: ["SENSITIVE_INSULIN_SENTINEL"],
+  };
+  const carbohydrate = {
+    start: "2026-04-22T12:00:00-05:00",
+    end: "2026-04-22T12:01:00-05:00",
+    unit: "g",
+    value: 35,
+    private_provider_array: ["SENSITIVE_CARBOHYDRATE_SENTINEL"],
+  };
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-metabolic",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        insulin_injection: {
+          groups: {
+            apple_health_kit: [{
+              data: [insulin, { ...insulin }, { ...insulin, value: 2 }],
+              source: { provider: "apple_health_kit", type: "phone" },
+            }],
+          },
+        },
+        carbohydrates: {
+          groups: {
+            apple_health_kit: [{
+              data: [carbohydrate, { ...carbohydrate }],
+              source: { provider: "apple_health_kit", type: "phone" },
+            }],
+          },
+        },
+      },
+    },
+  });
+  const medications = (payload.events ?? []).filter((event) => event.kind === "medication_intake");
+  const carbohydrateEvents = (payload.events ?? []).filter(
+    (event) => event.kind === "observation" && event.fields?.metric === "carbohydrate-intake",
+  );
+  const insulinArtifacts = findJunctionSparseMetabolicArtifacts(payload, "insulin-injection");
+  const carbohydrateArtifacts = findJunctionSparseMetabolicArtifacts(payload, "carbohydrates");
+  const artifactText = JSON.stringify(payload.evidenceParts ?? []);
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["insulin_injection", "carbohydrates"]);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(medications.length, 2);
+  assert.deepEqual(
+    medications.map((event) => event.fields?.dose).sort((left, right) => Number(left) - Number(right)),
+    [2, 4],
+  );
+  assert.ok(medications.every((event) => event.occurredAt === "2026-04-22T17:05:00.000Z"));
+  assert.ok(medications.every((event) => event.dayKey === "2026-04-22"));
+  assert.ok(medications.every((event) => event.fields?.medicationName === "Insulin (rapid acting)"));
+  assert.ok(medications.every((event) => event.fields?.unit === "unit"));
+  assert.ok(medications.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health-kit"));
+  assert.equal(new Set(medications.map((event) => event.externalRef?.resourceId)).size, 2);
+  assert.equal(carbohydrateEvents.length, 1);
+  assert.equal(carbohydrateEvents[0]?.occurredAt, "2026-04-22T17:00:00.000Z");
+  assert.equal(carbohydrateEvents[0]?.fields?.observationGrain, "sample");
+  assert.equal(carbohydrateEvents[0]?.fields?.value, 35);
+  assert.equal(carbohydrateEvents[0]?.fields?.unit, "g");
+  assert.equal((payload.events ?? []).some((event) => event.kind === "meal"), false);
+  assert.equal(insulinArtifacts.length, 2);
+  assert.equal(carbohydrateArtifacts.length, 1);
+  assert.deepEqual(
+    insulinArtifacts.find((artifact) =>
+      (artifact.content as Record<string, unknown>).dose === 4
+    )?.content,
+    {
+      schema: "junction.insulin_injection_reading.v1",
+      provider: "junction",
+      resource: "insulin_injection",
+      dayKey: "2026-04-22",
+      sourceProviderSlug: "apple-health-kit",
+      sourceType: "phone",
+      occurredAt: "2026-04-22T17:05:00.000Z",
+      endAt: "2026-04-22T17:06:00.000Z",
+      recordedAt: "2026-04-22T17:05:00.000Z",
+      insulinType: "rapid-acting",
+      deliveryMode: "bolus",
+      deliveryForm: "standard",
+      bolusPurpose: "meal",
+      dose: 4,
+      unit: "unit",
+    },
+  );
+  assert.deepEqual(carbohydrateArtifacts[0]?.content, {
+    schema: "junction.carbohydrate_reading.v1",
+    provider: "junction",
+    resource: "carbohydrates",
+    dayKey: "2026-04-22",
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "phone",
+    occurredAt: "2026-04-22T17:00:00.000Z",
+    endAt: "2026-04-22T17:01:00.000Z",
+    recordedAt: "2026-04-22T17:00:00.000Z",
+    value: 35,
+    unit: "g",
+  });
+  assert.ok(insulinArtifacts.every((artifact) => Buffer.byteLength(JSON.stringify(artifact.content), "utf8") < 2048));
+  assert.ok(carbohydrateArtifacts.every((artifact) =>
+    Buffer.byteLength(JSON.stringify(artifact.content), "utf8") < 2048
+  ));
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.doesNotMatch(artifactText, /SENSITIVE_(?:INSULIN|CARBOHYDRATE)_SENTINEL|private_provider_array/u);
+  assert.doesNotMatch(artifactText, /"samples"|"data"\s*:/u);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+  assert.deepEqual(readRawReceiptArtifact(payload).rawArtifactRoles.sort(), [
+    ...insulinArtifacts.map((artifact) => artifact.role),
+    ...carbohydrateArtifacts.map((artifact) => artifact.role),
+  ].sort());
+});
+
+test("Junction sparse metabolic resources fail closed without retaining invalid provider arrays", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        insulin_injection: [
+          {
+            start: "2026-04-22T12:05:00Z",
+            end: "2026-04-22T12:06:00Z",
+            type: "rapid_acting",
+            unit: "units",
+            value: 4,
+            private: "SENSITIVE_INVALID_INSULIN_UNIT",
+          },
+          {
+            start: "2026-04-22T12:05:00Z",
+            end: "2026-04-22T12:06:00Z",
+            unit: "unit",
+            value: 4,
+            private: "SENSITIVE_INVALID_INSULIN_TYPE",
+          },
+          {
+            timestamp: "2026-04-22T12:05:00Z",
+            end: "2026-04-22T12:06:00Z",
+            type: "rapid_acting",
+            unit: "unit",
+            value: 4,
+            private: "SENSITIVE_INVALID_INSULIN_START",
+          },
+          {
+            start: "2026-04-22T12:05:00Z",
+            end: "2026-04-22T12:04:00Z",
+            type: "rapid_acting",
+            unit: "unit",
+            value: 4,
+            private: "SENSITIVE_INVALID_INSULIN_INTERVAL",
+          },
+          {
+            start: "2026-04-22T12:05:00Z",
+            end: "2026-04-22T12:06:00Z",
+            type: "rapid_acting",
+            unit: "unit",
+            value: -1,
+            private: "SENSITIVE_INVALID_INSULIN_VALUE",
+          },
+        ],
+        carbohydrates: [
+          {
+            start: "2026-04-22T12:00:00Z",
+            end: "2026-04-22T12:01:00Z",
+            unit: "grams",
+            value: 25,
+            private: "SENSITIVE_INVALID_CARBOHYDRATE_UNIT",
+          },
+          {
+            timestamp: "2026-04-22T12:00:00Z",
+            end: "2026-04-22T12:01:00Z",
+            unit: "g",
+            value: 25,
+            private: "SENSITIVE_INVALID_CARBOHYDRATE_START",
+          },
+          {
+            start: "2026-04-22T12:00:00Z",
+            end: "2026-04-22T11:59:00Z",
+            unit: "g",
+            value: 25,
+            private: "SENSITIVE_INVALID_CARBOHYDRATE_INTERVAL",
+          },
+          {
+            start: "2026-04-22T12:00:00Z",
+            end: "2026-04-22T12:01:00Z",
+            unit: "g",
+            value: -1,
+            private: "SENSITIVE_INVALID_CARBOHYDRATE_VALUE",
+          },
+        ],
+      },
+    },
+  });
+  const insulinArtifacts = findJunctionSparseMetabolicArtifacts(payload, "insulin-injection");
+  const carbohydrateArtifacts = findJunctionSparseMetabolicArtifacts(payload, "carbohydrates");
+  const artifactText = JSON.stringify(payload.evidenceParts ?? []);
+
+  assert.deepEqual(payload.events, []);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(insulinArtifacts[0]?.role, "junction-timeseries-reading-insulin-injection:no-valid-samples");
+  assert.equal(carbohydrateArtifacts[0]?.role, "junction-timeseries-reading-carbohydrates:no-valid-samples");
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
+  assert.doesNotMatch(artifactText, /SENSITIVE_INVALID|"value":-1|"data"|"items"|"records"/u);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+});
+
+test("Junction sparse metabolic facts pass the core vault contract and replay idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-metabolic-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const snapshot = {
+      accountId: "junction-account-hash-1",
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        insulin_injection: [{
+          id: "insulin-1",
+          sourceProviderSlug: "apple_health_kit",
+          sourceType: "phone",
+          start: "2026-04-22T17:05:00Z",
+          end: "2026-04-22T17:06:00Z",
+          type: "rapid_acting",
+          delivery_mode: "bolus",
+          unit: "unit",
+          value: 4,
+        }],
+        carbohydrates: [{
+          id: "carbohydrate-1",
+          sourceProviderSlug: "apple_health_kit",
+          sourceType: "phone",
+          start: "2026-04-22T17:00:00Z",
+          end: "2026-04-22T17:01:00Z",
+          unit: "g",
+          value: 35,
+        }],
+      },
+    };
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...replay.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveMetabolicRecords = latestLiveRecords(records).filter((record) =>
+      record.kind === "medication_intake" ||
+      (record.kind === "observation" && record.metric === "carbohydrate-intake")
+    );
+    const medication = first.events.find((event) => event.kind === "medication_intake");
+    const carbohydrate = first.events.find(
+      (event) => event.kind === "observation" && event.metric === "carbohydrate-intake",
+    );
+
+    assert.equal(first.events.some((event) => event.kind === "meal"), false);
+    assert.equal(medication?.kind, "medication_intake");
+    if (medication?.kind === "medication_intake") {
+      assert.equal(medication.medicationName, "Insulin (rapid acting)");
+      assert.equal(medication.dose, 4);
+      assert.equal(medication.unit, "unit");
+    }
+    assert.equal(carbohydrate?.kind, "observation");
+    if (carbohydrate?.kind === "observation") {
+      assert.equal(carbohydrate.observationGrain, "sample");
+      assert.equal(carbohydrate.value, 35);
+      assert.equal(carbohydrate.unit, "g");
+    }
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      replay.events.map((event) => event.id).sort(),
+      first.events.map((event) => event.id).sort(),
+    );
+    assert.equal(liveMetabolicRecords.length, 2);
+    assert.equal(new Set(liveMetabolicRecords.map((record) => record.id)).size, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction normalizer lands sparse paired blood pressure readings as measurement events", () => {
@@ -3925,12 +4336,18 @@ test("Junction importer compacts floating-timestamp glucose records without reta
   const glucoseSamples = payload.samples?.filter((sample) => sample.stream === "glucose") ?? [];
   const glucoseEvents = payload.events?.filter((event) =>
     event.kind === "observation" &&
-    ["glucose", "lowest-glucose", "highest-glucose"].includes(String(event.fields?.metric))
+    [
+      "glucose",
+      "lowest-glucose",
+      "highest-glucose",
+      "glucose-standard-deviation",
+      "glucose-coefficient-of-variation",
+    ].includes(String(event.fields?.metric))
   ) ?? [];
   const mean = glucoseEvents.find((event) => event.fields?.metric === "glucose");
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
-  assert.equal(glucoseEvents.length, 3);
+  assert.equal(glucoseEvents.length, 5);
   assert.equal(mean?.occurredAt, "2023-09-27T00:00:00.000Z");
   assert.equal(mean?.dayKey, "2023-09-27");
   assert.equal(mean?.fields?.value, 108.1092);
@@ -4187,6 +4604,8 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "sleep_breathing_disturbance",
     "afib_burden",
     "glucose",
+    "insulin_injection",
+    "carbohydrates",
     "blood_pressure",
     "note",
   ]);
@@ -4243,6 +4662,8 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     assert.equal(findJunctionCompactTimeseriesArtifacts(payload, dailyResourceSlug).length, 1, dailyResourceSlug);
   }
   assert.equal(findJunctionBloodPressureReadingArtifacts(payload).length, 1);
+  assert.equal(findJunctionSparseMetabolicArtifacts(payload, "insulin-injection").length, 1);
+  assert.equal(findJunctionSparseMetabolicArtifacts(payload, "carbohydrates").length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));
