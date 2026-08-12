@@ -10,6 +10,8 @@ Updated: 2026-08-12
   connected-account identity and the authenticated Murph member identity.
 - Preserve the existing approval, argument, privacy, and non-retryable
   ambiguity boundaries for email and calendar writes.
+- Keep direct saved calendar automations functional while scheduled email sends
+  remain blocked before any Web control-plane request.
 
 ## Success criteria
 
@@ -79,6 +81,9 @@ Updated: 2026-08-12
   observability change is needed.
 - The minimal repair is request identity, not retry, reconciliation, or a new
   provider adapter.
+- The shared identity repair intentionally covers direct saved calendar
+  automations. Current private input remains an email-specific authority
+  requirement rather than a requirement for every connected-app action.
 - Treat the change as ReviewGPT-sensitive because it repairs an external write
   trust boundary.
 
@@ -106,6 +111,20 @@ Updated: 2026-08-12
 - A production-shaped synthetic direct scenario passed through the real Web
   service boundary and proved that the provider request binds both the
   authenticated member and selected account.
+- Parameterized runtime boundary coverage proves that direct scheduled Google
+  and Outlook calendar creates reach the Web port exactly once without current
+  input, while scheduled Gmail and Outlook sends make no Web request; ambiguous
+  calendar results remain non-retryable.
+- ReviewGPT round 1 identified the overbroad changelog claim and missing
+  scheduled-calendar boundary proof. The finding was accepted; the copy and
+  paired runtime/Web coverage were corrected without changing production
+  authority or retry behavior.
+- The real changelog archive card and existing synthetic design study rendered
+  successfully at desktop and mobile widths. The card copy stayed legible and
+  within its container. The unchanged global chat launcher overlaps the lower
+  left edge of a mobile element crop and remains outside this repair.
+- The required Claude Code UI double-check was attempted, but the `claude`
+  executable is unavailable in this checkout. No substitute review is claimed.
 - `pnpm docs:drift`, `git diff --check`, and the scoped identifier scan: passed.
 - The first focused test launch happened before fresh-worktree Prisma generation
   completed, so two suites failed during import with zero tests collected. The
