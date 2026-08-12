@@ -254,6 +254,14 @@ function findJunctionFeatureTimeseriesArtifacts(
     .filter((artifact) => artifact.role.startsWith(`junction-timeseries-feature-${resourceSlug}:`));
 }
 
+function findJunctionBodyReadingArtifacts(
+  payload: DeviceBatchImportPayload,
+  resourceSlug: string,
+) {
+  return (payload.evidenceParts ?? [])
+    .filter((artifact) => artifact.role.startsWith(`junction-timeseries-reading-${resourceSlug}:`));
+}
+
 function findJunctionBloodPressureReadingArtifacts(payload: DeviceBatchImportPayload) {
   return (payload.evidenceParts ?? [])
     .filter((artifact) => artifact.role.startsWith("junction-timeseries-reading-blood-pressure:"));
@@ -9464,9 +9472,13 @@ test("Junction normalizer maps documented activity and body summary scalar field
         id: "body-documented-fields",
         date: "2026-05-20T08:00:00+00:00",
         body_mass_index: 22.3,
+        bone_mass_percentage: 4.2,
         fat: 30,
         lean_body_mass_kilogram: 40.1,
+        muscle_mass_percentage: 63.4,
+        visceral_fat_index: 7,
         waist_circumference_centimeter: 86.36,
+        water_percentage: 51.8,
         body_temperature: 36.7,
         weight: 80,
       }],
@@ -9540,6 +9552,10 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("weight"), 80);
   assert.equal(metricValue("bmi"), 22.3);
   assert.equal(metricValue("body-fat-percentage"), 30);
+  assert.equal(metricValue("bone-mass-percentage"), 4.2);
+  assert.equal(metricValue("muscle-mass-percentage"), 63.4);
+  assert.equal(metricValue("visceral-fat-index"), 7);
+  assert.equal(metricValue("body-water-percentage"), 51.8);
   assert.equal(metricValue("waist-circumference"), 86.36);
   assert.equal(metricValue("lean-body-mass"), 40.1);
   assert.equal(metricValue("temperature"), 36.7);

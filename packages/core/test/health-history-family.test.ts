@@ -1253,6 +1253,57 @@ test("canonical event availability reads supported legacy provider body rows", a
   );
 });
 
+test("canonical event availability recognizes Junction body-composition summaries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-canonical-availability-body-composition");
+  await initializeVault({ vaultRoot });
+  const observations = [
+    { metric: "bone-mass-percentage", occurredAt: "2026-07-15T10:00:00.000Z", unit: "%", value: 4.2 },
+    { metric: "muscle-mass-percentage", occurredAt: "2026-07-15T11:00:00.000Z", unit: "%", value: 63.4 },
+    { metric: "visceral-fat-index", occurredAt: "2026-07-15T12:00:00.000Z", unit: "index", value: 7 },
+    { metric: "body-water-percentage", occurredAt: "2026-07-15T13:00:00.000Z", unit: "%", value: 51.8 },
+  ];
+
+  for (const [index, observation] of observations.entries()) {
+    await appendJsonlRecord({
+      vaultRoot,
+      relativePath: toMonthlyShardRelativePath(
+        VAULT_LAYOUT.eventLedgerDirectory,
+        observation.occurredAt,
+        "occurredAt",
+      ),
+      record: {
+        dayKey: "2026-07-15",
+        externalRef: {
+          resourceId: `body-composition-${index}`,
+          resourceType: "junction-withings-body",
+          system: "junction",
+        },
+        id: `evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F${index}`,
+        kind: "observation",
+        lifecycle: {
+          revision: 1,
+        },
+        metric: observation.metric,
+        observationGrain: "summary",
+        occurredAt: observation.occurredAt,
+        recordedAt: observation.occurredAt,
+        schemaVersion: "murph.event.v1",
+        source: "device",
+        title: "Body composition summary",
+        unit: observation.unit,
+        value: observation.value,
+      },
+    });
+  }
+
+  const summary = await readCanonicalEventAvailabilityInterruptible({ vaultRoot });
+  assert.equal(summary.latestBodyMeasurementDayKey, "2026-07-15");
+  assert.equal(
+    summary.latestBodyMeasurementOccurredAt,
+    observations.at(-1)?.occurredAt,
+  );
+});
+
 test("canonical event availability still fails closed for malformed relevant records", async () => {
   const vaultRoot = await makeTempDirectory("murph-canonical-availability-malformed-body-alias");
   await initializeVault({ vaultRoot });

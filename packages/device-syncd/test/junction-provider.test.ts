@@ -2724,13 +2724,16 @@ test("Junction REST diagnostics use date params for date-only summary resources"
   }
 });
 
-test("Junction maps the weight timeseries resource to the documented body_weight endpoint", async () => {
+test("Junction maps body timeseries resources to their documented endpoints", async () => {
   const seenUrls: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     seenUrls.push(url);
 
-    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
+    if (
+      url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")
+      || url.includes("/v2/timeseries/junction-user-1/body_fat/grouped")
+    ) {
       return createJsonResponse({ groups: {} });
     }
 
@@ -2741,23 +2744,31 @@ test("Junction maps the weight timeseries resource to the documented body_weight
   const probeRest = provider.diagnostics?.probeRest;
   assert.ok(probeRest);
 
-  await probeRest({
-    account: createAccount(),
-    endpoint: "timeseries",
-    now: "2026-04-03T12:00:00.000Z",
-    resource: "weight",
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-  });
+  for (const resource of ["weight", "fat"]) {
+    await probeRest({
+      account: createAccount(),
+      endpoint: "timeseries",
+      now: "2026-04-03T12:00:00.000Z",
+      resource,
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    });
+  }
 
-  assert.equal(seenUrls.length, 1);
-  const seenUrl = requireValue(seenUrls[0], "Junction diagnostic should issue one read request.");
-  assert.equal(new URL(seenUrl).pathname, "/v2/timeseries/junction-user-1/body_weight/grouped");
-  assertJunctionWindowQuery(
-    seenUrl,
-    "2026-04-02T00:00:00.000Z",
-    "2026-04-03T00:00:00.000Z",
+  assert.deepEqual(
+    seenUrls.map((seenUrl) => new URL(seenUrl).pathname),
+    [
+      "/v2/timeseries/junction-user-1/body_weight/grouped",
+      "/v2/timeseries/junction-user-1/body_fat/grouped",
+    ],
   );
+  for (const seenUrl of seenUrls) {
+    assertJunctionWindowQuery(
+      seenUrl,
+      "2026-04-02T00:00:00.000Z",
+      "2026-04-03T00:00:00.000Z",
+    );
+  }
 });
 
 test("Junction REST diagnostic can force a bounded user data refresh", async () => {

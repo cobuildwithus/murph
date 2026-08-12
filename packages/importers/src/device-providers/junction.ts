@@ -351,6 +351,34 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
   },
   { metric: "lean-body-mass", unit: "kg", title: "Junction lean body mass", paths: ["leanBodyMassKg", "lean_body_mass_kg", "leanBodyMassKilogram", "lean_body_mass_kilogram", "leanMassKg", "lean_mass_kg"] },
   { metric: "waist-circumference", unit: "cm", title: "Junction waist circumference", paths: ["waistCircumference", "waist_circumference", "waistCircumferenceCentimeter", "waist_circumference_centimeter", "waistCircumferenceCm", "waist_circumference_cm"] },
+  {
+    metric: "bone-mass-percentage",
+    unit: "%",
+    title: "Junction bone mass percentage",
+    paths: [],
+    value: (entry) => normalizeBodyCompositionPercent(firstNumberFromPaths(entry, ["boneMassPercentage", "bone_mass_percentage"])),
+  },
+  {
+    metric: "muscle-mass-percentage",
+    unit: "%",
+    title: "Junction muscle mass percentage",
+    paths: [],
+    value: (entry) => normalizeBodyCompositionPercent(firstNumberFromPaths(entry, ["muscleMassPercentage", "muscle_mass_percentage"])),
+  },
+  {
+    metric: "visceral-fat-index",
+    unit: "index",
+    title: "Junction visceral fat index",
+    paths: [],
+    value: (entry) => normalizeNonNegativeBodyIndex(firstNumberFromPaths(entry, ["visceralFatIndex", "visceral_fat_index"])),
+  },
+  {
+    metric: "body-water-percentage",
+    unit: "%",
+    title: "Junction body water percentage",
+    paths: [],
+    value: (entry) => normalizeBodyCompositionPercent(firstNumberFromPaths(entry, ["waterPercentage", "water_percentage"])),
+  },
   { metric: "temperature", unit: "celsius", title: "Junction body temperature", paths: ["temperature", "bodyTemperature", "body_temperature", "temperatureCelsius", "temperature_celsius", "skin_temperature"] },
 ];
 
@@ -8032,6 +8060,43 @@ function normalizePercentRatio(value: unknown): number | undefined {
   }
 
   return numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
+}
+
+function normalizeBodyCompositionPercent(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+  return numeric !== undefined && numeric >= 0 && numeric <= 100
+    ? roundJunctionDailyAggregateValue(numeric)
+    : undefined;
+}
+
+function normalizeNonNegativeBodyIndex(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+  return numeric !== undefined && numeric >= 0
+    ? roundJunctionDailyAggregateValue(numeric)
+    : undefined;
+}
+
+function normalizeBodyWeightKilograms(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 1_000);
+}
+
+function normalizeBodyMassIndex(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 150);
+}
+
+function normalizeLeanBodyMassKilograms(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 1_000);
+}
+
+function normalizeWaistCircumferenceCentimeters(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 500);
+}
+
+function normalizePositiveBodyMeasurement(value: unknown, maximum: number): number | undefined {
+  const numeric = finiteNumber(value);
+  return numeric !== undefined && numeric > 0 && numeric <= maximum
+    ? roundJunctionDailyAggregateValue(numeric)
+    : undefined;
 }
 
 function normalizeBloodOxygenPercent(value: unknown): number | undefined {
