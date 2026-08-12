@@ -63,6 +63,12 @@ Updated: 2026-08-12
    repairing a post-commit wake during a KMS outage.
    Mitigation: carry the original preparation failure into a narrow duplicate
    recovery branch and rethrow it for every nonduplicate outcome.
+6. Risk: mutable group-outreach state becomes eligible after an ordinary direct
+   append commits, then reclassifies the exact provider retry before wake
+   repair during a simultaneous preparation outage.
+   Mitigation: after active-member authority, treat the unique member/event
+   mailbox row as canonical for failure-only recovery and do not consult group
+   outreach semantics before that fixed read.
 
 ## Tasks
 
@@ -83,6 +89,27 @@ Updated: 2026-08-12
   keeping all mutation and encryption paths fail closed.
 - Warm historical control roots sequentially within one control-lane owner;
   ingress remains the only concurrent lane, so peak KMS concurrency is two.
+- An ordinary direct mailbox row is the durable classification authority for
+  failure-only wake repair. Later group-membership or delivery-state changes
+  cannot veto that exact retry, while absence of the row still rethrows the
+  original preparation failure.
+
+## Review retrospective
+
+- ReviewGPT found that failure-only recovery consulted the mutable group-join
+  outreach reader before the unique mailbox dedupe key. That reader performs a
+  collection query and per-candidate authority checks, and a delivery becoming
+  eligible after an ordinary append could therefore suppress the missing wake
+  repair during the same KMS outage.
+- The earlier implementation incorrectly treated current group semantics as a
+  prerequisite even after the ordinary direct append had durably classified
+  the event. The corrected requirement is that active member access and the
+  exact `(memberId, eventId)` mailbox row own recovery; group semantics only
+  classify events that have not already committed as ordinary direct mail.
+- Regression proof covers delivery terminalization after the original append,
+  one exact repair handoff with no second append/count/routing mutation, no
+  collection read on failure recovery, and a paired missing-row retry that
+  preserves the original preparation error.
 
 ## Verification
 

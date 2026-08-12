@@ -19,6 +19,15 @@ import {
   lockAndReadActiveHostedDomainRootKeyIdTx,
 } from "@/src/lib/hosted-crypto/domain-root-store";
 import {
+  buildHostedGroupJoinOutreachIdempotencyKey,
+  enqueueHostedGroupJoinOutreachTx,
+  HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+  HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+  readHostedGroupJoinOutreachReplyContextTx,
+} from "@/src/lib/hosted-groups/group-join-outreach-store";
+import {
+  createHostedLinqChatLookupKey,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
@@ -32,6 +41,12 @@ import {
 import {
   createHostedLinqParticipantContact,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import {
+  upsertHostedLinqLineForPhoneTx,
+} from "@/src/lib/hosted-onboarding/linq-line-store";
+import {
+  createHostedLinqDeliveryIdempotencyLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
   buildHostedMemberIdentityPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
@@ -77,9 +92,13 @@ function createDeferred(): Deferred {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq activation PostgreSQL concurrency",
   () => {
-    it("releases root authority for a member-first owner and appends once after retry", async () => {
+    it("releases root authority and keeps an ordinary duplicate canonical after group eligibility changes", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_linq_activation_${fixtureId}`;
+      const groupOwnerMemberId = `member_linq_group_owner_${fixtureId}`;
+      const groupRuntimeMemberId = `member_linq_group_runtime_${fixtureId}`;
+      const groupId = `group_linq_activation_${fixtureId}`;
+      const groupOfferId = `group_offer_linq_activation_${fixtureId}`;
       const memberPhone = buildFixturePhone(fixtureId, 5);
       const recipientPhone = buildFixturePhone(fixtureId, 6);
       const chatId = `chat_linq_activation_${fixtureId}`;
@@ -97,13 +116,26 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         messageId: `message_linq_activation_${fixtureId}`,
         recipientPhone,
       });
+      const missingEvent = buildDirectLinqEvent({
+        chatId,
+        eventId: `event_linq_activation_missing_${fixtureId}`,
+        memberPhone,
+        messageId: `message_linq_activation_missing_${fixtureId}`,
+        recipientPhone,
+      });
       let firstAttempt: Promise<unknown> | null = null;
 
-      await observer.hostedMember.create({
-        data: {
+      await observer.hostedMember.createMany({
+        data: [{
           billingStatus: HostedBillingStatus.active,
           id: memberId,
-        },
+        }, {
+          billingStatus: HostedBillingStatus.active,
+          id: groupOwnerMemberId,
+        }, {
+          billingStatus: HostedBillingStatus.active,
+          id: groupRuntimeMemberId,
+        }],
       });
       await observer.$transaction(async (tx) => {
         const identityPrivate = await buildHostedMemberIdentityPrivateColumns({
@@ -141,6 +173,93 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           recipientPhone,
         });
       }, transactionOptions);
+      await observer.hostedGroup.create({
+        data: {
+          displayName: "Linq activation transition proof",
+          id: groupId,
+          joinCode: `join_${fixtureId}`,
+          joinCodeCreatedAt: new Date("2026-08-12T00:00:00.000Z"),
+          ownerMemberId: groupOwnerMemberId,
+          runtimeMemberId: groupRuntimeMemberId,
+        },
+      });
+      await observer.hostedGroupJoinOffer.create({
+        data: {
+          groupId,
+          id: groupOfferId,
+          messageLookupKey: `offer_message_${fixtureId}`,
+          postedAt: new Date("2026-08-12T00:00:00.000Z"),
+          projectionKindsJson: ["best_effort"],
+        },
+      });
+      const outreach = await observer.$transaction((tx) =>
+        enqueueHostedGroupJoinOutreachTx({
+          offerId: groupOfferId,
+          participantPhoneNumber: memberPhone,
+          requestedAt: new Date("2026-08-12T00:00:00.000Z"),
+          tx,
+        }),
+      transactionOptions);
+      const openerMessageLookupKey = requireValue(
+        createHostedLinqMessageLookupKey(`opener_${fixtureId}`),
+        "outreach opener message lookup key",
+      );
+      const openerIdempotencyKey = requireValue(
+        createHostedLinqDeliveryIdempotencyLookupKey(
+          buildHostedGroupJoinOutreachIdempotencyKey(outreach.outreachId),
+        ),
+        "outreach opener idempotency key",
+      );
+      const groupSignupDeliveryId = `group_signup_linq_activation_${fixtureId}`;
+      await upsertHostedLinqLineForPhoneTx({
+        observedAt: new Date("2026-08-12T00:00:00.000Z"),
+        phoneNumber: recipientPhone,
+        prisma: observer,
+        source: "configured",
+      });
+      await observer.hostedLinqDelivery.createMany({
+        data: [{
+          acceptedAt: new Date("2026-08-12T00:00:01.000Z"),
+          attemptedAt: new Date("2026-08-12T00:00:00.000Z"),
+          groupJoinOutreachId: outreach.outreachId,
+          id: `group_opener_linq_activation_${fixtureId}`,
+          idempotencyKey: openerIdempotencyKey,
+          linqChatLookupKey: requireValue(
+            createHostedLinqChatLookupKey(chatId),
+            "outreach opener chat lookup key",
+          ),
+          messageLookupKey: openerMessageLookupKey,
+          phoneNumberLookupKey: requireValue(
+            createHostedPhoneLookupKey(recipientPhone),
+            "outreach recipient phone lookup key",
+          ),
+          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+          sourceRef: outreach.outreachId,
+          status: "accepted",
+          targetKind: "participant",
+          template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+        }, {
+          acceptedAt: new Date("2026-08-12T00:00:03.000Z"),
+          attemptedAt: new Date("2026-08-12T00:00:02.000Z"),
+          groupJoinOutreachId: outreach.outreachId,
+          id: groupSignupDeliveryId,
+          source: "hosted_group_join_signup",
+          sourceRef: outreach.outreachId,
+          status: "accepted",
+          targetKind: "participant",
+          template: "invite_signup",
+        }],
+      });
+      await expect(observer.$transaction((tx) =>
+        readHostedGroupJoinOutreachReplyContextTx({
+          linqChatId: chatId,
+          participantMemberId: memberId,
+          participantPhoneNumber: memberPhone,
+          recipientPhoneNumber: recipientPhone,
+          sourceEventId: event.event_id,
+          tx,
+        }),
+      transactionOptions)).resolves.toBeNull();
       await Promise.all([
         insertActiveRootEnvelope({
           domain: "control",
@@ -235,15 +354,49 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
 
+        await observer.hostedLinqDelivery.update({
+          data: {
+            failedAt: new Date("2026-08-12T00:00:04.000Z"),
+            status: "failed",
+          },
+          where: { id: groupSignupDeliveryId },
+        });
+        await expect(observer.$transaction((tx) =>
+          readHostedGroupJoinOutreachReplyContextTx({
+            linqChatId: chatId,
+            participantMemberId: memberId,
+            participantPhoneNumber: memberPhone,
+            recipientPhoneNumber: recipientPhone,
+            sourceEventId: event.event_id,
+            tx,
+          }),
+        transactionOptions)).resolves.toEqual({
+          joinCode: `join_${fixtureId}`,
+          outreachId: outreach.outreachId,
+        });
+        const mailboxCountAfterAppend = await observer.hostedMailboxItem.count({
+          where: {
+            kind: "conversation.message",
+            userId: memberId,
+          },
+        });
+        const dailyStateAfterAppend = await observer.hostedLinqDailyState.findMany({
+          where: { memberId },
+        });
+        const routingAfterAppend = await readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        });
         const recoveryError = new Error("prepared ingress root unavailable");
-        await expect(runHostedOnboardingWebhookTransaction(
+        const recoveredPlan = await runHostedOnboardingWebhookTransaction(
           inbound,
           (transaction) => planHostedOnboardingLinqWebhook({
             directMailboxPreparationFailure: recoveryError,
             event,
             prisma: transaction,
           }),
-        )).resolves.toMatchObject({
+        );
+        expect(recoveredPlan).toMatchObject({
           response: {
             duplicate: true,
             ignored: true,
@@ -256,21 +409,69 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             userId: memberId,
           }],
         });
+        expect(recoveredPlan.wakeHandoffs).toHaveLength(1);
 
         await expect(observer.hostedMailboxItem.count({
           where: {
             kind: "conversation.message",
             userId: memberId,
           },
-        })).resolves.toBe(1);
+        })).resolves.toBe(mailboxCountAfterAppend);
+        await expect(observer.hostedLinqDailyState.findMany({
+          where: { memberId },
+        })).resolves.toEqual(dailyStateAfterAppend);
+        await expect(readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        })).resolves.toEqual(routingAfterAppend);
+
+        const missingRecoveryError = new Error(
+          "prepared ingress root still unavailable",
+        );
+        await expect(runHostedOnboardingWebhookTransaction(
+          inbound,
+          (transaction) => planHostedOnboardingLinqWebhook({
+            directMailboxPreparationFailure: missingRecoveryError,
+            event: missingEvent,
+            prisma: transaction,
+          }),
+        )).rejects.toBe(missingRecoveryError);
+        await expect(observer.hostedMailboxItem.count({
+          where: {
+            kind: "conversation.message",
+            userId: memberId,
+          },
+        })).resolves.toBe(mailboxCountAfterAppend);
+        await expect(observer.hostedLinqDailyState.findMany({
+          where: { memberId },
+        })).resolves.toEqual(dailyStateAfterAppend);
+        await expect(readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        })).resolves.toEqual(routingAfterAppend);
       } finally {
         allowActivationRoot.resolve();
         await Promise.allSettled([
-          activationTransaction,
+          ...(activationTransaction ? [activationTransaction] : []),
           ...(firstAttempt ? [firstAttempt] : []),
         ]);
+        await observer.hostedGroup.deleteMany({
+          where: { id: groupId },
+        });
         await observer.hostedMember.deleteMany({
-          where: { id: memberId },
+          where: {
+            id: {
+              in: [memberId, groupOwnerMemberId, groupRuntimeMemberId],
+            },
+          },
+        });
+        await observer.hostedLinqLine.deleteMany({
+          where: {
+            phoneNumberLookupKey: requireValue(
+              createHostedPhoneLookupKey(recipientPhone),
+              "outreach recipient phone lookup key",
+            ),
+          },
         });
         await disconnectClients([observer, activation, inbound]);
       }

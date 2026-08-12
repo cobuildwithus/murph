@@ -1523,7 +1523,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     if (directMailboxPreparationFailureProvided) {
       throw input.directMailboxPreparationFailure;
     }
-    if (directMailboxPreparationProvided) {
+    // A null preflight target agrees with this terminal policy outcome: this
+    // branch cannot append or rewrite private routing, so it needs no mailbox
+    // cryptography. A concrete prepared member means authority changed after
+    // preflight and still receives the bounded retry.
+    if (input.preparedDirectMailboxPayloadRoot) {
       throw hostedLinqDirectMailboxPreparationRequired("home-chat-owner");
     }
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -1666,31 +1670,21 @@ export async function planHostedOnboardingLinqWebhook(input: {
       if (!exactMemberAccess.allowed) {
         throw input.directMailboxPreparationFailure;
       }
-      const recoveryGroupJoinContext = participantPhoneNumber
-        ? await readHostedGroupJoinOutreachReplyContextTx({
-            linqChatId: summary.chatId,
-            participantMemberId: existingMember.id,
-            participantPhoneNumber,
-            recipientPhoneNumber,
-            replyToMessageId:
-              messageEvent.data.message.reply_to?.message_id ?? null,
-            sourceEventId: input.event.event_id,
-            tx: input.prisma,
-          })
-        : null;
-      if (!recoveryGroupJoinContext) {
-        const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
-          dedupeKey: input.event.event_id,
-          prisma: input.prisma,
-          userId: existingMember.id,
+      // Once an ordinary direct append commits, its exact member/event mailbox
+      // row is the durable classification authority for wake repair. Mutable
+      // group-outreach state may become eligible afterward and must not veto
+      // that repair or add a collection scan to this failure-only path.
+      const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+        dedupeKey: input.event.event_id,
+        prisma: input.prisma,
+        userId: existingMember.id,
+      });
+      if (existingMailboxItem) {
+        return buildExistingMemberDuplicatePlan({
+          existingMemberActive: true,
+          mailboxItemId: existingMailboxItem.id,
+          memberId: existingMember.id,
         });
-        if (existingMailboxItem) {
-          return buildExistingMemberDuplicatePlan({
-            existingMemberActive: true,
-            mailboxItemId: existingMailboxItem.id,
-            memberId: existingMember.id,
-          });
-        }
       }
       throw input.directMailboxPreparationFailure;
     }

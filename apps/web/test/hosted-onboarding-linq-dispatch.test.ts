@@ -4522,7 +4522,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("repairs an exact duplicate wake when direct root preparation fails", async () => {
+  it("repairs an exact duplicate wake before mutable group context when direct root preparation fails", async () => {
     mocks.enforceDirectMailboxPreparation = true;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
@@ -4537,6 +4537,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
       id: "mailbox_existing_direct",
     });
+    const hostedLinqDeliveryFindMany = vi.fn().mockResolvedValue([{
+      groupJoinOutreach: {
+        id: "hgrpjoa_later_eligible",
+        offer: {
+          group: {
+            id: "hgrp_later_eligible",
+            joinCode: "join_later_eligible",
+            runtimeMember: { suspendedAt: null },
+            runtimeMemberId: "member_group_runtime",
+          },
+          revokedAt: null,
+        },
+      },
+      groupJoinOutreachId: "hgrpjoa_later_eligible",
+      id: "hld_group_opener_later_eligible",
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
+    }]);
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -4557,6 +4575,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       telegramUserLookupKey: null,
     });
     const prisma = asPrismaTransactionClient({
+      hostedGroupMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqDelivery: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: hostedLinqDeliveryFindMany,
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
       hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -4594,6 +4620,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
+      expect(hostedLinqDeliveryFindMany).not.toHaveBeenCalled();
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
         abortSignal: expect.any(AbortSignal),
         expectedUserId: "member_123",
@@ -4752,7 +4779,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the inbound chat is already another member's home chat", async () => {
+  it("terminates a stable home-chat owner mismatch without mailbox preparation", async () => {
+    mocks.enforceDirectMailboxPreparation = true;
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -4820,12 +4848,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
+      .toHaveBeenCalledTimes(1);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).not.toHaveBeenCalled();
   });
 
-  it("retries once and fails closed when the prepared direct home-chat owner changes", async () => {
+  it.each([
+    "member_123",
+    "member_other",
+  ])(
+    "retries once then terminates when preparation targeted %s before authority conflicts",
+    async (preparedMemberId) => {
     mocks.enforceDirectMailboxPreparation = true;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
-      .mockResolvedValueOnce("member_123")
+      .mockResolvedValueOnce(preparedMemberId)
       .mockResolvedValueOnce(null);
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
@@ -4874,13 +4910,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-      details: {
-        preparationTarget: "direct_linq_mailbox",
-        reason: "home-chat-owner",
-      },
-      retryable: true,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "home-chat-owner-mismatch",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
@@ -4889,7 +4922,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-  });
+    },
+  );
 
   it("prefers the canonical home owner over another member's stale pending contact", async () => {
     const participantContact = createHostedLinqParticipantContact({
