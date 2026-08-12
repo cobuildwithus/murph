@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   hasHostedLinqInviteSignupLiveDeliveryTx,
+  readHostedLinqInviteSignupLiveAttemptsTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   buildHostedLinqInviteSignupEffectId,
@@ -81,19 +82,6 @@ describe.skipIf(!runPostgresProof)(
         occurredAt: dayUtc,
         sourceEventDigest: otherDigest,
       });
-      const sourceRefPrefix = buildHostedLinqInviteSignupEffectId({
-        memberId,
-        occurredAt: dayUtc,
-      });
-      const exactSourceRefs = Array.from({ length: 5 }, (_, index) =>
-        buildHostedLinqInviteSignupEffectId({
-          attempt: index + 1,
-          memberId,
-          occurredAt: dayUtc,
-          sourceEventDigest: exactDigest,
-        })
-      );
-      const sourceRefLikePattern = `${escapeLikePrefix(sourceRefPrefix)}%`;
       const malformedAttemptId = `hld_live_invite_plan_${suffix}_attempt_6`;
       const otherIdentityId = `hld_live_invite_plan_${suffix}_other_identity`;
 
@@ -185,86 +173,64 @@ describe.skipIf(!runPostgresProof)(
         });
         await planClient.query('ANALYZE "hosted_linq_delivery"');
 
-        const factsSql = `
-          SELECT
-            EXISTS (
-              SELECT 1
-              FROM "hosted_linq_delivery" AS "delivery"
-              WHERE "delivery"."source_ref" IS NOT NULL
-                AND "delivery"."template" IN (
-                  'invite_signup',
-                  'invite_signup_fallback'
-                )
-                AND "delivery"."status" IN (
-                  'attempted',
-                  'provider_dispatch_started',
-                  'accepted',
-                  'delivered'
-                )
-                AND "delivery"."source_ref" IN ($1, $2, $3, $4, $5)
-              LIMIT 1
-            ) AS "sameIdentityStillLive",
-            EXISTS (
-              SELECT 1
-              FROM "hosted_linq_delivery" AS "delivery"
-              WHERE "delivery"."source_ref" IS NOT NULL
-                AND "delivery"."template" IN (
-                  'invite_signup',
-                  'invite_signup_fallback'
-                )
-                AND "delivery"."status" IN (
-                  'attempted',
-                  'provider_dispatch_started',
-                  'accepted',
-                  'delivered'
-                )
-                AND "delivery"."source_ref" LIKE $6::text ESCAPE '!'
-                AND substring(
-                  "delivery"."source_ref"
-                  FROM char_length($7::text) + 1
-                ) ~ '^(?::a[2-5]|:e[0-9a-f]{32}(?::a[2-5])?)?$'
-              LIMIT 1
-            ) AS "anyIdentityLive"
-        `;
-        const values = [
-          ...exactSourceRefs,
-          sourceRefLikePattern,
-          sourceRefPrefix,
-        ];
-        const facts = await planClient.query<{
+        const exactIdentityQuery = await captureLiveInviteFactsQuery({
+          dayUtc,
+          memberId,
+          sourceEventDigest: exactDigest,
+        });
+        const memberDayQuery = await captureLiveInviteFactsQuery({
+          dayUtc,
+          memberId,
+        });
+        expect(exactIdentityQuery.text.match(/EXISTS \(/gu)).toHaveLength(2);
+        expect(memberDayQuery.text.match(/EXISTS \(/gu)).toHaveLength(1);
+
+        const exactFacts = await planClient.query<{
           anyIdentityLive: boolean;
           sameIdentityStillLive: boolean;
-        }>({ text: factsSql, values });
-        expect(facts.rows).toEqual([{
+        }>({
+          text: exactIdentityQuery.text,
+          values: exactIdentityQuery.values,
+        });
+        expect(exactFacts.rows).toEqual([{
+          anyIdentityLive: true,
+          sameIdentityStillLive: false,
+        }]);
+        const memberDayFacts = await planClient.query<{
+          anyIdentityLive: boolean;
+          sameIdentityStillLive: boolean;
+        }>({
+          text: memberDayQuery.text,
+          values: memberDayQuery.values,
+        });
+        expect(memberDayFacts.rows).toEqual([{
           anyIdentityLive: true,
           sameIdentityStillLive: false,
         }]);
 
-        const planResult = await planClient.query<{ "QUERY PLAN": unknown }>({
-          text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${factsSql}`,
-          values,
+        const exactPlanResult = await planClient.query<{
+          "QUERY PLAN": unknown;
+        }>({
+          text:
+            `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${exactIdentityQuery.text}`,
+          values: exactIdentityQuery.values,
         });
-        const plan = readPostgreSqlExplainRoot(planResult.rows);
-        const indexNodes = collectPostgreSqlPlanNodes(
-          plan,
-          (node) => node["Index Name"] === LIVE_INVITE_SOURCE_REF_INDEX,
-        );
-        expect(indexNodes).toHaveLength(2);
-        expect(indexNodes.every((node) =>
-          (node["Actual Rows"] ?? 0) <= 2
-        )).toBe(true);
-        expect(indexNodes.some((node) =>
-          node["Index Cond"]?.includes("= ANY") === true
-        )).toBe(true);
-        expect(indexNodes.some((node) =>
-          node["Index Cond"]?.includes("~>=~") === true
-          && node["Index Cond"]?.includes("~<~") === true
-        )).toBe(true);
-        expect(collectPostgreSqlPlanNodes(
-          plan,
-          (node) => node["Node Type"] === "Seq Scan"
-            && node["Relation Name"] === "hosted_linq_delivery",
-        )).toHaveLength(0);
+        expectBoundedLiveInvitePlan({
+          expectedIndexNodeCount: 2,
+          plan: readPostgreSqlExplainRoot(exactPlanResult.rows),
+          requiresExactIdentityCondition: true,
+        });
+        const memberDayPlanResult = await planClient.query<{
+          "QUERY PLAN": unknown;
+        }>({
+          text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${memberDayQuery.text}`,
+          values: memberDayQuery.values,
+        });
+        expectBoundedLiveInvitePlan({
+          expectedIndexNodeCount: 1,
+          plan: readPostgreSqlExplainRoot(memberDayPlanResult.rows),
+          requiresExactIdentityCondition: false,
+        });
 
         await expect(hasHostedLinqInviteSignupLiveDeliveryTx({
           dayUtc,
@@ -610,6 +576,57 @@ function buildReceipt(input: {
   return parsed;
 }
 
+async function captureLiveInviteFactsQuery(input: {
+  dayUtc: string;
+  memberId: string;
+  sourceEventDigest?: string;
+}): Promise<Prisma.Sql> {
+  let capturedQuery: Prisma.Sql | null = null;
+  await readHostedLinqInviteSignupLiveAttemptsTx({
+    ...input,
+    prisma: {
+      $queryRaw: (query: Prisma.Sql) => {
+        capturedQuery = query;
+        return Promise.resolve([{
+          anyIdentityLive: false,
+          sameIdentityStillLive: false,
+        }]);
+      },
+    } as never,
+  });
+  if (!capturedQuery) {
+    throw new Error("Expected the production live-invite facts query.");
+  }
+  return capturedQuery;
+}
+
+function expectBoundedLiveInvitePlan(input: {
+  expectedIndexNodeCount: number;
+  plan: PostgreSqlExplainPlanNode;
+  requiresExactIdentityCondition: boolean;
+}): void {
+  const indexNodes = collectPostgreSqlPlanNodes(
+    input.plan,
+    (node) => node["Index Name"] === LIVE_INVITE_SOURCE_REF_INDEX,
+  );
+  expect(indexNodes).toHaveLength(input.expectedIndexNodeCount);
+  expect(indexNodes.every((node) =>
+    (node["Actual Rows"] ?? 0) <= 2
+  )).toBe(true);
+  expect(indexNodes.some((node) =>
+    node["Index Cond"]?.includes("~>=~") === true
+    && node["Index Cond"]?.includes("~<~") === true
+  )).toBe(true);
+  expect(indexNodes.some((node) =>
+    node["Index Cond"]?.includes("= ANY") === true
+  )).toBe(input.requiresExactIdentityCondition);
+  expect(collectPostgreSqlPlanNodes(
+    input.plan,
+    (node) => node["Node Type"] === "Seq Scan"
+      && node["Relation Name"] === "hosted_linq_delivery",
+  )).toHaveLength(0);
+}
+
 function collectPostgreSqlPlanNodes(
   root: PostgreSqlExplainPlanNode,
   predicate: (node: PostgreSqlExplainPlanNode) => boolean,
@@ -674,10 +691,6 @@ function requireLookupKey(value: string | null): string {
     throw new Error("Expected a deterministic Hosted Linq lookup key.");
   }
   return value;
-}
-
-function escapeLikePrefix(value: string): string {
-  return value.replace(/[!%_]/gu, (character) => `!${character}`);
 }
 
 function sleep(milliseconds: number): Promise<void> {

@@ -3039,7 +3039,7 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
     : link;
 }
 
-async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
+export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
   dayUtc: string;
   memberId: string;
   prisma: HostedLinqDeliveryClient;
