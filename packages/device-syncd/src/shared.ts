@@ -83,6 +83,7 @@ export function splitScopeList(value: unknown): string[] {
 }
 
 export {
+  DEVICE_SYNC_METADATA_DELETE,
   isBlockedStoredDeviceSyncMetadataKey,
   mergeStoredDeviceSyncMetadataPatch,
   sanitizeStoredDeviceSyncMetadata,
