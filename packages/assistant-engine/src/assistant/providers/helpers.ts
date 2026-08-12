@@ -13,7 +13,6 @@ import {
   normalizeNullableString,
 } from '../shared.js'
 import {
-  supportsAssistantNativeResume,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -62,19 +61,7 @@ function requireAssistantProviderUserPrompt(
 function hasAssistantProviderUsableNativeResume(
   input: AssistantProviderTurnExecutionInput,
 ): boolean {
-  const resumeCodexThreadId = normalizeNullableString(
-    input.resume?.codexThreadId,
-  )
-  if (!resumeCodexThreadId) {
-    return false
-  }
-
-  if (!supportsAssistantNativeResume(input.providerConfig)) {
-    return false
-  }
-
-  void resumeCodexThreadId
-  return true
+  return normalizeNullableString(input.resume?.codexThreadId) !== null
 }
 
 export type AssistantProviderHistoryMode =
@@ -335,9 +322,7 @@ export function extractCodexAssistantProviderUsage(input: {
     rawEvents: input.rawEvents,
     turnId,
   })
-  const providerName = input.providerConfig.target.kind === 'codex-cli'
-    ? input.providerConfig.target.modelProvider
-    : null
+  const providerName = input.providerConfig.target.modelProvider
   const requestedModel = input.providerConfig.target.model
   const servedModel = findAssistantCodexCurrentTurnReroutedModel({
     rawEvents: input.rawEvents,

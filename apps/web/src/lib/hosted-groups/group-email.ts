@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+  HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
 } from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
@@ -65,6 +67,16 @@ export type HostedGroupEmailPreparationResult =
 
 type ReadClient = PrismaClient;
 
+const HOSTED_GROUP_EMAIL_MEMBER_QUERY_TAKE =
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1;
+const HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY = "group-email.v0";
+// The selected relation also carries the exact group-email.v0 authorization
+// grant, so retain that row plus the first over-limit authorized-share row.
+// The snapshot validation below rejects a second or noncanonical email-kind
+// row, which keeps these two non-data slots sufficient for corrupt graphs too.
+const HOSTED_GROUP_EMAIL_SHARE_QUERY_TAKE =
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX + 2;
+
 function buildHostedGroupEmailMemberAccessSelect(now: Date) {
   return Prisma.validator<Prisma.HostedMemberSelect>()({
     ...hostedMemberAccessSelect,
@@ -123,17 +135,6 @@ export async function prepareHostedGroupEmail(input: {
   const resolved = await readHostedGroupEmailParticipantEmailFacts(input);
   if (resolved.status !== "ok") {
     return resolved;
-  }
-  if (
-    resolved.participants.some((participant) =>
-      participant.authorizedShares.length
-      > HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
-    )
-  ) {
-    return {
-      status: "unavailable",
-      unavailableReason: "authorization_snapshot_too_large",
-    };
   }
   const authorizationParticipants = resolved.participants.map((participant) => ({
     authorizedShares: participant.authorizedShares,
@@ -247,13 +248,20 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
     select: {
       id: true,
       members: {
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: { memberId: true },
+        take: HOSTED_GROUP_EMAIL_MEMBER_QUERY_TAKE,
       },
     },
   });
   if (!group) {
     return { status: "unavailable", unavailableReason: "group_not_found" };
+  }
+  if (group.members.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS) {
+    return {
+      status: "unavailable",
+      unavailableReason: "authorization_snapshot_too_large",
+    };
   }
 
   const memberIds = group.members.map((member) => member.memberId);
@@ -300,7 +308,8 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
 
   // This is the final awaited authority read. Its late repeatable-read snapshot
   // keeps group binding, membership, active access, verified-email identity,
-  // and every grant coherent even if Prisma splits nested relation loading.
+  // and the admitted grant snapshot coherent even if Prisma splits nested
+  // relation loading.
   const canonicalGroup = await prisma.$transaction(async (tx) =>
     await tx.hostedGroup.findFirst({
       where: {
@@ -310,7 +319,7 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
       select: {
         id: true,
         members: {
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: {
             member: {
               select: {
@@ -322,7 +331,10 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
                   },
                 },
                 vaultSharesGranted: {
-                  orderBy: { projectionScopeKey: "asc" },
+                  orderBy: [
+                    { projectionScopeKey: "asc" },
+                    { id: "asc" },
+                  ],
                   where: {
                     destinationMemberId: input.runtimeMemberId,
                     status: "granted",
@@ -332,10 +344,12 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
                     projectionKind: true,
                     projectionScopeKey: true,
                   },
+                  take: HOSTED_GROUP_EMAIL_SHARE_QUERY_TAKE,
                 },
               },
             },
           },
+          take: HOSTED_GROUP_EMAIL_MEMBER_QUERY_TAKE,
         },
         runtimeMember: {
           select: memberAccessSelect,
@@ -354,6 +368,49 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
   ) {
     return { status: "unavailable", unavailableReason: "runtime_inactive" };
   }
+  if (
+    canonicalGroup.members.length
+    > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
+  ) {
+    return {
+      status: "unavailable",
+      unavailableReason: "authorization_snapshot_too_large",
+    };
+  }
+
+  // Check the bounded share snapshot before testing email authorization. When
+  // the snapshot is over budget, a later group-email.v0 row may be outside the
+  // cap, so skipping first would turn an unknown authorization into success.
+  for (const { member } of canonicalGroup.members) {
+    if (!hasHostedGroupEmailMemberActiveAccess(member)) {
+      continue;
+    }
+    const emailAuthorizationGrants = member.vaultSharesGranted.filter((grant) =>
+      grant.projectionKind === HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+    );
+    if (
+      emailAuthorizationGrants.length > 1
+      || emailAuthorizationGrants.some((grant) =>
+        grant.projectionScopeKey !== HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+      )
+    ) {
+      return {
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_invalid",
+      };
+    }
+    if (
+      member.vaultSharesGranted.filter((grant) =>
+        grant.projectionKind !== HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+      ).length
+      > HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
+    ) {
+      return {
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_too_large",
+      };
+    }
+  }
 
   const participants: Array<{
     address: string | null;
@@ -366,7 +423,8 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
       continue;
     }
     if (!member.vaultSharesGranted.some((grant) =>
-      grant.projectionKind === "group-email.v0"
+      grant.projectionKind === HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+      && grant.projectionScopeKey === HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
     )) {
       continue;
     }
@@ -388,10 +446,18 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
             }),
           }
         : null;
+    if (participants.length >= HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX) {
+      return {
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_too_large",
+      };
+    }
     participants.push({
       address: emailUnchanged?.address ?? null,
       authorizedShares: member.vaultSharesGranted
-        .filter((grant) => grant.projectionKind !== "group-email.v0")
+        .filter((grant) =>
+          grant.projectionKind !== HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+        )
         .map((grant) => ({
           projectionScopeKey: grant.projectionScopeKey,
           shareId: grant.id,

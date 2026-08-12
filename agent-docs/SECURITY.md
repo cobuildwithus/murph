@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Non-Negotiable Rules
 
@@ -75,6 +75,10 @@ Last verified: 2026-08-10
   summary and timeseries records. An unresolved source reference fails closed
   while any source admission is pending; a truly absent row retains the legacy
   admitted behavior.
+- Junction Oura `note` data is admitted only for its dated tags. The importer
+  maps each distinct tag to a completed intervention event and compact evidence.
+  It must remove the free-text `value` before provider-snapshot or evidence
+  retention, and must not place that text in Patterns, logs, or fixtures.
 - Composio connected-app authority is web-owned. Keep `COMPOSIO_API_KEY`, `OPENWEATHER_API_KEY`, remote Tool Router session ids, OAuth state, provider tokens, and full authorization URLs out of runner env, Codex prompts, diagnostics, logs, fixtures, and persisted workspace artifacts. The runner may call only the single signed connected-app control route; web must bind every operation to the callback-authenticated member, enforce approved toolkits plus read-only/non-destructive session tags, require explicit account selection for connected-account execution, and allow accountless execution only for server-owned built-in service tool slugs. Web may inject server-held OpenWeather custom auth only for the allowlisted Composio weather reads. The exact official-alert slug may instead call the fixed OpenWeather One Call origin and path with only validated latitude and longitude, a fixed section exclusion, a short timeout, no cache, a response byte limit, and a bounded normalized projection. The runner never receives the OpenWeather key and cannot choose the provider URL or add query arguments. Connected-app writes remain limited to the exact server-owned fixed-write allowlist: primary-calendar event creation plus bounded Gmail and Microsoft Outlook sends. Every fixed write requires agent approval, an active owned account from the matching toolkit, a pinned provider version, local missing, blank, unsupported, and server-owned argument rejection, and server-forced provider fields. Email sends additionally require current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable, and an ambiguous email outcome may be reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body; uncertain results remain unknown. Web must verify callback account ownership against Composio before showing success. Email, calendar, attachment, weather-alert, and other provider payloads are high-sensitivity untrusted data: full or raw payloads and free-form provider error messages must not be written to operational logs; Web may retain only bounded documented provider error codes or strict category slugs from a bounded failure body.
 - Member memory consolidation retains its isolated network-denied model turn. Reminder availability has no model turn, model-facing tool, or separate permission profile: the hosted background automation pass deterministically selects only active non-exact-time direct automations with exact current `skip-when-busy`, `calendar-only`, and Google Calendar or Outlook account-binding lines. Host code derives the stored account, fixed provider tool, current seven-day window, arguments, and 256-item cap; rejects incomplete pagination and unsupported timestamps; reduces the response to merged busy instants; then rereads the exact automation and requires its version and source/account binding to remain unchanged before atomically replacing the engine-owned suffix. Complete empty reads persist only their bounded timestamps so refresh cadence needs no second state owner. Raw event titles, bodies, attendees, locations, URLs, and provider identifiers must not enter a model, memory, automation instructions, or logs. Ordinary saves and instruction patches strip the owned suffix; changing to an exact-time schedule also converts the policy to fixed and removes its source and account binding. Scheduled execution requires a non-exact-time schedule, current exact policy/source/account authorization, and a canonical snapshot covering an occurrence scheduled within 24 hours of generation. The timestamp-only suffix is removed before every provider prompt. Its host-only snapshot remains a bounded derived-data lease: disconnect or provider revocation blocks future reads but can leave the current lease usable for up to one day. Policy removal or account replacement invalidates it immediately; malformed or older evidence, failed first activation, and concurrent edits fail open to normal reminder delivery without a live account-status request on every occurrence.
 - Habitat location is city-or-approximate-region data, never precise-address data. Reject a precise address at the ordinary Habitat write boundary, instruct voice extraction to discard it, and revalidate the canonical value immediately before weather-provider egress so an unsafe legacy record cannot leave Murph. Environment voice is AI work: first-seen uploads require the existing AI-usage gate and may create at most one unconsumed recording per member under the member lock. Exact duplicate retries may reuse the canonical claim without spending another admission because they cannot create additional work. Enforce the three-minute audio limit on server-side prepared media, not on the caller's duration field.
@@ -339,6 +343,25 @@ Last verified: 2026-08-10
   membership check under the group transaction as a concurrency backstop.
   Contact hints, names, stale invitations, and a browser-supplied member id are
   never membership or payment authority.
+- An active Family owner membership without paid billing is not by itself
+  sponsorship authority. Automatic invite recovery may delete only the exact
+  accepting member's never-paid, owner-only group after proving it has no
+  invites, other memberships, paid capacity, Customer, Subscription, billing
+  period, or live or inconsistent Checkout claim. The authenticated Settings
+  recovery route must enforce the normal app session, same-origin mutation
+  check, suspension fence, and the exact group plus nullable Checkout-attempt
+  pair projected into the rendered action. Every abandonment caller supplies
+  that pair before Stripe retrieval, expiry, or a transaction begins; the
+  locked transaction then revalidates the complete claim so completion,
+  replacement, or new authority fails closed. A stale
+  duplicate binder must preserve an exact subscription already accepted by
+  that group and may close a completed Session only after the locked owner
+  boundary proves the original group is absent. Repeating a completed explicit
+  recovery may return only the already-validated internal invite path and must
+  perform no group creation, Checkout, provider call, or deletion. An in-flight
+  recovery must carry its exact projected group and Checkout-attempt identity
+  into replay and abandonment; a changed identity fails before provider cleanup
+  rather than rediscovering or retiring the owner's replacement checkout.
 - Group sponsorship separates funding authority from permission to speak into
   the room. A valid current funding locator may identify only the frozen group
   beneficiary. Alias, note, or running-bit content is accepted only from the
@@ -628,7 +651,8 @@ Last verified: 2026-08-10
   carries tracking, identity, canonical references, credentials, tokens, or
   write authority. V1-V5 presentation envelopes may also reach the bounded
   queryless
-  `/imessage/card/v1/:payload.png` route for Linq's static fallback. That path is
+  `/imessage/card/v1/:payload.png` route for Linq's static fallback and the
+  Telegram daily-nutrition Rich Message visual. That path is
   immutable message content, not an authenticated card API: strict parsing runs
   before bundled asset reads, the renderer performs no database or remote read,
   writes no application log or analytics event, and returns private
@@ -929,6 +953,13 @@ Last verified: 2026-08-10
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
+- Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
+  every class and must contain no authorized keys. Deploy automation must not
+  accept an environment-controlled SSH key or compatibility switch that can
+  restore an operator shell. Keep the independent Container PID-namespace
+  isolation flag enabled until the configured compatibility date provides the
+  same boundary by default. Use structured logs, Durable Object status,
+  Container inventory, and managed deploy smoke as the diagnostic boundary.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
   contain staging-only credentials and must not duplicate production database,

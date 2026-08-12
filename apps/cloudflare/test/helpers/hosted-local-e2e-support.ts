@@ -234,6 +234,7 @@ export function expectAdvertisedMurphDynamicTools(
   options: {
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
+    exerciseRoutineResponseCardAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
@@ -306,6 +307,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.responseCardAvailable !== true
         && name === "murph.attach_response_card"
+      ) {
+        return false;
+      }
+
+      if (
+        options.exerciseRoutineResponseCardAvailable !== true
+        && name === "murph.attach_exercise_routine_card"
       ) {
         return false;
       }

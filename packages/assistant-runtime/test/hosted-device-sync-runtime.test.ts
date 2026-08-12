@@ -3020,6 +3020,7 @@ describe("hosted device-sync runtime", () => {
             resource: "steps",
             resourceCategory: "timeseries",
             sourceProviderSlug: "garmin",
+            timingSourceProviderSlug: "garmin",
             windowEnd: "2026-04-04T00:00:00.000Z",
             windowStart: "2026-04-02T00:00:00.000Z",
           },
@@ -3109,6 +3110,7 @@ describe("hosted device-sync runtime", () => {
           eventToProviderSendBucket: "under_5_minutes",
           firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
           providerSendToWebhookMs: 60_000,
+          sourceProvider: "garmin",
         },
       }]);
       assert.deepEqual(
@@ -3156,6 +3158,7 @@ describe("hosted device-sync runtime", () => {
         jobKind: "resource",
         provider: "demo",
         providerSendToWebhookMs: 60_000,
+        sourceProvider: "garmin",
       });
       assert.equal(completedImports.length, 1);
       assert.deepEqual(state.pendingDirtyAcks, [{
@@ -3164,13 +3167,76 @@ describe("hosted device-sync runtime", () => {
         processedRevision: "42",
       }]);
       assert.deepEqual(state.pendingDirtyPayloadJobs, []);
+
+      const [timedResource] = dirtyState.dirtyResources;
+      assert.ok(timedResource);
+      const directProviderState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [{
+                ...dirtyState,
+                dirtyResources: [{
+                  ...timedResource,
+                  resource: "sleep",
+                  resourceCategory: "summary",
+                  sourceProviderSlug: null,
+                  timingSourceProviderSlug: undefined,
+                }],
+                dirtyRevision: "43",
+                eventCount: "1",
+                processedRevision: "42",
+                resourceCategoryCounts: { summary: 1 },
+                sourceProviderCounts: {},
+              }],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_dirty_wake",
+          eventId: "evt_device_sync_direct_timing",
+          hint: { reason: "dirty" },
+          occurredAt: "2026-04-04T10:01:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(
+        directProviderState.pendingDirtyPayloadJobs[0]?.timing?.sourceProvider,
+        "demo",
+      );
+      const directProviderJob = readJobsForAccount(service, connected.account.id)
+        .find((job) => job.id === directProviderState.pendingDirtyPayloadJobs[0]?.jobId);
+      assert.deepEqual(
+        directProviderJob?.payloadJson ? JSON.parse(directProviderJob.payloadJson) : null,
+        {
+          resource: "sleep",
+          resourceCategory: "summary",
+          windowEnd: "2026-04-04T00:00:00.000Z",
+          windowStart: "2026-04-02T00:00:00.000Z",
+        },
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
 
-  test("deduplicated local imports emit one timing event and acknowledge every payload", async () => {
+  test("duplicate pending timing entries merge conservatively after local job deduplication", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-deduped-timing-",
     );
@@ -3215,6 +3281,7 @@ describe("hosted device-sync runtime", () => {
             eventToProviderSendBucket: "under_5_minutes",
             firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
             providerSendToWebhookMs: 60_000,
+            sourceProvider: "garmin",
           },
         }, {
           connectionId: "hosted_conn_deduped",
@@ -3225,6 +3292,7 @@ describe("hosted device-sync runtime", () => {
             eventToProviderSendBucket: "5_to_30_minutes",
             firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
             providerSendToWebhookMs: 120_000,
+            sourceProvider: "fitbit",
           },
         }],
         snapshot: null,
@@ -3251,6 +3319,7 @@ describe("hosted device-sync runtime", () => {
         jobKind: "reconcile",
         provider: "demo",
         providerSendToWebhookMs: 120_000,
+        sourceProvider: null,
       });
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_deduped",
@@ -3259,6 +3328,102 @@ describe("hosted device-sync runtime", () => {
         processedRevision: "9",
       }]);
       assert.deepEqual(state.pendingDirtyPayloadJobs, []);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("one mixed-source compact reconcile stays one import and omits source attribution", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-mixed-source-timing-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "mixed-source-timing",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_mixed_source_timing",
+        externalAccountId: connected.account.externalAccountId,
+      });
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [{
+                connectionId: "hosted_conn_mixed_source_timing",
+                dirtyRevision: "1",
+                dirtyResources: [{
+                  count: 2,
+                  eventToProviderSendBucket: "5_to_30_minutes",
+                  firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
+                  providerSendToWebhookMs: 120_000,
+                  jobKind: "reconcile",
+                  resource: null,
+                  resourceCategory: null,
+                  sourceProviderSlug: null,
+                  timingSourceProviderSlug: null,
+                  windowEnd: null,
+                  windowStart: null,
+                }],
+                eventCount: "2",
+                latestDirtyAt: "2026-04-08T00:03:00.000Z",
+                processedRevision: "0",
+                provider: "demo",
+                resourceCategoryCounts: { reconcile: 2 },
+                sourceProviderCounts: { unknown: 2 },
+                userId: "member_mixed_source_timing",
+                windowEnd: null,
+                windowStart: null,
+              }],
+              nextWakeAt: null,
+              userId: "member_mixed_source_timing",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_mixed_source_timing",
+          eventId: "evt_device_sync_mixed_source_timing",
+          hint: { reason: "dirty" },
+          occurredAt: "2026-04-08T00:03:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      const payload = jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : {};
+      assert.deepEqual(payload, {
+        windowEnd: "2026-04-08T00:03:00.000Z",
+        windowStart: "2026-04-08T00:03:00.000Z",
+      });
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, "sourceProviderSlug"), false);
+      assert.equal(state.pendingDirtyPayloadJobs.length, 1);
+      assert.equal(state.pendingDirtyPayloadJobs[0]?.timing?.sourceProvider, null);
+
+      assert.equal(await service.drainWorker(1), 1);
+      const completedImports = promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      assert.equal(completedImports.length, 1);
+      assert.equal(completedImports[0]?.sourceProvider, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

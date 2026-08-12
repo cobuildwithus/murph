@@ -210,32 +210,62 @@ Render the macOS and app-absent fallback as the compact default state of the
 shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
 cream field, large calorie value, calorie progress ring, and one-row protein,
 carbohydrates, fat, and fiber readings visually aligned with the Messages
-extension. The bitmap stays rectangular and badge-free because Messages owns
-the outer corner mask. Installed extensions retain their native icon;
-app-absent static cards omit the optional square App Store artwork. Status
-color may tint nutrient values, but
-the ring draws quantitative progress only for a complete calorie total with an
+extension, with a clear pause between the calorie row and macro grid. The
+bitmap stays rectangular because Messages owns the outer corner
+mask, but the bitmap itself embeds the canonical Murph mark in the same 36×27pt
+upper-left badge footprint as the native balloon. Installed extensions retain
+their native icon; app-absent static cards omit the optional square App Store
+artwork because the provider request has no App Store id. Status color may tint
+nutrient values, while the safe text recovery preserves the complete status
+outside the bitmap. The ring
+draws quantitative progress only for a complete calorie total with an
 assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
 the neutral track. The static image does not expose the native card's
 tap-to-reveal target state. The provider caption retains only the date and meal
 count; visible totals and goals are not repeated beneath the image. V1 renders
 an unavailable fiber dash in the image without adding a fiber caption claim.
 
-Compact-table and workout fallback images use the same provider-owned chrome
-contract: keep the bitmap rectangular and badge-free, reserve empty upper-left
-clearance for the icon that Messages overlays, and let Messages supply that icon
-and the outer corner mask. Keep structural rounding only where it communicates
-an inner state, such as a progress track or set-status marker.
+Compact-table and workout fallback images use the same chrome contract: keep
+the bitmap rectangular, embed the canonical Murph mark in the native badge
+footprint, place the title beside that mark in one shared header, and let
+Messages supply only the outer corner mask and caption. The badge and title use
+one optically centered row with a measured gap; optional supporting text uses
+the card content inset below that row rather than participating in its
+centering. Do not reserve a larger empty icon gutter. Keep structural rounding
+only where it communicates an inner state, such as a progress track or
+set-status marker.
+When a generic table uses stacked fields, keep each measured header above its
+full-width measured value so every contract-valid token remains contained. The
+exact intrinsic width of the row-header, column-header, and value tracks plus
+their gutters is the sole layout selector: use the single shared table header
+whenever those tracks fit, including four-column cards, and repeat field labels
+only for genuinely overwide content.
 
 ### iMessage Challenge Standings Card Image
 Render the app-absent standings fallback as the static counterpart to the
 shipping SwiftUI balloon. Keep the cream field, title, rank or collective
 progress, and score hierarchy aligned with the native card. The bitmap remains
-rectangular and badge-free because Messages owns the outer chrome. Reserve the
-upper-left title gutter for its provider-owned logo without drawing that logo
-into the bitmap. Preserve
-scorer-owned order, scores, progress, and coverage while using the identity-free
-public presentation defined by the challenge standings delivery contract.
+rectangular because Messages owns the outer chrome, while the canonical Murph
+mark is embedded in the native upper-left badge footprint. Reuse the same
+optically centered badge-and-title row as workout and compact-table cards, with
+optional supporting text directly under the title. Preserve scorer-owned order,
+scores, progress, and coverage while using the identity-free public
+presentation defined by the challenge standings delivery contract.
+
+### Shared iMessage Card Handoff
+When a shared response-card URL reaches the public homepage instead of the
+Messages extension, open one compact handoff dialog after hydration. Reuse the
+standard Dialog and Button conventions without a logo, eyebrow, numbered step
+grid, or promotional accent treatment. In one short description, tell the user
+to install or open Murph and then return to Messages and tap the card again.
+Use Open App Store as the primary action, Cancel as a ghost secondary action,
+and the standard close control. Stack both actions at full width using the
+large settings-dialog button convention so the App Store destination remains
+the clear primary path. Give the short serif heading display-scale presence,
+use readable body copy, and let the compact surface breathe with the wider,
+roomier settings-dialog spacing. The dialog must not display or decode the
+fragment, add device-specific branching, or turn the fallback into a signup
+flow.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
@@ -492,6 +522,21 @@ unavailable state. After cancellation, replace the action with a durable receipt
 that confirms future automatic refills stopped and existing usage credit stays
 with the group. Do not reload into an unrelated unavailable state.
 
+For a signed-in active group participant, append one quiet **Supporters** list
+beneath the funding action when a current monthly sponsorship or recent
+one-time contribution exists. Use only a public alias entered after the dialog
+discloses its signed-in-group audience and active-monthly-or-recent-20 duration,
+and only after verified settlement preserved the sponsor's group authority;
+otherwise use `Anonymous`. Label each row only as
+`Monthly sponsor` or `One-time contribution`. Do not show amounts, monthly
+maximums, dates, payer identity, payment status, or automatic-refill history.
+Signed-out visitors and non-participants never see the supporter list. Keep the
+list absent when there is nothing to recognize. Stream it beneath the complete
+primary action in its own best-effort Suspense boundary with a null fallback so
+recognition cannot delay funding, management, cancellation, or recovery. Render
+its real component with synthetic states in both the components catalog and
+this section study.
+
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared
 choice cards. On phones, use a near-full-height bottom drawer with one large
@@ -592,7 +637,7 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
 - Dynamic OG image: `apps/web/app/opengraph-image.tsx` (1200×630, Fraunces + DM Sans, hero.jpg background)
-- Static iMessage response-card image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200px wide, content-sized, DM Sans, immutable bounded V1-V4 snapshot)
+- Static iMessage response-card image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200px wide, content-sized, DM Sans, canonical Murph badge, immutable bounded V1-V5 snapshot)
 - Canonical hero image: `apps/web/public/hero.jpg` (3583×2000)
 - Supporting texture: `apps/web/public/warmglow.png` (1376×768)
 - Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`; nutrition and compact-table image studies live on the components tab)

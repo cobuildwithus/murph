@@ -363,6 +363,44 @@ test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () 
   );
 });
 
+test("VercelTelemetry strips shared-card fragments before sending", () => {
+  mocks.pathname = "/";
+  mocks.analyticsProps.length = 0;
+  mocks.speedInsightsProps.length = 0;
+
+  renderToStaticMarkup(createElement(VercelTelemetry));
+
+  const analyticsProps = mocks.analyticsProps[0];
+  const speedInsightsProps = mocks.speedInsightsProps[0];
+
+  if (!analyticsProps || !speedInsightsProps) {
+    assert.fail("Vercel telemetry components did not receive beforeSend props.");
+  }
+
+  const sharedCardUrl =
+    "https://www.example.test/#murph-card=synthetic-private-envelope";
+
+  assert.deepEqual(
+    analyticsProps.beforeSend({ type: "pageview", url: sharedCardUrl }),
+    {
+      type: "pageview",
+      url: "https://www.example.test/",
+    },
+  );
+  assert.deepEqual(
+    speedInsightsProps.beforeSend({
+      route: "/#murph-card=synthetic-private-envelope",
+      type: "vital",
+      url: sharedCardUrl,
+    }),
+    {
+      route: "/",
+      type: "vital",
+      url: "https://www.example.test/",
+    },
+  );
+});
+
 test("VercelTelemetry aggregates public dynamic routes without sending identifiers", () => {
   const routes = [
     {

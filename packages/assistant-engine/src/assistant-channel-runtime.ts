@@ -3,6 +3,7 @@ export {
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,
   sendTelegramMessage,
+  sendTelegramRichMessage,
   sendTelegramVoiceMemoMessage,
   setLinqMessageReaction,
   startLinqTypingIndicator,

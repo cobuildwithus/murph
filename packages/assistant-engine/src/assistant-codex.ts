@@ -132,8 +132,10 @@ import {
   readCodexCollabReceiverThreadIds,
 } from './assistant/providers/helpers.js'
 import {
-  materializeCodexImagePaths,
+  materializeCodexImages,
+  normalizeCodexAppServerImageDetails,
   type CodexAppServerImageInput,
+  type CodexAppServerPreparedImageInput,
 } from './assistant-codex/images.js'
 import type {
   AssistantWorkspaceArtifactMaterializer,
@@ -279,8 +281,8 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   codexCommand: string
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  imagePaths: readonly string[]
   launchKey: string
+  preparedImages: readonly CodexAppServerPreparedImageInput[]
   publicInternetFetch: typeof fetch | null
   tempRoot: string
   workingDirectory: string
@@ -641,7 +643,7 @@ export type CodexAppServerSteerRequestInput = Omit<
   CodexAppServerSteerInput,
   'images'
 > & {
-  imagePaths?: readonly string[] | null
+  images?: readonly CodexAppServerPreparedImageInput[] | null
 }
 
 export interface CodexAppServerSteerRequest {
@@ -692,8 +694,13 @@ export async function executeCodexAppServerTurn(
   }
   const processInput = await prepareCodexAppServerProcessInput(input)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
-  const imagePaths = await materializeCodexImagePaths({
-    images: input.images,
+  const preparedImages = await materializeCodexImages({
+    images: normalizeCodexAppServerImageDetails({
+      images: input.images,
+      model: input.model,
+      modelProvider: input.modelProvider,
+      turnKind: 'initial',
+    }),
     tempRoot,
   })
   const normalizedInput = {
@@ -710,7 +717,7 @@ export async function executeCodexAppServerTurn(
     ...processInput,
     fetchImpl: input.fetchImpl ?? fetch,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-    imagePaths,
+    preparedImages,
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
@@ -5120,8 +5127,13 @@ async function runCodexAppServerTurnOnProcess(
     steerInput: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>,
   ): Promise<void> => {
     const liveTurn = requireLiveTurnIds()
-    const steerImagePaths = await materializeCodexImagePaths({
-      images: steerInput.images,
+    const preparedSteerImages = await materializeCodexImages({
+      images: normalizeCodexAppServerImageDetails({
+        images: steerInput.images,
+        model: input.model,
+        modelProvider: input.modelProvider,
+        turnKind: 'steer',
+      }),
       tempRoot: input.tempRoot,
     })
     await withCodexRpcTimeout(
@@ -5129,7 +5141,7 @@ async function runCodexAppServerTurnOnProcess(
         'turn/steer',
         buildCodexTurnSteerParams({
           ...liveTurn,
-          imagePaths: steerImagePaths,
+          images: preparedSteerImages,
           prompt: steerInput.prompt,
         }),
       ),
@@ -5315,7 +5327,7 @@ async function runCodexAppServerTurnOnProcess(
       'turn/start',
       buildCodexTurnStartParams({
         input,
-        imagePaths: input.imagePaths,
+        images: input.preparedImages,
         codexThreadId,
       }),
     )
