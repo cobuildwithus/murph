@@ -7607,6 +7607,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const accountSnapshots = Array.from({ length: 33 }, (_, index) => ({
+      connection: {
+        accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
+        connectedAt: "2026-04-28T00:00:00.000Z",
+        createdAt: new Date(Date.parse("2026-04-28T00:00:00.000Z") - index * 1_000)
+          .toISOString(),
+        displayName: index === 0 ? "Training wearable" : `Training wearable ${index + 1}`,
+        externalAccountId: `external-account-not-for-assistant-${index + 1}`,
+        id: index === 0
+          ? "conn_synthetic_whoop"
+          : `conn_synthetic_whoop_${String(index + 1).padStart(2, "0")}`,
+        metadata: { privateProviderDetail: "not-for-assistant" },
+        provider: "whoop",
+        scopes: ["read:recovery"],
+        status: "active" as const,
+      },
+      credential: {
+        credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
+        kind: "none" as const,
+      },
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
+        lastWebhookAt: "2026-04-28T23:58:00.000Z",
+        nextReconcileAt: null,
+      },
+    }));
+    const accountCursor = {
+      createdAt: accountSnapshots[31]!.connection.createdAt,
+      id: accountSnapshots[31]!.connection.id,
+    };
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -7628,36 +7662,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         };
       },
       async fetchSnapshot(request) {
+        const pageIndex = fetchSnapshotRequests.length;
         fetchSnapshotRequests.push(request);
         return {
-          connections: [{
-            connection: {
-              accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
-              connectedAt: "2026-04-28T00:00:00.000Z",
-              createdAt: "2026-04-28T00:00:00.000Z",
-              displayName: "Training wearable",
-              externalAccountId: "external-account-not-for-assistant",
-              id: "conn_synthetic_whoop",
-              metadata: { privateProviderDetail: "not-for-assistant" },
-              provider: "whoop",
-              scopes: ["read:recovery"],
-              status: "active" as const,
-            },
-            credential: {
-              credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
-              kind: "none" as const,
-            },
-            localState: {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-              lastSyncErrorAt: null,
-              lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
-              lastWebhookAt: "2026-04-28T23:58:00.000Z",
-              nextReconcileAt: null,
-            },
-          }],
+          connections: pageIndex === 0
+            ? accountSnapshots.slice(0, 32)
+            : accountSnapshots.slice(32),
           generatedAt: "2026-04-29T00:00:00.000Z",
+          nextCursor: pageIndex === 0 ? accountCursor : null,
           userId: "member_synthetic_phase",
         };
       },
@@ -7718,24 +7730,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       provider: " whoop ",
       sourceProvider: " whoop_v2 ",
     }, { signal: abortController.signal })).resolves.toEqual({
-      accounts: [{
-        accountId: "conn_synthetic_whoop",
-        displayName: "Training wearable",
-        lastErrorCode: null,
-        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-        provider: "whoop",
-        status: "active",
-      }],
+      accounts: accountSnapshots.map(({ connection, localState }) => ({
+        accountId: connection.id,
+        displayName: connection.displayName,
+        lastErrorCode: localState.lastErrorCode,
+        lastSyncCompletedAt: localState.lastSyncCompletedAt,
+        provider: connection.provider,
+        status: connection.status,
+      })),
       action: "list_accounts",
       provider: "whoop",
       sourceProvider: "whoop_v2",
     });
-    expect(fetchSnapshotRequests).toEqual([{
-      includeCredentialMaterial: false,
-      provider: "whoop",
-      signal: abortController.signal,
-      sourceProviderSlug: "whoop_v2",
-    }]);
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+      {
+        cursor: accountCursor,
+        includeCredentialMaterial: false,
+        limit: 32,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+    ]);
     await expect(
       deviceTool.request({
         action: "connect",
@@ -7908,14 +7930,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotRequests.push(request);
-        if (request?.sourceProviderSlug !== "whoop_v2") {
-          return {
-            connections: [],
-            generatedAt: "2026-04-29T00:00:00.000Z",
-            userId: "member_synthetic_phase",
-          };
-        }
-
         return {
           connections: [
             {
@@ -8010,27 +8024,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),
     );
-    expect(fetchSnapshotRequests.map((request) => ({
-      provider: request?.provider,
-      sourceProviderSlug: request?.sourceProviderSlug,
-    }))).toEqual([
-      { provider: undefined, sourceProviderSlug: "fitbit" },
-      { provider: undefined, sourceProviderSlug: "garmin" },
-      { provider: undefined, sourceProviderSlug: "oura" },
-      { provider: undefined, sourceProviderSlug: "withings" },
-      { provider: undefined, sourceProviderSlug: "whoop_v2" },
-      { provider: "strava", sourceProviderSlug: undefined },
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        signal: expect.any(AbortSignal),
+      },
     ]);
-    expect(fetchSnapshotRequests).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          includeCredentialMaterial: false,
-          limit: 4,
-          signal: expect.any(AbortSignal),
-          sourceProviderSlug: "whoop_v2",
-        }),
-      ]),
-    );
+    for (const request of fetchSnapshotRequests) {
+      expect(request).not.toHaveProperty("limit");
+    }
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
@@ -8377,7 +8379,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
     const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
-    expect(fetchSnapshotCalls).toBe(2);
+    expect(fetchSnapshotCalls).toBe(1);
     expect(fetchSnapshotSignal).toBeInstanceOf(AbortSignal);
     expect(prompt).toBeNull();
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();

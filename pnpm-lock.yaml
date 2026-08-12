@@ -312,6 +312,9 @@ importers:
       '@linqapp/sdk':
         specifier: 0.34.0
         version: 0.34.0
+      '@murphai/assistant-runtime':
+        specifier: workspace:*
+        version: link:../../packages/assistant-runtime
       '@murphai/hosted-local-harness':
         specifier: workspace:*
         version: link:../../packages/hosted-local-harness

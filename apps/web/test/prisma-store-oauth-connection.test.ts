@@ -61,6 +61,8 @@ vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", async () => {
 
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
 import {
+  hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
   PrismaDeviceSyncControlPlaneStore,
   type HostedConnectionRecord,
 } from "@/src/lib/device-sync/prisma-store";
@@ -1941,6 +1943,86 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         updatedAt: "2026-03-25T00:00:00.000Z",
       }),
     ]);
+  });
+
+  it("uses an id-and-status-only member projection for companion status", async () => {
+    const findMany = vi.fn(async () => [{
+      id: "dsc_123",
+      status: "active",
+    }]);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: { findMany },
+      } as never,
+    });
+
+    await expect(store.listMemberConnectionStatuses({
+      limit: 32,
+      provider: "junction",
+      status: "not_disconnected",
+      userId: "user-123",
+    })).resolves.toEqual([{
+      id: "dsc_123",
+      status: "active",
+    }]);
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 33,
+      select: {
+        id: true,
+        status: true,
+      },
+      where: {
+        provider: "junction",
+        status: { not: "disconnected" },
+        userId: "user-123",
+      },
+    });
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when companion status connection authority exceeds its bound", async () => {
+    const findMany = vi.fn(async () =>
+      Array.from({ length: 33 }, (_, index) => ({
+        id: `dsc_${String(index).padStart(2, "0")}`,
+        status: "active",
+      }))
+    );
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: { findMany },
+      } as never,
+    });
+
+    await expect(store.listMemberConnectionStatuses({
+      limit: 32,
+      provider: "junction",
+      status: "not_disconnected",
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "MEMBER_CONNECTION_STATUS_SNAPSHOT_SATURATED",
+      httpStatus: 503,
+      retryable: false,
+    });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 33 }));
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps redacted runtime SQL projections free of every device ciphertext", () => {
+    expect(hostedConnectionRecordArgs.select).toMatchObject({
+      accessTokenEncrypted: true,
+      externalAccountIdEncrypted: true,
+      refreshTokenEncrypted: true,
+    });
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "accessTokenEncrypted",
+    );
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "externalAccountIdEncrypted",
+    );
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "refreshTokenEncrypted",
+    );
   });
 
   it("keeps webhook-ingress external-account lookups on the durable Prisma owner", async () => {

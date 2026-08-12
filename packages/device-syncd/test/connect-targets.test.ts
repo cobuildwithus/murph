@@ -4,6 +4,7 @@ import { test } from "vitest";
 import {
   isDeviceConnectSourceAvailableForConnection,
   isMemberOwnedDeviceSyncConnectTarget,
+  listJunctionDeviceConnectRouteEntries,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
   listDeviceSyncReconnectTargets,
@@ -13,6 +14,21 @@ import {
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
 } from "../src/config.ts";
 import { readConfiguredDeviceSyncConnectTargetConfigs } from "../src/connect-config.ts";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "../src/hosted-runtime.ts";
+
+test("configured Junction source authority fits one runtime connection snapshot", () => {
+  const sourceProviderSlugs = new Set(
+    listJunctionDeviceConnectRouteEntries().map(
+      ({ route }) => route.sourceProviderSlug,
+    ),
+  );
+
+  assert.equal(sourceProviderSlugs.size, 33);
+  assert.ok(
+    sourceProviderSlugs.size
+      <= HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+  );
+});
 
 test("connect targets prefer direct providers except Junction-backed WHOOP", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
