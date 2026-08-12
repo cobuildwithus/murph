@@ -78,6 +78,11 @@ const EXPECTED_NEXT_SESSION_FEATURES = [
   "workout_swimming_stroke",
 ];
 
+const EXPECTED_DENSE_FEATURE_OPT_INS = [
+  "electrocardiogram_voltage",
+  "workout_stream",
+];
+
 const EXPECTED_OPT_IN = [
   "steps",
   "distance",
@@ -86,6 +91,7 @@ const EXPECTED_OPT_IN = [
   "weight",
   ...EXPECTED_NEW_SPARSE_OPT_INS,
   ...EXPECTED_NEXT_OPT_INS,
+  ...EXPECTED_DENSE_FEATURE_OPT_INS,
 ];
 
 describe("Junction timeseries resource policy", () => {
@@ -119,6 +125,28 @@ describe("Junction timeseries resource policy", () => {
       enabledByDefault: true,
       fetchChunkDays: 1,
       historyWindow: "dense_timeseries",
+    });
+    for (const resource of EXPECTED_DENSE_FEATURE_OPT_INS) {
+      expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).not.toContain(resource);
+      expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).not.toContain(resource);
+      expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).not.toContain(resource);
+    }
+    expect(resolveJunctionTimeseriesResourcePolicy("electrocardiogram_voltage")).toMatchObject({
+      enabledByDefault: false,
+      fetchChunkDays: 1,
+      historyWindow: "dense_timeseries",
+      maxRecordsPerWindow: 64,
+      maxSamplesPerWindow: 100_000,
+      normalizationMode: "ecg_recording_feature",
+    });
+    expect(resolveJunctionTimeseriesResourcePolicy("workout_stream")).toMatchObject({
+      enabledByDefault: false,
+      fetchChunkDays: 1,
+      fetchMode: "workout_stream",
+      historyWindow: "dense_timeseries",
+      maxRecordsPerWindow: 32,
+      maxSamplesPerRecord: 100_000,
+      normalizationMode: "workout_stream_feature",
     });
   });
 

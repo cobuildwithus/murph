@@ -80,6 +80,12 @@ import {
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
 import {
+  JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
+  JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  buildJunctionBoundedFeatureIdentity,
+  resolveJunctionBoundedFeatureRecords,
+} from "./junction-bounded-features.ts";
+import {
   normalizeJunctionSourceProviderSlug,
   readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
@@ -1857,6 +1863,11 @@ function normalizeTimeseries(
       continue;
     }
 
+    if (resource === "electrocardiogram_voltage" || resource === "workout_stream") {
+      pushJunctionBoundedTimeseriesFeatures(payload, resource, context);
+      continue;
+    }
+
     if (resource === JUNCTION_BLOOD_PRESSURE_RESOURCE) {
       pushJunctionBloodPressureReadings(payload, resource, slugify(resource, "timeseries"), context);
       continue;
@@ -1902,6 +1913,63 @@ function normalizeTimeseries(
       );
     }
   }
+}
+
+function pushJunctionBoundedTimeseriesFeatures(
+  payload: unknown,
+  resource: "electrocardiogram_voltage" | "workout_stream",
+  context: NormalizationContext,
+): void {
+  const features = normalizeJunctionBoundedTimeseriesFeatures(resource, payload);
+  const canonicalResource = resource === "electrocardiogram_voltage"
+    ? "electrocardiogram"
+    : "workouts";
+  const canonicalResourceSlug = slugify(canonicalResource, "summary");
+  const featureResourceSlug = slugify(resource, "timeseries");
+
+  features.forEach((entry, index) => {
+    const identity = buildJunctionBoundedFeatureIdentity(resource, entry);
+    const evidenceRole = `junction-timeseries-feature-${featureResourceSlug}:${shortHash([
+      resource,
+      identity,
+    ])}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(evidenceRole, `${evidenceRole}.json`, entry),
+        "timeseries_feature_aggregate",
+      ),
+    );
+
+    const resourceContext = buildResourceContext({
+      entry,
+      resource: canonicalResource,
+      resourceSlug: canonicalResourceSlug,
+      identityKind: "summary",
+      index,
+      fallbackArtifactRole: evidenceRole,
+      fallbackIdentityDisambiguator: identity,
+      context,
+    });
+    if (!resourceContext) {
+      return;
+    }
+
+    if (resource === "electrocardiogram_voltage") {
+      pushElectrocardiogramSummary(entry, resourceContext, context);
+    } else {
+      pushWorkoutSummary(entry, resourceContext, context);
+    }
+  });
+}
+
+function normalizeJunctionBoundedTimeseriesFeatures(
+  resource: "electrocardiogram_voltage" | "workout_stream",
+  payload: unknown,
+): PlainObject[] {
+  const records = timeseriesResourceEntries(payload).map(({ entry }) => entry);
+  return resolveJunctionBoundedFeatureRecords(resource, records);
 }
 
 function pushJunctionSparseTimeseriesRecords(
@@ -3402,6 +3470,9 @@ function buildRawResourcePayload(
   }
 
   const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  if (resource === "electrocardiogram_voltage" || resource === "workout_stream") {
+    return normalizeJunctionBoundedTimeseriesFeatures(resource, payload);
+  }
   const sparseDescriptor = JUNCTION_SPARSE_TIMESERIES_DESCRIPTORS.get(resource);
   if (
     policy
@@ -5254,10 +5325,10 @@ function inclusiveDaysBetween(startDate: string, endDate: string | undefined): n
   return days >= 1 && days <= 120 ? days : undefined;
 }
 
-// One Junction ECG summary per recording, dozens-to-hundreds of sub-KB rows
-// per member-year (docs.junction.com/api-reference/data/electrocardiogram/get-summary).
-// The recording lands as one measurement event carrying the classification as
-// a qualifier; the electrocardiogram_voltage waveform stays excluded.
+// One Junction ECG owner per recording. The default summary contributes its
+// documented bounded fields; the explicit voltage opt-in contributes only
+// neutral aggregate signal features and merges into that same owner. Waveform
+// samples never enter canonical events or retained evidence.
 function pushElectrocardiogramSummary(
   entry: PlainObject,
   resourceContext: ResourceContext,
@@ -6204,10 +6275,10 @@ function buildStableSummaryResourceId(
     resourceContext.origin.sourceType,
     resourceContext.origin.sourceInstanceId,
     timestamp.observedAtRaw ?? timestamp.occurredAt,
-    ...(resourceContext.resource === "meal" ? [
-      resolveJunctionMealTitle(entry),
-      ...(resourceContext.fallbackIdentityDisambiguator ? [resourceContext.fallbackIdentityDisambiguator] : []),
-    ] : []),
+    ...(resourceContext.resource === "meal" ? [resolveJunctionMealTitle(entry)] : []),
+    ...(resourceContext.fallbackIdentityDisambiguator
+      ? [resourceContext.fallbackIdentityDisambiguator]
+      : []),
   ])}`;
 }
 

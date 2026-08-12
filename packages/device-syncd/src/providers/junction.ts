@@ -22,6 +22,15 @@ import {
   resolveJunctionWeightProviderRecordIdentity,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
+import {
+  JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
+  JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  buildJunctionBoundedFeatureIdentity,
+  reduceJunctionElectrocardiogramVoltageRecords,
+  reduceJunctionWorkoutStreamPayload,
+  resolveJunctionBoundedFeatureRecords,
+  selectJunctionWorkoutStreamCandidates,
+} from "@murphai/importers/device-providers/junction-bounded-features";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   isJunctionRawDirectIdentityContainerKey,
@@ -1567,7 +1576,7 @@ export function createJunctionDeviceSyncProvider(
     if (timeseriesProbeWindow) {
       for (const resource of timeseriesResources) {
         const resourceResult = await runJunctionDiagnosticCall(() =>
-          client.listTimeseries({
+          fetchJunctionTimeseriesWindow(client, {
             resource,
             userId: context.account.externalAccountId,
             windowStart: timeseriesProbeWindow.windowStart,
@@ -1802,7 +1811,7 @@ export function createJunctionDeviceSyncProvider(
     const resourceCategory = endpoint;
     const resourceResult = await runJunctionDiagnosticCall(() =>
       resourceCategory === "timeseries"
-        ? client.listTimeseries({
+        ? fetchJunctionTimeseriesWindow(client, {
             resource: normalizedResource,
             sourceProviderSlug,
             userId: context.account.externalAccountId,
@@ -1825,9 +1834,7 @@ export function createJunctionDeviceSyncProvider(
         request: {
           configuredResource: isConfiguredJunctionResource(resourceCategory, normalizedResource),
           endpoint: resourceCategory,
-          endpointKind: resourceCategory === "timeseries"
-            ? "junction_timeseries_collection"
-            : "junction_summary_collection",
+          endpointKind: resolveJunctionDiagnosticEndpointKind(resourceCategory, normalizedResource),
           queryParameterNames: resolveJunctionDiagnosticResourceQueryParameterNames(
             resourceCategory,
             normalizedResource,
@@ -2823,7 +2830,7 @@ export function createJunctionDeviceSyncProvider(
         if (options.dateQueryFormat) {
           request.dateQueryFormat = options.dateQueryFormat;
         }
-        const chunkRecords = await client.listTimeseries(request);
+        const chunkRecords = await fetchJunctionTimeseriesWindow(client, request);
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
             chunkRecords,
@@ -2856,6 +2863,9 @@ export function createJunctionDeviceSyncProvider(
       chunkStart = chunkEnd;
     }
 
+    if (resource === "electrocardiogram_voltage" || resource === "workout_stream") {
+      return resolveJunctionBoundedFeatureRecords(resource, records);
+    }
     return dedupeJunctionTimeseriesRecords(resource, records);
   }
 
@@ -3565,6 +3575,77 @@ export function createJunctionDeviceSyncProvider(
       executeJob,
     },
   };
+}
+
+async function fetchJunctionTimeseriesWindow(
+  junctionClient: JunctionClient,
+  input: JunctionWindowInput,
+): Promise<unknown[]> {
+  const policy = resolveJunctionTimeseriesResourcePolicy(input.resource);
+  if (!policy) {
+    throw new TypeError(`Unknown Junction timeseries resource: ${input.resource}.`);
+  }
+
+  if (policy.fetchMode === "workout_stream") {
+    const maxWorkouts = policy.maxRecordsPerWindow;
+    const maxSamples = policy.maxSamplesPerRecord;
+    if (!maxWorkouts || !maxSamples) {
+      throw new TypeError("Junction workout_stream policy did not define bounded limits.");
+    }
+    const indexRecords = await junctionClient.listSummary({
+      resource: "workouts",
+      signal: input.signal ?? null,
+      sourceProviderSlug: input.sourceProviderSlug,
+      userId: input.userId,
+      windowStart: input.windowStart,
+      windowEnd: input.windowEnd,
+      maxRecords: maxWorkouts + 1,
+    });
+    const summaries = indexRecords.map((record) =>
+      withJunctionSourceProviderFallback(record, input.sourceProviderSlug)
+    );
+    const candidates = selectJunctionWorkoutStreamCandidates(summaries, maxWorkouts);
+    const features: unknown[] = [];
+    for (const candidate of candidates) {
+      const stream = await junctionClient.getWorkoutStream({
+        signal: input.signal ?? null,
+        workoutId: candidate.workoutId,
+      });
+      features.push(reduceJunctionWorkoutStreamPayload({
+        maxSamples,
+        stream,
+        summary: candidate.summary,
+      }));
+    }
+    return features;
+  }
+
+  const records = await junctionClient.listTimeseries({
+    ...input,
+    maxRecords: input.maxRecords ?? policy.maxSamplesPerWindow,
+  });
+  if (policy.normalizationMode !== "ecg_recording_feature") {
+    return records;
+  }
+  if (!policy.maxRecordsPerWindow || !policy.maxSamplesPerWindow) {
+    throw new TypeError("Junction ECG voltage policy did not define bounded limits.");
+  }
+  return reduceJunctionElectrocardiogramVoltageRecords(records, {
+    maxRecordings: policy.maxRecordsPerWindow,
+    maxSamples: policy.maxSamplesPerWindow,
+  });
+}
+
+function withJunctionSourceProviderFallback(
+  value: unknown,
+  sourceProviderSlug: string | null | undefined,
+): unknown {
+  const record = readPlainObject(value);
+  const normalizedSource = normalizeProviderSlug(sourceProviderSlug);
+  if (!record || !normalizedSource || resolveJunctionOrigin(record).sourceProviderSlug) {
+    return value;
+  }
+  return { ...record, sourceProviderSlug: normalizedSource };
 }
 
 function withJunctionSkippedResourceMetadata(
@@ -4290,7 +4371,7 @@ async function runJunctionDiagnosticMatrixRead(input: {
 }): Promise<Record<string, unknown>> {
   const response = await runJunctionDiagnosticCall(() =>
     input.category === "timeseries"
-      ? input.client.listTimeseries({
+      ? fetchJunctionTimeseriesWindow(input.client, {
           resource: input.resource,
           sourceProviderSlug: input.sourceProviderSlug,
           userId: input.account.externalAccountId,
@@ -4310,9 +4391,7 @@ async function runJunctionDiagnosticMatrixRead(input: {
     request: {
       configuredResource: input.configuredResource,
       endpoint: input.category,
-      endpointKind: input.category === "timeseries"
-        ? "junction_timeseries_collection"
-        : "junction_summary_collection",
+      endpointKind: resolveJunctionDiagnosticEndpointKind(input.category, input.resource),
       queryParameterNames: resolveJunctionDiagnosticResourceQueryParameterNames(
         input.category,
         input.resource,
@@ -4325,6 +4404,18 @@ async function runJunctionDiagnosticMatrixRead(input: {
     },
     response: describeJunctionDiagnosticRecords(response),
   };
+}
+
+function resolveJunctionDiagnosticEndpointKind(
+  category: "summary" | "timeseries",
+  resource: string,
+): string {
+  if (category === "summary") {
+    return "junction_summary_collection";
+  }
+  return resolveJunctionTimeseriesResourcePolicy(resource)?.fetchMode === "workout_stream"
+    ? "junction_workout_stream"
+    : "junction_timeseries_collection";
 }
 
 function resolveJunctionDiagnosticResourceQueryParameterNames(
@@ -5386,6 +5477,17 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
     return null;
   }
 
+  if (
+    (resource === "electrocardiogram_voltage" && entry.schema === JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA)
+    || (resource === "workout_stream" && entry.schema === JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA)
+  ) {
+    return JSON.stringify([
+      "junction-bounded-timeseries-feature",
+      resource,
+      buildJunctionBoundedFeatureIdentity(resource, entry),
+    ]);
+  }
+
   const origin = resolveJunctionOrigin(entry);
   const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
   const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
@@ -5561,9 +5663,13 @@ function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown
     "time",
     "date",
     "day",
+    "sessionEnd",
+    "session_end",
     "end",
     "endAt",
     "end_at",
+    "sessionStart",
+    "session_start",
     "start",
     "startAt",
     "start_at",

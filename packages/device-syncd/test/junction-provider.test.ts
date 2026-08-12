@@ -13763,6 +13763,8 @@ test("Junction provider rejects unsupported configured resources", () => {
       "workout_distance",
       "workout_duration",
       "workout_swimming_stroke",
+      "electrocardiogram_voltage",
+      "workout_stream",
     ],
   }));
   assert.throws(
@@ -13773,9 +13775,9 @@ test("Junction provider rejects unsupported configured resources", () => {
   );
   assert.throws(
     () => createJunctionProvider(async () => createJsonResponse({}), {
-      timeseriesResources: ["electrocardiogram_voltage", "workout_stream"],
+      timeseriesResources: ["electrocardiogram_waveform_legacy", "workout_stream_legacy"],
     }),
-    /Junction timeseries resources include unsupported resource\(s\): electrocardiogram_voltage, workout_stream\./u,
+    /Junction timeseries resources include unsupported resource\(s\): electrocardiogram_waveform_legacy, workout_stream_legacy\./u,
   );
 });
 
@@ -14513,4 +14515,233 @@ test("Junction mixed sparse and dense backfills resume the longest history befor
     const end = url.searchParams.get("end_date");
     return start !== null && start === end;
   }));
+});
+
+test("Junction workout_stream diagnostics use one bounded index read and serial dedicated stream reads", async () => {
+  const requests: string[] = [];
+  let activeStreams = 0;
+  let maximumActiveStreams = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    const parsed = new URL(url);
+
+    if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
+      return createJsonResponse({
+        data: Array.from({ length: 32 }, (_, index) => ({
+          id: `workout-${index}`,
+          source: { provider: "garmin", type: "watch", device_id: "watch-1" },
+          start: `2026-04-02T${String(index % 24).padStart(2, "0")}:00:00.000Z`,
+          end: `2026-04-02T${String(index % 24).padStart(2, "0")}:30:00.000Z`,
+          sport: "run",
+        })),
+      });
+    }
+    if (/^\/v2\/timeseries\/workouts\/workout-\d+\/stream$/u.test(parsed.pathname)) {
+      activeStreams += 1;
+      maximumActiveStreams = Math.max(maximumActiveStreams, activeStreams);
+      await Promise.resolve();
+      activeStreams -= 1;
+      return createJsonResponse({
+        time: [1_775_131_200, 1_775_133_000],
+        heartrate: [100, 160],
+        distance: [0, 5_000],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["workout_stream"],
+  });
+  const probeRest = provider.diagnostics?.probeRest;
+  assert.ok(probeRest);
+
+  const result = await probeRest({
+    account: createAccount(),
+    endpoint: "timeseries",
+    now: "2026-04-03T12:00:00.000Z",
+    resource: "workout_stream",
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  const diagnostic = result.result as {
+    request?: { endpointKind?: string };
+    response?: { ok?: boolean; recordCount?: number };
+  };
+
+  assert.equal(diagnostic.request?.endpointKind, "junction_workout_stream");
+  assert.equal(diagnostic.response?.ok, true);
+  assert.equal(diagnostic.response?.recordCount, 32);
+  assert.equal(requests.filter((url) => url.includes("/v2/summary/workouts/")).length, 1);
+  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/workouts/")).length, 32);
+  assert.equal(requests.some((url) => url.includes("/workout_stream/grouped")), false);
+  assert.equal(maximumActiveStreams, 1);
+});
+
+test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {
+  let indexPages = 0;
+  let streamCalls = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const parsed = new URL(readUrl(input));
+    if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
+      indexPages += 1;
+      if (indexPages < 100) {
+        return createJsonResponse({ data: [], next_cursor: `page-${indexPages + 1}` });
+      }
+      return createJsonResponse({
+        data: Array.from({ length: 32 }, (_, index) => ({
+          id: `workout-${index}`,
+          sourceProviderSlug: "garmin",
+          startAt: "2026-04-02T12:00:00.000Z",
+          endAt: "2026-04-02T12:30:00.000Z",
+        })),
+      });
+    }
+    if (/^\/v2\/timeseries\/workouts\/workout-\d+\/stream$/u.test(parsed.pathname)) {
+      streamCalls += 1;
+      return createJsonResponse({
+        time: [1_775_131_200],
+        heartrate: [120],
+        distance: [5_000],
+      });
+    }
+    throw new Error(`Unexpected request: ${parsed.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["workout_stream"],
+  });
+  const probeRest = provider.diagnostics?.probeRest;
+  assert.ok(probeRest);
+
+  const result = await probeRest({
+    account: createAccount(),
+    endpoint: "timeseries",
+    now: "2026-04-03T12:00:00.000Z",
+    resource: "workout_stream",
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  const diagnostic = result.result as { response?: { ok?: boolean; recordCount?: number } };
+
+  assert.equal(diagnostic.response?.ok, true);
+  assert.equal(diagnostic.response?.recordCount, 32);
+  assert.equal(indexPages, 100);
+  assert.equal(streamCalls, 32);
+  assert.equal(indexPages + streamCalls, 132);
+});
+
+test("Junction workout_stream rejects an over-cap index before fetching any stream", async () => {
+  let streamCalls = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const parsed = new URL(readUrl(input));
+    if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
+      return createJsonResponse({
+        data: Array.from({ length: 33 }, (_, index) => ({
+          id: `workout-${index}`,
+          sourceProviderSlug: "garmin",
+          startAt: `2026-04-02T${String(index % 24).padStart(2, "0")}:00:00.000Z`,
+          endAt: `2026-04-02T${String(index % 24).padStart(2, "0")}:30:00.000Z`,
+        })),
+      });
+    }
+    if (parsed.pathname.includes("/v2/timeseries/workouts/")) {
+      streamCalls += 1;
+      return createJsonResponse({});
+    }
+    throw new Error(`Unexpected request: ${parsed.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["workout_stream"],
+  });
+  const probeRest = provider.diagnostics?.probeRest;
+  assert.ok(probeRest);
+
+  const result = await probeRest({
+    account: createAccount(),
+    endpoint: "timeseries",
+    now: "2026-04-03T12:00:00.000Z",
+    resource: "workout_stream",
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  const diagnostic = result.result as { response?: { ok?: boolean; error?: Record<string, unknown> } };
+
+  assert.equal(diagnostic.response?.ok, false);
+  assert.equal(streamCalls, 0);
+});
+
+test("Junction workout_stream resource jobs reuse precise continuation windows", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    const parsed = new URL(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
+      const start = parsed.searchParams.get("start_date") ?? "2026-04-01T06:00:00.000Z";
+      const end = new Date(Date.parse(start) + 30 * 60_000).toISOString();
+      return createJsonResponse({
+        data: [{
+          id: `workout-${start}`,
+          source: { provider: "garmin", type: "watch", device_id: "watch-1" },
+          start,
+          end,
+          sport: "run",
+        }],
+      });
+    }
+    if (parsed.pathname.startsWith("/v2/timeseries/workouts/")) {
+      return createJsonResponse({
+        time: [1_775_131_200, 1_775_133_000],
+        heartrate: [100, 160],
+        distance: [0, 5_000],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["workout_stream"],
+  });
+  const job = createJob("resource", {
+    resource: "workout_stream",
+    resourceCategory: "timeseries",
+    windowStart: "2026-04-01T06:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      shouldYield: () => requests.some((url) => url.includes("/v2/timeseries/workouts/")),
+    }),
+    job,
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    timeseries?: { workout_stream?: Array<Record<string, unknown>> };
+    windowEnd?: string;
+    windowStart?: string;
+  };
+  assert.deepEqual([snapshot.windowStart, snapshot.windowEnd], [
+    "2026-04-01T06:00:00.000Z",
+    "2026-04-02T06:00:00.000Z",
+  ]);
+  assert.equal(snapshot.timeseries?.workout_stream?.length, 1);
+  assert.equal(Array.isArray(snapshot.timeseries?.workout_stream?.[0]?.stream), false);
+  const continuation = requireValue(
+    result.scheduledJobs?.find((scheduled) => scheduled.kind === "resource"),
+    "workout stream yield should schedule the remaining precise window",
+  );
+  assert.equal(continuation.payload?.windowStart, "2026-04-02T06:00:00.000Z");
+  assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });

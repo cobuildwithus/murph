@@ -163,6 +163,8 @@ describe("deviceSyncProviderManifests", () => {
       "workout_distance",
       "workout_duration",
       "workout_swimming_stroke",
+      "electrocardiogram_voltage",
+      "workout_stream",
     ]);
     for (const resource of JUNCTION_OPT_IN_TIMESERIES_RESOURCES) {
       expect(normalizeJunctionDeviceSyncRuntimeConfig({

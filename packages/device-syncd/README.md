@@ -57,6 +57,16 @@ Current providers:
   extended-history horizon as summaries, fetched in bounded 30-day windows;
   dense/default timeseries retain their one-day windows. `fat` remains the
   public resource name while the client requests Junction's `body_fat` path.
+- `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins and
+  remain off by default. ECG voltage uses one-day grouped windows capped at
+  100,000 admitted samples and 64 recordings, then reduces each recording to one
+  clinically neutral feature record before a sync snapshot exists. Workout stream
+  uses the ordinary workout index only to admit at most 32 stable workouts per
+  one-day window, then reads Junction's dedicated per-workout stream endpoint
+  serially and caps each stream at 100,000 points. The common single-page bound is
+  33 provider calls (one index plus 32 streams); the hard bound is 132 calls under
+  the existing 100-page pagination ceiling. Neither path retains waveform/stream
+  points, provider envelopes, or evidence whose size scales with sample count.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
