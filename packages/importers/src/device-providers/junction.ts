@@ -49,6 +49,7 @@ import {
   JUNCTION_SLEEP_HRV_PATHS,
   JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
   JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
+  JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
   JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
   JUNCTION_SLEEP_PERFORMANCE_PATHS,
@@ -297,7 +298,7 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: JUNCTION_SLEEP_LIGHT_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_LIGHT_SECOND_PATHS },
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
   { metric: "time-in-bed-minutes", unit: "minutes", title: "Junction time in bed", paths: JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS },
-  { metric: "sleep-latency-minutes", unit: "minutes", title: "Junction sleep latency", paths: [], secondsPaths: JUNCTION_SLEEP_LATENCY_SECOND_PATHS, nonnegative: true },
+  { metric: "sleep-latency-minutes", unit: "minutes", title: "Junction sleep latency", paths: JUNCTION_SLEEP_LATENCY_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_LATENCY_SECOND_PATHS, nonnegative: true },
   { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
   { metric: "sleep-consistency", unit: "%", title: "Junction sleep consistency", paths: JUNCTION_SLEEP_CONSISTENCY_PATHS },
   { metric: "sleep-performance", unit: "%", title: "Junction sleep performance", paths: JUNCTION_SLEEP_PERFORMANCE_PATHS },
@@ -1182,7 +1183,10 @@ function normalizeSummaries(
   const sleepSummaryMetricOwners = collectJunctionSleepSummaryMetricOwners(summaryEntries, context);
 
   for (const [resource, payload] of summaryEntries) {
-    const entries = resourceEntries(payload, resource);
+    const preparedMenstrualCycle = resource === "menstrual_cycle"
+      ? prepareJunctionMenstrualCycleSummary(payload)
+      : undefined;
+    const entries = preparedMenstrualCycle?.entries ?? resourceEntries(payload, resource);
     const resourceSlug = slugify(resource, "summary");
     const evidencePartRole = `junction-summary-${resourceSlug}`;
     const fallbackIdentityDisambiguators = resource === "meal"
@@ -1199,7 +1203,8 @@ function normalizeSummaries(
       createEvidencePart(
         evidencePartRole,
         `${evidencePartRole}.json`,
-        buildRawResourcePayload(resource, payload, context.connectionsByKey),
+        preparedMenstrualCycle?.evidence
+          ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
       ),
     );
 
@@ -2225,6 +2230,10 @@ function buildRawResourcePayload(
   payload: unknown,
   connectionsByKey?: ReadonlyMap<string, PlainObject>,
 ): unknown {
+  if (resource === "menstrual_cycle") {
+    return prepareJunctionMenstrualCycleSummary(payload).evidence;
+  }
+
   if (resource === JUNCTION_NOTE_RESOURCE) {
     return sanitizeJunctionNoteRawValue(sanitizeJunctionRawPayload(payload));
   }
@@ -3764,18 +3773,422 @@ const JUNCTION_MENSTRUAL_FLOW_ORDINALS: Readonly<Record<string, number>> = Objec
   medium: 2,
   heavy: 3,
 });
-// Surge results are positive detections; indeterminate results carry no
-// usable value and stay raw-only.
-const JUNCTION_FERTILITY_TEST_RESULT_VALUES: Readonly<Record<string, number>> = Object.freeze({
+const JUNCTION_CERVICAL_MUCUS_QUALITIES = new Set([
+  "dry",
+  "sticky",
+  "creamy",
+  "watery",
+  "egg_white",
+]);
+const JUNCTION_CONTRACEPTIVE_TYPES = new Set([
+  "implant",
+  "injection",
+  "iud",
+  "intravaginal_ring",
+  "oral",
+  "patch",
+]);
+const JUNCTION_MENSTRUAL_DEVIATIONS = new Set([
+  "persistent_intermenstrual_bleeding",
+  "prolonged_menstrual_periods",
+  "irregular_menstrual_cycles",
+  "infrequent_menstrual_cycles",
+]);
+const JUNCTION_OVULATION_TEST_RESULT_VALUES: Readonly<Record<string, number>> = Object.freeze({
   negative: 0,
   positive: 1,
   luteinizing_hormone_surge: 1,
   estrogen_surge: 1,
 });
+const JUNCTION_PREGNANCY_TEST_RESULT_VALUES: Readonly<Record<string, number>> = Object.freeze({
+  negative: 0,
+  positive: 1,
+});
+const JUNCTION_PROGESTERONE_TEST_RESULT_VALUES: Readonly<Record<string, number>> = Object.freeze({
+  negative: 0,
+  positive: 1,
+});
+const JUNCTION_MENSTRUAL_CYCLE_LIMIT = 64;
+const JUNCTION_MENSTRUAL_FACT_LIMIT = 512;
+const JUNCTION_MENSTRUAL_FACT_ARRAY_KEYS = [
+  "basalBodyTemperature",
+  "basal_body_temperature",
+  "cervicalMucus",
+  "cervical_mucus",
+  "contraceptive",
+  "detectedDeviations",
+  "detected_deviations",
+  "homePregnancyTest",
+  "home_pregnancy_test",
+  "homeProgesteroneTest",
+  "home_progesterone_test",
+  "intermenstrualBleeding",
+  "intermenstrual_bleeding",
+  "menstrualFlow",
+  "menstrual_flow",
+  "ovulationTest",
+  "ovulation_test",
+  "sexualActivity",
+  "sexual_activity",
+] as const;
 
-// One Junction menstrual cycle summary per cycle (~13/year), with small dated
-// sub-arrays (docs.junction.com/api-reference/data/menstrual-cycle/get-summary).
-// Predicted cycles are upstream forecasts, not facts, and stay raw-only.
+type JunctionMenstrualFactKind =
+  | "basal_body_temperature"
+  | "cervical_mucus"
+  | "contraceptive"
+  | "detected_deviation"
+  | "home_pregnancy_test"
+  | "home_progesterone_test"
+  | "intermenstrual_bleeding"
+  | "menstrual_flow"
+  | "ovulation_test"
+  | "sexual_activity";
+
+interface JunctionMenstrualFactDraft {
+  canonical: boolean;
+  date: string;
+  kind: JunctionMenstrualFactKind;
+  value?: string | number | boolean;
+}
+
+interface JunctionMenstrualEvidenceFact extends Omit<JunctionMenstrualFactDraft, "canonical"> {
+  cycleRecordHash: string;
+}
+
+interface JunctionPreparedMenstrualFact extends JunctionMenstrualEvidenceFact {
+  canonical: boolean;
+  isPredicted: boolean;
+}
+
+interface JunctionPreparedMenstrualCycle {
+  entry: PlainObject;
+  evidence: PlainObject;
+  facts: JunctionPreparedMenstrualFact[];
+  isPredicted: boolean;
+  originFallback?: JunctionOriginFallback;
+  recordHash: string;
+  sortKey: string;
+}
+
+interface JunctionPreparedMenstrualCycleSummary {
+  entries: JunctionResourceEntry[];
+  evidence: PlainObject;
+}
+
+function prepareJunctionMenstrualCycleSummary(
+  payload: unknown,
+): JunctionPreparedMenstrualCycleSummary {
+  const sortedSourceCycles = resourceEntries(payload, "menstrual_cycle")
+    .map(({ entry, originFallback }) =>
+      prepareJunctionMenstrualCycle(entry, originFallback)
+    )
+    .sort(comparePreparedJunctionMenstrualCycles);
+  const sourceCyclesByHash = new Map<string, JunctionPreparedMenstrualCycle>();
+  for (const cycle of sortedSourceCycles) {
+    const existing = sourceCyclesByHash.get(cycle.recordHash);
+    if (!existing) {
+      sourceCyclesByHash.set(cycle.recordHash, cycle);
+      continue;
+    }
+    existing.facts.push(...cycle.facts);
+  }
+  const sourceCycles = [...sourceCyclesByHash.values()];
+  const admittedCycles = sourceCycles.slice(0, JUNCTION_MENSTRUAL_CYCLE_LIMIT);
+  const uniqueFacts = new Map<string, JunctionPreparedMenstrualFact>();
+
+  for (const fact of admittedCycles.flatMap((cycle) => cycle.facts).sort(compareJunctionMenstrualFacts)) {
+    const key = junctionMenstrualFactSortKey(fact);
+    if (!uniqueFacts.has(key)) {
+      uniqueFacts.set(key, fact);
+    }
+  }
+
+  const allFacts = [...uniqueFacts.values()];
+  const admittedFacts = allFacts.slice(0, JUNCTION_MENSTRUAL_FACT_LIMIT);
+  const factsByCycle = new Map<string, JunctionPreparedMenstrualFact[]>();
+  for (const fact of admittedFacts) {
+    const facts = factsByCycle.get(fact.cycleRecordHash) ?? [];
+    facts.push(fact);
+    factsByCycle.set(fact.cycleRecordHash, facts);
+  }
+
+  return {
+    entries: admittedCycles.map((cycle) => ({
+      entry: buildPreparedJunctionMenstrualCycleEntry(
+        cycle.entry,
+        factsByCycle.get(cycle.recordHash) ?? [],
+      ),
+      originFallback: cycle.originFallback,
+    })),
+    evidence: {
+      schema: "junction.menstrual_cycle_evidence.v1",
+      provider: "junction",
+      resource: "menstrual_cycle",
+      cycleCount: admittedCycles.length,
+      factCount: admittedFacts.length,
+      omittedCycleCount: Math.max(0, sourceCycles.length - admittedCycles.length),
+      omittedFactCount: Math.max(0, allFacts.length - admittedFacts.length),
+      cycles: admittedCycles.map((cycle) => ({
+        ...cycle.evidence,
+        factCount: factsByCycle.get(cycle.recordHash)?.length ?? 0,
+      })),
+      facts: admittedFacts.map(({ canonical: _canonical, isPredicted: _isPredicted, ...fact }) => fact),
+    },
+  };
+}
+
+function prepareJunctionMenstrualCycle(
+  entry: PlainObject,
+  originFallback: JunctionOriginFallback | undefined,
+): JunctionPreparedMenstrualCycle {
+  const isPredicted = firstValueFromPaths(entry, ["isPredicted", "is_predicted"]) === true;
+  const drafts = collectJunctionMenstrualFactDrafts(entry);
+  const sourceProviderSlug = readJunctionSourceProviderSlug(entry, originFallback);
+  const sourceType = firstStringFromPaths(entry, ["sourceType", "source_type", "source.type"])
+    ?? firstStringFromPaths(originFallback, ["sourceType", "source_type", "source.type"]);
+  const explicitId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  const periodStart = firstIsoDateFromPaths(entry, ["periodStart", "period_start"]);
+  const periodEnd = firstIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
+  const cycleEnd = firstIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
+  const createdAt = trimOptionalToLength(firstStringFromPaths(entry, ["createdAt", "created_at"]), 80);
+  const updatedAt = trimOptionalToLength(firstStringFromPaths(entry, ["updatedAt", "updated_at"]), 80);
+  const recordHash = shortHash([
+    "menstrual-cycle",
+    sourceProviderSlug,
+    sourceType,
+    explicitId,
+    periodStart,
+    periodEnd,
+    cycleEnd,
+    createdAt,
+    updatedAt,
+    isPredicted,
+  ]);
+  const facts = drafts.map((fact) => ({
+    ...fact,
+    cycleRecordHash: recordHash,
+    isPredicted,
+  }));
+  const evidence = stripUndefined({
+    recordHash,
+    sourceProviderSlug,
+    sourceType,
+    isPredicted,
+    periodStart,
+    periodEnd,
+    cycleEnd,
+    createdAt,
+    updatedAt,
+    legacyCycleStart: firstIsoDateFromPaths(entry, ["cycleStart", "cycle_start"]),
+    legacyCycleDay: firstNumberFromPaths(entry, ["cycleDay", "cycle_day"]),
+    legacyPeriodLengthDays: firstNumberFromPaths(entry, ["periodLengthDays", "period_length_days"]),
+    legacyCycleLengthDays: firstNumberFromPaths(entry, ["cycleLengthDays", "cycle_length_days"]),
+  });
+
+  return {
+    entry,
+    evidence,
+    facts,
+    isPredicted,
+    originFallback,
+    recordHash,
+    sortKey: JSON.stringify([
+      isPredicted ? 1 : 0,
+      periodStart ?? "",
+      cycleEnd ?? "",
+      recordHash,
+    ]),
+  };
+}
+
+function collectJunctionMenstrualFactDrafts(entry: PlainObject): JunctionMenstrualFactDraft[] {
+  const facts: JunctionMenstrualFactDraft[] = [];
+  const pushEnumFacts = (
+    paths: readonly string[],
+    kind: JunctionMenstrualFactKind,
+    valuePaths: readonly string[],
+    isCanonical: (value: string) => boolean,
+  ): void => {
+    for (const sub of junctionDatedSubEntries(entry, paths)) {
+      const value = normalizeJunctionMenstrualEvidenceLabel(
+        firstStringFromPaths(sub.entry, valuePaths),
+      );
+      if (value) {
+        facts.push({ canonical: isCanonical(value), date: sub.date, kind, value });
+      }
+    }
+  };
+
+  pushEnumFacts(
+    ["menstrualFlow", "menstrual_flow"],
+    "menstrual_flow",
+    ["flow"],
+    (value) => Object.hasOwn(JUNCTION_MENSTRUAL_FLOW_ORDINALS, value),
+  );
+  pushEnumFacts(
+    ["cervicalMucus", "cervical_mucus"],
+    "cervical_mucus",
+    ["quality"],
+    (value) => JUNCTION_CERVICAL_MUCUS_QUALITIES.has(value),
+  );
+  pushEnumFacts(
+    ["contraceptive"],
+    "contraceptive",
+    ["type"],
+    (value) => JUNCTION_CONTRACEPTIVE_TYPES.has(value),
+  );
+  pushEnumFacts(
+    ["detectedDeviations", "detected_deviations"],
+    "detected_deviation",
+    ["deviation"],
+    (value) => JUNCTION_MENSTRUAL_DEVIATIONS.has(value),
+  );
+  pushEnumFacts(
+    ["ovulationTest", "ovulation_test"],
+    "ovulation_test",
+    ["testResult", "test_result"],
+    (value) => Object.hasOwn(JUNCTION_OVULATION_TEST_RESULT_VALUES, value),
+  );
+  pushEnumFacts(
+    ["homePregnancyTest", "home_pregnancy_test"],
+    "home_pregnancy_test",
+    ["testResult", "test_result"],
+    (value) => Object.hasOwn(JUNCTION_PREGNANCY_TEST_RESULT_VALUES, value),
+  );
+  pushEnumFacts(
+    ["homeProgesteroneTest", "home_progesterone_test"],
+    "home_progesterone_test",
+    ["testResult", "test_result"],
+    (value) => Object.hasOwn(JUNCTION_PROGESTERONE_TEST_RESULT_VALUES, value),
+  );
+
+  for (const sub of junctionDatedSubEntries(entry, ["intermenstrualBleeding", "intermenstrual_bleeding"])) {
+    facts.push({ canonical: true, date: sub.date, kind: "intermenstrual_bleeding" });
+  }
+  for (const sub of junctionDatedSubEntries(entry, ["basalBodyTemperature", "basal_body_temperature"])) {
+    const value = finiteNumber(firstValueFromPaths(sub.entry, ["value"]));
+    if (value !== undefined) {
+      facts.push({ canonical: false, date: sub.date, kind: "basal_body_temperature", value });
+    }
+  }
+  for (const sub of junctionDatedSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
+    const rawProtectionUsed = firstValueFromPaths(sub.entry, ["protectionUsed", "protection_used"]);
+    if (rawProtectionUsed === undefined || rawProtectionUsed === null || typeof rawProtectionUsed === "boolean") {
+      facts.push(stripUndefined({
+        canonical: true,
+        date: sub.date,
+        kind: "sexual_activity" as const,
+        value: typeof rawProtectionUsed === "boolean" ? rawProtectionUsed : undefined,
+      }));
+      continue;
+    }
+
+    const invalidValue = normalizeJunctionMenstrualEvidenceLabel(String(rawProtectionUsed));
+    if (invalidValue) {
+      facts.push({
+        canonical: false,
+        date: sub.date,
+        kind: "sexual_activity",
+        value: invalidValue,
+      });
+    }
+  }
+
+  return facts;
+}
+
+function buildPreparedJunctionMenstrualCycleEntry(
+  entry: PlainObject,
+  facts: readonly JunctionPreparedMenstrualFact[],
+): PlainObject {
+  const prepared: PlainObject = { ...entry };
+  for (const key of JUNCTION_MENSTRUAL_FACT_ARRAY_KEYS) {
+    delete prepared[key];
+  }
+
+  const grouped = new Map<JunctionMenstrualFactKind, PlainObject[]>();
+  for (const fact of [...facts].sort(compareJunctionMenstrualFacts)) {
+    const value = junctionMenstrualFactProviderEntry(fact);
+    const entries = grouped.get(fact.kind) ?? [];
+    entries.push(value);
+    grouped.set(fact.kind, entries);
+  }
+
+  const providerKeyByKind: Readonly<Record<JunctionMenstrualFactKind, string>> = {
+    basal_body_temperature: "basal_body_temperature",
+    cervical_mucus: "cervical_mucus",
+    contraceptive: "contraceptive",
+    detected_deviation: "detected_deviations",
+    home_pregnancy_test: "home_pregnancy_test",
+    home_progesterone_test: "home_progesterone_test",
+    intermenstrual_bleeding: "intermenstrual_bleeding",
+    menstrual_flow: "menstrual_flow",
+    ovulation_test: "ovulation_test",
+    sexual_activity: "sexual_activity",
+  };
+  for (const [kind, entries] of grouped) {
+    prepared[providerKeyByKind[kind]] = entries;
+  }
+
+  return prepared;
+}
+
+function junctionMenstrualFactProviderEntry(fact: JunctionPreparedMenstrualFact): PlainObject {
+  switch (fact.kind) {
+    case "basal_body_temperature":
+      return { date: fact.date, value: fact.value };
+    case "cervical_mucus":
+      return { date: fact.date, quality: fact.value };
+    case "contraceptive":
+      return { date: fact.date, type: fact.value };
+    case "detected_deviation":
+      return { date: fact.date, deviation: fact.value };
+    case "home_pregnancy_test":
+    case "home_progesterone_test":
+    case "ovulation_test":
+      return { date: fact.date, test_result: fact.value };
+    case "intermenstrual_bleeding":
+      return { date: fact.date };
+    case "menstrual_flow":
+      return { date: fact.date, flow: fact.value };
+    case "sexual_activity":
+      return stripUndefined({ date: fact.date, protection_used: fact.value });
+  }
+}
+
+function comparePreparedJunctionMenstrualCycles(
+  left: JunctionPreparedMenstrualCycle,
+  right: JunctionPreparedMenstrualCycle,
+): number {
+  return left.sortKey.localeCompare(right.sortKey);
+}
+
+function compareJunctionMenstrualFacts(
+  left: JunctionPreparedMenstrualFact,
+  right: JunctionPreparedMenstrualFact,
+): number {
+  return Number(left.isPredicted) - Number(right.isPredicted)
+    || Number(!left.canonical) - Number(!right.canonical)
+    || junctionMenstrualFactSortKey(left).localeCompare(junctionMenstrualFactSortKey(right));
+}
+
+function junctionMenstrualFactSortKey(fact: JunctionMenstrualEvidenceFact): string {
+  return JSON.stringify([
+    fact.cycleRecordHash,
+    fact.date,
+    fact.kind,
+    fact.value ?? null,
+  ]);
+}
+
+function normalizeJunctionMenstrualEvidenceLabel(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? trimToLength(normalized, 80) : undefined;
+}
+
+// One Junction menstrual cycle summary per cycle (~13/year). The caller has
+// already replaced provider arrays with the deterministic admitted fact set.
+// Predicted cycles are upstream forecasts, not canonical facts.
 function pushMenstrualCycleSummary(
   entry: PlainObject,
   resourceContext: ResourceContext,
@@ -3788,33 +4201,22 @@ function pushMenstrualCycleSummary(
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const periodStart = firstIsoDateFromPaths(entry, ["periodStart", "period_start"]);
   const periodEnd = firstIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
-  const cycleStart = firstIsoDateFromPaths(entry, ["cycleStart", "cycle_start"]);
   const cycleEnd = firstIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
-  const cycleAnchorDate = periodStart ?? cycleStart;
 
-  if (cycleAnchorDate) {
-    const cycleTimestamp = junctionDateOnlyTimestamp(baseTimestamp, cycleAnchorDate);
-    // Date-derived lengths win; explicit provider length fields are the
-    // fallback (the backfill completion predicate already treats them as
-    // useful, so a record carrying only the explicit fields must still
-    // land its observation). Both paths share the 1..120-day guard.
+  if (periodStart) {
+    const cycleTimestamp = junctionDateOnlyTimestamp(baseTimestamp, periodStart);
+    // Junction currently documents period_start, period_end, and cycle_end.
+    // Legacy cycle_start and scalar length aliases remain evidence-only.
     const cycleObservations = [
       {
         metric: "period-length-days",
         title: "Junction period length",
-        value: (periodStart ? inclusiveDaysBetween(periodStart, periodEnd) : undefined)
-          ?? plausibleCycleLengthDays(firstNumberFromPaths(entry, ["periodLengthDays", "period_length_days"])),
+        value: inclusiveDaysBetween(periodStart, periodEnd),
       },
       {
         metric: "cycle-length-days",
         title: "Junction cycle length",
-        // Cycle length anchors on the cycle start when present (period
-        // start is the fallback anchor — cycles begin with the period in
-        // Junction's model, but explicit cycle_start wins if they differ).
-        value: (cycleStart ?? periodStart
-          ? inclusiveDaysBetween(cycleStart ?? periodStart ?? "", cycleEnd)
-          : undefined)
-          ?? plausibleCycleLengthDays(firstNumberFromPaths(entry, ["cycleLengthDays", "cycle_length_days"])),
+        value: inclusiveDaysBetween(periodStart, cycleEnd),
       },
     ];
 
@@ -3850,8 +4252,8 @@ function pushMenstrualCycleSummary(
   // different resourceType that dedupe cannot collapse.
 
   for (const sub of junctionDatedSubEntries(entry, ["menstrualFlow", "menstrual_flow"])) {
-    const flow = firstStringFromPaths(sub.entry, ["flow"]);
-    const value = flow ? JUNCTION_MENSTRUAL_FLOW_ORDINALS[flow.trim().toLowerCase()] : undefined;
+    const flow = normalizeJunctionMenstrualEvidenceLabel(firstStringFromPaths(sub.entry, ["flow"]));
+    const value = flow ? JUNCTION_MENSTRUAL_FLOW_ORDINALS[flow] : undefined;
     if (!flow || value === undefined) {
       continue;
     }
@@ -3865,19 +4267,31 @@ function pushMenstrualCycleSummary(
         metric: "menstrual-flow",
         value,
         unit: "score",
-        qualifiers: { flow: trimToLength(flow, 80) },
+        qualifiers: { flow },
       },
       title: "Junction menstrual flow",
     });
   }
 
   for (const test of [
-    { metric: "ovulation-test", paths: ["ovulationTest", "ovulation_test"], title: "Junction ovulation test" },
-    { metric: "pregnancy-test", paths: ["homePregnancyTest", "home_pregnancy_test"], title: "Junction pregnancy test" },
+    {
+      metric: "ovulation-test",
+      paths: ["ovulationTest", "ovulation_test"],
+      resultValues: JUNCTION_OVULATION_TEST_RESULT_VALUES,
+      title: "Junction ovulation test",
+    },
+    {
+      metric: "pregnancy-test",
+      paths: ["homePregnancyTest", "home_pregnancy_test"],
+      resultValues: JUNCTION_PREGNANCY_TEST_RESULT_VALUES,
+      title: "Junction pregnancy test",
+    },
   ]) {
     for (const sub of junctionDatedSubEntries(entry, test.paths)) {
-      const result = firstStringFromPaths(sub.entry, ["testResult", "test_result"]);
-      const value = result ? JUNCTION_FERTILITY_TEST_RESULT_VALUES[result.trim().toLowerCase()] : undefined;
+      const result = normalizeJunctionMenstrualEvidenceLabel(
+        firstStringFromPaths(sub.entry, ["testResult", "test_result"]),
+      );
+      const value = result ? test.resultValues[result] : undefined;
       if (!result || value === undefined) {
         continue;
       }
@@ -3892,7 +4306,7 @@ function pushMenstrualCycleSummary(
           metric: test.metric,
           value,
           unit: "result",
-          qualifiers: { result: trimToLength(result, 80) },
+          qualifiers: { result },
         },
         title: test.title,
       });
@@ -3900,8 +4314,8 @@ function pushMenstrualCycleSummary(
   }
 
   for (const sub of junctionDatedSubEntries(entry, ["cervicalMucus", "cervical_mucus"])) {
-    const quality = boundedCycleLabel(firstStringFromPaths(sub.entry, ["quality"]));
-    if (!quality) {
+    const quality = normalizeJunctionMenstrualEvidenceLabel(firstStringFromPaths(sub.entry, ["quality"]));
+    if (!quality || !JUNCTION_CERVICAL_MUCUS_QUALITIES.has(quality)) {
       continue;
     }
 
@@ -3933,8 +4347,10 @@ function pushMenstrualCycleSummary(
   }
 
   for (const sub of junctionDatedSubEntries(entry, ["homeProgesteroneTest", "home_progesterone_test"])) {
-    const result = boundedCycleLabel(firstStringFromPaths(sub.entry, ["testResult", "test_result"]));
-    const value = result ? JUNCTION_FERTILITY_TEST_RESULT_VALUES[result] : undefined;
+    const result = normalizeJunctionMenstrualEvidenceLabel(
+      firstStringFromPaths(sub.entry, ["testResult", "test_result"]),
+    );
+    const value = result ? JUNCTION_PROGESTERONE_TEST_RESULT_VALUES[result] : undefined;
     if (!result || value === undefined) {
       continue;
     }
@@ -3953,8 +4369,8 @@ function pushMenstrualCycleSummary(
   }
 
   for (const sub of junctionDatedSubEntries(entry, ["contraceptive"])) {
-    const type = boundedCycleLabel(firstStringFromPaths(sub.entry, ["type"]));
-    if (!type || type === "unspecified") {
+    const type = normalizeJunctionMenstrualEvidenceLabel(firstStringFromPaths(sub.entry, ["type"]));
+    if (!type || !JUNCTION_CONTRACEPTIVE_TYPES.has(type)) {
       continue;
     }
 
@@ -3973,6 +4389,9 @@ function pushMenstrualCycleSummary(
 
   for (const sub of junctionDatedSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
     const protectionUsed = firstValueFromPaths(sub.entry, ["protectionUsed", "protection_used"]);
+    if (protectionUsed !== undefined && protectionUsed !== null && typeof protectionUsed !== "boolean") {
+      continue;
+    }
     const protectionFacet = typeof protectionUsed === "boolean"
       ? (protectionUsed ? "protected" : "unprotected")
       : "unspecified";
@@ -3992,8 +4411,8 @@ function pushMenstrualCycleSummary(
   }
 
   for (const sub of junctionDatedSubEntries(entry, ["detectedDeviations", "detected_deviations"])) {
-    const deviation = firstStringFromPaths(sub.entry, ["deviation"]);
-    if (!deviation) {
+    const deviation = normalizeJunctionMenstrualEvidenceLabel(firstStringFromPaths(sub.entry, ["deviation"]));
+    if (!deviation || !JUNCTION_MENSTRUAL_DEVIATIONS.has(deviation)) {
       continue;
     }
 
@@ -4004,7 +4423,7 @@ function pushMenstrualCycleSummary(
         metric: "menstrual-cycle-deviation",
         value: 1,
         unit: "flag",
-        qualifiers: { deviation: trimToLength(deviation, 80) },
+        qualifiers: { deviation },
       },
       title: "Junction cycle deviation",
     });
@@ -4065,15 +4484,6 @@ function pushJunctionCycleDailyMeasurement(
   }));
 }
 
-function boundedCycleLabel(value: string | undefined): string | undefined {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized || normalized === "unknown") {
-    return undefined;
-  }
-
-  return trimToLength(normalized, 80);
-}
-
 function junctionDateOnlyTimestamp(
   baseTimestamp: ReturnType<typeof resolveRecordTimestamp>,
   date: string,
@@ -4084,12 +4494,6 @@ function junctionDateOnlyTimestamp(
     dayKey: date,
     observedAtRaw: date,
   });
-}
-
-function plausibleCycleLengthDays(value: number | undefined): number | undefined {
-  return value !== undefined && Number.isInteger(value) && value >= 1 && value <= 120
-    ? value
-    : undefined;
 }
 
 function inclusiveDaysBetween(startDate: string, endDate: string | undefined): number | undefined {
