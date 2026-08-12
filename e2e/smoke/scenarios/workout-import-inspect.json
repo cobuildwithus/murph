@@ -1,0 +1,10 @@
+{
+  "id": "workout-import-inspect",
+  "command": "vault-cli workout import inspect <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/sample-imports/workouts/strong.csv"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/workout-import-csv",
+  "purpose": "Covers non-mutating Strong and Hevy CSV planning with explicit unit provenance before any workout write."
+}

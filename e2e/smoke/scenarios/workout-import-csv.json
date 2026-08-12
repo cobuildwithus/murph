@@ -1,0 +1,10 @@
+{
+  "id": "workout-import-csv",
+  "command": "vault-cli workout import csv <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi] [--store-raw-only]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/sample-imports/workouts/strong.csv"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/workout-import-csv",
+  "purpose": "Covers the bounded workout CSV write contract, complete-batch validation, raw evidence, and replay semantics."
+}
