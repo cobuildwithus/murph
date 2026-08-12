@@ -29,6 +29,7 @@ import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isDeviceSyncSourceHistoricalBackfillComplete,
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationSuccessorReady,
   isEstablishedDeviceSyncConnection,
   isDeviceSyncConnectionSetupPending,
@@ -377,9 +378,11 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
         input.connectionId,
         tx,
       );
+      const sources = await input.store.listConnectionSources(input.connectionId, tx);
       const source = await findHostedConnectionSource({
         connectionId: input.connectionId,
         sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        sources,
         store: input.store,
         tx,
       });
@@ -395,6 +398,33 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
         source.status === "disconnected"
         && source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
       ) {
+        return { state: "complete" as const };
+      }
+      if (isGoogleHealthFitbitMigrationLegacyTerminal(source)) {
+        if (!isHostedGoogleHealthFitbitMigrationCutoverReady(sources)) {
+          return { state: "pending" as const };
+        }
+        const disconnectedAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+        await writeHostedConnectionSourceLifecycle({
+          errorCode: HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+          errorMessage: null,
+          now: disconnectedAt,
+          source,
+          status: "disconnected",
+          store: input.store,
+          tx,
+        });
+        await input.store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: connection.provider,
+          kind: "source_disconnected",
+          occurredAt: disconnectedAt,
+          sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+          reason: "provider_disconnect",
+          createdAt: disconnectedAt,
+          tx,
+        });
         return { state: "complete" as const };
       }
       if (source.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE) {
@@ -1854,10 +1884,16 @@ function isHostedGoogleHealthFitbitMigrationCutoverReady(
 
   return Boolean(
     legacy
-    && legacy.status !== "disconnected"
-    && !isHostedSourceDisconnectFenced(legacy)
+    && (
+      isGoogleHealthFitbitMigrationLegacyTerminal(legacy)
+      || (
+        legacy.status !== "disconnected"
+        && !isHostedSourceDisconnectFenced(legacy)
+      )
+    )
     && successor
     && isGoogleHealthFitbitMigrationLegacyCoverageReady({
+      legacyAccessTerminal: isGoogleHealthFitbitMigrationLegacyTerminal(legacy),
       legacySummary: legacy.resourceAvailabilitySummary,
       successorSummary: successor.resourceAvailabilitySummary,
     })

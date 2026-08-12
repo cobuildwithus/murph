@@ -1309,7 +1309,7 @@ test("device sync service reports canonical counts separately from durable deliv
           ? {
               events: [{ kind: "activity" }, { kind: "sleep" }],
               junctionCanonicalCoverage: [{
-                coverageThrough: "2026-08-11T04:00:00.000Z",
+                coverageBoundary: "2026-08-11",
                 resource: "activity",
                 sourceProviderSlug: "fitbit",
               }],
@@ -1342,7 +1342,7 @@ test("device sync service reports canonical counts separately from durable deliv
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
         junctionCanonicalCoverage: [{
-          coverageThrough: "2026-08-11T04:00:00.000Z",
+          coverageBoundary: "2026-08-11",
           resource: "activity",
           sourceProviderSlug: "fitbit",
         }],

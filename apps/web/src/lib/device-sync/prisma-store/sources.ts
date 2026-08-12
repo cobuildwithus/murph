@@ -5,8 +5,9 @@ import type {
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
-  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX,
+  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+  readDeviceSyncSourceCanonicalCoverageBoundary,
 } from "@murphai/device-syncd/public-account";
 
 import {
@@ -551,7 +552,6 @@ function sanitizeSummaryScalar(
 
   if (
     key === DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
-    || key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX)
   ) {
     if (!normalized || normalized.length > 64) {
       return undefined;
@@ -561,6 +561,17 @@ function sanitizeSummaryScalar(
       && new Date(timestampMs).toISOString() === normalized
       ? normalized
       : undefined;
+  }
+
+  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX)) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const resource = key.slice(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX.length);
+    return readDeviceSyncSourceCanonicalCoverageBoundary(
+      { [key]: normalized },
+      resource,
+    ) ?? undefined;
   }
 
   if (

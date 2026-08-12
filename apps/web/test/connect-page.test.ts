@@ -2239,7 +2239,7 @@ test("ConnectPage projects durable Fitbit cutover failure as an explicit retry",
   });
 });
 
-test("ConnectPage keeps provider-disconnected Fitbit migrations staged until automatic cutover", async () => {
+test("ConnectPage keeps provider-disconnected Fitbit migrations staged until local convergence", async () => {
   const { resolveConnectSourceConnectionStates } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );

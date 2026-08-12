@@ -81,6 +81,60 @@ export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([
   ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
 ] as const);
 
+const JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES: ReadonlySet<string> = new Set([
+  "activity",
+  "body",
+  "menstrual_cycle",
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES.filter((resource) =>
+    resource !== "blood_pressure" && resource !== "note"
+  ),
+]);
+
+export function isJunctionDailyCanonicalCoverageResource(resource: string): boolean {
+  return JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES.has(resource);
+}
+
+export function normalizeJunctionCanonicalCoverageBoundary(
+  resource: string,
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (isJunctionDailyCanonicalCoverageResource(resource)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+      return null;
+    }
+    const timestampMs = Date.parse(`${value}T00:00:00.000Z`);
+    return Number.isFinite(timestampMs)
+        && new Date(timestampMs).toISOString().slice(0, 10) === value
+      ? value
+      : null;
+  }
+
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs)
+      && new Date(timestampMs).toISOString() === value
+    ? value
+    : null;
+}
+
+export function maxJunctionCanonicalCoverageBoundary(
+  resource: string,
+  left: string,
+  right: string,
+): string {
+  const normalizedLeft = normalizeJunctionCanonicalCoverageBoundary(resource, left);
+  const normalizedRight = normalizeJunctionCanonicalCoverageBoundary(resource, right);
+  if (!normalizedLeft) {
+    return normalizedRight ?? left;
+  }
+  if (!normalizedRight) {
+    return normalizedLeft;
+  }
+  return normalizedRight > normalizedLeft ? normalizedRight : normalizedLeft;
+}
+
 export function normalizeJunctionRawIdentityKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
 }

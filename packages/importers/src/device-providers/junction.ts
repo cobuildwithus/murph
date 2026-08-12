@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
-  addDaysToIsoDate,
   extractIsoDatePrefix,
-  formatTimeZoneDateTimeParts,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
   parseCompanionHrvRmssdAdmissionId,
@@ -72,6 +70,9 @@ import {
   JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS,
   JUNCTION_SLEEP_TOTAL_MINUTE_PATHS,
   JUNCTION_SLEEP_TOTAL_SECOND_PATHS,
+  isJunctionDailyCanonicalCoverageResource,
+  maxJunctionCanonicalCoverageBoundary,
+  normalizeJunctionCanonicalCoverageBoundary,
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
   normalizeJunctionRawIdentityKey,
@@ -133,7 +134,7 @@ export interface JunctionSnapshotInput {
 }
 
 export interface JunctionCanonicalCoverageFence {
-  readonly coverageThroughByResource: Readonly<Record<string, string | null>>;
+  readonly coverageBoundaryByResource: Readonly<Record<string, string | null>>;
   readonly sourceProviderSlug: string;
 }
 
@@ -156,7 +157,7 @@ export interface JunctionBloodPressureProviderRecordIdentityEvidence {
 }
 
 export interface JunctionCanonicalCoverageEvidence {
-  readonly coverageThrough: string;
+  readonly coverageBoundary: string;
   readonly resource: string;
   readonly sourceProviderSlug: string;
 }
@@ -234,7 +235,7 @@ const junctionSnapshotSchema = z.object({
   timeseries: z.record(z.string(), z.unknown()).optional(),
   companionHrvRmssd: z.unknown().optional(),
   canonicalCoverageFence: z.object({
-    coverageThroughByResource: z.record(z.string(), z.string().nullable()),
+    coverageBoundaryByResource: z.record(z.string(), z.string().nullable()),
     sourceProviderSlug: z.string(),
   }).strict().optional(),
 }).catchall(z.unknown());
@@ -264,14 +265,6 @@ const RAW_SOURCE_NAME_KEYS = new Set([
   "name",
 ]);
 
-const JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES: ReadonlySet<string> = new Set([
-  "activity",
-  "body",
-  "menstrual_cycle",
-  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES.filter((resource) =>
-    resource !== "blood_pressure" && resource !== "note"
-  ),
-]);
 const JUNCTION_CANONICAL_COVERAGE_RESOURCES: readonly string[] = [
   ...JUNCTION_ALLOWED_SUMMARY_RESOURCES.filter((resource) => resource !== "profile"),
   ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
@@ -493,6 +486,8 @@ const JUNCTION_LOCAL_CALENDAR_DATE_PATHS = [
   "calendar_date",
   "localDate",
   "local_date",
+  "date",
+  "day",
 ] as const;
 const JUNCTION_MEAL_ITEM_CONTAINER_PATHS = [
   "data",
@@ -1014,19 +1009,15 @@ export function normalizeJunctionSnapshot(
 /**
  * Derives provider cutover coverage only from the canonical events returned by
  * the committed vault import. This deliberately does not replay raw Junction
- * normalization: the stored event owns the resolved day and vault timezone.
+ * normalization: the stored event owns the canonical provider day or interval.
  */
 export function deriveJunctionCanonicalCoverageEvidence(
   events: readonly JunctionCanonicalCoverageEvent[],
-  defaultTimeZone?: string,
 ): readonly JunctionCanonicalCoverageEvidence[] {
   const coverageBySourceAndResource = new Map<string, JunctionCanonicalCoverageEvidence>();
 
   for (const event of events) {
-    const evidence = resolveJunctionCanonicalCoverageEvidence(
-      event,
-      defaultTimeZone,
-    );
+    const evidence = resolveJunctionCanonicalCoverageEvidence(event);
     if (!evidence) {
       continue;
     }
@@ -1035,7 +1026,11 @@ export function deriveJunctionCanonicalCoverageEvidence(
     const existing = coverageBySourceAndResource.get(key);
     if (
       !existing
-      || Date.parse(evidence.coverageThrough) > Date.parse(existing.coverageThrough)
+      || maxJunctionCanonicalCoverageBoundary(
+          evidence.resource,
+          existing.coverageBoundary,
+          evidence.coverageBoundary,
+        ) === evidence.coverageBoundary
     ) {
       coverageBySourceAndResource.set(key, evidence);
     }
@@ -1065,27 +1060,26 @@ function applyJunctionCanonicalCoverageFence(
     ) {
       return true;
     }
-    const evidence = resolveJunctionCanonicalCoverageEvidence(
-      event,
-      context.defaultTimeZone,
-    );
+    const evidence = resolveJunctionCanonicalCoverageEvidence(event);
     if (!evidence) {
       return event.externalRef?.resourceType
         === `junction-${slugify(sourceProviderSlug, "source")}-profile`;
     }
-    if (!(evidence.resource in fence.coverageThroughByResource)) {
+    if (!(evidence.resource in fence.coverageBoundaryByResource)) {
       return true;
     }
-    const legacyCoverageThrough = fence.coverageThroughByResource[evidence.resource];
-    return typeof legacyCoverageThrough === "string"
-      && Date.parse(evidence.coverageThrough) > Date.parse(legacyCoverageThrough);
+    const legacyCoverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+      evidence.resource,
+      fence.coverageBoundaryByResource[evidence.resource],
+    );
+    return legacyCoverageBoundary !== null
+      && evidence.coverageBoundary > legacyCoverageBoundary;
   });
   context.events.splice(0, context.events.length, ...admittedEvents);
 }
 
 function resolveJunctionCanonicalCoverageEvidence(
   event: JunctionCanonicalCoverageEvent,
-  defaultTimeZone?: string,
 ): JunctionCanonicalCoverageEvidence | null {
   const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
     event.dataOrigin?.sourceProviderSlug,
@@ -1103,29 +1097,15 @@ function resolveJunctionCanonicalCoverageEvidence(
     return null;
   }
 
-  const coverageThrough = JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES.has(resource)
-    ? resolveCanonicalLocalDayEnd(
-        event.dayKey ?? resolveCanonicalLocalDayKey(event.occurredAt, event.timeZone ?? defaultTimeZone),
-        event.timeZone ?? defaultTimeZone,
-      )
-    : resolveCanonicalEventIntervalEnd(event);
-  return coverageThrough
-    ? { coverageThrough, resource, sourceProviderSlug }
+  const coverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+    resource,
+    isJunctionDailyCanonicalCoverageResource(resource)
+    ? event.dayKey
+    : resolveCanonicalEventIntervalEnd(event),
+  );
+  return coverageBoundary
+    ? { coverageBoundary, resource, sourceProviderSlug }
     : null;
-}
-
-function resolveCanonicalLocalDayKey(
-  occurredAt: string,
-  timeZone: string | undefined,
-): string {
-  if (!timeZone) {
-    return "";
-  }
-  try {
-    return formatTimeZoneDateTimeParts(occurredAt, timeZone).dayKey;
-  } catch {
-    return "";
-  }
 }
 
 function resolveCanonicalEventIntervalEnd(
@@ -1146,42 +1126,6 @@ function resolveCanonicalEventIntervalEnd(
   return normalizeTimestamp(event.occurredAt) ?? null;
 }
 
-function resolveCanonicalLocalDayEnd(
-  dayKey: string,
-  timeZone: string | undefined,
-): string | null {
-  if (!timeZone) {
-    return null;
-  }
-
-  let targetDayKey: string;
-  try {
-    if (!dayKey) {
-      return null;
-    }
-    targetDayKey = addDaysToIsoDate(dayKey, 1);
-  } catch {
-    return null;
-  }
-
-  const targetUtcMidnightMs = Date.parse(`${targetDayKey}T00:00:00.000Z`);
-  let lowMs = targetUtcMidnightMs - 36 * 60 * 60_000;
-  let highMs = targetUtcMidnightMs + 36 * 60 * 60_000;
-  try {
-    while (lowMs < highMs) {
-      const midpointMs = lowMs + Math.floor((highMs - lowMs) / 2);
-      const localDayKey = formatTimeZoneDateTimeParts(midpointMs, timeZone).dayKey;
-      if (localDayKey < targetDayKey) {
-        lowMs = midpointMs + 1;
-      } else {
-        highMs = midpointMs;
-      }
-    }
-    return new Date(lowMs).toISOString();
-  } catch {
-    return null;
-  }
-}
 
 export function classifyJunctionSummaryNormalizationEvidence(
   snapshot: Pick<

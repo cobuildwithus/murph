@@ -24,6 +24,8 @@ import {
   JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
+  maxJunctionCanonicalCoverageBoundary,
+  normalizeJunctionCanonicalCoverageBoundary,
   normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
@@ -58,15 +60,18 @@ import {
 } from "../junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
-  buildDeviceSyncSourceCanonicalCoverageThroughKey,
+  buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+  DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
+  isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isDeviceSyncSourceAdmitted,
   isDeviceSyncSourceDisconnectFenced,
   isDeviceSyncSourceResourceAvailabilityMetadataKey,
   isJunctionHistoricalResetProviderSlug,
-  readDeviceSyncSourceCanonicalCoverageThrough,
+  readDeviceSyncSourceCanonicalCoverageBoundary,
   requiresHistoricalResetDeviceSyncSource,
 } from "../public-account.ts";
 import {
@@ -4856,7 +4861,7 @@ async function recordAcceptedJunctionFitbitCoverage(
     if (
       normalizeProviderSlug(evidence.sourceProviderSlug)
         !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-      || !buildDeviceSyncSourceCanonicalCoverageThroughKey(evidence.resource)
+      || !buildDeviceSyncSourceCanonicalCoverageBoundaryKey(evidence.resource)
     ) {
       continue;
     }
@@ -4864,8 +4869,12 @@ async function recordAcceptedJunctionFitbitCoverage(
     coverageByResource.set(
       evidence.resource,
       existing
-        ? maxIsoTimestamp(existing, evidence.coverageThrough)
-        : evidence.coverageThrough,
+        ? maxJunctionCanonicalCoverageBoundary(
+            evidence.resource,
+            existing,
+            evidence.coverageBoundary,
+          )
+        : evidence.coverageBoundary,
     );
   }
 
@@ -4890,22 +4899,26 @@ async function recordAcceptedJunctionFitbitCoverage(
     ...(legacy.resourceAvailabilitySummary ?? {}),
   };
   let changed = false;
-  for (const [resource, coverageThrough] of coverageByResource) {
-    const key = buildDeviceSyncSourceCanonicalCoverageThroughKey(resource);
+  for (const [resource, coverageBoundary] of coverageByResource) {
+    const key = buildDeviceSyncSourceCanonicalCoverageBoundaryKey(resource);
     if (!key) {
       continue;
     }
-    const existingCoverage = readDeviceSyncSourceCanonicalCoverageThrough(
+    const existingCoverage = readDeviceSyncSourceCanonicalCoverageBoundary(
       resourceAvailabilitySummary,
       resource,
     );
     if (
       existingCoverage
-      && Date.parse(existingCoverage) >= Date.parse(coverageThrough)
+      && maxJunctionCanonicalCoverageBoundary(
+          resource,
+          existingCoverage,
+          coverageBoundary,
+        ) === existingCoverage
     ) {
       continue;
     }
-    resourceAvailabilitySummary[key] = coverageThrough;
+    resourceAvailabilitySummary[key] = coverageBoundary;
     changed = true;
   }
 
@@ -7502,20 +7515,17 @@ function buildJunctionGoogleHealthCanonicalCoverageFence(
   );
   if (
     legacySources.length === 0
-    || legacySources.some((source) =>
-      source.status !== "disconnected"
-      || source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
-    )
+    || legacySources.some((source) => !isGoogleHealthFitbitMigrationLegacyTerminal(source))
   ) {
     return undefined;
   }
 
-  const coverageThroughByResource: Record<string, string | null> = {};
+  const coverageBoundaryByResource: Record<string, string | null> = {};
   for (const resource of [
     ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
     ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   ]) {
-    const coverageKey = buildDeviceSyncSourceCanonicalCoverageThroughKey(resource);
+    const coverageKey = buildDeviceSyncSourceCanonicalCoverageBoundaryKey(resource);
     if (!coverageKey) {
       continue;
     }
@@ -7527,23 +7537,23 @@ function buildJunctionGoogleHealthCanonicalCoverageFence(
       continue;
     }
     const coverageValues = summariesWithCoverage.map((summary) =>
-      readDeviceSyncSourceCanonicalCoverageThrough(summary, resource)
+      readDeviceSyncSourceCanonicalCoverageBoundary(summary, resource)
     );
     if (coverageValues.some((coverage) => coverage === null)) {
-      coverageThroughByResource[resource] = null;
+      coverageBoundaryByResource[resource] = null;
       continue;
     }
     const validCoverage = coverageValues.filter(
       (coverage): coverage is string => coverage !== null,
     );
-    coverageThroughByResource[resource] = validCoverage.reduce((latest, coverage) =>
-      Date.parse(coverage) > Date.parse(latest) ? coverage : latest
+    coverageBoundaryByResource[resource] = validCoverage.reduce((latest, coverage) =>
+      maxJunctionCanonicalCoverageBoundary(resource, latest, coverage)
     );
   }
 
-  return Object.keys(coverageThroughByResource).length > 0
+  return Object.keys(coverageBoundaryByResource).length > 0
     ? {
-        coverageThroughByResource,
+        coverageBoundaryByResource,
         sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
       }
     : undefined;
@@ -7562,21 +7572,40 @@ function isJunctionSourceAdmittedForImport(
 
   // Junction does not deduplicate equivalent Fitbit and Google Health records.
   // During migration, keep legacy Fitbit as the sole canonical writer until its
-  // provider revoke succeeds and the source is durably marked user-disconnected.
+  // access is explicitly terminal through local cutover or provider-confirmed absence.
   // A disconnect-in-progress fence blocks both sides so a failed revoke cannot
   // leave a brief dual-writer interval before the legacy row is restored.
-  if (
-    normalizedSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-    && sources.some((source) =>
+  if (normalizedSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG) {
+    const legacySources = sources.filter((source) =>
       normalizeProviderSlug(source.sourceProviderSlug)
         === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-      && (
-        source.status !== "disconnected"
-        || source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
-      )
-    )
-  ) {
-    return false;
+    );
+    if (legacySources.length > 0) {
+      const canonicalFence = buildJunctionGoogleHealthCanonicalCoverageFence(sources);
+      const successor = sources.find((source) =>
+        normalizeProviderSlug(source.sourceProviderSlug)
+          === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+      );
+      if (
+        legacySources.some((source) => !isGoogleHealthFitbitMigrationLegacyTerminal(source))
+        || !successor
+        || legacySources.some((source) =>
+          !isGoogleHealthFitbitMigrationLegacyCoverageReady({
+            legacyAccessTerminal: true,
+            legacySummary: source.resourceAvailabilitySummary,
+            successorSummary: successor.resourceAvailabilitySummary,
+          })
+        )
+        || (
+          canonicalFence
+          && Object.values(canonicalFence.coverageBoundaryByResource).some(
+            (boundary) => boundary === null,
+          )
+        )
+      ) {
+        return false;
+      }
+    }
   }
 
   const matchingSources = sources.filter((source) =>
@@ -7744,6 +7773,9 @@ function projectJunctionSourcesByProviderSlug(
     const status = mapJunctionSourceStatus(provider.status);
     const lastErrorCode = status === "error"
       ? truncateJunctionSourceErrorText(provider.errorDetails?.errorType, JUNCTION_SOURCE_ERROR_CODE_MAX_LENGTH)
+      : status === "disconnected"
+          && sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      ? DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE
       : null;
     const lastErrorMessage = status === "error"
       ? truncateJunctionSourceErrorText(provider.errorDetails?.errorMessage, JUNCTION_SOURCE_ERROR_MESSAGE_MAX_LENGTH)
@@ -7755,10 +7787,19 @@ function projectJunctionSourcesByProviderSlug(
         resourceAvailabilitySummary,
       );
       existing.status = mergeJunctionSourceStatus(existing.status, status);
-      if (existing.status !== "error") {
+      if (
+        existing.status === "disconnected"
+        && sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      ) {
+        existing.lastErrorCode = DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE;
+        existing.lastErrorMessage = null;
+      } else if (existing.status !== "error") {
         existing.lastErrorCode = null;
         existing.lastErrorMessage = null;
-      } else if (existing.lastErrorCode === null && existing.lastErrorMessage === null) {
+      } else if (
+        existing.lastErrorCode === DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE
+        || (existing.lastErrorCode === null && existing.lastErrorMessage === null)
+      ) {
         existing.lastErrorCode = lastErrorCode;
         existing.lastErrorMessage = lastErrorMessage;
       }
@@ -7995,7 +8036,7 @@ function readProviderSnapshotCanonicalEventExternalRefResourceIds(
 }
 
 function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly {
-  coverageThrough: string;
+  coverageBoundary: string;
   resource: string;
   sourceProviderSlug: string;
 }[] {
@@ -8006,18 +8047,22 @@ function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly
 
   return entries.flatMap((entry) => {
     const evidence = readPlainObject(entry);
-    const coverageThrough = toIsoTimestampIfValid(evidence?.coverageThrough);
+    const resource = typeof evidence?.resource === "string" ? evidence.resource : "";
+    const coverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+      resource,
+      evidence?.coverageBoundary,
+    );
     if (
       !evidence
-      || !coverageThrough
-      || typeof evidence.resource !== "string"
+      || !coverageBoundary
+      || !resource
       || typeof evidence.sourceProviderSlug !== "string"
     ) {
       return [];
     }
     return [{
-      coverageThrough,
-      resource: evidence.resource,
+      coverageBoundary,
+      resource,
       sourceProviderSlug: evidence.sourceProviderSlug,
     }];
   });

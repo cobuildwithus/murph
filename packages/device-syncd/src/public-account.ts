@@ -1,6 +1,7 @@
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  normalizeJunctionCanonicalCoverageBoundary,
 } from "@murphai/importers/device-providers/junction-resources";
 
 import type {
@@ -25,11 +26,13 @@ export const DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE =
 
 export const DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE =
   "SOURCE_USER_DISCONNECTED";
+export const DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE =
+  "SOURCE_PROVIDER_DISCONNECTED";
 
 export const DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY =
   "historicalBackfillCompletedAt";
-export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX =
-  "canonicalCoverageThrough_";
+export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX =
+  "canonicalCoverageBoundary_";
 
 export const DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE =
   "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED";
@@ -50,6 +53,7 @@ const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES = new Set<string>([
 const DEVICE_SYNC_SOURCE_DISCONNECT_FENCE_CODES = new Set([
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 ]);
 
@@ -102,46 +106,62 @@ export function isDeviceSyncSourceResourceAvailabilityMetadataKey(
 ): boolean {
   return DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS.has(key)
     || key.startsWith(
-      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX,
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
     );
 }
 
-export function buildDeviceSyncSourceCanonicalCoverageThroughKey(
+export function buildDeviceSyncSourceCanonicalCoverageBoundaryKey(
   resource: string,
 ): string | null {
   const normalized = resource.trim();
   return /^[A-Za-z][A-Za-z0-9_-]{0,38}$/u.test(normalized)
-    ? `${DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX}${normalized}`
+    ? `${DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX}${normalized}`
     : null;
 }
 
-export function readDeviceSyncSourceCanonicalCoverageThrough(
+export function readDeviceSyncSourceCanonicalCoverageBoundary(
   summary: Record<string, unknown> | null | undefined,
   resource: string,
 ): string | null {
-  const key = buildDeviceSyncSourceCanonicalCoverageThroughKey(resource);
+  const key = buildDeviceSyncSourceCanonicalCoverageBoundaryKey(resource);
   const value = key ? summary?.[key] : undefined;
-  if (typeof value !== "string") {
-    return null;
-  }
-  const timestampMs = Date.parse(value);
-  return Number.isFinite(timestampMs)
-    && new Date(timestampMs).toISOString() === value
-    ? value
-    : null;
+  return normalizeJunctionCanonicalCoverageBoundary(resource, value);
+}
+
+export function isGoogleHealthFitbitMigrationLegacyTerminal(source: {
+  lastErrorCode?: string | null;
+  status: string;
+}): boolean {
+  return source.status === "disconnected"
+    && (
+      source.lastErrorCode === null
+      || source.lastErrorCode === undefined
+      || source.lastErrorCode === DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
+      || source.lastErrorCode === DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE
+    );
 }
 
 export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
+  legacyAccessTerminal?: boolean;
   legacySummary: Record<string, unknown> | null | undefined;
   successorSummary: Record<string, unknown> | null | undefined;
 }): boolean {
   const producedLegacyResources = [...DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES]
     .filter((resource) =>
-      readDeviceSyncSourceCanonicalCoverageThrough(input.legacySummary, resource) !== null
+      readDeviceSyncSourceCanonicalCoverageBoundary(input.legacySummary, resource) !== null
+    );
+  const uncoveredLegacyResources = [...DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES]
+    .filter((resource) =>
+      isAvailableDeviceSyncSourceResource(
+        resource,
+        input.legacySummary?.[resource],
+      )
+      && !producedLegacyResources.includes(resource)
     );
 
-  return producedLegacyResources.length > 0
-    && producedLegacyResources.every((resource) =>
+  return producedLegacyResources.length === 0
+    ? input.legacyAccessTerminal === true && uncoveredLegacyResources.length === 0
+    : producedLegacyResources.every((resource) =>
       isAvailableDeviceSyncSourceResource(
         resource,
         input.successorSummary?.[resource],

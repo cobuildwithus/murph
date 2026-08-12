@@ -9,6 +9,7 @@ import {
 } from "@murphai/device-syncd/public-provider-descriptors";
 import {
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
 } from "@murphai/device-syncd/public-account";
 import {
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
@@ -172,6 +173,7 @@ function buildSettingsSources(input: {
         legacy
         && successor
         && isGoogleHealthFitbitMigrationLegacyCoverageReady({
+          legacyAccessTerminal: isGoogleHealthFitbitMigrationLegacyTerminal(legacy),
           legacySummary: legacy.resourceAvailabilitySummary,
           successorSummary: successor.resourceAvailabilitySummary,
         }),

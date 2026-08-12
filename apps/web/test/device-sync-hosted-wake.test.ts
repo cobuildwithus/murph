@@ -2076,8 +2076,8 @@ describe("hosted device-sync wakes", () => {
     let sources = [
       buildHostedConnectionSource(connection.id, "fitbit", {
         resourceAvailabilitySummary: {
-          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
-          canonicalCoverageThrough_steps: "2026-08-11T10:05:00.000Z",
+          canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
+          canonicalCoverageBoundary_steps: "2026-08-11",
           sleep: true,
           steps: true,
         },
@@ -2135,6 +2135,129 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("converges provider-confirmed Fitbit disconnection without revoking again", async () => {
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_provider_disconnected",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    let sources = [
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+        resourceAvailabilitySummary: {
+          canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
+          sleep: true,
+        },
+        status: "disconnected",
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        lastDataAt: "2026-08-11T10:05:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+          sleep: true,
+        },
+      }),
+    ];
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
+      if (!existing) {
+        throw new Error("Test source was not found.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) => source.id === existing.id ? updated : source);
+      return updated;
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
+    );
+
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).resolves.toEqual({
+      connectionId: connection.id,
+      status: "complete",
+    });
+
+    expect(revokeSourceAccess).not.toHaveBeenCalled();
+    expect(sources.find((source) => source.sourceProviderSlug === "fitbit")).toMatchObject({
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      status: "disconnected",
+    });
+    expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "provider_disconnect",
+      sourceProviderSlug: "fitbit",
+    }));
+  });
+
+  it("converges a legacy provider-disconnected Fitbit row without coverage markers", async () => {
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_legacy_disconnected",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    let sources = [
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        lastErrorCode: null,
+        resourceAvailabilitySummary: {},
+        status: "disconnected",
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        lastDataAt: "2026-08-11T10:05:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+          sleep: true,
+        },
+      }),
+    ];
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
+      if (!existing) {
+        throw new Error("Test source was not found.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) => source.id === existing.id ? updated : source);
+      return updated;
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
+    );
+
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).resolves.toEqual({ connectionId: connection.id, status: "complete" });
+
+    expect(revokeSourceAccess).not.toHaveBeenCalled();
+    expect(sources[0]).toMatchObject({
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      status: "disconnected",
+    });
+  });
+
   it("keeps legacy Fitbit active when durable Google Health verification is incomplete", async () => {
     const connection = buildHostedConnection({
       externalAccountId: "junction-user-established",
@@ -2145,7 +2268,7 @@ describe("hosted device-sync wakes", () => {
     const sources = [
       buildHostedConnectionSource(connection.id, "fitbit", {
         resourceAvailabilitySummary: {
-          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
           sleep: true,
         },
       }),
@@ -2189,7 +2312,7 @@ describe("hosted device-sync wakes", () => {
     const sources = [
       buildHostedConnectionSource(connection.id, "fitbit", {
         resourceAvailabilitySummary: {
-          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
           sleep: true,
         },
       }),
@@ -2573,7 +2696,7 @@ describe("hosted device-sync wakes", () => {
     let sources = [
       buildHostedConnectionSource(connection.id, "fitbit", {
         resourceAvailabilitySummary: {
-          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
           sleep: true,
         },
       }),
@@ -2666,7 +2789,7 @@ describe("hosted device-sync wakes", () => {
     let sources = [
       buildHostedConnectionSource(connection.id, "fitbit", {
         resourceAvailabilitySummary: {
-          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
           sleep: true,
         },
       }),

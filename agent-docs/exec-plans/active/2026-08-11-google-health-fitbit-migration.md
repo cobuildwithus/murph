@@ -116,16 +116,20 @@ Updated: 2026-08-12
     successor admission still compared raw UTC-shaped records after legacy
     coverage moved to canonical local-day boundaries, while crash recovery
     could leave an active-provider pre-revoke claim pending forever.
-13. In progress: push the requirement-level round-five remediation, rerun final
+13. Completed: pushed the requirement-level round-five remediation, reran final
     ReviewGPT against the exact head with all rendered evidence attached, and
     inspect current-base mergeability without spending a second base update.
-14. In progress: final ReviewGPT round 6 accepted one review-induced receipt
+14. Completed: final ReviewGPT round 6 accepted one review-induced receipt
     gap: the importer resolved the vault timezone for normalization but did not
     pass it into committed daily-coverage derivation. Apply the existing
     resolved timezone at that owner boundary, remove the test helper's invented
     UTC fallback, prove floating date-only event identity plus monotonic durable
     coverage and mixed daily/interval obligations, then run round 7 at the
     ReviewGPT hard cap.
+15. In progress: final ReviewGPT round 7 required the hard-cap retrospective.
+    Replace timezone-derived daily timestamps with stable canonical day keys,
+    converge provider-confirmed Fitbit disconnection through the existing Web
+    cutover owner, and obtain the user's explicit decision before any round 8.
 
 ## Decisions
 
@@ -139,11 +143,19 @@ Updated: 2026-08-12
   and targeted legacy cutover instead of requiring a second confirmation click.
 - Treat the broader refactor request as permission to simplify adjacent code in
   the exact migration call path, not to widen into unrelated device providers.
-- Carry the existing durable per-resource Fitbit boundary into the Junction
-  importer and apply it only after canonical normalization, before the writer.
-  Daily facts use the same vault-local day-end resolver that produced the
-  boundary; interval facts use the canonical accepted interval end. Do not add
-  another coverage store or raw-record timestamp interpretation.
+- Carry one durable per-resource Fitbit boundary into the Junction importer and
+  apply it only after canonical normalization, before the writer. Daily facts
+  use their canonical provider day key; interval facts use the canonical
+  accepted interval end. The receipt, source summary, and fence share that
+  representation, with no timezone-derived daily timestamp or second store.
+- Treat explicit upstream Fitbit `disconnected` as provider-confirmed terminal
+  evidence. Runtime candidacy, readiness, importer admission, fencing, and UI
+  use the shared terminal predicate; the existing Web cutover owner converges
+  it to the completed local marker after successor verification without a
+  redundant revoke. Legacy disconnected rows with no error code are the same
+  terminal provider fact; a missing coverage marker is waived only when their
+  availability summary proves they produced no resource obligation. Ambiguous
+  or unavailable states remain fail-closed.
 - Treat `SOURCE_DISCONNECT_IN_PROGRESS` plus the source row's `lastSeenAt` as a
   bounded 60-second cutover claim. A fresh active-provider claim remains with
   its owner; a stale claim is renewed under the exact source epoch before the
@@ -210,15 +222,18 @@ Updated: 2026-08-12
   timezone-free and replay-stable; durable coverage remains monotonic across a
   vault-timezone update; mixed activity/sleep obligations and successor fencing
   are covered together.
+- Final round-seven retrospective proof: 156 focused importer tests, 233 focused
+  device-sync tests, 82 hosted-runtime maintenance tests, and 256 affected Web
+  tests pass. Importer, device-sync, runtime, and Web typechecks pass. Daily
+  coverage is now stable across vault-timezone changes, interval coverage stays
+  instant-based, provider-confirmed Fitbit absence admits only post-boundary
+  Google Health facts, and Web converges that state without another revoke.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Push the round-six receipt correction and run final ReviewGPT round 7 against
-  its exact head with the eight authorization, verification, cutover, and retry
-  captures packaged as rendered evidence. Round 7 is the normal hard cap;
-  resolve any accepted finding but do not start round 8 without an explicit
-  continuation decision.
+- Commit and push the round-seven retrospective correction. Do not start
+  ReviewGPT round 8 without the user's explicit continuation decision.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict
   if the reviewed patch no longer merges cleanly.

@@ -1,4 +1,5 @@
 import { createImporters } from "@murphai/importers";
+import { normalizeJunctionCanonicalCoverageBoundary } from "@murphai/importers/device-providers/junction-resources";
 
 import {
   normalizeConfiguredDeviceSyncJobInput,
@@ -2142,18 +2143,22 @@ function readCanonicalDeviceImportJunctionCoverage(
 
   return result.junctionCanonicalCoverage.flatMap((entry) => {
     const evidence = toPlainRecord(entry);
+    const resource = typeof evidence?.resource === "string" ? evidence.resource : "";
+    const coverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+      resource,
+      evidence?.coverageBoundary,
+    );
     if (
       !evidence
-      || typeof evidence.coverageThrough !== "string"
-      || !Number.isFinite(Date.parse(evidence.coverageThrough))
-      || typeof evidence.resource !== "string"
+      || !coverageBoundary
+      || !resource
       || typeof evidence.sourceProviderSlug !== "string"
     ) {
       return [];
     }
     return [{
-      coverageThrough: new Date(Date.parse(evidence.coverageThrough)).toISOString(),
-      resource: evidence.resource,
+      coverageBoundary,
+      resource,
       sourceProviderSlug: evidence.sourceProviderSlug,
     }];
   });

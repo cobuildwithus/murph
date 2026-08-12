@@ -16,7 +16,9 @@ import {
 } from "@murphai/device-syncd/service";
 import {
   countAvailableDeviceSyncSourceResources,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isDeviceSyncSourceHistoricalBackfillComplete,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isGoogleHealthFitbitMigrationSuccessorReady,
 } from "@murphai/device-syncd/public-account";
@@ -373,7 +375,11 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
     const legacy = sources.find((source) =>
       normalizeJunctionProviderSlug(source.sourceProviderSlug)
         === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-      && source.status !== "disconnected"
+      && source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
+      && (
+        source.status !== "disconnected"
+        || isGoogleHealthFitbitMigrationLegacyTerminal(source)
+      )
     );
     const successor = sources.find((source) =>
       normalizeJunctionProviderSlug(source.sourceProviderSlug)
@@ -393,6 +399,7 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
       : false;
     const legacyCoverageReady = legacy && successor
       ? isGoogleHealthFitbitMigrationLegacyCoverageReady({
+          legacyAccessTerminal: isGoogleHealthFitbitMigrationLegacyTerminal(legacy),
           legacySummary: legacy.resourceAvailabilitySummary,
           successorSummary: successor.resourceAvailabilitySummary,
         })

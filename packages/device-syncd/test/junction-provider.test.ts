@@ -295,7 +295,6 @@ function createCanonicalImportReceipt(
         ...event.fields,
         dayKey: event.dayKey ?? event.occurredAt?.slice(0, 10) ?? "2000-01-01",
       })),
-      defaultTimeZone,
     ),
   };
 }
@@ -9534,6 +9533,54 @@ test("Junction source projection persists provider error details for errored sou
   assert.equal(Object.hasOwn(connectedUpsert, "lastErrorMessage"), false);
 });
 
+test("Junction source projection marks provider-confirmed Fitbit disconnection as terminal", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          { name: "Fitbit", slug: "fitbit", status: "disconnected" },
+          { name: "Withings", slug: "withings", status: "disconnected" },
+        ],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    upserts.find((source) => source.sourceProviderSlug === "fitbit")?.lastErrorCode,
+    "SOURCE_PROVIDER_DISCONNECTED",
+  );
+  assert.equal(
+    Object.hasOwn(
+      requireValue(
+        upserts.find((source) => source.sourceProviderSlug === "withings"),
+        "Expected projected Withings source.",
+      ),
+      "lastErrorCode",
+    ),
+    false,
+  );
+});
+
 test("Junction source projection drops error details when a sibling source entry is connected", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -11566,7 +11613,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     timeseriesResources: [],
   });
   const cutoverAt = "2026-08-11T12:00:00.000Z";
-  const cutoverDayCoverageThrough = "2026-08-12T00:00:00.000Z";
+  const cutoverDayBoundary = "2026-08-11";
   const legacyFitbit = createConnectionSource({
     id: "src-fitbit-legacy",
     lastSeenAt: cutoverAt,
@@ -11577,7 +11624,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     sourceProviderSlug: "fitbit",
     resourceAvailabilitySummary: {
       activity: true,
-      canonicalCoverageThrough_activity: cutoverDayCoverageThrough,
+      canonicalCoverageBoundary_activity: cutoverDayBoundary,
     },
   });
   const googleHealth = createConnectionSource({
@@ -11663,10 +11710,45 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
       ...legacyFitbit,
       status: "disconnected",
       lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+      resourceAvailabilitySummary: { activity: true },
     },
     googleHealth,
-  ]);
+  ], "2026-08-12T12:05:00.000Z", { date: "2026-08-12" });
   assert.equal(importedSnapshots.length, 0);
+
+  await executeWithSources([
+    {
+      ...legacyFitbit,
+      status: "disconnected",
+      lastErrorCode: null,
+      resourceAvailabilitySummary: {},
+    },
+    googleHealth,
+  ], "2026-08-12T12:05:00.000Z", { date: "2026-08-12" });
+  assert.equal(importedSnapshots.length, 1);
+  importedSnapshots.length = 0;
+
+  const providerCutoverSources: DeviceConnectionSourceRecord[] = [
+    {
+      ...legacyFitbit,
+      status: "disconnected",
+      lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+    },
+    googleHealth,
+  ];
+  await executeWithSources(
+    providerCutoverSources,
+    "2026-08-11T12:05:00.000Z",
+    { date: "2026-08-11" },
+  );
+  assert.equal(importedSnapshots.length, 0);
+  await executeWithSources(
+    providerCutoverSources,
+    "2026-08-12T12:05:00.000Z",
+    { date: "2026-08-12" },
+  );
+  assert.equal(importedSnapshots.length, 1);
+  importedSnapshots.length = 0;
   assert.equal(fetchCalls, 0);
 
   const cutoverSources: DeviceConnectionSourceRecord[] = [
@@ -11715,15 +11797,14 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
   assert.match(JSON.stringify(importedSnapshots[0]), /google_health/u);
 
   importedSnapshots.length = 0;
-  const localDayBoundary = "2026-08-12T04:00:00.000Z";
+  const localDayBoundary = "2026-08-11";
   const localDayCutoverSources = cutoverSources.map((source) =>
     source.sourceProviderSlug === "fitbit"
       ? {
           ...source,
-          lastSeenAt: localDayBoundary,
           resourceAvailabilitySummary: {
             activity: false,
-            canonicalCoverageThrough_activity: localDayBoundary,
+            canonicalCoverageBoundary_activity: localDayBoundary,
           },
         }
       : source
@@ -11802,7 +11883,7 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   await executeJunctionJob(provider, context, job);
   assert.equal(
     upserts.some((source) =>
-      source.resourceAvailabilitySummary?.canonicalCoverageThrough_activity
+      source.resourceAvailabilitySummary?.canonicalCoverageBoundary_activity
         !== undefined
     ),
     false,
@@ -11818,8 +11899,8 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   );
   assert.equal(
     upserts.at(-1)?.resourceAvailabilitySummary
-      ?.canonicalCoverageThrough_activity,
-    "2026-08-12T04:00:00.000Z",
+      ?.canonicalCoverageBoundary_activity,
+    "2026-08-11",
   );
 });
 
@@ -11887,7 +11968,7 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
     upsertConnectionSource: (input) => {
       const next = createConnectionSource({ ...legacyFitbit, ...input });
       const coverage = next.resourceAvailabilitySummary
-        ?.canonicalCoverageThrough_activity;
+        ?.canonicalCoverageBoundary_activity;
       if (typeof coverage === "string") {
         recordedCoverage.push(coverage);
       }
@@ -11903,10 +11984,10 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
   await executeJunctionJob(provider, context, job);
   await executeJunctionJob(provider, context, job);
 
-  assert.deepEqual([...new Set(recordedCoverage)], ["2026-08-11T04:00:00.000Z"]);
+  assert.deepEqual([...new Set(recordedCoverage)], ["2026-08-10"]);
   assert.equal(
-    legacyFitbit.resourceAvailabilitySummary?.canonicalCoverageThrough_activity,
-    "2026-08-11T04:00:00.000Z",
+    legacyFitbit.resourceAvailabilitySummary?.canonicalCoverageBoundary_activity,
+    "2026-08-10",
   );
 });
 
@@ -11964,7 +12045,7 @@ test("Junction Fitbit sleep coverage advances through the accepted session end",
   );
 
   assert.equal(
-    upserts.at(-1)?.resourceAvailabilitySummary?.canonicalCoverageThrough_sleep,
+    upserts.at(-1)?.resourceAvailabilitySummary?.canonicalCoverageBoundary_sleep,
     "2026-08-12T10:00:00.000Z",
   );
 });

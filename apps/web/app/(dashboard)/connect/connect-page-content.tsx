@@ -13,6 +13,7 @@ import {
 import {
   DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationSuccessorReady,
 } from "@murphai/device-syncd/public-account";
 
@@ -1087,9 +1088,15 @@ function isUnfinishedFitbitLegacySource(
   if (isLiveJunctionUpstreamSource(source)) {
     return true;
   }
-
-  return source.status === "disconnected"
-    && source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE;
+  if (source.status !== "disconnected") {
+    return false;
+  }
+  if (!isGoogleHealthFitbitMigrationLegacyTerminal(source)) {
+    return true;
+  }
+  // Provider-confirmed absence is terminal for ingestion, but remains visible
+  // until the cutover owner has written the completed local marker.
+  return source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE;
 }
 
 function isDisconnectableJunctionUpstreamSource(

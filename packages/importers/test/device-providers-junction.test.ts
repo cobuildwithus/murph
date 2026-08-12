@@ -3132,7 +3132,7 @@ test("Junction importer reports committed Fitbit daily coverage at the vault-loc
     assert.equal(first.events[0]?.dayKey, "2026-06-24");
     assert.equal(first.events[0]?.timeZone, "America/New_York");
     assert.deepEqual(first.junctionCanonicalCoverage, [{
-      coverageThrough: "2026-06-25T04:00:00.000Z",
+      coverageBoundary: "2026-06-24",
       resource: "hrv",
       sourceProviderSlug: "fitbit",
     }]);
@@ -3181,7 +3181,7 @@ test("Junction importer reports date-only Fitbit activity coverage without rewri
     assert.equal(activity?.dayKey, "2026-08-11");
     assert.equal(activity?.timeZone, undefined);
     assert.deepEqual(first.junctionCanonicalCoverage, [{
-      coverageThrough: "2026-08-12T04:00:00.000Z",
+      coverageBoundary: "2026-08-11",
       resource: "activity",
       sourceProviderSlug: "fitbit",
     }]);
@@ -3198,11 +3198,7 @@ test("Junction importer reports date-only Fitbit activity coverage without rewri
     assert.equal(replayedActivity?.id, activity?.id);
     assert.equal(replayedActivity?.dayKey, "2026-08-11");
     assert.equal(replayedActivity?.timeZone, undefined);
-    assert.deepEqual(replay.junctionCanonicalCoverage, [{
-      coverageThrough: "2026-08-12T00:00:00.000Z",
-      resource: "activity",
-      sourceProviderSlug: "fitbit",
-    }]);
+    assert.deepEqual(replay.junctionCanonicalCoverage, first.junctionCanonicalCoverage);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
@@ -3211,8 +3207,8 @@ test("Junction importer reports date-only Fitbit activity coverage without rewri
 test("Junction canonical fence suppresses same-day Google Health facts east of UTC", () => {
   const payload = normalizeJunctionSnapshot({
     canonicalCoverageFence: {
-      coverageThroughByResource: {
-        hrv: "2026-08-11T15:00:00.000Z",
+      coverageBoundaryByResource: {
+        hrv: "2026-08-11",
       },
       sourceProviderSlug: "google_health",
     },
@@ -3235,12 +3231,9 @@ test("Junction canonical fence suppresses same-day Google Health facts east of U
   const hrvEvents = payload.events?.filter((event) => event.fields?.metric === "hrv") ?? [];
   assert.deepEqual(hrvEvents.map((event) => event.dayKey), ["2026-08-12"]);
   assert.deepEqual(
-    deriveJunctionCanonicalCoverageEvidence(
-      hrvEvents,
-      "Asia/Tokyo",
-    ),
+    deriveJunctionCanonicalCoverageEvidence(hrvEvents),
     [{
-      coverageThrough: "2026-08-12T15:00:00.000Z",
+      coverageBoundary: "2026-08-12",
       resource: "hrv",
       sourceProviderSlug: "google-health",
     }],
@@ -3265,8 +3258,8 @@ test("Junction importer applies the canonical fence before the vault writer", as
       snapshot: {
         accountId: "junction-account-hash-google-health-fence",
         canonicalCoverageFence: {
-          coverageThroughByResource: {
-            hrv: "2026-08-11T15:00:00.000Z",
+          coverageBoundaryByResource: {
+            hrv: "2026-08-11",
           },
           sourceProviderSlug: "google_health",
         },
@@ -3289,7 +3282,7 @@ test("Junction importer applies the canonical fence before the vault writer", as
 
     assert.deepEqual(result.events.map((event) => event.dayKey), ["2026-08-12"]);
     assert.deepEqual(result.junctionCanonicalCoverage, [{
-      coverageThrough: "2026-08-12T15:00:00.000Z",
+      coverageBoundary: "2026-08-12",
       resource: "hrv",
       sourceProviderSlug: "google-health",
     }]);
@@ -3301,8 +3294,8 @@ test("Junction importer applies the canonical fence before the vault writer", as
 test("Junction canonical fence handles a negative-offset DST boundary", () => {
   const payload = normalizeJunctionSnapshot({
     canonicalCoverageFence: {
-      coverageThroughByResource: {
-        hrv: "2026-11-02T05:00:00.000Z",
+      coverageBoundaryByResource: {
+        hrv: "2026-11-01",
       },
       sourceProviderSlug: "google_health",
     },
@@ -3329,7 +3322,7 @@ test("Junction canonical fence handles a negative-offset DST boundary", () => {
 test("Junction canonical fence compares sleep sessions by accepted interval end", () => {
   const payload = normalizeJunctionSnapshot({
     canonicalCoverageFence: {
-      coverageThroughByResource: {
+      coverageBoundaryByResource: {
         sleep: "2026-08-12T10:00:00.000Z",
       },
       sourceProviderSlug: "google_health",
@@ -3366,8 +3359,8 @@ test("Junction canonical fence compares sleep sessions by accepted interval end"
 test("Junction canonical fence applies mixed daily and interval boundaries together", () => {
   const payload = normalizeJunctionSnapshot({
     canonicalCoverageFence: {
-      coverageThroughByResource: {
-        activity: "2026-08-12T04:00:00.000Z",
+      coverageBoundaryByResource: {
+        activity: "2026-08-11",
         sleep: "2026-08-12T10:00:00.000Z",
       },
       sourceProviderSlug: "google_health",

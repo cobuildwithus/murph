@@ -1729,12 +1729,13 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
       listConnectionSources: vi.fn(() => [
         {
+          lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
           resourceAvailabilitySummary: {
-            canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+            canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
             sleep: true,
           },
           sourceProviderSlug: "fitbit",
-          status: "connected",
+          status: "disconnected",
         },
         {
           firstSeenAt: "2026-08-11T10:00:00.000Z",
@@ -1807,7 +1808,7 @@ describe("runHostedDeviceSyncPass", () => {
       listConnectionSources: vi.fn(() => [
         {
           resourceAvailabilitySummary: {
-            canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+            canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
             sleep: true,
           },
           sourceProviderSlug: "fitbit",
@@ -1905,7 +1906,7 @@ describe("runHostedDeviceSyncPass", () => {
       listConnectionSources: vi.fn(() => [
         {
           resourceAvailabilitySummary: {
-            canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+            canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
             sleep: true,
           },
           sourceProviderSlug: "fitbit",
