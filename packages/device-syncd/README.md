@@ -62,11 +62,19 @@ Current providers:
 - Schedule-time history jobs bind the existing exact source row's lifecycle
   epoch. Hosted Web advances that epoch when the source moves from disconnected
   to connected and clears only that source's schedule-time coverage in the same
-  admission lock. Hosted hydration accepts the newer epoch before merging
-  coverage, and the runner rereads it before import and again before publishing
-  progress. A queued or in-flight job from an older epoch therefore cannot
-  block the replacement job or certify current coverage; pre-epoch jobs exit
-  without importing. Source-first-seen history is unchanged.
+  admission lock. A same-epoch runtime projection cannot move a disconnected
+  Junction source to connected, so provider polling cannot preempt that owner.
+  Hosted hydration accepts the newer epoch before merging coverage, and the
+  runner rereads it before import and again before publishing progress. A queued
+  or in-flight job from an older epoch therefore cannot block the replacement
+  job or certify current coverage; pre-epoch jobs exit without importing.
+  Source-first-seen history is unchanged.
+- Schedule-time retry chains retain one stable logical identity and their
+  original fixed window. Before terminal coverage is published, that window
+  must still touch the ordinary rolling daily reconcile interval. A stale row
+  finishes without a matrix bit, allowing the existing scheduler to enqueue
+  one current-anchored replacement under the same identity; only that
+  replacement can close the obligation.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

@@ -2429,6 +2429,23 @@ export function createJunctionDeviceSyncProvider(
       return {};
     }
 
+    if (
+      policy.historyAnchor === "schedule_time"
+      && !doesJunctionScheduleTimeHistoryWindowReachDailyCoverage({
+        currentClosedDayTarget: floorUtcDayTimestamp(context.now),
+        fixedWindowEnd: normalizeString(job.payload.windowEnd),
+        reconcileDays,
+      })
+    ) {
+      // The stable logical chain deliberately keeps its original fixed
+      // window while an optional endpoint is unavailable. If that window no
+      // longer touches the ordinary rolling reconcile interval, completing
+      // it cannot certify the intervening gap. Finish this row without the
+      // matrix bit; the existing scheduler can then enqueue one replacement
+      // under the same logical identity, anchored to the current closed day.
+      return {};
+    }
+
     return addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       existingMetadata: context.account.metadata,
       providerSlug: sourceProviderSlug,
@@ -5431,6 +5448,35 @@ function isFullUtcDayWindow(window: { windowStart: string; windowEnd: string }):
   return Date.parse(window.windowStart) < Date.parse(window.windowEnd)
     && window.windowStart === floorUtcDayTimestamp(window.windowStart)
     && window.windowEnd === floorUtcDayTimestamp(window.windowEnd);
+}
+
+function doesJunctionScheduleTimeHistoryWindowReachDailyCoverage(input: {
+  currentClosedDayTarget: string;
+  fixedWindowEnd: string | null | undefined;
+  reconcileDays: number;
+}): boolean {
+  const fixedWindowEnd = toIsoTimestampIfValid(input.fixedWindowEnd);
+  if (!fixedWindowEnd) {
+    return false;
+  }
+
+  const currentClosedDayTargetMs = Date.parse(input.currentClosedDayTarget);
+  const fixedWindowEndMs = Date.parse(fixedWindowEnd);
+  if (
+    !Number.isFinite(currentClosedDayTargetMs)
+    || !Number.isFinite(fixedWindowEndMs)
+  ) {
+    return false;
+  }
+  if (fixedWindowEndMs >= currentClosedDayTargetMs) {
+    return true;
+  }
+
+  const dailyCoverageStartMs = Date.parse(floorUtcDayTimestamp(
+    subtractDays(input.currentClosedDayTarget, input.reconcileDays),
+  ));
+  return Number.isFinite(dailyCoverageStartMs)
+    && fixedWindowEndMs >= dailyCoverageStartMs;
 }
 
 function shouldImportClosedTimeseriesForReconcile(

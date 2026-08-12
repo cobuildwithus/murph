@@ -469,6 +469,7 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
   persistHostedDeviceSyncCompanionMetadata,
+  prepareHostedDeviceSyncConnectionSourceStart,
   reconcileHostedDeviceSyncConnectionSourceRegistration,
 } from "@/src/lib/device-sync/wake-service";
 import { buildHostedDeviceSyncWakeEventId } from "@/src/lib/device-sync/wake";
@@ -2065,12 +2066,17 @@ describe("hosted device-sync wakes", () => {
     let sources = [
       buildHostedConnectionSource(currentConnection.id, "garmin", {
         lastSeenAt: "2026-03-26T12:01:00.000Z",
-        status: "disconnected",
       }),
       buildHostedConnectionSource(currentConnection.id, "oura"),
     ];
+    const storedConnection = buildProviderConfigStoredConnection(currentConnection);
+    const revokeSourceAccess = vi.fn(async () => undefined);
     mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { revokeSourceAccess },
+    });
     mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
       currentConnection = connection;
     });
@@ -2090,6 +2096,31 @@ describe("hosted device-sync wakes", () => {
       sources = sources.map((source) => source.id === existing.id ? updated : source);
       return updated;
     });
+    const sourceLifecycleProof = await prepareHostedDeviceSyncConnectionSourceStart({
+      connectionId: currentConnection.id,
+      registry: {
+        get: mocks.registryGet,
+        list: mocks.registryList,
+        register: vi.fn(),
+      },
+      sourceProviderSlug: "garmin",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      userId: "user-123",
+    });
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "garmin");
+    expect(sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        lifecycleEpoch: 1,
+        sourceProviderSlug: "garmin",
+        status: "disconnected",
+      }),
+      expect.objectContaining({
+        lifecycleEpoch: 1,
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+    ]));
+
     const establish = () =>
       handleHostedDeviceSyncConnectionEstablished({
         account: {
@@ -2100,6 +2131,7 @@ describe("hosted device-sync wakes", () => {
           status: "active",
         },
         connection: { initialJobs: [], nextReconcileAt: null },
+        connectionStartedAt: sourceLifecycleProof.lastSeenAt,
         now: "2026-03-26T12:02:00.000Z",
         sourceProviderSlug: "garmin",
         store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),

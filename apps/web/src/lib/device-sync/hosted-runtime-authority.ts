@@ -1059,6 +1059,20 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       continue;
     }
 
+    if (
+      input.provider.trim().toLowerCase() === "junction"
+      && current?.status === "disconnected"
+      && update.status === "connected"
+    ) {
+      // Web's connection-established admission owns this boundary because it
+      // clears schedule-time coverage and advances the exact source epoch in
+      // the same transaction. A runner projection from the disconnected
+      // snapshot may report upstream connectivity, but it cannot substitute
+      // for those dependent effects at the same epoch.
+      staleCount += 1;
+      continue;
+    }
+
     if (current && isHostedSourceDisconnectFenced(current)) {
       staleCount += 1;
       continue;

@@ -1073,6 +1073,82 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
   });
 
+  it("does not let a same-epoch Junction projection admit a disconnected source", async () => {
+    const connectionId = "conn_junction_pending_reconnect";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "garmin",
+    });
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a canonical Junction source instance key.");
+    }
+    const harness = createAuthorityHarness({
+      connectionSources: [{
+        connectionId,
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:00:00.000Z",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { caffeine: true },
+        sourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "disconnected",
+      }],
+      record: buildHostedRecord({
+        id: connectionId,
+        provider: "junction",
+        updatedAt: "2026-04-06T10:00:00.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId,
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            sources: [{
+              displayName: "Garmin",
+              firstSeenAt: "2026-04-06T09:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-06T10:05:00.000Z",
+              lifecycleEpoch: 1,
+              observedLifecycleEpoch: 1,
+              observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+              resourceAvailabilitySummary: { caffeine: true },
+              sourceInstanceKey,
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            }],
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId,
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(await harness.store.listConnectionSources()).toEqual([
+      expect.objectContaining({
+        lifecycleEpoch: 1,
+        sourceProviderSlug: "garmin",
+        status: "disconnected",
+      }),
+    ]);
+  });
+
   it.each([
     "SOURCE_DISCONNECT_IN_PROGRESS",
     "SOURCE_START_CLEANUP_IN_PROGRESS",

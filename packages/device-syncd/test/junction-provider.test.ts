@@ -14370,7 +14370,7 @@ test.each([
   const expectedRequestCount = expectedScanCount * 6;
   for (let chunkIndex = 0; chunkIndex < expectedRequestCount; chunkIndex += 1) {
     const now = new Date(
-      Date.parse("2026-08-11T12:00:00.000Z") + chunkIndex * 24 * 60 * 60_000,
+      Date.parse("2026-08-11T12:00:00.000Z") + chunkIndex * 60_000,
     ).toISOString();
     const result = await executeJunctionJob(
       provider,
@@ -14424,7 +14424,7 @@ test.each([
     };
     for (let chunkIndex = 0; chunkIndex < 6; chunkIndex += 1) {
       const now = new Date(
-        Date.parse("2026-08-20T12:00:00.000Z") + chunkIndex * 24 * 60 * 60_000,
+        Date.parse("2026-08-20T12:00:00.000Z") + chunkIndex * 60_000,
       ).toISOString();
       const result = await executeJunctionJob(
         provider,

@@ -698,6 +698,17 @@ Last verified: 2026-08-11
   late generation-1 completion cannot downgrade newer coverage. This keeps the
   rollout fence in the existing queue, scheduler, and account-metadata owners
   without another repair loop or lifecycle manager.
+- Junction provider polling cannot admit a disconnected source. A same-epoch
+  runtime connected projection is discarded so the existing hosted
+  connection-established owner remains the only path that clears that source's
+  schedule-time coverage and advances its lifecycle epoch atomically.
+- Junction schedule-time history retries retain one stable logical identity and
+  fixed target window. Terminal matrix publication requires that fixed end to
+  still touch the current ordinary daily reconcile interval. If a long outage
+  makes the target stale, the old row succeeds without coverage; after it is no
+  longer active, the ordinary scheduler reuses the logical identity for one
+  current-anchored replacement. No cursor, retry owner, or cleanup pass is
+  added.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

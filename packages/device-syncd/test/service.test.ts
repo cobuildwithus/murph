@@ -1445,6 +1445,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
       historicalWindowStart: "2026-07-12T00:00:00.000Z",
       resource: "caffeine",
       resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
       sourceProviderSlug: "garmin",
       windowStart: "2026-07-12T00:00:00.000Z",
       windowEnd: "2026-08-11T00:00:00.000Z",
@@ -1677,6 +1678,196 @@ test("Junction schedule-time history keeps one durable retry chain across UTC da
   }
 });
 
+test("a stale Junction history retry finishes without coverage and is replaced once at the current window", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-stale-history-replacement");
+  let now = new Date("2026-08-01T12:00:00.000Z");
+  vi.useFakeTimers();
+  vi.setSystemTime(now);
+  let optionalEndpointUnavailable = true;
+  const successfulCaffeineWindows: Array<{ end: string; start: string }> = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 1,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryBackfillDays: 1,
+    summaryResources: [],
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-stale-history") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-stale-history",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-stale-history/caffeine/grouped") {
+        if (optionalEndpointUnavailable) {
+          return createJsonResponse({ code: "historical_window_not_ready" }, 422);
+        }
+        const start = url.searchParams.get("start_date");
+        const end = url.searchParams.get("end_date");
+        assert.ok(start);
+        assert.ok(end);
+        successfulCaffeineWindows.push({ end, start });
+        return createJsonResponse({ groups: { garmin: [{
+          data: [{ start: new Date(start).toISOString(), value: 0.095 }],
+          source: { provider: "garmin", type: "watch" },
+        }] } });
+      }
+      if (
+        url.pathname.startsWith("/v2/summary/")
+        && url.pathname.endsWith("/junction-user-stale-history")
+      ) {
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected Junction stale-history request: ${url.pathname}`);
+    },
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(snapshot) {
+        const prepared = await prepareDeviceProviderSnapshotImport(snapshot);
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      connectedAt: "2026-04-03T12:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-user-stale-history",
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      },
+      nextReconcileAt: now.toISOString(),
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      lastSeenAt: now.toISOString(),
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { caffeine: true },
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    const activeHistoryJobs = () => readJobsForAccountForTesting(store, account.id)
+      .flatMap((row) => {
+        const job = store.getJobById(row.id);
+        return job
+          && job.kind === "resource"
+          && job.payload.historicalBackfill === true
+          && (job.status === "queued" || job.status === "running")
+          ? [job]
+          : [];
+      });
+    const hasCoverage = () => {
+      const persisted = store.getAccountById(account.id);
+      assert.ok(persisted);
+      return hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        persisted.metadata,
+        "garmin",
+        "caffeine",
+        JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      );
+    };
+
+    await service.runSchedulerOnce();
+    const originalHistoryJob = activeHistoryJobs()[0];
+    assert.ok(originalHistoryJob);
+    assert.equal(originalHistoryJob.payload.windowEnd, "2026-08-01T00:00:00.000Z");
+    const stableDedupeKey = originalHistoryJob.dedupeKey;
+
+    for (const cycleAt of [
+      "2026-08-01T12:00:00.000Z",
+      "2026-08-02T12:00:00.000Z",
+      "2026-08-03T12:00:00.000Z",
+    ]) {
+      now = new Date(cycleAt);
+      vi.setSystemTime(now);
+      store.patchAccount(account.id, { nextReconcileAt: cycleAt });
+      await service.runSchedulerOnce();
+      assert.equal(activeHistoryJobs().length, 1);
+      assert.equal(activeHistoryJobs()[0]?.dedupeKey, stableDedupeKey);
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      assert.equal(hasCoverage(), false);
+    }
+
+    optionalEndpointUnavailable = false;
+    now = new Date("2026-08-05T12:00:00.000Z");
+    vi.setSystemTime(now);
+    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await service.runSchedulerOnce();
+    assert.equal(activeHistoryJobs().length, 1);
+    assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+    for (let pass = 0; pass < 16 && activeHistoryJobs().length > 0; pass += 1) {
+      await service.runWorkerOnce();
+    }
+    assert.equal(activeHistoryJobs().length, 0);
+    assert.equal(hasCoverage(), false);
+
+    now = new Date("2026-08-05T13:00:00.000Z");
+    vi.setSystemTime(now);
+    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await service.runSchedulerOnce();
+    const replacements = activeHistoryJobs();
+    assert.equal(replacements.length, 1);
+    assert.equal(replacements[0]?.dedupeKey, stableDedupeKey);
+    assert.notEqual(replacements[0]?.id, originalHistoryJob.id);
+    assert.equal(replacements[0]?.payload.windowEnd, "2026-08-05T00:00:00.000Z");
+    const replacementWindowStartIndex = successfulCaffeineWindows.length;
+
+    for (let pass = 0; pass < 16 && activeHistoryJobs().length > 0; pass += 1) {
+      await service.runWorkerOnce();
+    }
+    assert.equal(activeHistoryJobs().length, 0);
+    assert.equal(hasCoverage(), true);
+    assert.equal(
+      successfulCaffeineWindows.slice(replacementWindowStartIndex).some((window) =>
+        Date.parse(window.start) <= Date.parse("2026-08-01T00:00:00.000Z")
+        && Date.parse(window.end) >= Date.parse("2026-08-04T00:00:00.000Z")
+      ),
+      true,
+    );
+
+    now = new Date("2026-08-06T12:00:00.000Z");
+    vi.setSystemTime(now);
+    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await service.runSchedulerOnce();
+    assert.equal(activeHistoryJobs().length, 0);
+  } finally {
+    close();
+    vi.useRealTimers();
+  }
+});
+
 test("a queued pre-reconnect history job cannot block the exact-source replacement", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-epoch-retry");
   const now = new Date("2026-08-11T12:00:00.000Z");
@@ -1894,6 +2085,7 @@ test("device sync job context lets providers update source projections", async (
       lastErrorMessage: null,
       firstSeenAt: sources[0]?.firstSeenAt,
       lastSeenAt: sources[0]?.lastSeenAt,
+      lifecycleEpoch: 1,
       lastDataAt: null,
       createdAt: sources[0]?.createdAt,
       updatedAt: sources[0]?.updatedAt,

@@ -206,7 +206,11 @@ compact facts; it does not retain provider sample arrays or emit canonical
 samples. Scheduling offers at most eight extended-history resource/source jobs
 per reconcile pass and rotates deterministic pages across the bounded Junction
 connect-source catalog. Blood pressure and note keep their existing daily
-history chunks and coverage semantics.
+history chunks and coverage semantics. Schedule-time chains keep one stable
+identity while retrying, but an obsolete fixed window cannot publish terminal
+coverage once it no longer touches the ordinary rolling daily window. The old
+row finishes without its matrix bit and the existing scheduler supplies one
+current-anchored replacement under the same identity.
 
 The checked-in inventory is guarded against the runtime enums exported by the
 pinned `@junction-api/sdk` package. The test has explicit exclusions for
