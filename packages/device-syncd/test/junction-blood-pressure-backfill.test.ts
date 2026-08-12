@@ -1109,7 +1109,7 @@ test("terminal matrix coverage suppresses every extended-history pair", () => {
   );
 });
 
-test("an unrepresentable source fails before extended-history provider egress", async () => {
+test("an unrepresentable source is omitted from extended-history scheduling", () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     additionalProviders: [{
@@ -1128,19 +1128,13 @@ test("an unrepresentable source fails before extended-history provider egress", 
     "connected",
     { caffeine: true },
   )];
-  const job = findResourceJob(
-    createScheduledJobs(createStoredAccount({ sources }), NOW).jobs,
-    "caffeine",
-  );
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
 
-  await assert.rejects(
-    requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ account: createAccount({ sources }) }),
-      toJobRecord(job, 1),
+  assert.equal(
+    scheduled.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "caffeine"
     ),
-    (error) =>
-      isDeviceSyncError(error)
-      && error.code === "JUNCTION_EXTENDED_HISTORY_COVERAGE_UNREPRESENTABLE",
+    false,
   );
   assert.equal(requests.length, 0);
 });
@@ -1189,7 +1183,7 @@ test("unwritable legacy slots fail before extended-history provider egress", asy
   assert.equal(requests.length, 0);
 });
 
-test("a full metadata envelope without a coverage slot fails before provider egress", async () => {
+test("coverage capacity gates scheduling and reopens when retention becomes possible", () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     providerState: {
@@ -1211,20 +1205,37 @@ test("a full metadata envelope without a coverage slot fails before provider egr
   const metadata = Object.fromEntries(
     Array.from({ length: 16 }, (_, index) => [`capacityFact${index}`, index]),
   );
-  const job = findResourceJob(
-    createScheduledJobs(createStoredAccount({ metadata, sources }), NOW).jobs,
-    "caffeine",
+  const saturated = createScheduledJobs(
+    createStoredAccount({ metadata, sources }),
+    NOW,
   );
-
-  await assert.rejects(
-    requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ account: createAccount({ metadata, sources }) }),
-      toJobRecord(job, 1),
+  assert.equal(
+    saturated.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "caffeine"
     ),
-    (error) =>
-      isDeviceSyncError(error)
-      && error.code === "JUNCTION_EXTENDED_HISTORY_COVERAGE_UNREPRESENTABLE",
+    false,
   );
+  assert.equal(saturated.jobs.some((job) => job.kind === "reconcile"), true);
+
+  const available = createScheduledJobs(
+    createStoredAccount({
+      metadata: Object.fromEntries(Object.entries(metadata).slice(0, 15)),
+      sources,
+    }),
+    NOW,
+  );
+  assert.equal(findResourceJob(available.jobs, "caffeine").kind, "resource");
+
+  const reusableCoverage = addHistoryCoverage(
+    Object.fromEntries(Object.entries(metadata).slice(0, 15)),
+    "withings",
+    "blood_pressure",
+  );
+  const inPlace = createScheduledJobs(
+    createStoredAccount({ metadata: reusableCoverage, sources }),
+    NOW,
+  );
+  assert.equal(findResourceJob(inPlace.jobs, "caffeine").kind, "resource");
   assert.equal(requests.length, 0);
 });
 

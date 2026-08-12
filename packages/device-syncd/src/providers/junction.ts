@@ -751,6 +751,12 @@ export function createJunctionDeviceSyncProvider(
             resource,
             policy.version,
           )
+          || !canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            account.metadata,
+            sourceProviderSlug,
+            resource,
+            policy.version,
+          )
         ) {
           continue;
         }
