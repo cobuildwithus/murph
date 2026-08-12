@@ -1270,6 +1270,16 @@ Last verified: 2026-08-11
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
+- Vault-share projection delivery reads at most 33 active generations through
+  the partial `(grantor, scope, id)` index and attempts at most 32 per signed
+  Web callback. An opaque exact-generation cursor continues later pages within
+  the Cloudflare call's original deadline; repeated or malformed cursors fail
+  closed. Each share performs an unlocked active-access preflight, prepares its
+  destination-root ciphertext before `BEGIN`, then takes container owners and
+  runtime members in canonical owner-first phases, revalidates both sides, and
+  compare-and-sets only the exact still-granted generation. Reciprocal delivery
+  can never choose caller-role lock order, and a failed later page replays only
+  that bounded page.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event

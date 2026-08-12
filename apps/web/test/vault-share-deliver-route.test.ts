@@ -11,8 +11,13 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
+  findActiveHostedVaultSharePage: async (input: unknown) => {
+    const result = await mocks.findActiveHostedVaultShares(input);
+    return Array.isArray(result)
+      ? { continuation: null, shares: result }
+      : result;
+  },
 	replaceHostedVaultShareProjectionSnapshot: mocks.replaceHostedVaultShareProjectionSnapshot,
-	findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({}));
@@ -310,6 +315,29 @@ describe("vault-share deliver route", () => {
 			records: VALID_BODY.records,
 			share: ACTIVE_SHARE,
 		});
+  });
+
+  it("forwards and returns the opaque delivery continuation", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue({
+      continuation: "share_064",
+      shares: [ACTIVE_SHARE],
+    });
+
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      continuation: "share_032",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      continuation: "share_064",
+      status: "delivered",
+    });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      continuation: "share_032",
+      grantorMemberId: "member_grantor",
+      projectionScope: SLEEP_SCOPE,
+    });
   });
 
   it("preserves activity semantics through the deliver route into snapshot storage", async () => {

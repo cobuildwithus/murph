@@ -7,7 +7,9 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+  isHostedRuntimeVaultShareDeliverContinuation,
 } from "@murphai/hosted-execution/routes";
 
 import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
@@ -35,17 +37,46 @@ export function createHostedWebVaultSharePort(input: {
       return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionScopes;
     },
     async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
-        boundUserId: input.boundUserId,
-        description: "Hosted vault share delivery",
-        fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
+      const deadlineMs = Date.now() + input.timeoutMs;
+      const observedContinuations = new Set<string>();
+      let continuation: string | null = null;
+      let delivered = false;
 
-      return parseHostedVaultShareDeliverResponse(payload);
+      while (true) {
+        const payload = await fetchHostedWebControlPlaneJson({
+          body: continuation === null
+            ? request
+            : {
+                ...request,
+                [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]: continuation,
+              },
+          boundUserId: input.boundUserId,
+          description: "Hosted vault share delivery",
+          fetchImpl: input.fetchImpl,
+          path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+          replayOnceOnRetryableFailure: true,
+          timeoutMs: Math.max(0, deadlineMs - Date.now()),
+          transport: input.transport,
+        });
+        const response = parseHostedVaultShareDeliverResponse(payload);
+        delivered ||= response.status === "delivered";
+
+        const nextContinuation = readHostedVaultShareDeliverContinuation(payload);
+        if (nextContinuation === null) {
+          return delivered
+            ? { status: "delivered" as const }
+            : { status: "no-active-share" as const };
+        }
+        if (
+          nextContinuation === continuation
+          || observedContinuations.has(nextContinuation)
+        ) {
+          throw new TypeError("Hosted vault-share delivery continuation repeated.");
+        }
+
+        observedContinuations.add(nextContinuation);
+        continuation = nextContinuation;
+      }
     },
   };
 }
@@ -60,4 +91,22 @@ function buildHostedVaultShareActiveKindsPath(): string {
   }
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;
+}
+
+function readHostedVaultShareDeliverContinuation(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted vault share delivery response must be an object.");
+  }
+
+  const continuation = (value as Record<string, unknown>)[
+    HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD
+  ];
+  if (continuation === undefined) {
+    return null;
+  }
+  if (!isHostedRuntimeVaultShareDeliverContinuation(continuation)) {
+    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
+  }
+
+  return continuation;
 }

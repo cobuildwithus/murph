@@ -200,18 +200,21 @@ interface HostedVaultShareGrantStoreForTestModule {
 }
 
 interface HostedVaultShareProjectionStoreForTestModule {
-  findActiveHostedVaultShares(input: {
+  findActiveHostedVaultSharePage(input: {
     grantorMemberId: string;
     prisma: HostedTestPrismaClient;
     projectionScope: HostedVaultShareProjectionScope;
-  }): Promise<Array<{
-    destinationMemberId: string;
-    grantorMemberId: string;
-    id: string;
-    projectionKind: string;
-    projectionScope: HostedVaultShareProjectionScope;
-    projectionScopeKey: string;
-  }>>;
+  }): Promise<{
+    continuation: string | null;
+    shares: Array<{
+      destinationMemberId: string;
+      grantorMemberId: string;
+      id: string;
+      projectionKind: string;
+      projectionScope: HostedVaultShareProjectionScope;
+      projectionScopeKey: string;
+    }>;
+  }>;
   replaceHostedVaultShareProjectionSnapshot(input: {
     prisma: HostedTestPrismaClient;
     records: [];
@@ -1414,11 +1417,12 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const share = (await projectionStore.findActiveHostedVaultShares({
+        const page = await projectionStore.findActiveHostedVaultSharePage({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
-        })).find((candidate) =>
+        });
+        const share = page.shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {

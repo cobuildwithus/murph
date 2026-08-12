@@ -1,4 +1,7 @@
 import {
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
+} from "@murphai/hosted-execution/routes";
+import {
   isHostedVaultShareCurrentStateProjectionKind,
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverResponse,
@@ -19,7 +22,7 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  findActiveHostedVaultShares,
+  findActiveHostedVaultSharePage,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -28,6 +31,10 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+type HostedVaultShareDeliverPageResponse = HostedVaultShareDeliverResponse & {
+  [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]?: string;
+};
 
 const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
   status: "no-active-share",
@@ -39,26 +46,32 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
 
 /**
  * The single cross-member write seam. The grantor identity comes exclusively from the
- * signed Cloudflare callback. The grantor runtime first asks web for active projection
- * kinds, then this write seam revalidates the requested kind before fanout. Web remains
- * the sole authority: each replacement transaction validates both members' access and
- * conditionally updates the exact active HostedVaultShare generation. The response is a
- * function of share configuration alone — no grants, only inactive destinations, or only
- * stale generations resolves to `no-active-share`; everything else resolves to a bare
- * `delivered`, so the grantor runtime learns nothing beyond "an active share exists".
+ * signed Cloudflare callback. Each callback attempts one hard-bounded page and returns
+ * only an opaque share-generation continuation when more configured shares remain. Web
+ * remains the sole authority: each replacement prepares crypto before its transaction,
+ * then the transaction validates both members and conditionally updates the exact active
+ * HostedVaultShare generation. Status remains a function of share configuration alone;
+ * continuation reveals only that another bounded callback is required.
  */
 export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
-  const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
+  const requestBody = await readOptionalJsonObject(request);
+  const body = parseHostedVaultShareDeliverRequest(requestBody);
+  const continuation =
+    requestBody[HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD];
 
-  const shares = await findActiveHostedVaultShares({
+  const page = await findActiveHostedVaultSharePage({
     grantorMemberId,
     projectionScope: body.projectionScope,
+    ...(continuation === undefined ? {} : { continuation }),
   });
-  if (shares.length === 0) {
-    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+  if (page.shares.length === 0) {
+    return jsonOk(buildHostedVaultShareDeliverPageResponse(
+      NO_ACTIVE_SHARE_RESPONSE,
+      page.continuation,
+    ));
   }
 
   // An all-stale offer replaces the prior snapshot with an encrypted empty snapshot. The
@@ -68,7 +81,7 @@ export const POST = withJsonError(async (request: Request) => {
   let delivered = false;
   let deliveryFailed = false;
 
-  for (const share of shares) {
+  for (const share of page.shares) {
     try {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         records,
@@ -92,8 +105,23 @@ export const POST = withJsonError(async (request: Request) => {
     throw createHostedVaultShareDeliveryFailedError();
   }
 
-  return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
+  return jsonOk(buildHostedVaultShareDeliverPageResponse(
+    delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE,
+    page.continuation,
+  ));
 });
+
+function buildHostedVaultShareDeliverPageResponse(
+  response: HostedVaultShareDeliverResponse,
+  continuation: string | null,
+): HostedVaultShareDeliverPageResponse {
+  return continuation === null
+    ? response
+    : {
+        ...response,
+        [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]: continuation,
+      };
+}
 
 function createHostedVaultShareDeliveryFailedError(): Error {
   return hostedOnboardingError({

@@ -1,6 +1,9 @@
 import "server-only";
 
 import {
+  isHostedRuntimeVaultShareDeliverContinuation,
+} from "@murphai/hosted-execution/routes";
+import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   type HostedVaultShareDeliveryRecord,
@@ -13,8 +16,12 @@ import { getPrisma } from "../prisma";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
   isHostedRuntimeInactiveAccessError,
-  requireHostedRuntimeActiveAccessForUpdateTx,
+  requireHostedRuntimeActiveAccess,
+  requireHostedRuntimeMembersActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
+import {
+  HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
+} from "./delivery-limits";
 import { encryptHostedVaultShareProjectionSnapshot } from "./projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
 
@@ -27,17 +34,29 @@ export interface ActiveHostedVaultShare {
   projectionScopeKey: string;
 }
 
-export async function findActiveHostedVaultShares(input: {
+export interface ActiveHostedVaultSharePage {
+  continuation: string | null;
+  shares: ActiveHostedVaultShare[];
+}
+
+/**
+ * Reads one deterministic, hard-bounded page. The stable share-generation id is an opaque
+ * callback cursor, so successful pages need no parallel recovery state and malformed rows
+ * still advance the cursor instead of pinning delivery forever.
+ */
+export async function findActiveHostedVaultSharePage(input: {
+  continuation?: unknown;
   grantorMemberId: string;
   prisma?: PrismaClient;
   projectionScope: HostedVaultShareProjectionScope;
-}): Promise<ActiveHostedVaultShare[]> {
+}): Promise<ActiveHostedVaultSharePage> {
   const prisma = input.prisma ?? getPrisma();
+  const continuation = parseHostedVaultShareDeliveryContinuation(input.continuation);
   const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
     input.projectionScope,
   );
   const rows = await prisma.hostedVaultShare.findMany({
-    orderBy: { createdAt: "asc" },
+    orderBy: { id: "asc" },
     select: {
       destinationMemberId: true,
       grantorMemberId: true,
@@ -46,29 +65,37 @@ export async function findActiveHostedVaultShares(input: {
       projectionScopeJson: true,
       projectionScopeKey: true,
     },
+    take: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1,
     where: {
       grantorMemberId: input.grantorMemberId,
+      ...(continuation ? { id: { gt: continuation } } : {}),
       projectionScopeKey,
       status: "granted",
     },
   });
+  const pageRows = rows.slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE);
 
-  return rows.flatMap((row) => {
-    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
-    if (!projectionScope) {
-      return [];
-    }
-    const rowScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+  return {
+    continuation: rows.length > HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE
+      ? pageRows[pageRows.length - 1]?.id ?? null
+      : null,
+    shares: pageRows.flatMap((row) => {
+      const projectionScope = parseHostedVaultShareRowProjectionScope(row);
+      if (!projectionScope) {
+        return [];
+      }
+      const rowScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
-    return [{
-      destinationMemberId: row.destinationMemberId,
-      grantorMemberId: row.grantorMemberId,
-      id: row.id,
-      projectionKind: projectionScope.projectionKind,
-      projectionScope,
-      projectionScopeKey: rowScopeKey,
-    }];
-  });
+      return [{
+        destinationMemberId: row.destinationMemberId,
+        grantorMemberId: row.grantorMemberId,
+        id: row.id,
+        projectionKind: projectionScope.projectionKind,
+        projectionScope,
+        projectionScopeKey: rowScopeKey,
+      }];
+    }),
+  };
 }
 
 export async function readDeliverableHostedVaultShareProjectionScopes(input: {
@@ -103,9 +130,9 @@ export async function readDeliverableHostedVaultShareProjectionScopes(input: {
 /**
  * Replaces the encrypted snapshot on the exact active share generation. Encryption uses
  * the destination member's runtime-ingress root, and the row id is part of authenticated
- * data, so ciphertext cannot be replayed across a revoke/regrant generation. The final
- * conditional update is the linearization point: a stale writer cannot overwrite a
- * revoked or newly granted share.
+ * data, so ciphertext cannot be replayed across a revoke/regrant generation. Crypto is
+ * completed before the transaction opens; the short transaction then takes the canonical
+ * sorted member locks, revalidates access, and conditionally updates the exact active row.
  */
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
   prisma?: PrismaClient;
@@ -113,28 +140,27 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
   share: ActiveHostedVaultShare;
 }): Promise<"replaced" | "no-active-share"> {
   const prisma = input.prisma ?? getPrisma();
+  if (!await hasHostedVaultShareRuntimeActiveAccessBeforePreparation(
+    [input.share.grantorMemberId, input.share.destinationMemberId],
+    prisma,
+  )) {
+    return "no-active-share";
+  }
+  const projectionSnapshotCiphertext =
+    await encryptHostedVaultShareProjectionSnapshot({
+      prisma,
+      records: input.records,
+      share: input.share,
+    });
 
   return prisma.$transaction(async (tx) => {
     if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
-      input.share.grantorMemberId,
+      [input.share.grantorMemberId, input.share.destinationMemberId],
       tx,
     )) {
       return "no-active-share";
     }
 
-    if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
-      input.share.destinationMemberId,
-      tx,
-    )) {
-      return "no-active-share";
-    }
-
-    const projectionSnapshotCiphertext =
-      await encryptHostedVaultShareProjectionSnapshot({
-        prisma: tx,
-        records: input.records,
-        share: input.share,
-      });
     const replaced = await tx.hostedVaultShare.updateMany({
       data: { projectionSnapshotCiphertext },
       where: {
@@ -150,12 +176,39 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
   });
 }
 
+async function hasHostedVaultShareRuntimeActiveAccessBeforePreparation(
+  memberIds: readonly string[],
+  prisma: PrismaClient,
+): Promise<boolean> {
+  try {
+    for (const memberId of memberIds) {
+      await requireHostedRuntimeActiveAccess(memberId, { prisma });
+    }
+    return true;
+  } catch (error) {
+    if (isHostedRuntimeInactiveAccessError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function parseHostedVaultShareDeliveryContinuation(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!isHostedRuntimeVaultShareDeliverContinuation(value)) {
+    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
+  }
+  return value;
+}
+
 async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
-  memberId: string,
+  memberIds: readonly string[],
   tx: Prisma.TransactionClient,
 ): Promise<boolean> {
   try {
-    await requireHostedRuntimeActiveAccessForUpdateTx(memberId, {
+    await requireHostedRuntimeMembersActiveAccessForUpdateTx(memberIds, {
       prisma: tx,
     });
     return true;
