@@ -1665,7 +1665,7 @@ function preserveExistingPullRequestBody(
   worktree: string,
   issueNumber: number,
   existing: BranchPullRequestRecord,
-) {
+): string {
   const bodyPath = path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH);
   const operator = parseAuthenticatedGitHubOperator(
     recoveryCommands.authenticatedOperator(worktree),
@@ -1690,6 +1690,7 @@ function preserveExistingPullRequestBody(
     recovered,
     0o600,
   );
+  return recovered;
 }
 
 function publishPullRequest(
@@ -1835,7 +1836,7 @@ export function bodyWithParentMetadata(
   body: string,
   metadata: {
     finalHead?: string;
-    firstHead: string;
+    firstHead?: string;
     handoff?: "product-runtime" | "review-findings";
     handoffHead?: string;
     specialistHead?: string;
@@ -1852,7 +1853,10 @@ export function bodyWithParentMetadata(
     .filter((line) => !prefixes.some((prefix) => line.startsWith(prefix)))
     .join("\n")
     .trimEnd();
-  const additions = [`ReviewGPT first-reviewed head: ${metadata.firstHead}`];
+  const additions: string[] = [];
+  if (metadata.firstHead) {
+    additions.push(`ReviewGPT first-reviewed head: ${metadata.firstHead}`);
+  }
   if (metadata.specialistHead) {
     additions.push(`Frog autofix specialist review: PASS at ${metadata.specialistHead}`);
   }
@@ -1926,29 +1930,47 @@ export function carriedForwardBodyHandoff(
   return handoff.kind;
 }
 
-function resolveFirstReviewedHead(
+export interface ReviewBaselineState {
+  firstHead?: string;
+  requiresHumanHandoff: boolean;
+}
+
+export function resolveReviewBaselineState(
   worktree: string,
-  existingBody: string | null,
+  existing: BranchPullRequestRecord | null,
+  authenticatedOperator: string,
+  recoveredExistingBody: string | null,
   currentHead: string,
-): string {
-  const existing = existingBody === null
-    ? null
-    : extractFirstReviewedHead(existingBody);
-  if (existingBody !== null && !existing) {
-    throw new Error("existing pull request is missing its immutable review baseline");
+): ReviewBaselineState {
+  if (!existing) {
+    if (recoveredExistingBody) {
+      throw new Error("existing pull request changed during review recovery");
+    }
+    return { firstHead: currentHead, requiresHumanHandoff: false };
   }
-  if (!existing) return currentHead;
-  requireCommand("git", ["cat-file", "-e", `${existing}^{commit}`], worktree);
+  const trustedBody = hasParentOwnedPullRequestBody(
+    existing,
+    authenticatedOperator,
+  )
+    ? existing.body
+    : recoveredExistingBody;
+  if (!trustedBody) return { requiresHumanHandoff: true };
+  const firstHead = extractFirstReviewedHead(trustedBody);
+  if (!firstHead) return { requiresHumanHandoff: true };
+  requireCommand("git", ["cat-file", "-e", `${firstHead}^{commit}`], worktree);
   if (
     runCommand(
       "git",
-      ["merge-base", "--is-ancestor", existing, currentHead],
+      ["merge-base", "--is-ancestor", firstHead, currentHead],
       worktree,
     ).status !== 0
   ) {
     throw new Error("ReviewGPT baseline is not an ancestor of the current head");
   }
-  return existing;
+  return {
+    firstHead,
+    requiresHumanHandoff: firstHead !== currentHead,
+  };
 }
 
 async function runEditOnlyCycle(options: {
@@ -2223,6 +2245,7 @@ async function reviewPublishAndFinalize(options: {
   branch: string;
   issueNumber: number;
   primary: string;
+  recoveredExistingBody: string | null;
   transient: string;
   worktree: string;
 }): Promise<"awaiting-human" | "merged"> {
@@ -2241,11 +2264,11 @@ async function reviewPublishAndFinalize(options: {
     existingBeforePublish
     && hasParentOwnedPullRequestBody(existingBeforePublish, operator),
   );
-  const firstHead = resolveFirstReviewedHead(
+  const baseline = resolveReviewBaselineState(
     options.worktree,
-    existingBeforePublish && existingBodyIsParentOwned
-      ? existingBeforePublish.body
-      : null,
+    existingBeforePublish,
+    operator,
+    options.recoveredExistingBody,
     head,
   );
   let specialistPassed = Boolean(
@@ -2278,9 +2301,12 @@ async function reviewPublishAndFinalize(options: {
       },
     )
     : null;
+  if (!handoff && baseline.requiresHumanHandoff) {
+    handoff = "review-findings";
+  }
   body = bodyWithParentMetadata(body, {
     finalHead: finalPassed ? head : undefined,
-    firstHead,
+    firstHead: baseline.firstHead,
     handoff: handoff ?? undefined,
     handoffHead: handoff ? head : undefined,
     specialistHead: specialistPassed ? head : undefined,
@@ -2300,7 +2326,7 @@ async function reviewPublishAndFinalize(options: {
   const persistMetadata = () => {
     body = bodyWithParentMetadata(body, {
       finalHead: finalPassed ? head : undefined,
-      firstHead,
+      firstHead: baseline.firstHead,
       handoff: handoff ?? undefined,
       handoffHead: handoff ? head : undefined,
       specialistHead: specialistPassed ? head : undefined,
@@ -2314,7 +2340,7 @@ async function reviewPublishAndFinalize(options: {
   };
 
   if (handoff) return "awaiting-human";
-  if (firstHead !== head || !trustedReviewControlsMatch(
+  if (!baseline.firstHead || !trustedReviewControlsMatch(
     options.primary,
     options.worktree,
   )) {
@@ -2519,6 +2545,13 @@ async function runOnce() {
         issue.number,
         recoveryCommands,
       );
+      const recoveredExistingBody = existingPullRequest
+        ? preserveExistingPullRequestBody(
+          worktree,
+          issue.number,
+          existingPullRequest,
+        )
+        : null;
       if (workerMode === "implement") {
         const implementation = runParentReview({
           connector: "github",
@@ -2544,41 +2577,39 @@ async function runOnce() {
         requireCommand("git", ["apply", patchPath], worktree);
       }
 
-      if (
+      const cleanExistingResume = Boolean(
         workerMode === "resume"
         && existingPullRequest
         && existingPullRequest.headRefOid
           === requireCommand("git", ["rev-parse", "HEAD"], worktree)
         && !requireCommand("git", ["status", "--porcelain"], worktree)
-      ) {
-        preserveExistingPullRequestBody(
-          worktree,
-          issue.number,
-          existingPullRequest,
-        );
-      } else if (
-        workerMode === "resume"
-        && !existingPullRequest
-        && existsSync(path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH))
-        && !requireCommand("git", ["status", "--porcelain"], worktree)
-      ) {
-        validatedWorkerPrBody(worktree, issue.number);
-      } else {
-        await runEditOnlyCycle({
-          codexHome,
-          issueNumber: issue.number,
-          lock,
-          mode: workerMode,
-          phase: workerMode === "implement" ? "implementation" : "resume",
-          primary,
-          transient,
-          worktree,
-        });
+      );
+      if (!cleanExistingResume) {
+        if (
+          workerMode === "resume"
+          && !existingPullRequest
+          && existsSync(path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH))
+          && !requireCommand("git", ["status", "--porcelain"], worktree)
+        ) {
+          validatedWorkerPrBody(worktree, issue.number);
+        } else {
+          await runEditOnlyCycle({
+            codexHome,
+            issueNumber: issue.number,
+            lock,
+            mode: workerMode,
+            phase: workerMode === "implement" ? "implementation" : "resume",
+            primary,
+            transient,
+            worktree,
+          });
+        }
       }
       const result = await reviewPublishAndFinalize({
         branch,
         issueNumber: issue.number,
         primary,
+        recoveredExistingBody,
         transient,
         worktree,
       });

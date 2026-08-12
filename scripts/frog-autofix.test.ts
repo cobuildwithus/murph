@@ -53,6 +53,7 @@ import {
   recoverablePullRequestBody,
   requiredCheckWatchHandoff,
   requiredPullRequestCheckState,
+  resolveReviewBaselineState,
   reusableRepairPhase,
   trustedReviewControlPaths,
 } from "./frog-autofix.ts";
@@ -504,6 +505,115 @@ describe("Frog autofix guards", () => {
     expect(recovered).not.toContain("Frog autofix handoff:");
     expect(() => validatePullRequestBody(recovered, 42, "<HOME>", "<USER>"))
       .not.toThrow();
+  });
+
+  it("preserves the parent-local baseline after a foreign body edit and branch advance", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "frog-review-baseline-"));
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    try {
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      writeFileSync(path.join(root, "authority.txt"), "trusted\n");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "trusted candidate");
+      const trustedHead = git("rev-parse", "HEAD");
+      writeFileSync(path.join(root, "authority.txt"), "foreign descendant\n");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "foreign descendant");
+      const descendantHead = git("rev-parse", "HEAD");
+      const branch = "agent/frog-autofix-42";
+      const localBody = bodyWithParentMetadata(
+        renderRecoveredPullRequestBody(42),
+        { firstHead: trustedHead },
+      );
+      const foreignEdited = {
+        ...pullRequestAuthority(branch),
+        body: bodyWithParentMetadata(renderRecoveredPullRequestBody(42), {
+          firstHead: descendantHead,
+        }),
+        editor: { login: "different-operator" },
+        headRefOid: descendantHead,
+        isDraft: true,
+        number: 99,
+        state: "OPEN" as const,
+      };
+
+      expect(resolveReviewBaselineState(
+        root,
+        foreignEdited,
+        authenticatedOperator,
+        localBody,
+        descendantHead,
+      )).toEqual({
+        firstHead: trustedHead,
+        requiresHumanHandoff: true,
+      });
+      expect(resolveReviewBaselineState(
+        root,
+        { ...foreignEdited, headRefOid: trustedHead },
+        authenticatedOperator,
+        localBody,
+        trustedHead,
+      )).toEqual({
+        firstHead: trustedHead,
+        requiresHumanHandoff: false,
+      });
+      expect(resolveReviewBaselineState(
+        root,
+        foreignEdited,
+        authenticatedOperator,
+        renderRecoveredPullRequestBody(42),
+        descendantHead,
+      )).toEqual({ requiresHumanHandoff: true });
+      expect(resolveReviewBaselineState(
+        root,
+        foreignEdited,
+        authenticatedOperator,
+        null,
+        descendantHead,
+      )).toEqual({ requiresHumanHandoff: true });
+      expect(resolveReviewBaselineState(
+        root,
+        { ...foreignEdited, editor: { login: authenticatedOperator }, body: localBody },
+        authenticatedOperator,
+        null,
+        descendantHead,
+      )).toEqual({
+        firstHead: trustedHead,
+        requiresHumanHandoff: true,
+      });
+      expect(resolveReviewBaselineState(
+        root,
+        null,
+        authenticatedOperator,
+        null,
+        descendantHead,
+      )).toEqual({
+        firstHead: descendantHead,
+        requiresHumanHandoff: false,
+      });
+      expect(() => resolveReviewBaselineState(
+        root,
+        null,
+        authenticatedOperator,
+        localBody,
+        descendantHead,
+      )).toThrow("existing pull request changed during review recovery");
+
+      const fixedHandoff = bodyWithParentMetadata(
+        renderRecoveredPullRequestBody(42),
+        { handoff: "review-findings", handoffHead: descendantHead },
+      );
+      expect(extractFirstReviewedHead(fixedHandoff)).toBeNull();
+      expect(bodyHandoff(fixedHandoff, descendantHead)).toBe("review-findings");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   it("renders a two-hour LaunchAgent without direct local identifiers", () => {

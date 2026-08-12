@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -628,7 +628,10 @@ handoff and queue advancement, same-named fork/different-operator rejection,
 closed-unmerged and descendant-head handoff continuity, terminal versus
 transient required-check classification, conflict disposition, real native
 two-contender serialization, operator-created but foreign-edited baseline/PASS/
-open-and-closed-handoff rejection with safe body recovery, 100-plus-record
+open-and-closed-handoff rejection with safe body recovery, parent-local
+baseline preservation plus pre-review handoff when a foreign body edit is
+composed with a newer same-repository branch descendant, fixed-body handoff
+when no trusted baseline remains, 100-plus-record
 cursor pagination before parent cardinality, clean post-commit/pre-first-push
 resume without a second implementation request or child, exact parent-local
 body/head provenance for push-before-PR recovery plus rejection of seeded or

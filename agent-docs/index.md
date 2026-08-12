@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Purpose
 
@@ -16,7 +16,8 @@ Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
 protected PR merges, one authenticated-operator/same-repository PR predicate,
 fully traversed deterministic-branch PR history plus latest-body-editor
-provenance, GitHub-owned implement/resume recovery state including clean
+provenance with parent-local baseline preservation and foreign-descendant
+handoff, GitHub-owned implement/resume recovery state including clean
 post-commit/pre-first-push continuation and exact parent-local body/head
 provenance for remote-no-PR continuation, dual pre-push/pre-create issue
 authority refresh, mandatory foul-play assessment in both implementation

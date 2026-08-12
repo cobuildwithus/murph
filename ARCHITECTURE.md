@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Local Frog Autofix
 
@@ -41,9 +41,13 @@ Its server-side `main`/head query traverses every cursor page before foreign
 records are removed and the zero-or-one parent-owned cardinality is enforced.
 Mutable remote body text supplies baseline, PASS, closing, or handoff authority
 only when `editor`/`lastEditedAt` proves the live operator made the latest edit,
-with creator fallback only for a never-edited body. Otherwise the parent keeps
-an already validated local body or writes one fixed recovery body, overwrites
-the remote presentation, and reruns exact-head reviews.
+with creator fallback only for a never-edited body. Otherwise the parent
+captures an already validated local body before any child runs or writes one
+fixed recovery body. A retained baseline equal to the current head may replace
+the remote presentation and rerun exact-head reviews. A retained ancestor
+baseline paired with a newer remote head is preserved and becomes a durable
+review-findings handoff; a recovery body with no trusted baseline also becomes
+that handoff without establishing the remote head as a fresh baseline.
 A clean implementation commit interrupted before its first remote push, or an
 open PR, may resume without requesting a second implementation patch. A clean
 local-only no-PR commit remains resumable. Once the deterministic branch has

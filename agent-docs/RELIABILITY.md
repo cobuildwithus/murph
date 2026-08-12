@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Current Guardrails
 
@@ -233,10 +233,13 @@ Last verified: 2026-08-11
   head descends from the marked head carries the disposition forward at the
   current head without rerunning a model; non-descendant replacement fails
   closed. That marker is effective only while the live operator is also the
-  proven latest body editor. A foreign body edit discards all remote metadata,
-  preserves a validated local body or installs one fixed recovery body, and
-  reruns the reviews rather than hydrating forged authority. Before merge it
-  revalidates live issue authority, PR head, required checks, current-base
+  proven latest body editor. A foreign body edit discards all remote metadata
+  and uses a validated parent-local body captured before any child or one fixed
+  recovery body. An unchanged trusted baseline restores presentation and reruns
+  review; a newer remote descendant preserves the older baseline and receives
+  the existing review-findings handoff, while missing trusted baseline evidence
+  receives the fixed-body handoff without autonomous rebaselining. Before merge
+  it revalidates live issue authority, PR head, required checks, current-base
   mergeability, and both old and new paths of any rename or copy. Proven local
   agent/Codex workflow changes may merge and close automatically; possible
   product-runtime changes remain as reviewed ready PRs with open issues for

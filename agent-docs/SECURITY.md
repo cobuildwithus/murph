@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Non-Negotiable Rules
 
@@ -1092,8 +1092,13 @@ Last verified: 2026-08-11
   operator whenever `lastEditedAt` is present, while the PR creator is accepted
   only for a never-edited body with no editor. Other remote text cannot supply
   baseline, PASS, handoff, closing, hydration, merge, or closure authority. The
-  parent retains a validated local body or creates a fixed authority-free
-  recovery body, replaces the remote presentation, and reruns exact-head review.
+  parent captures a validated local body before any child runs or creates a
+  fixed authority-free recovery body. A local immutable baseline equal to the
+  current head may replace the remote presentation and rerun exact-head review.
+  If that baseline is an ancestor of a newer remote head, the parent preserves
+  it and publishes the existing review-findings handoff before any autonomous
+  review or merge. If no trusted baseline exists, the fixed recovery body gains
+  that handoff without making the remote head a new autonomous baseline.
   Only a fresh branch can authorize the implementation ReviewGPT request;
   resume omits that command entirely. A clean local-only committed deterministic
   branch ahead of `origin/main` may resume before its first push. When remote-
