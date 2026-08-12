@@ -47,9 +47,9 @@ Updated: 2026-08-11
 ## Risks and mitigations
 
 1. Risk: collapsing the surface accidentally broadens private delivery.
-   Mitigation: make the fresh exact question the reviewer's sole audience
-   evidence, require explicit private wording for direct delivery, and reuse the
-   existing sender/route authority.
+   Mitigation: make the fresh exact question Web's sole audience evidence,
+   require explicit private wording for direct delivery, and reuse the existing
+   sender/route authority; the reviewer may only allow or deny.
 2. Risk: Web, hosted contracts, and warm runtime bundles deploy out of sync.
    Mitigation: prefer a backward-compatible consumer-first transition or record
    an explicit tandem deployment requirement with direct parser tests.
@@ -62,8 +62,8 @@ Updated: 2026-08-11
 1. Ask ReviewGPT Pro for a scoped deletion-first implementation patch and inspect
    its assumptions before applying any hunk.
 2. Trace and collapse the model, Web authority, hosted contract, and runtime
-   paths into one destination-free current-sender request whose existing final
-   reviewer returns the terminal audience.
+   paths into one destination-free current-sender request whose exact source
+   deterministically fixes the audience before the existing final reviewer.
 3. Add focused regression coverage and update the live architecture/security/
    reliability contracts plus member-visible changelog.
 4. Run focused tests, typechecks, static stale-symbol checks, and direct scenario
@@ -79,10 +79,10 @@ Updated: 2026-08-11
   intent classifier or provider turn.
 - Treat the ReviewGPT patch as untrusted design input: inspect it fully and adapt
   only the smallest maintainable change that preserves repository invariants.
-- Keep one canonical model/runtime action with no response destination. Extend
-  the existing fresh outgoing reviewer so the exact selected message alone can
-  authorize private delivery; otherwise a valid request returns read-only to
-  the group caller.
+- Keep one canonical model/runtime action with no response destination. Web
+  deterministically fixes private delivery only from the exact selected
+  message; otherwise a valid request returns read-only to the group caller. The
+  existing outgoing reviewer can only allow or deny that fixed disclosure.
 - Retain the two old wire spellings only as a bounded rolling-deploy seam. The
   parser immediately canonicalizes them, while in-process ownership and all new
   model output use the single destination-free action. Lock canonical and legacy
@@ -99,15 +99,22 @@ Updated: 2026-08-11
   still left terminal audience authority model-owned and origin admission split.
 - ReviewGPT Pro returned a second complete patch that removes the model-authored
   destination, establishes one origin-level request identity, reuses the
-  existing fresh outgoing reviewer to select terminal audience, serializes all
+  existing fresh outgoing reviewer only for allow/deny, serializes the deployed
   rollout aliases, and fails mixed-version traffic closed.
 - Synthetic coverage proves both destinations, exact message/sender/route
   authority, rollback wire compatibility, and the stale-context regression.
 - Focused suites pass across hosted execution, assistant engine, assistant
   runtime, Web, Cloudflare, and PostgreSQL-backed admission; affected package
   typechecks pass.
-- Remaining work is PR publication, the public changelog fragment, exact-head
-  specialist/final ReviewGPT gates, CI, plan closure, and merge-tree proof.
+- PR #1705 is open. The first exact-head final audit found and proved three
+  defects: private completion could block terminal fallback, common private
+  reply phrasing could default to the group, and undeployed compatibility had
+  been retained. The remediation separates private delivery from group fallback,
+  makes unfamiliar audience wording fail closed, persists a fresh group
+  fallback after expiry or provider-entry route loss, and deletes those
+  compatibility paths.
+- Remaining work is focused remediation proof, a new exact-head final ReviewGPT
+  round, CI, plan closure, and merge-tree proof.
 
 ## Verification
 

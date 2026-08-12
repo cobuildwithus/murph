@@ -25,7 +25,8 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 - Neither group nor personal model selects another member or an audience.
 - Completion cannot change the persisted target kind.
 - Private reviewed text is delivered only by the exact current same-channel direct route.
-- Route loss after private admission persists only the existing non-disclosing `cannot_answer` result to the authorized originating group.
+- Private delivery has a separate deterministic identity and cannot occupy the canonical group completion/fallback identity.
+- Route loss at completion or provider entry, and request expiry before prepare, persist only a fresh non-disclosing `cannot_answer` result to the authorized originating group.
 - Terminal or unavailable control responses without a persisted completion are retryable, not successful consumption.
 
 ## Implementation
@@ -36,7 +37,7 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 - [x] Require private routing at admission and revalidate it at completion.
 - [x] Remove reviewer-selected audience, model-produced destination, and post-read audience resolution.
 - [x] Make completion fixed-audience and terminal persistence explicit.
-- [x] Keep only body-marker and bounded old-runner/mailbox drain compatibility.
+- [x] Keep only the strict body marker plus deployed unmarked old-runner and bounded mailbox drain compatibility.
 - [x] Add synthetic unit and opt-in PostgreSQL proof for mixed senders, group/private admission, ambiguity, route loss, replay/restart, and concurrency.
 - [x] Update architecture, security, reliability, protocol, testing, and changelog owners.
 
@@ -47,10 +48,12 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 - [x] Focused Assistant Ask parser, tool, runtime, Web authority, route, and Cloudflare port suites: 310 tests.
 - [x] Opt-in PostgreSQL mixed-sender, route-loss, and concurrency proof: 4 tests.
 - [x] Focused Web ESLint and agent-doc drift checks.
+- [x] ReviewGPT round 3 findings remediated: common private wording, expiry/route-loss terminal convergence, and undeployed compatibility deletion.
+- [x] Remediation proof includes fresh provider-entry expiry/route-loss fallbacks, duplicate-terminal suppression, legacy/current private-ID dirty-checkpoint dispatch on Linq and Telegram, and a 572-test affected runtime pass.
 - [ ] Exact pushed-head GitHub Actions and final ReviewGPT gate.
 
 ## Rollout And Removal
 
-Deploy Web admission/completion support before recycling Cloudflare and detached runners. New callers use only the strict `currentSenderProtocol: "v2"` body marker. During the drain, Web accepts the exact-head dual URL/body marker, parses old `ask_current_sender` and `message_current_sender` calls, and drains existing accepted `group_sender` or `group_sender_private` work. Compatibility metadata is stripped before admission; exact-source rules remain authoritative and legacy destination fields are ignored.
+Deploy Web admission/completion support before recycling Cloudflare and detached runners. New callers use only the strict `currentSenderProtocol: "v2"` body marker. During the drain, Web parses deployed unmarked old `ask_current_sender` and `message_current_sender` calls and drains existing accepted `group_sender` or `group_sender_private` work. Exact-source rules remain authoritative. The undeployed dual URL marker, destination dialect, and intermediate request-id alias are rejected.
 
-After all old runners are recycled, wait the ten-minute request TTL plus a one-minute queue margin. Then remove the legacy action alias, legacy destination parsing/echo, and legacy request-id lookups.
+After all old runners are recycled, wait the ten-minute request TTL plus a one-minute queue margin. Then remove the legacy action alias and legacy request-id lookups.

@@ -51,10 +51,13 @@ audience. The private candidate and fresh outgoing reviewer may only allow or
 deny the answer under the fixed permission; no model output may select a member,
 route, or audience. Group answers use the existing group completion. Private
 answers use the existing exact-text notification on the admitted channel. If a
-private route disappears after admission, the private answer is discarded and
-the originating group receives only the existing non-disclosing cannot-answer
-completion. This path creates no group, membership, permission, or grant row and
-grants no future or scheduled access.
+private route disappears after admission or at provider entry, or if the
+request expires before prepare, the private answer is discarded and the
+originating group receives only a fresh non-disclosing cannot-answer
+completion. Private delivery has a separate deterministic identity, so it
+cannot occupy the canonical group completion/fallback identity. This path
+creates no group, membership, permission, or grant row and grants no future or
+scheduled access.
 
 ## Product flow
 

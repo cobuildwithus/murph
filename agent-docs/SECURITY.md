@@ -780,24 +780,26 @@ Last verified: 2026-08-12
   `assistant.notification.requested` is the private path and may target only
   the source sender's current same-channel `direct-member` route, with
   `threadIsDirect: true`, queue-only dispatch, exact reviewed text, and no
-  external group-thread authority. If that route is lost before completion,
-  Web discards the private answer and persists the existing `cannot_answer`
-  completion to the already-authorized origin group. It never redirects or
-  exposes the private answer. Provider entry still revalidates expiry, exact
-  text digest, the same personal member, and the current same-channel direct
-  route.
+  external group-thread authority. It uses a separate deterministic delivery
+  identity so it cannot occupy the canonical group completion/fallback
+  identity. If the route is lost before completion or at provider entry, or if
+  the request expires before prepare, Web discards the private answer and
+  persists a fresh `cannot_answer` completion to the already-authorized origin
+  group. It never redirects or exposes the private answer. Provider entry still
+  revalidates expiry, exact text digest, the same personal member, and the
+  current same-channel direct route before any private provider call.
 - Rolling compatibility is legacy-facing only. New callers use one strict body
-  marker. Exact-head callers may drain through the former dual URL/body marker,
-  while unmarked old `ask_current_sender` / `message_current_sender` requests
-  and old destination fields are validated for shape. Web strips every marker
-  and ignores every legacy destination before applying canonical source-text
-  authority.
+  marker. Deployed unmarked old `ask_current_sender` /
+  `message_current_sender` requests remain accepted and are subjected to the
+  same canonical source-text authority. The undeployed dual URL marker,
+  model-authored destination fields, and intermediate request-id alias are not
+  compatibility surfaces.
   Already-accepted former request ids and `group_sender` /
   `group_sender_private` targets drain only under their stored target kind and
   permission digest. After all old runners are recycled, retain this seam for
   the ten-minute request TTL plus the one-minute detached-queue retry margin,
-  then remove the old action/destination parsing and echo, former request-id
-  readers, and neutral-permission drain branch together.
+  then remove the old action parser, former request-id readers, and
+  neutral-permission drain branch together.
 
 - The hosted assistant-configuration tool may reach only the bounded signed `POST /api/internal/hosted-execution/assistant-configuration/tool` web callback through `web-control.worker` under the exact active runtime write fence. The callback binds the operation to the runtime-authenticated member, accepts only the closed Luna/Terra/Sol model set and common `low`/`medium`/`high`/`xhigh` reasoning set, and re-derives active personal access plus Sol's paid-Edge entitlement from web-owned Postgres state. Reads need no member decision. Assistant-driven updates require an explicit request in eligible accepted user input for that turn. The runtime forwards only the terminal input id from a locally revalidated, bounded exact-successor provider batch; inside the mutation transaction, web binds it to the callback member and exactly one live conversation-lane mailbox row before the matching field-level preference write. Missing, legacy, mismatched, or ambiguous input authority fails closed. Never trust a model-provided member id, plan, availability list, current preference, causal sequence, or configuration claim as authority. A successful mutation changes only nullable web-owned next-turn preference fields; it must not mutate the running turn, mint a wake, or return billing records, credentials, or other member data to the runtime. The control request accepts only the input-bound update shape and rejects approval or resolved-target fields before the handler runs. The authenticated Settings form remains a separate direct member-action boundary protected by the normal app session and CSRF controls.
 - Only an authoritative assistant-configuration web response with `updated` or `unchanged` status may refresh the ephemeral target for later provider turns in that invocation. Failure statuses leave it unchanged, the current turn remains immutable, and web remains the sole durable preference owner. A model or reasoning change must preserve the provider-native Codex thread and apply both settings on the next separately accepted `turn/start`; it must not bootstrap a replacement thread merely because those preferences changed. Idle compaction must attribute usage from the model actually bound to the warm thread rather than the future preference and skip provider work when that bound model cannot be priced.

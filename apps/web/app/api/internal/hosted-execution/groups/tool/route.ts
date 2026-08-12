@@ -47,7 +47,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
-  const currentSenderWire = readHostedCurrentSenderWire(request, payload);
+  const currentSenderWire = readHostedCurrentSenderWire(payload);
   const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
   });
@@ -109,21 +109,8 @@ function readHostedAssistantAskDiagnosticCode(error: unknown): string | undefine
   }
 }
 
-// Temporary transport-only compatibility for old Cloudflare/runtime bundles.
-// New runners send one strict body marker so they fail closed against old Web.
-// Exact-head runners may still send the former dual URL/body marker during a
-// rolling deploy; it is parsed here only, then discarded before admission.
-// Remove the dual-marker branch with the other legacy action/shape parsing
-// after every old runner is recycled plus the request TTL and queue margin
-// (currently eleven minutes).
-const LEGACY_CURRENT_SENDER_REVIEW_MARKER = "currentSenderAudienceReview";
-const LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE = "v1";
-
-type HostedCurrentSenderLegacyAudience = "group" | "current_sender";
-
 type HostedCurrentSenderWireCompatibility = {
   action: "ask_current_sender" | "message_current_sender";
-  responseDestination: HostedCurrentSenderLegacyAudience | null;
 };
 
 type HostedCurrentSenderWire = {
@@ -134,7 +121,6 @@ type HostedCurrentSenderWire = {
 type HostedCurrentSenderLegacyWireResponse =
   | {
       action: "ask_current_sender";
-      responseDestination?: HostedCurrentSenderLegacyAudience;
       result: HostedRuntimeGroupCurrentSenderDirectResult;
     }
   | {
@@ -143,31 +129,20 @@ type HostedCurrentSenderLegacyWireResponse =
     };
 
 function readHostedCurrentSenderWire(
-  request: Request,
   payload: unknown,
 ): HostedCurrentSenderWire {
-  const legacyUrlMarkerValues = new URL(request.url).searchParams.getAll(
-    LEGACY_CURRENT_SENDER_REVIEW_MARKER,
-  );
   const hasProtocolMarker = hasHostedWireProperty(
     payload,
     HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
   );
-  const hasLegacyBodyMarker = hasHostedWireProperty(
-    payload,
-    LEGACY_CURRENT_SENDER_REVIEW_MARKER,
-  );
-  const hasLegacyMarker = legacyUrlMarkerValues.length > 0 || hasLegacyBodyMarker;
 
   if (hasProtocolMarker) {
     if (
-      hasLegacyMarker
-      || readHostedWireProperty(
+      readHostedWireProperty(
         payload,
         HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
       ) !== HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE
       || readHostedCurrentSenderWireAction(payload) !== "ask_current_sender"
-      || hasHostedCurrentSenderResponseDestination(payload)
     ) {
       throw new TypeError("Hosted current-sender protocol is invalid.");
     }
@@ -180,43 +155,14 @@ function readHostedCurrentSenderWire(
     };
   }
 
-  if (hasLegacyMarker) {
-    if (
-      legacyUrlMarkerValues.length !== 1
-      || legacyUrlMarkerValues[0] !== LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE
-      || readHostedWireProperty(payload, LEGACY_CURRENT_SENDER_REVIEW_MARKER)
-        !== LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE
-      || readHostedCurrentSenderWireAction(payload) !== "ask_current_sender"
-      || hasHostedCurrentSenderResponseDestination(payload)
-    ) {
-      throw new TypeError("Hosted legacy current-sender protocol is invalid.");
-    }
-    return {
-      compatibility: null,
-      payload: removeHostedWireProperty(
-        payload,
-        LEGACY_CURRENT_SENDER_REVIEW_MARKER,
-      ),
-    };
-  }
-
   const action = readHostedCurrentSenderWireAction(payload);
-  if (action === "message_current_sender") {
+  if (action === "message_current_sender" || action === "ask_current_sender") {
     return {
-      compatibility: { action, responseDestination: null },
+      compatibility: { action },
       payload,
     };
   }
-  if (action !== "ask_current_sender") {
-    return { compatibility: null, payload };
-  }
-  return {
-    compatibility: {
-      action,
-      responseDestination: readHostedCurrentSenderResponseDestination(payload),
-    },
-    payload,
-  };
+  return { compatibility: null, payload };
 }
 
 function hasHostedWireProperty(
@@ -254,19 +200,6 @@ function readHostedCurrentSenderWireAction(
     : null;
 }
 
-function hasHostedCurrentSenderResponseDestination(
-  payload: unknown,
-): payload is object {
-  return hasHostedWireProperty(payload, "responseDestination");
-}
-
-function readHostedCurrentSenderResponseDestination(
-  payload: unknown,
-): HostedCurrentSenderLegacyAudience | null {
-  const value = readHostedWireProperty(payload, "responseDestination");
-  return value === "group" || value === "current_sender" ? value : null;
-}
-
 function encodeHostedCurrentSenderLegacyWireResponse(
   response: HostedRuntimeGroupToolResponse,
   compatibility: HostedCurrentSenderWireCompatibility | null,
@@ -279,9 +212,6 @@ function encodeHostedCurrentSenderLegacyWireResponse(
   }
   return {
     action: compatibility.action,
-    ...(compatibility.responseDestination === null
-      ? {}
-      : { responseDestination: compatibility.responseDestination }),
     result: response.result,
   };
 }

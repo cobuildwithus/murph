@@ -84,16 +84,12 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/unsupported field/u);
   });
 
-  it("canonicalizes bounded legacy group-tool calls without carrying audience", () => {
+  it("canonicalizes the bounded legacy action without carrying audience", () => {
     const canonical = {
       action: "ask_current_sender",
       origin: CURRENT_SENDER_ASK.origin,
     } as const;
     expect(parseHostedRuntimeGroupToolRequest(canonical)).toEqual(canonical);
-    expect(parseHostedRuntimeGroupToolRequest({
-      ...canonical,
-      responseDestination: "current_sender",
-    })).toEqual(canonical);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "message_current_sender",
       origin: CURRENT_SENDER_ASK.origin,
@@ -105,38 +101,38 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/not allowed/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       ...canonical,
-      responseDestination: "other",
-    })).toThrow(/invalid/u);
+      responseDestination: "current_sender",
+    })).toThrow(/not allowed/u);
   });
 
-  it("canonicalizes bounded legacy responses without carrying audience", () => {
+  it("canonicalizes the bounded legacy action response without carrying audience", () => {
     const canonical = {
       action: "ask_current_sender",
       result: { status: "accepted" as const },
     };
     expect(parseHostedRuntimeGroupToolResponse(canonical)).toEqual(canonical);
     expect(parseHostedRuntimeGroupToolResponse({
-      ...canonical,
-      responseDestination: "group",
-    })).toEqual(canonical);
-    expect(parseHostedRuntimeGroupToolResponse({
       action: "message_current_sender",
       result: { status: "accepted" },
     })).toEqual(canonical);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...canonical,
+      responseDestination: "group",
+    })).toThrow(/not allowed/u);
   });
 
-  it("drops legacy completion audience metadata and parses persisted completion replay", () => {
+  it("rejects removed completion audience metadata and parses persisted completion replay", () => {
     const requestId = `aask_req_${"e".repeat(64)}`;
     const result = {
       answer: "Synthetic reviewed answer.",
       outcome: "answered" as const,
     };
-    expect(parseHostedRuntimeAssistantAskControlRequest({
+    expect(() => parseHostedRuntimeAssistantAskControlRequest({
       action: "complete",
       requestId,
       responseDestination: "current_sender",
       result,
-    })).toEqual({ action: "complete", requestId, result });
+    })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantAskControlResponse({
       action: "prepare",
       status: "already_completed",

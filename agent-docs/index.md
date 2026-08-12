@@ -59,10 +59,13 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 Current-sender Assistant Ask binds the argument-free model action to the newest
 accepted group input, gives Web sole exact-source admission and fixed-audience
 ownership, requires same-channel private routing before personal work, and
-persists one authorized terminal experience. A lost private route produces only
-the existing non-disclosing group `cannot_answer` completion; it never redirects
-the private answer. These rules, plus exact `aask_done_*` pre-checkpoint staging
-without generic-notification admission, are jointly specified by
+persists one authorized terminal experience. Private delivery has a distinct
+identity from the canonical group completion/fallback, so expiry or a lost
+private route at completion or provider entry produces only a fresh
+non-disclosing group `cannot_answer` completion; it never redirects the private
+answer. These rules, plus exact legacy `aask_done_*` and current
+`aask_private_*` pre-checkpoint staging without generic-notification admission,
+are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.

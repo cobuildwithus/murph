@@ -117,9 +117,10 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import type {
-  HostedExecutionAssistantAskRequestedWake,
-  HostedExecutionBundleRef,
+import {
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  type HostedExecutionAssistantAskRequestedWake,
+  type HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -7564,7 +7565,12 @@ describe("hosted workspace runtime entrypoint", () => {
     },
     {
       dedupeKey: "aask_done_private_synthetic",
-      label: "private Assistant Ask completion",
+      label: "legacy private Assistant Ask completion",
+      preCheckpointSafe: true,
+    },
+    {
+      dedupeKey: "aask_private_synthetic",
+      label: "current private Assistant Ask completion",
       preCheckpointSafe: true,
     },
     {
@@ -7694,7 +7700,12 @@ describe("hosted workspace runtime entrypoint", () => {
     },
     {
       dedupeKey: `aask_done_${"b".repeat(64)}`,
-      label: "private Assistant Ask completion",
+      label: "legacy private Assistant Ask completion",
+      privateCompletion: true,
+    },
+    {
+      dedupeKey: `aask_private_${"b".repeat(64)}`,
+      label: "current private Assistant Ask completion",
       privateCompletion: true,
     },
   ].flatMap((completion) =>
@@ -7946,7 +7957,7 @@ describe("hosted workspace runtime entrypoint", () => {
                             action: "prepare",
                             disclosure: {
                               permissionText:
-                                "One-time private owner-only answer.",
+                                HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
                             },
                             question: "What is my shoulder-safe workout?",
                             status: "ready",
@@ -8146,7 +8157,7 @@ describe("hosted workspace runtime entrypoint", () => {
             events.filter((event) =>
               event === `authority.private:${completion.dedupeKey}`
             ).length,
-            1,
+            2,
             events.join(","),
           );
           assert.ok(

@@ -36,9 +36,6 @@ type RouteModule = typeof import(
 
 let route: RouteModule;
 
-const LEGACY_CURRENT_SENDER_REVIEW_MARKER = "currentSenderAudienceReview";
-const LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE = "v1";
-
 describe("hosted group tool route", () => {
   beforeAll(async () => {
     route = await import(
@@ -348,31 +345,6 @@ describe("hosted group tool route", () => {
       expectedRequest: {
         action: "ask_current_sender",
         origin: {
-          assistantInputId: `ain_${"e".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-      },
-      expectedResponse: {
-        action: "ask_current_sender",
-        responseDestination: "current_sender",
-        result: { status: "accepted" },
-      },
-      label: "bounded destination-bearing legacy protocol",
-      requestBody: {
-        action: "ask_current_sender",
-        origin: {
-          assistantInputId: `ain_${"e".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-        responseDestination: "current_sender",
-      },
-    },
-    {
-      expectedRequest: {
-        action: "ask_current_sender",
-        origin: {
           assistantInputId: `ain_${"d".repeat(32)}`,
           kind: "accepted_input",
           sessionId: "session_group",
@@ -421,109 +393,36 @@ describe("hosted group tool route", () => {
     },
   );
 
-  it("drains the exact-head dual-marker caller without trusting it as audience authority", async () => {
-    const origin = {
-      assistantInputId: `ain_${"f".repeat(32)}`,
-      kind: "accepted_input" as const,
-      sessionId: "session_group",
-    };
-    mocks.handleTool.mockResolvedValueOnce({
-      action: "ask_current_sender",
-      result: { status: "accepted" },
-    });
-    const request = new Request(
-      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`
-        + `?${LEGACY_CURRENT_SENDER_REVIEW_MARKER}`
-        + `=${LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
-      {
-        body: JSON.stringify({
-          action: "ask_current_sender",
-          [LEGACY_CURRENT_SENDER_REVIEW_MARKER]:
-            LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE,
-          origin,
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      },
-    );
-
-    const response = await route.POST(request);
-
-    expect(response.status).toBe(200);
-    expect(mocks.handleTool).toHaveBeenCalledWith({
-      memberId: "member_group_runtime",
-      request: { action: "ask_current_sender", origin },
-      requestStartedAtMs: expect.any(Number),
-      scheduleMailboxWake: expect.any(Function),
-    });
-    await expect(response.json()).resolves.toEqual({
-      action: "ask_current_sender",
-      result: { status: "accepted" },
-    });
-  });
-
   it.each([
     {
-      label: "a legacy body marker without its URL marker",
+      label: "an undeployed intermediate marker",
       requestBody: {
         action: "ask_current_sender",
-        [LEGACY_CURRENT_SENDER_REVIEW_MARKER]:
-          LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        currentSenderAudienceReview: "v1",
         origin: {
           assistantInputId: `ain_${"1".repeat(32)}`,
           kind: "accepted_input",
           sessionId: "session_group",
         },
       },
-      urlSuffix: "",
     },
     {
-      label: "a legacy URL marker without its body marker",
-      requestBody: {
-        action: "ask_current_sender",
-        origin: {
-          assistantInputId: `ain_${"2".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-      },
-      urlSuffix: `?${LEGACY_CURRENT_SENDER_REVIEW_MARKER}`
-        + `=${LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
-    },
-    {
-      label: "mismatched legacy marker values",
-      requestBody: {
-        action: "ask_current_sender",
-        [LEGACY_CURRENT_SENDER_REVIEW_MARKER]: "v2",
-        origin: {
-          assistantInputId: `ain_${"3".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-      },
-      urlSuffix: `?${LEGACY_CURRENT_SENDER_REVIEW_MARKER}`
-        + `=${LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
-    },
-    {
-      label: "mixed new and legacy markers",
+      label: "a strict marker mixed with the undeployed marker",
       requestBody: {
         action: "ask_current_sender",
         [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
           HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
-        [LEGACY_CURRENT_SENDER_REVIEW_MARKER]:
-          LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        currentSenderAudienceReview: "v1",
         origin: {
           assistantInputId: `ain_${"4".repeat(32)}`,
           kind: "accepted_input",
           sessionId: "session_group",
         },
       },
-      urlSuffix: `?${LEGACY_CURRENT_SENDER_REVIEW_MARKER}`
-        + `=${LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
     },
-  ])("rejects $label", async ({ requestBody, urlSuffix }) => {
+  ])("rejects $label", async ({ requestBody }) => {
     const request = new Request(
-      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}${urlSuffix}`,
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
       {
         body: JSON.stringify(requestBody),
         headers: { "content-type": "application/json" },
@@ -646,7 +545,6 @@ describe("hosted group tool route", () => {
           kind: "accepted_input",
           sessionId: "session_group",
         },
-        responseDestination: "group",
       },
       expectedUserId: "member-sender",
       mailboxItemId: "aask_req_current_sender",
@@ -663,7 +561,6 @@ describe("hosted group tool route", () => {
           kind: "accepted_input",
           sessionId: "session_group",
         },
-        responseDestination: "current_sender",
       },
       expectedUserId: "member-sender",
       mailboxItemId: "aask_req_private_sender",

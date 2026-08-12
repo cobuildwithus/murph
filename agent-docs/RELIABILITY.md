@@ -1088,10 +1088,10 @@ Last verified: 2026-08-12
   requests, whose stable identities make identical replay idempotent. New
   current-sender callers use one strict JSON-body protocol marker; the URL has
   no duplicate marker. Old Web rejects that unknown field, while new Web strips
-  it before canonical parsing. Unmarked old `ask_current_sender` and
-  `message_current_sender` calls may drain, but any old destination field is
-  parser/response compatibility only and never admission or completion
-  authority. Caller cancellation, exhausted deadlines, authority failures, and
+  it before canonical parsing. Deployed unmarked old `ask_current_sender` and
+  `message_current_sender` calls may drain through the same exact-source
+  admission. The undeployed dual URL marker and destination dialect are
+  rejected. Caller cancellation, exhausted deadlines, authority failures, and
   other `4xx` responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
@@ -1111,7 +1111,8 @@ Last verified: 2026-08-12
 - One-time current-sender Assistant Ask has one origin-level request, one Web
   admission owner, one mailbox lifecycle, one deterministic origin identity,
   ten-minute expiry, isolated personal read, existing fresh allow/deny reviewer,
-  and one completion identity. Trusted runtime code binds the argument-free
+  one canonical group completion/fallback identity, and one separate private
+  delivery identity. Trusted runtime code binds the argument-free
   model action to the newest accepted group input. Web reloads that exact wake,
   preserves native-reply evidence, resolves its author, and deterministically
   admits only a flat explicit request to ask the author's Murph. It fixes group
@@ -1129,24 +1130,26 @@ Last verified: 2026-08-12
   group. Private completion persists as one deterministic queue-only
   `assistant.notification.requested` for the source sender: exact text,
   same-channel current `direct-member` route, no external group-route authority,
-  and the original request expiry. If the direct route is lost before private
-  completion, Web discards the private answer and atomically persists the fixed
-  `cannot_answer` group completion instead. Completion replay recognizes that
-  fallback as the one authorized terminal experience. The detached runtime
+  and the original request expiry. Its separate identity cannot block the
+  canonical group fallback. If the direct route is lost before completion or
+  at provider entry, or the request expires before prepare, Web discards the
+  private answer and atomically persists a fresh fixed `cannot_answer` group
+  completion instead. Completion replay recognizes that fallback as the one
+  authorized terminal experience. The detached runtime
   removes work only after a valid persisted completion or an explicit
   `already_completed` response; a terminal/unavailable response with no valid
   completion requeues until expiry rather than consuming accepted work.
-- Legacy wire and mailbox compatibility is bounded. Web accepts the exact-head
-  dual URL/body marker and older unmarked action shapes only at the transport
-  edge, strips their compatibility metadata, and reapplies exact-source
-  admission. Existing former request ids and `group_sender` /
+- Legacy wire and mailbox compatibility is bounded. Web accepts deployed older
+  unmarked action shapes only at the transport edge and reapplies exact-source
+  admission. The undeployed dual URL marker, destination dialect, and
+  intermediate request-id alias are rejected. Existing former request ids and `group_sender` /
   `group_sender_private` targets drain only when their stored shape is valid and
   the reloaded source independently agrees on sender and audience. Completion
   locks every alias and accepts at most one completion alias. After
   all old runners are recycled, wait the ten-minute request TTL plus the
   one-minute detached-queue retry margin (eleven minutes total), then remove the
-  old action/destination parsing and response echo, former request-id readers,
-  and neutral-permission drain branch together.
+  old action parsing, former request-id readers, and neutral-permission drain
+  branch together.
 - Deploy in authority order: shared contracts and Web first, then the personal
   runtime/assistant-engine bundle, then Cloudflare and the argument-free model
   catalog. The new body marker fails closed against old Web. Roll back the model
@@ -1159,7 +1162,8 @@ Last verified: 2026-08-12
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and
   `assistant.notification.requested:usage-referral-reward:*`, plus exact private
-  Assistant Ask completions under `aask_done_*`. Their stable mailbox identity
+  Assistant Ask completions under legacy `aask_done_*` or current
+  `aask_private_*`. Their stable mailbox identity
   lets them interrupt the idle floor; the foreground-causal selector rechecks
   those exact dedupe-key families and carries only the just-created causal
   outbox intent into the existing write-ahead provider drain. Private Assistant

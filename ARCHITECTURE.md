@@ -380,32 +380,33 @@ one representation. The personal candidate pass and outgoing reviewer receive
 the already-fixed permission; the reviewer returns only `allow` or `deny` and
 cannot choose a member, route, or audience.
 
-Group completion remains `assistant.ask.completed` for the originating group.
-Private completion remains one deterministic queue-only
+Group completion and non-disclosing fallback use the shared canonical
+`assistant.ask.completed` identity for the originating group. Private
+completion uses a separate deterministic queue-only
 `assistant.notification.requested` containing the exact reviewed text for the
 same sender's current same-channel direct route, with no external group-route
 authority. Completion revalidates the persisted request, exact source, fixed
 audience, expiry, runtime fences, and route. If a private route is lost after
-admission, Web discards the private answer and persists the existing fixed
-`cannot_answer` completion to the already-authorized originating group. Exact
-replay returns that persisted terminal experience; a terminal or unavailable
-control response without a valid persisted completion is never successful
-consumption.
+admission or at provider entry, or if the request expires before prepare, Web
+discards the private answer and persists a fresh fixed `cannot_answer`
+completion to the already-authorized originating group. The private delivery
+identity cannot occupy that group fallback identity. Exact replay returns the
+persisted terminal experience; a terminal or unavailable control response
+without a valid persisted completion is never successful consumption.
 
 Rolling-deploy compatibility is transport-only. New Cloudflare callers send one
 strict body marker, which old Web rejects as an unknown field. New Web also
-drains exact-head callers that still present the former dual URL/body marker,
-and accepts unmarked old `ask_current_sender` and `message_current_sender`
-calls. It strips compatibility metadata before admission, validates the exact
-source with the same deterministic rules, and ignores any legacy destination as
-authority. Already-accepted canonical and former
+accepts the deployed unmarked `ask_current_sender` and
+`message_current_sender` calls, then validates the exact source with the same
+deterministic rules. The undeployed dual URL marker, model-authored destination
+dialect, and intermediate request-id alias are absent. Already-accepted former
 `group_sender` / `group_sender_private` mailbox work drains under its stored
 request id, target kind, and permission digest. After all old runners are
 recycled, wait the ten-minute request TTL plus the one-minute detached-queue
-retry margin (eleven minutes total), then remove the old action/destination
-wire parsing and echo, former request-id readers, and neutral-permission drain
-branch together. This path adds no model turn, classifier, service, queue,
-workflow, table, grant, route selector, or reconciliation owner.
+retry margin (eleven minutes total), then remove the old action parser, former
+request-id readers, and neutral-permission drain branch together. This path
+adds no model turn, classifier, service, queue, workflow, table, grant, route
+selector, or reconciliation owner.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most

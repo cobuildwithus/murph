@@ -40,7 +40,8 @@ The live ownership split is:
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
-  exact phone-call-result, usage-referral-reward, and `aask_done_*` private
+  exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
+  current `aask_private_*` private
   Assistant Ask notification families may also run queue-only through their
   causal outbox intent after fresh conversation work has priority; generic
   notifications remain excluded. Non-idempotent provider work still waits for
@@ -118,7 +119,8 @@ for Linq input with link parts, attachment-bearing non-email input, and direct r
 run local runtime work until idle or budget
 while dirty and before the idle floor, service fresh foreground input, the
   exact safe Assistant Ask shapes, and only replay-safe phone-call-result,
-  usage-referral-reward, or `aask_done_*` private Assistant Ask notifications
+  usage-referral-reward, legacy `aask_done_*`, or current `aask_private_*`
+  private Assistant Ask notifications
   without publishing a snapshot; other wakes do not shorten the floor
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
@@ -656,7 +658,8 @@ cancellation, or mailbox-budget exhaustion stops the drain.
 The same bounded pass admits only
 `assistant.notification.requested:phone-call-result:*` and
 `assistant.notification.requested:usage-referral-reward:*`, plus exact private
-Assistant Ask completions under `aask_done_*`. Import eligibility does not grant
+Assistant Ask completions under legacy `aask_done_*` or current
+`aask_private_*`. Import eligibility does not grant
 dispatch authority: the foreground-causal system-mailbox selector must match the
 exact dedupe-key family again, then collect only the outbox intent returned by
 that mailbox execution. Its persisted `sending` transition precedes provider
@@ -784,22 +787,25 @@ vault, assistant state, operational log, or error.
 
 Completion cannot change audience. `group_sender` uses the existing authorized
 group completion. `group_sender_private` uses the existing same-channel private
-notification with exact reviewed text. If that direct route disappears after
-admission, Web persists the existing non-disclosing `cannot_answer` completion
-to the already-authorized originating group; the private answer never falls
-back. Replay, restart, and concurrent prepare or completion observe that one
-persisted terminal result. A detached runner must requeue rather than consume a
-terminal or unavailable response that has no persisted completion.
+notification with exact reviewed text and a separate deterministic delivery
+identity. It cannot occupy the canonical group completion/fallback identity. If
+that direct route disappears after admission or at provider entry, or if the
+request expires before prepare, Web persists a fresh non-disclosing
+`cannot_answer` completion to the already-authorized originating group; the
+private answer never falls back. Replay, restart, and concurrent prepare or
+completion observe the persisted terminal result. A detached runner must
+requeue rather than consume a terminal or unavailable response that has no
+persisted completion.
 
 New callers identify the strict protocol with the single
 `currentSenderProtocol: "v2"` body field. During the bounded drain, Web also
-parses the exact-head dual URL/body marker, accepts old `ask_current_sender` or
-`message_current_sender` bodies, and drains already-accepted `group_sender` or
-`group_sender_private` mailbox work. Marker and destination compatibility data
-is stripped before admission; Web reapplies exact-source rules and ignores every
-legacy model-selected origin or destination as audience authority. Remove the alias parsing and legacy
-request-id lookup eleven minutes after all old runners are recycled: the
-existing ten-minute request TTL plus a one-minute queue margin.
+accepts deployed unmarked old `ask_current_sender` or
+`message_current_sender` bodies and drains already-accepted `group_sender` or
+`group_sender_private` mailbox work. It reapplies the exact-source rules. The
+undeployed dual URL marker, model-authored destination dialect, and intermediate
+request-id alias are rejected rather than preserved. Remove the old action
+parsing and legacy request-id lookup eleven minutes after all old runners are
+recycled: the existing ten-minute request TTL plus a one-minute queue margin.
 
 
 For `consented_member` requests, on an allow the completion control path
