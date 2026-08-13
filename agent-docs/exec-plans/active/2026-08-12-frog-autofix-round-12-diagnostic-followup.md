@@ -11,6 +11,8 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
   and could replace a valid committed candidate with an empty handoff.
 - Task drift after a resumed local descendant commit could not bind the human
   handoff to the unchanged existing PR head, leaving the oldest issue pinned.
+- Trusted ReviewGPT controls could change during a long review or CI wait while
+  the previously produced PASS still retained unattended merge authority.
 
 ## Design
 
@@ -24,12 +26,16 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
   and write the handoff to that exact head without pushing candidate bytes.
 - Fail closed on a changed projection, non-ancestor, missing commit, or foreign
   ownership.
+- Reuse the existing trusted-control comparison after every long canonical
+  review and at both finalization refreshes. Any drift uses the existing exact-
+  head review-findings handoff and never reaches merge or issue closure.
 
 ## Verification
 
 - Source-order proof for retryable post-worker authority infrastructure.
 - Real-Git descendant normalization and non-ancestor rejection.
 - Existing-PR projection, no-push, exact-body, and queue-handoff guards.
+- Post-review and pre-merge trusted-control drift handoff guards.
 - Focused Frog suite, repo tooling, workspace typecheck, docs/shell/permission
   guards, privacy checks, current-base merge tree, and a fresh valid exact-head
   ReviewGPT round.
@@ -40,4 +46,5 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
 - [x] Separate authority refresh from terminal worker-output classification.
 - [x] Normalize proven unpushed descendants to the unchanged existing PR head.
 - [x] Add production-shaped proof and update owner documentation.
+- [x] Fence accepted review evidence and final merge on current trusted controls.
 - [ ] Verify, commit, push, and continue exact-head review and CI.

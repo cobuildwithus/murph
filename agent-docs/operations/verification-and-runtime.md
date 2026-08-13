@@ -657,6 +657,8 @@ before draft creation, mandatory foul-play prompt ordering, unrelated hostile
 evidence ignore behavior, boundary-weakening task/candidate refusal,
 parent-local review-body archive binding with changed digest/editor/body/head
 rejection before and after each model wait and before metadata persistence,
+fresh trusted-review-control comparison after each canonical model wait and at
+both finalization refreshes with exact-head handoff on drift,
 operator-handoff preservation during a blocked model review, non-closing exact
 issue binding across short and full-URL forms plus parent-only post-merge
 closure and never-closed retry that refuses deliberate reopen,

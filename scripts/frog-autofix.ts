@@ -1612,7 +1612,7 @@ export const trustedReviewControlPaths = [
   "scripts/review-gpt.config.sh",
 ];
 
-function trustedReviewControlsMatch(
+export function trustedReviewControlsMatch(
   primary: string,
   sourceWorktree: string,
 ): boolean {
@@ -1889,7 +1889,7 @@ function runCanonicalPullRequestReview(options: {
   task: FrogTaskIdentity;
   transient: string;
   worktree: string;
-}): "findings" | "operator-handoff" | "pass" | "retrospective-required" {
+}): "controls-changed" | "findings" | "operator-handoff" | "pass" | "retrospective-required" {
   const operator = recoveryCommands.authenticatedOperator(options.primary);
   assertExpectedPullRequestBody({
     authenticatedOperator: operator,
@@ -1984,6 +1984,9 @@ function runCanonicalPullRequestReview(options: {
     removeTrustedReviewCheckout(options.primary, checkout);
   }
   if (postReviewDisposition === "operator-handoff") return "operator-handoff";
+  if (!trustedReviewControlsMatch(options.primary, options.worktree)) {
+    return "controls-changed";
+  }
   const response = readBoundedParentFile(responsePath, 1024 * 1024);
   const modelVerification = readBoundedParentFile(
     `${responsePath}.model-verification.json`,
@@ -3332,13 +3335,14 @@ function exactHeadIsLocalAgentOnly(
 
 function finalizeReviewedRepair(
   primary: string,
+  worktree: string,
   branch: string,
   issueNumber: number,
   pullRequest: number,
   head: string,
   body: string,
   task: FrogTaskIdentity,
-): "awaiting-human-authority" | "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
+): "awaiting-human-authority" | "awaiting-human-conflict" | "awaiting-human-product" | "awaiting-human-review" | "merged" {
   const operator = parseAuthenticatedGitHubOperator(
     recoveryCommands.authenticatedOperator(primary),
   );
@@ -3427,6 +3431,7 @@ function finalizeReviewedRepair(
       primary,
       identity.pullRequest,
     ),
+    reviewControlsMatch: () => trustedReviewControlsMatch(primary, worktree),
     taskAuthorityMatches: (identity) => committedFrictionTaskMatches(
       primary,
       identity.issueNumber,
@@ -3578,7 +3583,10 @@ async function reviewPublishAndFinalize(options: {
       worktree: options.worktree,
     });
     if (specialist === "operator-handoff") return "awaiting-human";
-    if (reviewRequiresHumanHandoff(specialist)) {
+    if (
+      specialist === "controls-changed"
+      || reviewRequiresHumanHandoff(specialist)
+    ) {
       handoff = "review-findings";
       if (!persistMetadata()) return "awaiting-human";
       return "awaiting-human";
@@ -3602,7 +3610,10 @@ async function reviewPublishAndFinalize(options: {
       worktree: options.worktree,
     });
     if (finalReview === "operator-handoff") return "awaiting-human";
-    if (reviewRequiresHumanHandoff(finalReview)) {
+    if (
+      finalReview === "controls-changed"
+      || reviewRequiresHumanHandoff(finalReview)
+    ) {
       handoff = "review-findings";
       if (!persistMetadata()) return "awaiting-human";
       return "awaiting-human";
@@ -3671,6 +3682,7 @@ async function reviewPublishAndFinalize(options: {
   }
   const result = finalizeReviewedRepair(
     options.primary,
+    options.worktree,
     options.branch,
     options.issueNumber,
     pullRequest,
@@ -3688,6 +3700,11 @@ async function reviewPublishAndFinalize(options: {
   }
   if (result === "awaiting-human-product") {
     handoff = "product-runtime";
+    if (!persistMetadata()) return "awaiting-human";
+    return "awaiting-human";
+  }
+  if (result === "awaiting-human-review") {
+    handoff = "review-findings";
     if (!persistMetadata()) return "awaiting-human";
     return "awaiting-human";
   }

@@ -135,8 +135,12 @@ exact projection is checked after each long model wait and immediately before
 metadata persistence; an operator handoff created during a wait is preserved
 and any other drift fails closed. Review
 controls, including the complete prompt-preset directory, exactly match trusted
-`main`. Either review returning findings, a final review requiring a
-scope retrospective, or a candidate changing those controls creates the same
+`main`. That comparison repeats after every long canonical review once the
+parent has refreshed `origin/main`, and at both finalization refreshes including
+immediately before merge. Review-control drift uses the existing exact-head
+review-findings handoff; superseded review evidence never retains unattended
+merge or issue-closure authority. Either review returning findings, a final
+review requiring a scope retrospective, or a candidate changing those controls creates the same
 durable human-review handoff; the automation does not ask another child to
 remediate review prose. After both reviews pass, it waits for required CI.
 Definitive failed or cancelled required checks and a current-base conflict

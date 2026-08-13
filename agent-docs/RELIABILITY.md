@@ -316,7 +316,11 @@ Last verified: 2026-08-13
   receives the fixed-body handoff without autonomous rebaselining. The same
   task path/digest must still resolve to the sole issue binding after every
   long model wait and at both final merge fences; edit, move, replacement,
-  deletion, or binding drift produces the fixed human handoff. The last scope
+  deletion, or binding drift produces the fixed human handoff. The trusted ReviewGPT control
+  inventory is likewise compared with freshly fetched `origin/main` after each
+  long canonical review and after both finalization refreshes, including just
+  before merge. Drift publishes the existing review-findings handoff instead of
+  accepting or merging superseded review evidence. The last scope
   evaluation cannot fetch past that fence: it uses the caller-fetched ref, then
   the parent performs the final task comparison. A local terminal marker is
   recovered before remote synchronization. Remote replacement is authorized

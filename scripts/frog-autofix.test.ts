@@ -76,6 +76,7 @@ import {
   TerminalPrePullRequestFailure,
   terminalWorkerFailureClass,
   trustedReviewControlPaths,
+  trustedReviewControlsMatch,
 } from "./frog-autofix.ts";
 import {
   branchHasMergedPullRequest,
@@ -282,22 +283,37 @@ describe("Frog autofix guards", () => {
     };
     try {
       mkdirSync(presetDirectory, { recursive: true });
+      mkdirSync(path.join(root, "scripts"), { recursive: true });
       writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "trusted\n");
+      writeFileSync(path.join(root, "package.json"), "{}\n");
+      writeFileSync(
+        path.join(root, "scripts", "package-audit-context-full.sh"),
+        "trusted\n",
+      );
+      writeFileSync(
+        path.join(root, "scripts", "review-gpt-pr-head-preflight.sh"),
+        "trusted\n",
+      );
       git("init", "--quiet");
       git("config", "user.name", "Automation");
       git("config", "user.email", "automation@example.invalid");
       git("add", ".");
       git("commit", "--quiet", "-m", "base");
       const base = git("rev-parse", "HEAD").trim();
-      writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "candidate\n");
-      git("add", ".");
-      git("commit", "--quiet", "-m", "candidate");
-      const head = git("rev-parse", "HEAD").trim();
-      expect(spawnSync(
-        "git",
-        ["diff", "--quiet", base, head, "--", ...trustedReviewControlPaths],
-        { cwd: root },
-      ).status).toBe(1);
+      git("update-ref", "refs/remotes/origin/main", base);
+      expect(trustedReviewControlsMatch(root, root)).toBe(true);
+      for (const changedPath of [
+        "package.json",
+        "scripts/package-audit-context-full.sh",
+        "scripts/review-gpt-pr-head-preflight.sh",
+        "scripts/chatgpt-review-presets/pr-deep-review.md",
+      ]) {
+        writeFileSync(path.join(root, changedPath), `candidate ${changedPath}\n`);
+        git("add", changedPath);
+        git("commit", "--quiet", "-m", `change ${changedPath}`);
+        expect(trustedReviewControlsMatch(root, root), changedPath).toBe(false);
+        git("reset", "--hard", base);
+      }
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -886,6 +902,10 @@ describe("Frog autofix guards", () => {
       .toBeGreaterThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
     expect(canonical.indexOf("refreshAndRequireCommittedFrictionTask("))
       .toBeGreaterThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
+    expect(canonical.indexOf("trustedReviewControlsMatch("))
+      .toBeGreaterThan(canonical.indexOf("refreshAndRequireCommittedFrictionTask("));
+    expect(canonical.indexOf("trustedReviewControlsMatch("))
+      .toBeLessThan(canonical.indexOf("const response = readBoundedParentFile("));
   });
 
   it("preserves an authenticated operator handoff written during review", () => {
@@ -1861,6 +1881,10 @@ describe("Frog autofix guards", () => {
         events.push("checks");
         return true;
       },
+      reviewControlsMatch: () => {
+        events.push("review-controls");
+        return true;
+      },
       taskAuthorityMatches: () => {
         events.push("task");
         return true;
@@ -1873,6 +1897,7 @@ describe("Frog autofix guards", () => {
       "checks",
       "verify-issue",
       "task",
+      "review-controls",
       "pr",
       "checks",
       "merge-tree",
@@ -1882,6 +1907,7 @@ describe("Frog autofix guards", () => {
       "checks",
       "scope",
       "task",
+      "review-controls",
       "pr",
       "merge",
       "close",
@@ -2010,6 +2036,7 @@ describe("Frog autofix guards", () => {
           if (failure === "authority") throw new Error("revoked Frog authority");
         },
         requiredChecksPass: () => failure !== "checks",
+        reviewControlsMatch: () => true,
         taskAuthorityMatches: () => true,
       };
       expect(() => finalizeReadyRepair(identity, dependencies)).toThrow();
@@ -2034,6 +2061,7 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => false,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      reviewControlsMatch: () => true,
       taskAuthorityMatches: () => true,
     })).toBe("awaiting-human-conflict");
 
@@ -2058,6 +2086,7 @@ describe("Frog autofix guards", () => {
         pullRequestIsMerged: () => false,
         refreshAndVerifyIssue: () => undefined,
         requiredChecksPass: () => true,
+        reviewControlsMatch: () => true,
         taskAuthorityMatches: () => {
           taskChecks += 1;
           return taskChecks !== driftAt;
@@ -2093,10 +2122,43 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => false,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      reviewControlsMatch: () => true,
       taskAuthorityMatches: () => !taskRevokedByFinalScopeRefresh,
     })).toBe("awaiting-human-authority");
     expect(scopeChecks).toBe(2);
     expect(mergeCalls).toBe(0);
+
+    for (const driftAt of [1, 2]) {
+      let controlChecks = 0;
+      let mergeCalls = 0;
+      const result = finalizeReadyRepair(identity, {
+        autoMergeAllowed: () => true,
+        closeIssue: () => undefined,
+        currentPullRequest: () => ({
+          bodyAuthoritative: true,
+          bodySha256: identity.bodySha256,
+          head: identity.head,
+          issueBound: true,
+          pullRequest: identity.pullRequest,
+        }),
+        issueIsClosed: () => false,
+        merge: () => {
+          mergeCalls += 1;
+        },
+        mergeTreePasses: () => true,
+        pullRequestIsMerged: () => false,
+        refreshAndVerifyIssue: () => undefined,
+        requiredChecksPass: () => true,
+        reviewControlsMatch: () => {
+          controlChecks += 1;
+          return controlChecks !== driftAt;
+        },
+        taskAuthorityMatches: () => true,
+      });
+      expect(result).toBe("awaiting-human-review");
+      expect(mergeCalls).toBe(0);
+      expect(controlChecks).toBe(driftAt);
+    }
   });
 
   it("hands off every broader authority class and merges exact Frog script scope", () => {
@@ -2142,6 +2204,7 @@ describe("Frog autofix guards", () => {
         pullRequestIsMerged: () => false,
         refreshAndVerifyIssue: () => undefined,
         requiredChecksPass: () => true,
+        reviewControlsMatch: () => true,
         taskAuthorityMatches: () => true,
       });
       expect(outcome, broaderPath).toBe("awaiting-human-product");
@@ -2173,6 +2236,7 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => merged,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      reviewControlsMatch: () => true,
       taskAuthorityMatches: () => true,
     })).toBe("merged");
     expect(merged).toBe(true);

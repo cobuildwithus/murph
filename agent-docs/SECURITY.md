@@ -1182,6 +1182,13 @@ Last verified: 2026-08-13
   The same projection is checked after every long model wait and immediately
   before each metadata write. An authenticated-operator handoff created during
   the wait is preserved byte-for-byte; other drift fails closed.
+  After the fresh post-review `origin/main` fetch, the parent also compares the
+  complete trusted ReviewGPT control inventory before accepting any result. It
+  repeats that comparison after both finalization refreshes, including the last
+  pre-merge fence. Any preset, packager, preflight, configuration, package, or
+  other trusted-control drift produces the existing exact-head review-findings
+  handoff, so review evidence generated under superseded controls grants no
+  merge or issue-closure authority.
   Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
   controls produce the same exact-head human handoff; review prose is never
   delegated to another autonomous editing turn.

@@ -26,6 +26,7 @@ export interface ReadyRepairFinalizationDependencies {
   pullRequestIsMerged: (identity: ReadyRepairIdentity) => boolean;
   refreshAndVerifyIssue: () => void;
   requiredChecksPass: (identity: ReadyRepairIdentity) => boolean;
+  reviewControlsMatch: (identity: ReadyRepairIdentity) => boolean;
   taskAuthorityMatches: (identity: ReadyRepairIdentity) => boolean;
 }
 
@@ -49,7 +50,7 @@ function assertRemoteIdentity(
 export function finalizeReadyRepair(
   identity: ReadyRepairIdentity,
   dependencies: ReadyRepairFinalizationDependencies,
-): "awaiting-human-authority" | "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
+): "awaiting-human-authority" | "awaiting-human-conflict" | "awaiting-human-product" | "awaiting-human-review" | "merged" {
   if (
     !/^\.agents\/friction-log\/[^/\r\n]+\/friction\.md$/u.test(identity.taskPath)
     || !/^[0-9a-f]{64}$/u.test(identity.taskSha256)
@@ -63,6 +64,9 @@ export function finalizeReadyRepair(
   dependencies.refreshAndVerifyIssue();
   if (!dependencies.taskAuthorityMatches(identity)) {
     return "awaiting-human-authority";
+  }
+  if (!dependencies.reviewControlsMatch(identity)) {
+    return "awaiting-human-review";
   }
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   if (!dependencies.requiredChecksPass(identity)) {
@@ -84,6 +88,9 @@ export function finalizeReadyRepair(
   if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
   if (!dependencies.taskAuthorityMatches(identity)) {
     return "awaiting-human-authority";
+  }
+  if (!dependencies.reviewControlsMatch(identity)) {
+    return "awaiting-human-review";
   }
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   dependencies.merge(identity);
