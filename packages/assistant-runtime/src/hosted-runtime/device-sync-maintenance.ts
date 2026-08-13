@@ -1022,15 +1022,31 @@ function attachHostedDeviceSyncFollowUpWake(input: {
   nextWakeAt: string | null;
   record: HostedMaintenanceMetrics["postCheckpointRecord"];
 }): HostedMaintenanceMetrics["postCheckpointRecord"] {
-  if (!input.nextWakeAt || input.record) {
+  if (!input.nextWakeAt) {
     return input.record;
   }
-
-  return {
-    kind: "device-sync.dirty-processed-batch",
-    nextWakeAt: input.nextWakeAt,
-    records: [],
-  };
+  if (!input.record) {
+    return {
+      kind: "device-sync.dirty-processed-batch",
+      nextWakeAt: input.nextWakeAt,
+      records: [],
+    };
+  }
+  if (
+    input.record.kind === "device-sync.dirty-processed"
+    || input.record.kind === "device-sync.dirty-processed-batch"
+  ) {
+    return {
+      ...input.record,
+      nextWakeAt: earliestHostedMaintenanceWakeAt(
+        input.record.nextWakeAt ?? null,
+        input.nextWakeAt,
+      ),
+    };
+  }
+  throw new TypeError(
+    "Hosted device-sync follow-up wake received an unrelated checkpoint record.",
+  );
 }
 
 function listHostedDeviceSyncDirtyProcessedRecords(input: {
