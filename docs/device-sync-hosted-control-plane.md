@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-08-11
+Last verified against repo layout: 2026-08-12
 
 ## Current split
 
@@ -176,11 +176,13 @@ remaining terminal setup failures normalize to
 `COMPANION_ADMISSION_SUPPORT_REQUIRED`. The client may retry only the former
 and must stop automatic admission attempts on the latter, while internal
 hosted lifecycle codes remain private. The route's static dependency graph is
-kept outside device-sync public ingress, and this account-only caller uses the
-existing signup-welcome suppression policy. Admission therefore preserves
-trial activation and the internal `member.activated` fact without assigning a
-Linq home line, queueing or emailing a welcome, or creating, resuming,
-reactivating, or otherwise mutating a Junction connection.
+kept outside device-sync public ingress. A consented fresh companion activation
+with a verified phone may enter the canonical signup-welcome path under the
+existing exact-member binding, signup idempotency, home-line health, and
+proactive-capacity owners. Exhausted proactive capacity does not block
+activation: Web still assigns an eligible home line without a proactive welcome,
+and inbound-first messaging remains available. Admission creates, resumes,
+reactivates, or otherwise mutates no Junction connection.
 
 ### Cloudflare execution state
 

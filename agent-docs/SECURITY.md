@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Non-Negotiable Rules
 
@@ -627,11 +627,14 @@ Last verified: 2026-08-11
   account boundary. Its Privy bearer may create or recover the canonical hosted
   member through the existing consent, untouched-member trial, and access
   owner, but the closed request accepts only an optional validated IANA time
-  zone and the response is always the non-identifying `{ "ok": true }`. The
-  route requests the existing signup-welcome suppression policy so account
-  admission cannot reserve a Linq home line, queue a signup welcome, or send a
-  welcome email; canonical trial activation and its internal
-  `member.activated` fact remain unchanged. The route must not import or invoke
+  zone and the response is always the non-identifying `{ "ok": true }`. A
+  consented fresh companion activation with a verified phone may enter the
+  canonical signup-welcome path. Exact-member binding, signup idempotency,
+  home-line health, and proactive capacity remain governed by the existing
+  starter enrollment, line reservation, and welcome owners. Exhausted proactive
+  capacity must not block activation: Web still assigns an eligible home line
+  without a proactive welcome, and inbound-first messaging remains available.
+  The route must not import or invoke
   device-sync public ingress, mint Junction authority, or create, resume,
   reactivate, or otherwise mutate a device connection. Validate the complete
   bounded body before acquiring Prisma or running member admission. Its

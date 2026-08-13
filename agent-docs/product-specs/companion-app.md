@@ -1,6 +1,6 @@
 # Native Companion Apps (Health Sync)
 
-Last verified: 2026-08-06
+Last verified: 2026-08-12
 
 Current iOS distribution status: approved for the App Store. The canonical
 public listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
@@ -171,11 +171,14 @@ before status, token exchange, or any health setup:
 Admission grants no Junction or device authority. A newly authenticated signup
 must not request a sign-in token, sign in to the Junction SDK, or create or
 resume a hosted connection before the member explicitly chooses **Connect
-Health Connect**. Account-only admission also suppresses the ordinary hosted
-signup welcome: it must not assign a Linq home line, queue a signup-welcome
-notification, or send a welcome email. Canonical starter-usage activation,
-active-access proof, and the internal `member.activated` fact remain intact.
-Existing established-member session restoration retains its separate
+Health Connect**. A consented fresh companion activation with a verified phone
+may enter the ordinary hosted signup-welcome path. The existing exact-member
+binding, signup idempotency, home-line health, and proactive-capacity owners
+still govern that path. Exhausted proactive capacity does not block activation:
+Web assigns an eligible home line without a proactive welcome, and inbound-first
+messaging remains available. Canonical starter-usage activation, active-access
+proof, and the internal `member.activated` fact remain intact. Existing
+established-member session restoration retains its separate
 documented `resume` path and cannot turn admission itself into health
 connection authority.
 

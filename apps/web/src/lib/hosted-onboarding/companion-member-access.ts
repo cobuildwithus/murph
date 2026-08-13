@@ -29,7 +29,6 @@ import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
 export async function requireHostedCompanionMemberIdFromRequest(input: {
   prisma?: PrismaClient;
   request: Request;
-  suppressSignupWelcome?: boolean;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
@@ -46,9 +45,6 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
   return ensureHostedCompanionMemberId({
     identity: session.identity,
     prisma,
-    ...(input.suppressSignupWelcome === undefined
-      ? {}
-      : { suppressSignupWelcome: input.suppressSignupWelcome }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
@@ -57,7 +53,6 @@ export async function ensureHostedCompanionMemberId(input: {
   identity: HostedPrivyIdentity;
   now?: Date;
   prisma?: PrismaClient;
-  suppressSignupWelcome?: boolean;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
@@ -116,9 +111,6 @@ export async function ensureHostedCompanionMemberId(input: {
       now,
       prisma,
       source: "companion_onboarding",
-      ...(input.suppressSignupWelcome === undefined
-        ? {}
-        : { suppressSignupWelcome: input.suppressSignupWelcome }),
     });
   }
 

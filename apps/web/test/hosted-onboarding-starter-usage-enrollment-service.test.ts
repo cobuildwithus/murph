@@ -387,7 +387,7 @@ describe("Starter usage enrollment owner", () => {
       member: { id: memberState.id, suspendedAt: null },
       now: NOW,
       prisma: prisma as never,
-      source: "web_onboarding",
+      source: "companion_onboarding",
     })).resolves.toEqual({
       redirectPath: "/home",
       status: "enrolled",
@@ -397,7 +397,7 @@ describe("Starter usage enrollment owner", () => {
       member: { id: memberState.id, suspendedAt: null },
       now: new Date("2026-08-09T14:05:00.000Z"),
       prisma: prisma as never,
-      source: "companion_onboarding",
+      source: "web_onboarding",
     })).resolves.toEqual({
       redirectPath: "/home",
       status: "already_enrolled",
@@ -405,6 +405,12 @@ describe("Starter usage enrollment owner", () => {
 
     expect(createdGrantCount).toBe(1);
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.activateHostedMemberForPositiveSourceTx.mock.calls[0]?.[0],
+    ).toMatchObject({
+      memberId: memberState.id,
+      suppressSignupWelcome: false,
+    });
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
       .toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
