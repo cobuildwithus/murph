@@ -125,6 +125,30 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
+  it("requires existing-set updates to own one consistent field family", () => {
+    const request = validRequest();
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          ...request.action.mutations[0],
+          result: null,
+        }],
+      },
+    }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          ...request.action.mutations[0],
+          expectedResult: { kind: "note", note: "Previous note" },
+        }],
+      },
+    }).success).toBe(false);
+  });
+
   it("rejects duplicate mutation targets so exact replay has one postcondition", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({

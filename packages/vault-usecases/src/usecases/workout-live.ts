@@ -158,24 +158,34 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
       continue
     }
 
-    if (memberActionWorkoutSetMatches(existing, mutation.result)) {
+    if (memberActionWorkoutSetMatches({
+      expected: mutation.result,
+      ownedKind: mutation.result?.kind ?? null,
+      set: existing,
+    })) {
       continue
     }
     if (
       mutation.requiresExistingSet
-      && !memberActionWorkoutSetMatches(existing, mutation.expectedResult)
+      && !memberActionWorkoutSetMatches({
+        expected: mutation.expectedResult,
+        ownedKind: mutation.result?.kind ?? null,
+        set: existing,
+      })
     ) {
       return { reason: 'workout_changed', status: 'rejected' }
     }
     if (!mutation.requiresExistingSet && hasLoggedWorkoutSet(existing)) {
       return { reason: 'workout_changed', status: 'rejected' }
     }
+    if (mutation.result === null) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
 
-    exercise.sets[mutation.setPosition - 1] = buildMemberActionWorkoutSet({
-      order: existing.order,
-      result: mutation.result,
-      type: existing.type,
-    })
+    exercise.sets[mutation.setPosition - 1] = applyMemberActionWorkoutSetResult(
+      existing,
+      mutation.result,
+    )
   }
 
   const parsed = workoutSessionSchema.safeParse({
@@ -210,7 +220,11 @@ function memberActionAlreadyApplied(
       .slice()
       .sort((left, right) => left.order - right.order)[mutation.setPosition - 1]
     return set !== undefined
-      && memberActionWorkoutSetMatches(set, mutation.result)
+      && memberActionWorkoutSetMatches({
+        expected: mutation.result,
+        ownedKind: mutation.result?.kind ?? null,
+        set,
+      })
   })
 }
 
@@ -269,11 +283,14 @@ function matchesAppendedExercise(
       && candidate.exerciseName === mutation.name
       && candidate.setPosition === setPosition
     )
-    const expectedSet = buildMemberActionWorkoutSet({
-      order: setPosition,
-      result: setMutation?.kind === 'set.put' ? setMutation.result : null,
+    if (setMutation?.kind !== 'set.put') {
+      return !hasLoggedWorkoutSet(set)
+    }
+    return memberActionWorkoutSetMatches({
+      expected: setMutation.result,
+      ownedKind: setMutation.result?.kind ?? null,
+      set,
     })
-    return JSON.stringify(set) === JSON.stringify(expectedSet)
   })
 }
 
@@ -300,18 +317,76 @@ function buildMemberActionWorkoutSet(input: {
   }
 }
 
-function memberActionWorkoutSetMatches(
+type MemberActionSetResult = Extract<
+  WorkoutLiveApplyMemberActionV1['mutations'][number],
+  { kind: 'set.put' }
+>['result']
+type MemberActionSetResultKind = NonNullable<MemberActionSetResult>['kind']
+
+function applyMemberActionWorkoutSetResult(
   set: WorkoutSet,
-  result: Extract<
-    WorkoutLiveApplyMemberActionV1['mutations'][number],
-    { kind: 'set.put' }
-  >['result'],
-): boolean {
-  return JSON.stringify(buildMemberActionWorkoutSet({
-    order: set.order,
-    result,
-    type: set.type,
-  })) === JSON.stringify(set)
+  result: NonNullable<MemberActionSetResult>,
+): WorkoutSet {
+  return {
+    ...set,
+    ...(result.kind === 'note' ? { note: result.note } : {}),
+    ...(result.kind === 'reps' ? { reps: result.reps } : {}),
+    ...(result.kind === 'weight_reps'
+      ? {
+          reps: result.reps,
+          weight: result.weight,
+          weightUnit: result.weightUnit,
+        }
+      : {}),
+  }
+}
+
+function memberActionWorkoutSetMatches(input: {
+  expected: MemberActionSetResult
+  ownedKind: MemberActionSetResultKind | null
+  set: WorkoutSet
+}): boolean {
+  if (input.ownedKind === null) {
+    return JSON.stringify(buildMemberActionWorkoutSet({
+      order: input.set.order,
+      result: null,
+      type: input.set.type,
+    })) === JSON.stringify(input.set)
+  }
+  if (input.expected !== null && input.expected.kind !== input.ownedKind) {
+    return false
+  }
+
+  const actual = projectMemberActionWorkoutSetResult(
+    input.set,
+    input.ownedKind,
+  )
+  return JSON.stringify(actual) === JSON.stringify(input.expected)
+}
+
+function projectMemberActionWorkoutSetResult(
+  set: WorkoutSet,
+  kind: MemberActionSetResultKind,
+): MemberActionSetResult {
+  if (kind === 'note') {
+    return set.note === undefined ? null : { kind, note: set.note }
+  }
+  if (kind === 'reps') {
+    return set.reps === undefined ? null : { kind, reps: set.reps }
+  }
+  if (
+    set.reps === undefined
+    || set.weight === undefined
+    || set.weightUnit === undefined
+  ) {
+    return null
+  }
+  return {
+    kind,
+    reps: set.reps,
+    weight: set.weight,
+    weightUnit: set.weightUnit,
+  }
 }
 
 export async function startLiveWorkout(input: StartLiveWorkoutInput) {

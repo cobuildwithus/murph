@@ -123,4 +123,67 @@ describe("hosted member action runtime", () => {
       },
     });
   });
+
+  it.each(["applied", "unchanged"] as const)(
+    "records a %s mixed-field correction as a terminal success",
+    async (status) => {
+      mocks.applyLiveWorkoutMemberAction.mockResolvedValueOnce({ status });
+      const action = {
+        expectedWorkout: {
+          actionBinding: "a".repeat(64),
+          exercises: [{ name: "Bench press", sets: [{ logged: true }] }],
+        },
+        kind: "workout.live.apply" as const,
+        mutations: [{
+          exerciseName: "Bench press",
+          exercisePosition: 1,
+          expectedResult: {
+            kind: "weight_reps" as const,
+            reps: 8,
+            weight: 185,
+            weightUnit: "lb" as const,
+          },
+          kind: "set.put" as const,
+          requiresExistingSet: true,
+          result: {
+            kind: "weight_reps" as const,
+            reps: 8,
+            weight: 190,
+            weightUnit: "lb" as const,
+          },
+          setPosition: 1,
+        }],
+        version: 1 as const,
+      };
+
+      const outcome = await executeHostedMemberActionWake({
+        vaultRoot: "/vault",
+        wake: {
+          eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+          kind: "member.action.requested",
+          occurredAt: "2026-08-12T15:00:00.000Z",
+          request: {
+            action,
+            actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+            requestedAt: "2026-08-12T15:00:00.000Z",
+            schemaVersion: 1,
+          },
+          userId: "member-1",
+        },
+      });
+
+      expect(outcome.postCheckpointRecord).toMatchObject({
+        kind: "member-action.outcome-recorded",
+        outcome: {
+          reason: null,
+          status,
+        },
+      });
+      expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledWith({
+        acceptedAt: "2026-08-12T15:00:00.000Z",
+        action,
+        vault: "/vault",
+      });
+    },
+  );
 });

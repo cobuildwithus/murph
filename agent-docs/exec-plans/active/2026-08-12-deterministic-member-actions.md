@@ -89,6 +89,9 @@ Messages extension as the first action family.
 - Admission and outcome recording reuse the mailbox owner's prepared-crypto
   boundary: provider work finishes before their transactions, while root drift
   retries the full preparation once through the existing fresh-cache owner.
+- A set mutation owns only the explicit result field family. Optimistic
+  comparison, exact replay, and canonical merge preserve unrelated annotations
+  and metrics; existing-set mutations cannot use an ambiguous null clear.
 
 ## Verification
 

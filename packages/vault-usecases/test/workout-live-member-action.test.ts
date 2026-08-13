@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkoutSession } from "@murphai/contracts";
+import type {
+  WorkoutMemberActionSetResultV1,
+  WorkoutSession,
+} from "@murphai/contracts";
 import { deriveWorkoutActionBinding } from "@murphai/operator-config/workout-action-binding";
 
 const mocks = vi.hoisted(() => ({
@@ -46,17 +49,26 @@ function shownWorkout(
   };
 }
 
-function setAction(result: { kind: "reps"; reps: number }) {
+function setAction(
+  result: WorkoutMemberActionSetResultV1,
+  input: {
+    expectedResult?: WorkoutMemberActionSetResultV1 | null;
+    logged?: boolean;
+  } = {},
+) {
   return {
     expectedWorkout: {
       actionBinding: ACTION_BINDING,
-      exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+      exercises: [{
+        name: "Leg press",
+        sets: [{ logged: input.logged ?? false }],
+      }],
     },
     kind: "workout.live.apply" as const,
     mutations: [{
       exerciseName: "Leg press",
       exercisePosition: 1,
-      expectedResult: null,
+      expectedResult: input.expectedResult ?? null,
       kind: "set.put" as const,
       requiresExistingSet: true,
       result,
@@ -194,6 +206,166 @@ describe("live workout member action", () => {
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
+  it("updates weight and reps while preserving unrelated set annotations", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{
+          note: "Final rep spotted",
+          order: 1,
+          reps: 8,
+          rpe: 9,
+          weight: 185,
+          weightUnit: "lb",
+        }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 190, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: 185,
+            weightUnit: "lb",
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
+      ...BASE_WORKOUT.exercises[0],
+      sets: [{
+        note: "Final rep spotted",
+        order: 1,
+        reps: 8,
+        rpe: 9,
+        weight: 190,
+        weightUnit: "lb",
+      }],
+    }]);
+  });
+
+  it("updates a note while preserving unrelated load and effort fields", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{
+          note: "Final rep spotted",
+          order: 1,
+          reps: 8,
+          rpe: 9,
+          weight: 185,
+          weightUnit: "lb",
+        }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "note", note: "Smooth tempo" },
+        {
+          expectedResult: { kind: "note", note: "Final rep spotted" },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
+      ...BASE_WORKOUT.exercises[0],
+      sets: [{
+        note: "Smooth tempo",
+        order: 1,
+        reps: 8,
+        rpe: 9,
+        weight: 185,
+        weightUnit: "lb",
+      }],
+    }]);
+  });
+
+  it("rejects a concurrent change to the fields owned by the correction", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{
+          note: "Final rep spotted",
+          order: 1,
+          reps: 7,
+          rpe: 9,
+          weight: 185,
+          weightUnit: "lb",
+        }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 190, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: 185,
+            weightUnit: "lb",
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("recognizes an exact correction replay after an unrelated annotation changes", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{
+          note: "Coach updated this later",
+          order: 1,
+          reps: 8,
+          rpe: 9.5,
+          weight: 190,
+          weightUnit: "lb",
+        }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 190, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: 185,
+            weightUnit: "lb",
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
   it("does not retarget a delayed action to a workout started after admission", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
@@ -238,6 +410,28 @@ describe("live workout member action", () => {
           name: "Push-up",
           order: 2,
           sets: [{ order: 1, reps: 12 }],
+        },
+      ],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: appendAction(),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("recognizes an appended-set replay after an unrelated annotation changes", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [
+        BASE_WORKOUT.exercises[0],
+        {
+          mode: "bodyweight",
+          name: "Push-up",
+          order: 2,
+          sets: [{ note: "Easy tempo", order: 1, reps: 12, rpe: 7 }],
         },
       ],
     })]);

@@ -22,6 +22,9 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 - An active workout editor submits a closed, bounded member action directly.
   The existing hosted mailbox delivers it to the canonical workout owner with
   no assistant turn; the immutable card remains presentation, not authority.
+- A set edit owns only its explicit result family (`note`, `reps`, or
+  `weight_reps`): optimistic comparison, canonical merge, and exact replay
+  preserve unrelated annotations and metrics on the same set.
 
 ## Response-card contract
 

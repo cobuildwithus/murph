@@ -123,6 +123,29 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
       path: ["expectedResult"],
     });
   }
+  if (
+    mutation.kind === "set.put"
+    && mutation.requiresExistingSet
+    && mutation.result === null
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "An existing set update must name the fields it owns.",
+      path: ["result"],
+    });
+  }
+  if (
+    mutation.kind === "set.put"
+    && mutation.expectedResult !== null
+    && mutation.result !== null
+    && mutation.expectedResult.kind !== mutation.result.kind
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "A set update must compare and write the same field family.",
+      path: ["expectedResult"],
+    });
+  }
 });
 
 export type WorkoutMemberActionMutationV1 = z.infer<
