@@ -8,6 +8,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import {
+  sendLinqIMessageAppCard,
+  type LinqFetch,
+} from '@murphai/operator-config/linq-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { addStructuredWorkoutRecord } from '@murphai/vault-usecases/workouts'
 
@@ -29,6 +33,10 @@ import {
   digestGroupChallengeDefinition,
   renderGroupChallengeDefinitionSection,
 } from '../src/assistant/group-challenge-response-card-schema.ts'
+import {
+  createAssistantOutboxIntent,
+  readAssistantOutboxIntent,
+} from '../src/assistant/outbox.ts'
 
 const LEGACY_CARD_V1: AssistantResponseCard = {
   kind: 'daily_nutrition',
@@ -278,7 +286,9 @@ async function createChallengeVault(input: {
   return root
 }
 
-async function createLiveWorkoutCardVault(): Promise<{
+async function createLiveWorkoutCardVault(input: {
+  hiddenNote?: string
+} = {}): Promise<{
   card: AssistantResponseCard
   root: string
 }> {
@@ -300,17 +310,23 @@ async function createLiveWorkoutCardVault(): Promise<{
       workout: {
         sourceApp: 'murph-live',
         startedAt: '2026-08-12T14:00:00.000Z',
-        exercises: [{
-          mode: 'weight_reps',
-          name: 'Leg press',
-          order: 1,
-          unitOverride: 'lb',
-          sets: [
-            { order: 1, reps: 0, weight: 0 },
-            { order: 2, reps: 8, weight: 185, weightUnit: 'lb' },
-            { order: 3 },
-          ],
-        }],
+        exercises: input.hiddenNote === undefined
+          ? [{
+              mode: 'weight_reps',
+              name: 'Leg press',
+              order: 1,
+              unitOverride: 'lb',
+              sets: [
+                { order: 1, reps: 0, weight: 0 },
+                { order: 2, reps: 8, weight: 185, weightUnit: 'lb' },
+                { order: 3 },
+              ],
+            }]
+          : [{
+              name: 'Plank',
+              order: 1,
+              sets: [{ note: input.hiddenNote, order: 1 }],
+            }],
       },
     },
   })
@@ -330,14 +346,19 @@ async function createLiveWorkoutCardVault(): Promise<{
       workout: {
         version: 1,
         state: 'active',
-        exercises: [{
-          name: 'Leg press',
-          sets: [
-            { status: 'completed', target: '185 lb × 8', actual: '0 lb × 0' },
-            { status: 'completed', target: '185 lb × 8', actual: '185 lb × 8' },
-            { status: 'pending', target: '185 lb × 8', actual: null },
-          ],
-        }],
+        exercises: input.hiddenNote === undefined
+          ? [{
+              name: 'Leg press',
+              sets: [
+                { status: 'completed', target: '185 lb × 8', actual: '0 lb × 0' },
+                { status: 'completed', target: '185 lb × 8', actual: '185 lb × 8' },
+                { status: 'pending', target: '185 lb × 8', actual: null },
+              ],
+            }]
+          : [{
+              name: 'Plank',
+              sets: [{ status: 'completed', target: null, actual: 'Logged' }],
+            }],
       },
     },
   }
@@ -1099,6 +1120,88 @@ describe('murph.attach_response_card', () => {
         }],
       },
     })
+  })
+
+  it('keeps a hidden canonical note out of the persisted card and Linq request', async () => {
+    const hiddenNote = 'n'.repeat(41)
+    const fixture = await createLiveWorkoutCardVault({ hiddenNote })
+    const attached = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+    const card = attached.responseCardPatch?.card
+    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
+      throw new TypeError('Expected the attached workout card.')
+    }
+
+    expect(card).not.toHaveProperty('editor')
+    expect(JSON.stringify(card)).not.toContain(hiddenNote)
+
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card,
+      channel: 'linq',
+      dedupeToken: 'note-privacy-card',
+      message: 'ignored model prose',
+      sessionId: 'session-note-privacy',
+      threadId: 'thread-note-privacy',
+      threadIsDirect: true,
+      turnId: 'turn-note-privacy',
+      vault: fixture.root,
+    })
+    const persisted = await readAssistantOutboxIntent(
+      fixture.root,
+      intent.intentId,
+    )
+    const persistedCard = persisted?.card
+    if (
+      !persistedCard
+      || persistedCard.kind !== 'compact_table'
+      || !('workout' in persistedCard)
+    ) {
+      throw new TypeError('Expected the persisted workout card.')
+    }
+    expect(persistedCard).not.toHaveProperty('editor')
+    expect(JSON.stringify(persistedCard)).not.toContain(hiddenNote)
+
+    const requests: unknown[] = []
+    const fetchImplementation: LinqFetch = async (_url, init) => {
+      requests.push(
+        typeof init.body === 'string' ? JSON.parse(init.body) : null,
+      )
+      return {
+        arrayBuffer: async () => new ArrayBuffer(0),
+        json: async () => ({ message: { id: 'msg_note_privacy' } }),
+        ok: true,
+        status: 200,
+        text: async () => '',
+      }
+    }
+    await sendLinqIMessageAppCard({
+      card: persistedCard,
+      chatId: 'chat_note_privacy',
+      idempotencyKey: 'note-privacy-1',
+    }, {
+      env: { LINQ_API_TOKEN: 'test-token' },
+      fetchImplementation,
+    })
+
+    expect(requests).toHaveLength(1)
+    const requestJson = JSON.stringify(requests[0])
+    expect(requestJson).not.toContain(hiddenNote)
+    const request = requests[0] as {
+      message: { parts: Array<{ url: string }> }
+    }
+    const encoded = request.message.parts[0]?.url.split('#murph-card=')[1]
+    expect(encoded).toBeDefined()
+    const envelope = JSON.parse(
+      Buffer.from(encoded ?? '', 'base64url').toString('utf8'),
+    ) as { schemaVersion?: unknown }
+    expect(envelope.schemaVersion).toBe(4)
+    expect(JSON.stringify(envelope)).not.toContain(hiddenNote)
   })
 
   it('refuses group cards without a complete read, authorized participants, backed definition scopes, or canonical page', async () => {

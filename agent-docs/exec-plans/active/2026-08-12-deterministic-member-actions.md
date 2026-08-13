@@ -101,6 +101,10 @@ Messages extension as the first action family.
   carries that projection, including zero and explicit-versus-inherited units;
   V4 remains the read-only fallback for mismatches, read failures, completed
   workouts, and payloads that exceed the existing inline ceiling.
+- A note enters the editable projection only when its exact canonical value is
+  fully visible in the 40-character result field. Longer hidden notes force the
+  whole card to the V4/read-only path so they cannot enter persisted card state
+  or the provider request under a generic display label.
 
 ## Verification
 

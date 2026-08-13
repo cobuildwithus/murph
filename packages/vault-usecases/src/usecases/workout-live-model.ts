@@ -1,5 +1,6 @@
 import {
   renderWorkoutSessionEditorResultV1,
+  workoutSessionCardV1Bounds,
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutMemberActionExpectedSetResultV1,
   type WorkoutSessionDetailV1,
@@ -159,6 +160,9 @@ export function buildLiveWorkoutCardEditor(input: {
       const result = logged
         ? projectWorkoutSessionEditorResult(exercise, set)
         : null
+      if (logged && result === null) {
+        return null
+      }
       const actual = result === null
         ? null
         : renderWorkoutSessionEditorResultV1(
@@ -198,7 +202,7 @@ export function buildLiveWorkoutCardEditor(input: {
 function projectWorkoutSessionEditorResult(
   exercise: WorkoutExercise,
   set: WorkoutSet,
-): WorkoutMemberActionExpectedSetResultV1 {
+): WorkoutMemberActionExpectedSetResultV1 | null {
   const isWeightOriented = exercise.mode === 'weight_reps'
     || typeof set.weight === 'number'
     || exercise.unitOverride !== undefined
@@ -218,7 +222,9 @@ function projectWorkoutSessionEditorResult(
     return { kind: 'reps', reps: set.reps ?? null }
   }
   if (typeof set.note === 'string') {
-    return { kind: 'note', note: set.note }
+    return set.note.length <= workoutSessionCardV1Bounds.setValue
+      ? { kind: 'note', note: set.note }
+      : null
   }
   if (isWeightOriented) {
     return {

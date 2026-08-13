@@ -47,8 +47,11 @@ that exact active workout and may add one internal editor projection only when
 ordered exercise names, set counts, and logged states match the presentation.
 The projection preserves the closed result family, canonical zero values,
 nullable reps/weight, the raw optional set unit, and separate exercise unit
-context. A read failure, mismatch, completed workout, or oversized V6 leaves the
-card as the existing readable V4 snapshot.
+context. A note is eligible only when its exact canonical value fits the
+40-character visible card field; a longer note is never substituted with a
+generic label inside editable state. A read failure, mismatch, completed
+workout, hidden note, or oversized V6 leaves the card as the existing readable
+V4 snapshot.
 
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The

@@ -2163,8 +2163,11 @@ projection to an active card. The native V6 wire carries that projection plus
 one opaque SHA-256 action binding; it contains no canonical id and grants no
 authority, but preserves exact nullable prior fields while letting the workout
 owner prove under its existing lock that an old card still names the exact
-active workout. A failed read, presentation mismatch, completed workout, or
-oversized V6 stays V4/read-only instead of guessing. Web authenticates and validates the request, locks and
+active workout. Note-shaped results enter V6 only when the exact canonical note
+fits the visible card result; longer hidden notes cannot enter persisted or
+provider payloads and leave the card V4/read-only. A failed read, presentation
+mismatch, completed workout, or oversized V6 likewise stays V4/read-only instead
+of guessing. Web authenticates and validates the request, locks and
 re-checks member access and consent, then appends one encrypted
 `member.action.requested:<actionId>` item to the existing system mailbox before
 signaling the existing Temporal runtime. Runtime dispatches the action directly

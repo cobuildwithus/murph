@@ -1,9 +1,6 @@
 import * as z from "./zod-runtime.ts";
 
-import {
-  memberActionV1Bounds,
-  workoutMemberActionExpectedSetResultV1Schema,
-} from "./member-action.ts";
+import { workoutMemberActionExpectedSetResultV1Schema } from "./member-action.ts";
 
 export const workoutSessionCardV1Bounds = {
   title: 60,
@@ -137,10 +134,25 @@ export type WorkoutSessionDetailV1 = z.infer<
   typeof workoutSessionDetailV1Schema
 >;
 
+const workoutSessionEditorResultV1Schema = workoutMemberActionExpectedSetResultV1Schema
+  .superRefine((result, context) => {
+    if (
+      result.kind === "note"
+      && result.note !== null
+      && result.note.length > workoutSessionCardV1Bounds.setValue
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "An editable note must be fully visible in the workout card.",
+        path: ["note"],
+      });
+    }
+  });
+
 const workoutSessionEditorSetV1Schema = z
   .object({
     logged: z.boolean(),
-    result: workoutMemberActionExpectedSetResultV1Schema.nullable(),
+    result: workoutSessionEditorResultV1Schema.nullable(),
   })
   .strict()
   .superRefine((set, context) => {
@@ -507,13 +519,11 @@ export function renderWorkoutSessionEditorResultV1(
     }
     if (!isSingleLineText(
       value[1],
-      memberActionV1Bounds.expectedFreeformResult,
+      workoutSessionCardV1Bounds.setValue,
     )) {
       return undefined;
     }
-    return value[1].length <= workoutSessionCardV1Bounds.setValue
-      ? value[1]
-      : "Logged";
+    return value[1];
   }
   if (value.length === 2 && value[0] === "r") {
     if (value[1] === null) {

@@ -237,7 +237,7 @@ describe("workout session compact-table contract", () => {
             },
           }],
         }],
-        version: 1,
+        version: 1 as const,
       },
       title: TRACKED_WORKOUT_CARD.title,
       subtitle: null,
@@ -262,9 +262,46 @@ describe("workout session compact-table contract", () => {
       }],
     });
 
-    const noteEnvelope = buildWorkoutSessionAppCardEnvelopeV6({
+    const noteInput = {
       actionBinding: "a".repeat(64),
       editor: {
+        exercises: [{
+          unitOverride: null,
+          sets: [{
+            logged: true,
+            result: { kind: "note" as const, note: "n".repeat(40) },
+          }],
+        }],
+        version: 1 as const,
+      },
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: null,
+      footer: null,
+      workout,
+    };
+    const noteEnvelope = buildWorkoutSessionAppCardEnvelopeV6(noteInput);
+    const parsedNote = parseCompactTableAppCardEnvelope(noteEnvelope);
+    if (!parsedNote || !("workout" in parsedNote)) {
+      throw new TypeError("Expected the parsed note workout card.");
+    }
+    expect(parsedNote.workout.exercises[0]?.sets[0]?.actual).toBe("n".repeat(40));
+    expect(() => buildWorkoutSessionAppCardEnvelopeV6({
+      ...noteInput,
+      editor: {
+        ...noteInput.editor,
+        exercises: [{
+          unitOverride: null,
+          sets: [{
+            logged: true,
+            result: { kind: "note", note: "n".repeat(41) },
+          }],
+        }],
+      },
+    })).toThrow(/fully visible/iu);
+    expect(() => buildWorkoutSessionAppCardEnvelopeV6({
+      ...noteInput,
+      editor: {
+        ...noteInput.editor,
         exercises: [{
           unitOverride: null,
           sets: [{
@@ -272,18 +309,8 @@ describe("workout session compact-table contract", () => {
             result: { kind: "note", note: "n".repeat(400) },
           }],
         }],
-        version: 1,
       },
-      title: TRACKED_WORKOUT_CARD.title,
-      subtitle: null,
-      footer: null,
-      workout,
-    });
-    const parsedNote = parseCompactTableAppCardEnvelope(noteEnvelope);
-    if (!parsedNote || !("workout" in parsedNote)) {
-      throw new TypeError("Expected the parsed note workout card.");
-    }
-    expect(parsedNote.workout.exercises[0]?.sets[0]?.actual).toBe("Logged");
+    })).toThrow(/fully visible/iu);
   });
 
   it("accepts a completed workout with completed and skipped sets", () => {

@@ -123,6 +123,42 @@ describe('live workout model', () => {
     })
   })
 
+  test('keeps hidden canonical notes out of the editable projection', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Plank',
+        sets: [{ status: 'completed' as const, target: null, actual: 'Logged' }],
+      }],
+    }
+    const workoutForNote = (note: string) => workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Plank',
+        order: 1,
+        sets: [{ note, order: 1 }],
+      }],
+    })
+
+    assert.deepEqual(
+      buildLiveWorkoutCardEditor({
+        presentation,
+        workout: workoutForNote('n'.repeat(40)),
+      })?.editor.exercises[0]?.sets[0]?.result,
+      { kind: 'note', note: 'n'.repeat(40) },
+    )
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout: workoutForNote('n'.repeat(41)),
+    }), null)
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout: workoutForNote('n'.repeat(400)),
+    }), null)
+  })
+
   test('starts saved routines as active sessions with unlogged placeholders', () => {
     const template = workoutTemplateSchema.parse({
       routineNote: 'Push day',

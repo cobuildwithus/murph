@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-11
+Last verified: 2026-08-13
 
 ## Non-Negotiable Rules
 
@@ -662,11 +662,14 @@ Last verified: 2026-08-11
   authority. V6 adds a 64-character lowercase SHA-256 action binding derived
   from the canonical workout id plus a bounded typed projection of the same
   completed-set values already visible in that private-direct card. It reveals
-  no canonical id or member,
-  is never accepted as authentication, and can authorize nothing without the
-  separately enrolled scoped bearer; the workout owner uses it only as an exact
-  stale-card precondition under the canonical mutation lock. V1-V5 presentation
-  envelopes may also reach the bounded
+  no canonical id or member. An editable note is admitted only when its exact
+  canonical value fits the visible 40-character result field; a longer hidden
+  note forces the authority-free V4 presentation instead of entering either
+  persisted card state or the Linq request.
+  The binding is never accepted as authentication and can authorize nothing
+  without the separately enrolled scoped bearer; the workout owner uses it
+  only as an exact stale-card precondition under the canonical mutation lock.
+  V1-V5 presentation envelopes may also reach the bounded
   queryless
   `/imessage/card/v1/:payload.png` route for Linq's static fallback and the
   Telegram daily-nutrition Rich Message visual. That path is
