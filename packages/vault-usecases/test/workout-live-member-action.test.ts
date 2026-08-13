@@ -66,6 +66,36 @@ function setAction(result: { kind: "reps"; reps: number }) {
   };
 }
 
+function appendAction(setCount = 1) {
+  return {
+    expectedWorkout: {
+      actionBinding: ACTION_BINDING,
+      exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+    },
+    kind: "workout.live.apply" as const,
+    mutations: [
+      {
+        exercisePosition: 2,
+        kind: "exercise.append" as const,
+        mode: "bodyweight" as const,
+        name: "Push-up",
+        setCount,
+        unitOverride: null,
+      },
+      {
+        exerciseName: "Push-up",
+        exercisePosition: 2,
+        expectedResult: null,
+        kind: "set.put" as const,
+        requiresExistingSet: false,
+        result: { kind: "reps" as const, reps: 12 },
+        setPosition: 1,
+      },
+    ],
+    version: 1 as const,
+  };
+}
+
 describe("live workout member action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -182,37 +212,9 @@ describe("live workout member action", () => {
   });
 
   it("appends an exercise and fills its sets in the same write", async () => {
-    const action = {
-      expectedWorkout: {
-        actionBinding: ACTION_BINDING,
-        exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
-      },
-      kind: "workout.live.apply" as const,
-      mutations: [
-        {
-          exercisePosition: 2,
-          kind: "exercise.append" as const,
-          mode: "bodyweight" as const,
-          name: "Push-up",
-          setCount: 1,
-          unitOverride: null,
-        },
-        {
-          exerciseName: "Push-up",
-          exercisePosition: 2,
-          expectedResult: null,
-          kind: "set.put" as const,
-          requiresExistingSet: false,
-          result: { kind: "reps" as const, reps: 12 },
-          setPosition: 1,
-        },
-      ],
-      version: 1 as const,
-    };
-
     await expect(applyLiveWorkoutMemberAction({
       acceptedAt: ACCEPTED_AT,
-      action,
+      action: appendAction(),
       vault: "/vault",
     })).resolves.toEqual({ status: "applied" });
     expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([
@@ -224,5 +226,61 @@ describe("live workout member action", () => {
         sets: [{ order: 1, reps: 12 }],
       },
     ]);
+  });
+
+  it("treats an exact appended exercise retry as unchanged", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [
+        BASE_WORKOUT.exercises[0],
+        {
+          mode: "bodyweight",
+          name: "Push-up",
+          order: 2,
+          sets: [{ order: 1, reps: 12 }],
+        },
+      ],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: appendAction(),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "an extra set",
+      sets: [{ order: 1, reps: 12 }, { order: 2 }],
+    },
+    {
+      label: "different logged data",
+      sets: [{ order: 1, reps: 10 }],
+    },
+  ])("rejects an append retry containing $label", async ({ sets }) => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [
+        BASE_WORKOUT.exercises[0],
+        {
+          mode: "bodyweight",
+          name: "Push-up",
+          order: 2,
+          sets,
+        },
+      ],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: appendAction(),
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 });

@@ -2164,7 +2164,12 @@ workout. Web authenticates and validates the request, locks and
 re-checks member access and consent, then appends one encrypted
 `member.action.requested:<actionId>` item to the existing system mailbox before
 signaling the existing Temporal runtime. Runtime dispatches the action directly
-to the canonical vault use case without starting an assistant turn. The workout
+to the canonical vault use case without starting an assistant turn. When a
+conversation reply already owns the foreground pass, the existing scheduler
+finishes that reply first and then selects at most one due
+`member.action.requested` item before another provider pass or unrelated system
+work; the terminal `member.action.completed` receipt receives no such priority.
+The workout
 owner takes the existing live-workout mutation lock, requires exactly one active
 workout matching both that binding and the authority-free visible shape, applies
 the complete batch in one canonical write, converges exact retries, and rejects

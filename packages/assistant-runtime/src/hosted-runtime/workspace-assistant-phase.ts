@@ -6,6 +6,7 @@ import {
   deriveHostedExecutionErrorCode,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
+  type HostedExecutionSystemWake,
   type HostedExecutionRedactedLogEntry,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
@@ -275,6 +276,12 @@ const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
+] as const;
+const HOSTED_POST_FOREGROUND_MEMBER_ACTION_ROUTE_ACTIONS = [
+  "apply-member-action",
+] as const;
+const HOSTED_POST_FOREGROUND_MEMBER_ACTION_WAKE_KINDS = [
+  "member.action.requested",
 ] as const;
 const HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS = [
   "initialize-group-room-model",
@@ -2544,12 +2551,18 @@ export async function runHostedWorkspaceAssistantPhase(
       if (!foregroundAssistantResult.afterCheckpoint) {
         writeForegroundAssistantFinishedTiming();
       }
-      const result = mergeContinuingSystemMailboxResult(
+      const foregroundResult = mergeContinuingSystemMailboxResult(
         withFreshHostedManagedAutomationsAfterCheckpoint({
           input,
           result: timedForegroundAssistantResult,
         }),
       );
+      const result = withPostForegroundMemberActionAfterCheckpoint({
+        executionContext,
+        input,
+        result: foregroundResult,
+        wake,
+      });
       if (providerCleanupPlan.stateQueued && !result.progressed) {
         return {
           ...result,
@@ -4593,6 +4606,78 @@ async function runBackgroundMaintenanceAfterDeferredPendingAssistantInput(input:
   });
 }
 
+function withPostForegroundMemberActionAfterCheckpoint(input: {
+  executionContext: AssistantExecutionContext;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  if (
+    input.result.progressed !== true
+    || input.result.foregroundReplyFailed !== 0
+  ) {
+    return input.result;
+  }
+
+  return {
+    ...input.result,
+    afterCheckpointKeepsForegroundImportLoop: true,
+    afterCheckpoint: composeHostedAssistantPhaseAfterCheckpoint({
+      callbacks: [
+        input.result.afterCheckpoint,
+        async () => {
+          const maintenance = await runSystemMailboxMaintenancePhase({
+            exclusiveRouteActions:
+              HOSTED_POST_FOREGROUND_MEMBER_ACTION_ROUTE_ACTIONS,
+            exclusiveWakeKinds:
+              HOSTED_POST_FOREGROUND_MEMBER_ACTION_WAKE_KINDS,
+            executionContext: input.executionContext,
+            hasFreshConversationInput: false,
+            input: input.input,
+            pendingAssistantInputBlocksMaintenance: false,
+            pendingAssistantInputWakeAt: null,
+            wake: input.wake,
+          });
+          return deferPostForegroundMemberActionResult(maintenance.result);
+        },
+      ],
+    }),
+  };
+}
+
+function deferPostForegroundMemberActionResult(
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null,
+): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
+  if (!result || result.progressed !== true) {
+    return null;
+  }
+
+  const recordAfterCheckpoint = result.afterCheckpoint ?? null;
+  return {
+    ...(recordAfterCheckpoint
+      ? {
+          afterDurableCheckpoint: async () => {
+            const recorded = await recordAfterCheckpoint();
+            if (!recorded) {
+              return null;
+            }
+            return {
+              nextWakeAt: recorded.nextWakeAt ?? null,
+              nextWakeReason: recorded.nextWakeReason ?? "assistant",
+              requiresFollowUpCheckpoint: true,
+            };
+          },
+        }
+      : {}),
+    checkpointReason: result.checkpointReason,
+    ...(Object.hasOwn(result, "nextWakeAt")
+      ? { nextWakeAt: result.nextWakeAt ?? null }
+      : {}),
+    ...(result.nextWakeReason ? { nextWakeReason: result.nextWakeReason } : {}),
+    ...(result.redactedStatus ? { redactedStatus: result.redactedStatus } : {}),
+  };
+}
+
 function withDeferredPendingAssistantInputWake(input: {
   maintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
   pendingAssistantInputWakeAt: string | null;
@@ -4980,6 +5065,8 @@ function resolveDeferredPendingAssistantInputWakeAt(input: {
 }
 
 async function runSystemMailboxMaintenancePhase(input: {
+  exclusiveRouteActions?: readonly HostedSystemMailboxRouteAction[];
+  exclusiveWakeKinds?: readonly HostedExecutionSystemWake["kind"][];
   executionContext: AssistantExecutionContext;
   hasFreshConversationInput: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -5016,8 +5103,22 @@ async function runSystemMailboxMaintenancePhase(input: {
         signal: phaseInput.signal ?? null,
         vaultRoot: phaseInput.restored.vaultRoot,
       });
-  let foregroundCausalPreparation =
-    (
+  const hasExclusiveSelection = input.exclusiveRouteActions !== undefined
+    || input.exclusiveWakeKinds !== undefined;
+  let foregroundCausalPreparation = hasExclusiveSelection
+    ? await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: input.exclusiveRouteActions ?? null,
+        allowedWakeKinds: input.exclusiveWakeKinds ?? null,
+        executionContext: input.executionContext,
+        ...(phaseInput.now ? { now: phaseInput.now } : {}),
+        operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+        runtime: phaseInput.runtime,
+        runtimeEnv: phaseInput.runtimeEnv,
+        signal: phaseInput.signal ?? null,
+        shouldYieldBackgroundMaintenance: null,
+        vaultRoot: phaseInput.restored.vaultRoot,
+      })
+    : (
       pendingAssistantInputWakeAt !== null
       || phaseInput.foregroundCausalOnly === true
     )
@@ -5041,6 +5142,16 @@ async function runSystemMailboxMaintenancePhase(input: {
           vaultRoot: phaseInput.restored.vaultRoot,
         })
       : null;
+  if (hasExclusiveSelection && foregroundCausalPreparation === null) {
+    return {
+      backgroundMaintenanceYielded: false,
+      continueAssistantLane: false,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint: null,
+      pendingAssistantInputWakeAt,
+      result: null,
+    };
+  }
   if (
     phaseInput.foregroundCausalOnly === true
     && foregroundCausalPreparation === null
@@ -5224,8 +5335,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         phaseInput.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: phaseInput.restored.vaultRoot,
     });
-  const shouldYieldAfterSystemMailboxPreparation =
-    phaseInput.shouldYieldBackgroundMaintenance?.() === true;
+  const shouldYieldAfterSystemMailboxPreparation = !hasExclusiveSelection
+    && phaseInput.shouldYieldBackgroundMaintenance?.() === true;
   const foregroundCausalPreparationSelected =
     systemMailboxPreparation !== null
     && isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation);

@@ -200,7 +200,8 @@ function memberActionAlreadyApplied(
   return mutations.every((mutation) => {
     const exercise = exercises[mutation.exercisePosition - 1]
     if (mutation.kind === 'exercise.append') {
-      return exercise !== undefined && matchesAppendedExercise(exercise, mutation)
+      return exercise !== undefined
+        && matchesAppendedExercise(exercise, mutation, mutations)
     }
     if (!exercise || exercise.name !== mutation.exerciseName) {
       return false
@@ -245,11 +246,35 @@ function matchesAppendedExercise(
     WorkoutLiveApplyMemberActionV1['mutations'][number],
     { kind: 'exercise.append' }
   >,
+  mutations: WorkoutLiveApplyMemberActionV1['mutations'],
 ): boolean {
-  return exercise.name === mutation.name
-    && (exercise.mode ?? null) === mutation.mode
-    && (exercise.unitOverride ?? null) === mutation.unitOverride
-    && exercise.sets.length >= mutation.setCount
+  if (
+    exercise.name !== mutation.name
+    || (exercise.mode ?? null) !== mutation.mode
+    || (exercise.unitOverride ?? null) !== mutation.unitOverride
+    || exercise.sets.length !== mutation.setCount
+  ) {
+    return false
+  }
+
+  const sets = exercise.sets.slice().sort((left, right) => left.order - right.order)
+  return sets.every((set, setIndex) => {
+    const setPosition = setIndex + 1
+    if (set.order !== setPosition) {
+      return false
+    }
+    const setMutation = mutations.find((candidate) =>
+      candidate.kind === 'set.put'
+      && candidate.exercisePosition === mutation.exercisePosition
+      && candidate.exerciseName === mutation.name
+      && candidate.setPosition === setPosition
+    )
+    const expectedSet = buildMemberActionWorkoutSet({
+      order: setPosition,
+      result: setMutation?.kind === 'set.put' ? setMutation.result : null,
+    })
+    return JSON.stringify(set) === JSON.stringify(expectedSet)
+  })
 }
 
 function buildMemberActionWorkoutSet(input: {

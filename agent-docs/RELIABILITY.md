@@ -1478,7 +1478,12 @@ message and route checks.
 Direct editors reuse the existing encrypted system mailbox rather than adding a
 queue or result table. Admission deduplicates the exact action id, body, and
 client timestamp and re-signals an exact duplicate. Runtime applies the closed
-action through its canonical domain owner, then records the typed terminal
+action through its canonical domain owner. Fresh conversation work keeps its
+foreground priority, but its first successful reply checkpoint includes one
+bounded selection restricted to due `member.action.requested` work. That
+provider-free service point ignores unrelated system backlog and a newly
+arrived conversation cannot defer the already-accepted action into another
+provider pass. Runtime then records the typed terminal
 outcome as an existing post-checkpoint effect before releasing the requested
 item. The scoped client reads that action-id-keyed outcome from the same member
 mailbox and reports success only for `applied` or `unchanged`; a rejected or

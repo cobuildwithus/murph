@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -78,6 +78,12 @@ Messages extension as the first action family.
   from targeting a later workout or overwriting a newer set correction without
   adding a second version store. The client timestamp stays stable across an
   exact retry and remains bounded by the credential lifetime at admission.
+- A successful foreground reply checkpoint services at most one due requested
+  member action through the existing system-mailbox owner before another model
+  pass. Completion receipts and unrelated system work retain ordinary ordering.
+- Append replay convergence proves the exact action-owned exercise and set
+  state; an extra set, different result, or non-canonical order is stale state,
+  not an unchanged retry.
 
 ## Verification
 
