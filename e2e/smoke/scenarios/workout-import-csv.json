@@ -1,0 +1,10 @@
+{
+  "id": "workout-import-csv",
+  "command": "vault-cli workout import csv <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi] [--store-raw-only] [--correct-units]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/sample-imports/workouts/strong.csv"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/workout-import-csv",
+  "purpose": "Registers the bounded Strong fixture and workout CSV write command for scenario-integrity coverage; executable batch, Hevy, raw-evidence, correction, and replay proof lives in focused CLI and use-case tests."
+}

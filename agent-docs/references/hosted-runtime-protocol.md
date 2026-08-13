@@ -2053,10 +2053,36 @@ independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,
 not a scheduler queue. The runtime must support dirty-pending and dirty-ack
 callbacks; dirty ack means the dirty revision was handed off into the
-checkpointed local device-sync job store, not that upstream provider sync
-succeeded. Connection-established and disconnect lifecycle commands may still
-use coarse device-sync mailbox wakes because they are explicit lifecycle events,
-not high-cardinality freshness hints.
+local execution cache. Web keeps the dirty row and payload authority until the
+runtime reports terminal job completion, so a lost cache cannot acknowledge
+unfinished provider work. Connection-established and disconnect lifecycle
+commands may still use coarse device-sync mailbox wakes because they are
+explicit lifecycle events, not high-cardinality freshness hints.
+The machine-local job store projects its earliest queued-job continuation
+through the runtime-owned workspace `nextWakeAt` while the runner is warm. The
+hosted provider scheduler runs only for the account mapped by a connection
+mailbox wake; a retained job wake and a generic runtime timer cannot admit
+provider cadence. Only that connection mailbox wake may fetch its exact
+Web-owned dirty row or claim its account's local jobs; a generic runtime timer
+does neither. The connection-specific encrypted system-mailbox item remains
+pending while that account has queued or running work. Before checkpoint
+publication, the runtime queries those actual job rows and replaces the item's
+job hints with every unfinished kind, manifest-shaped payload/window, dedupe
+identity, priority, retry time, and remaining attempt limit, including
+worker-created children. It also carries the provider's advanced cadence, but
+withholds that cadence from Web until an empty-job completion-fence checkpoint
+has made the terminal transition durable. A cold replacement, whose snapshot
+intentionally excludes the device-sync SQLite store, reconstructs the same
+unfinished operation and cadence from that item. Terminal success or failure
+then advances the mailbox item. Web dirty rows use their existing terminal
+acknowledgement boundary instead. Device-sync mailbox ordering and scheduler
+admission are per connection, so a retained retry cannot block or advance a due
+wake for a different connection. The global due-reconcile sweep consumes only
+the Web-owned provider `nextReconcileAt`; local retry timing never enters that
+sweep. Future provider cadence may remain the workspace's projected follow-up
+wake and is included in the system-mailbox checkpoint handoff, but a cadence
+that is already due is suppressed from generic runtime-timer projection and can
+be admitted only by its connection mailbox wake.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

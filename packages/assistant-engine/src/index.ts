@@ -36,6 +36,7 @@ export type {
 } from './assistant/group-room-model.js'
 export * from './assistant/hosted-image-completion.js'
 export type {
+  AssistantAutomationTimingVerificationIssue,
   AssistantGroupParticipantDisplayName,
   AssistantGroupParticipantDisplayNameSource,
   AssistantGeneratedImageCapturePersistenceMetadata,

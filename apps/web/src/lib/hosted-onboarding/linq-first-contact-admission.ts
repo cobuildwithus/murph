@@ -1,3 +1,4 @@
+import OpenAI, { APIError } from "openai";
 import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
@@ -13,7 +14,7 @@ import {
 } from "./logging";
 import { getHostedOnboardingEnvironment } from "./runtime";
 
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const OPENAI_RESPONSES_BASE_URL = "https://api.openai.com/v1";
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 10_000;
 export const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS = 4;
 
@@ -125,6 +126,18 @@ type HostedLinqFirstContactAdmissionModelResult = {
   decision: "allow" | "block";
 };
 
+type HostedLinqFirstContactAdmissionProviderError = {
+  code?: string;
+  message?: string;
+  requestIdPresent: boolean;
+  type?: string;
+};
+
+type HostedLinqFirstContactAdmissionOpenAiRequestState = {
+  errorResponse: Response | null;
+  transportError: unknown;
+};
+
 export function readHostedLinqFirstContactAdmissionMode(): HostedLinqFirstContactAdmissionMode {
   return getHostedOnboardingEnvironment().linqFirstContactAdmissionMode;
 }
@@ -180,53 +193,98 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
     ? AbortSignal.any([input.signal, timeoutSignal])
     : timeoutSignal;
 
+  const requestState: HostedLinqFirstContactAdmissionOpenAiRequestState = {
+    errorResponse: null,
+    transportError: null,
+  };
+  const openAi = new OpenAI({
+    adminAPIKey: null,
+    apiKey,
+    baseURL: OPENAI_RESPONSES_BASE_URL,
+    fetch: createHostedLinqFirstContactAdmissionOpenAiFetch(fetch, requestState),
+    logLevel: "off",
+    maxRetries: 0,
+    organization: null,
+    project: null,
+    timeout: HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS,
+    webhookSecret: null,
+  });
+
   let response: Response;
   try {
-    response = await fetch(OPENAI_RESPONSES_URL, {
-      body: JSON.stringify(buildHostedLinqFirstContactAdmissionOpenAiBody({
+    response = await openAi.responses.create(
+      buildHostedLinqFirstContactAdmissionOpenAiBody({
         model: environment.linqFirstContactAdmissionModel,
         request: input.request,
-      })),
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
+      }),
+      {
+        maxRetries: 0,
+        signal,
+        timeout: HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS,
       },
-      method: "POST",
-      signal,
-    });
+    ).asResponse();
   } catch (error) {
-    throw buildHostedLinqFirstContactAdmissionUnavailableError({
-      cause: error,
-      failureCategory: "transport",
-      retryable: true,
-    });
-  }
+    const errorResponse = requestState.errorResponse;
+    if (errorResponse) {
+      const providerError = await readHostedLinqFirstContactAdmissionProviderError(errorResponse);
+      if (isHostedLinqFirstContactAdmissionQuotaExhausted({
+        providerError,
+        status: errorResponse.status,
+      })) {
+        const decision = buildHostedLinqFirstContactAdmissionAllow({
+          confidence: 1,
+          source: "deterministic",
+        });
+        logHostedLinqFirstContactAdmissionDecision(input.request, {
+          ...decision,
+          model: environment.linqFirstContactAdmissionModel,
+        });
+        return decision;
+      }
 
-  if (!response.ok) {
-    const providerError = await readHostedLinqFirstContactAdmissionProviderError(response);
-    if (isHostedLinqFirstContactAdmissionQuotaExhausted({
-      providerError,
-      status: response.status,
-    })) {
-      const decision = buildHostedLinqFirstContactAdmissionAllow({
-        confidence: 1,
-        source: "deterministic",
+      throw buildHostedLinqFirstContactAdmissionUnavailableError({
+        cause: providerError.message
+          ? new Error(`OpenAI Responses API error: ${providerError.message}`)
+          : undefined,
+        failureCategory: "http",
+        httpStatus: errorResponse.status,
+        providerError,
+        retryable: errorResponse.status === 429 || errorResponse.status >= 500,
       });
-      logHostedLinqFirstContactAdmissionDecision(input.request, {
-        ...decision,
-        model: environment.linqFirstContactAdmissionModel,
+    }
+
+    if (error instanceof APIError && typeof error.status === "number") {
+      const providerError = readHostedLinqFirstContactAdmissionApiError(error);
+      if (isHostedLinqFirstContactAdmissionQuotaExhausted({
+        providerError,
+        status: error.status,
+      })) {
+        const decision = buildHostedLinqFirstContactAdmissionAllow({
+          confidence: 1,
+          source: "deterministic",
+        });
+        logHostedLinqFirstContactAdmissionDecision(input.request, {
+          ...decision,
+          model: environment.linqFirstContactAdmissionModel,
+        });
+        return decision;
+      }
+
+      throw buildHostedLinqFirstContactAdmissionUnavailableError({
+        cause: providerError.message
+          ? new Error(`OpenAI Responses API error: ${providerError.message}`)
+          : undefined,
+        failureCategory: "http",
+        httpStatus: error.status,
+        providerError,
+        retryable: error.status === 429 || error.status >= 500,
       });
-      return decision;
     }
 
     throw buildHostedLinqFirstContactAdmissionUnavailableError({
-      cause: providerError.message
-        ? new Error(`OpenAI Responses API error: ${providerError.message}`)
-        : undefined,
-      failureCategory: "http",
-      httpStatus: response.status,
-      providerError,
-      retryable: response.status === 429 || response.status >= 500,
+      cause: requestState.transportError ?? error,
+      failureCategory: "transport",
+      retryable: true,
     });
   }
 
@@ -644,10 +702,10 @@ function parseHostedLinqFirstContactAdmissionDecisionRecord(
 }
 
 // Custom-boundary parse of the OpenAI Responses API payload (canonical SDK shape:
-// `Response` from `openai/resources/responses/responses`). We use raw fetch
-// instead of the openai SDK client to keep auth/timeout/retry on our owners; the
-// API output is a deep discriminated union of which we consume only a narrow set
-// of fields. The defensive walks in this file are the executable shape contract:
+// `Response` from `openai/resources/responses/responses`). The SDK owns request
+// construction and transport, while these defensive walks remain the executable
+// response contract because provider payloads are untrusted: we consume only a
+// narrow set of fields from the deep discriminated union.
 // `status` must equal `"completed"` before we trust the structured output;
 // `incomplete_details.reason === "content_filter"` is a terminal block;
 // `output[].content[].type === "refusal"` (or any `output[].content[].refusal`
@@ -787,12 +845,7 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 async function readHostedLinqFirstContactAdmissionProviderError(
   response: Response,
-): Promise<{
-  code?: string;
-  message?: string;
-  requestIdPresent: boolean;
-  type?: string;
-}> {
+): Promise<HostedLinqFirstContactAdmissionProviderError> {
   const requestIdPresent = Boolean(
     response.headers.get("x-request-id")
     ?? response.headers.get("openai-request-id"),
@@ -822,6 +875,54 @@ async function readHostedLinqFirstContactAdmissionProviderError(
       ? { type: readBoundedProviderErrorString(errorRecord?.type) }
       : {}),
   };
+}
+
+function readHostedLinqFirstContactAdmissionApiError(
+  error: APIError,
+): HostedLinqFirstContactAdmissionProviderError {
+  const errorRecord = readRecord(error.error);
+  return {
+    ...(readBoundedProviderErrorString(errorRecord?.code)
+      ? { code: readBoundedProviderErrorString(errorRecord?.code) }
+      : {}),
+    ...(readBoundedProviderErrorString(errorRecord?.message)
+      ? { message: readBoundedProviderErrorString(errorRecord?.message) }
+      : {}),
+    requestIdPresent: Boolean(
+      error.requestID
+      ?? error.headers?.get("openai-request-id"),
+    ),
+    ...(readBoundedProviderErrorString(errorRecord?.type)
+      ? { type: readBoundedProviderErrorString(errorRecord?.type) }
+      : {}),
+  };
+}
+
+function createHostedLinqFirstContactAdmissionOpenAiFetch(
+  fetchImpl: typeof fetch,
+  state: HostedLinqFirstContactAdmissionOpenAiRequestState,
+): typeof fetch {
+  const sdkFetch = async (
+    request: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    try {
+      const response = await fetchImpl(request, init);
+      if (!response.ok) {
+        try {
+          state.errorResponse = response.clone();
+        } catch {
+          state.errorResponse = null;
+        }
+      }
+      return response;
+    } catch (error) {
+      state.transportError = error;
+      throw error;
+    }
+  };
+
+  return Object.assign(sdkFetch, { Response });
 }
 
 function readBoundedProviderErrorString(value: unknown): string | undefined {
@@ -862,12 +963,7 @@ function buildHostedLinqFirstContactAdmissionUnavailableError(input: {
   cause?: unknown;
   failureCategory: "http" | "invalid_json" | "invalid_output" | "missing_key" | "transport";
   httpStatus?: number;
-  providerError?: {
-    code?: string;
-    message?: string;
-    requestIdPresent: boolean;
-    type?: string;
-  };
+  providerError?: HostedLinqFirstContactAdmissionProviderError;
   retryable: boolean;
 }) {
   return hostedOnboardingError({
