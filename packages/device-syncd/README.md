@@ -81,8 +81,8 @@ Current providers:
   wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
   hour; daily aggregates remain day-atomic. Workout streams use the same bounded
   three-page index and carry only at-most-32 completed workout identities between
-  serial stream reads. Each reduced unit is imported before the bounded completed-resource
-  names and window coordinate advance. Pagination remains in memory, and no provider
+  serial stream reads. Each reduced unit is imported before the scalar
+  resource/window cursor advances. Pagination remains in memory, and no provider
   row, vendor page cursor, waveform sample, or workout point enters job state. This
   adds no control-database collection path, pooled transaction, or vault persistence.
 - Successful Junction resource/webhook jobs preserve the full-sync completion

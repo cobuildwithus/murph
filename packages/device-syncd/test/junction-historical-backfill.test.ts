@@ -83,10 +83,7 @@ function assertFullTimeseriesContinuation(result: {
   assert.equal(continuation?.kind, "backfill");
   assert.equal(continuation?.availableAt, "2026-04-03T00:00:00.000Z");
   assert.equal(continuation?.payload?.timeseriesCursor, "2026-04-01T00:00:00.000Z");
-  assert.equal(
-    continuation?.payload?.timeseriesResourceCursor,
-    JSON.stringify({ v: 1, a: "blood_oxygen", i: [] }),
-  );
+  assert.equal(continuation?.payload?.timeseriesResourceCursor, "blood_oxygen");
 }
 
 function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
