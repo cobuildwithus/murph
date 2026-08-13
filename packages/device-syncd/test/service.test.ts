@@ -234,14 +234,9 @@ function assertJunctionWorkoutStreamRetryCoordinate(
   assert.equal(job.payload.windowEnd, JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW.windowEnd);
   if (jobKind === "backfill") {
     assert.equal(job.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_ONE);
-    assert.equal(job.payload.timeseriesPhase, "dense");
     assert.equal(job.payload.timeseriesCursor, JUNCTION_WORKOUT_STREAM_DAY_TWO);
   } else {
     assert.equal(job.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_TWO);
-    assert.equal(
-      job.payload.timeseriesPhase,
-      jobKind === "reconcile" ? "dense" : undefined,
-    );
     assert.equal(job.payload.timeseriesCursor, undefined);
   }
   if (resourceCursorExpected) {
@@ -1454,7 +1449,6 @@ test.each(["resource"] as const)(
         assert.equal(storedActiveJob.maxAttempts, 5);
         if (jobKind === "backfill") {
           assert.equal(storedActiveJob.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_ONE);
-          assert.equal(storedActiveJob.payload.timeseriesPhase, "dense");
           assert.equal(storedActiveJob.payload.timeseriesCursor, JUNCTION_WORKOUT_STREAM_DAY_TWO);
         } else {
           assert.equal(storedActiveJob.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_TWO);
@@ -6952,7 +6946,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
       timeseriesCursor: ownerWindowStart,
-      timeseriesResourceCursor: JSON.stringify({ v: 1, a: "stress_level", i: [] }),
+      timeseriesResourceCursor: "stress_level",
     });
 
     yieldRequested = false;
