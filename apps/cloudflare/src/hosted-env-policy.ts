@@ -163,6 +163,7 @@ const DISALLOWED_RUNNER_SECRET_PREFIXES = [
   "NPM_CONFIG_",
   // Retired provider configuration remains permanently non-forwardable so a
   // stale deployed allowlist cannot expose old credentials to the runner.
+  "AGENTMAIL_",
   "WHATSAPP_",
   "npm_config_",
   "WRANGLER_",

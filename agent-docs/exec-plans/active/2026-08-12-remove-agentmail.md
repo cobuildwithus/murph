@@ -126,6 +126,19 @@ Updated: 2026-08-12
   routes and redirects email intent before soliciting any route data; hosted
   email guidance remains unchanged. Focused assembled-prompt tests cover both
   sides of that boundary.
+- Final ReviewGPT round 3 found two additional upgrade-safety gaps. First,
+  removing the provider name also removed its permanent hosted secret-prefix
+  deny rules, allowing a stale operator allowlist to reintroduce a retired
+  credential. The `AGENTMAIL_` prefix is restored only at both negative trust
+  boundaries and is covered through stored-payload, runtime-user-env, and final
+  Codex child-env tests; this is a tombstone, not runtime compatibility.
+- Second, the earlier local migration covered canonical scheduled automations
+  but not the separately persisted assistant auto-reply state. A deletion-only
+  reconciliation now removes the literal legacy `email` auto-reply entry during
+  setup and before any direct local automation scan, including upgrades that
+  skip setup. It preserves Telegram, Linq, custom channels, and hosted email;
+  real-file setup, idempotency, direct pending-input/no-provider-turn, mocked
+  scan-order, and hosted non-regression tests cover the correction.
 
 ## Change-shape retrospective
 
@@ -146,11 +159,12 @@ Updated: 2026-08-12
   email delivery, verified and signed hosted email routes, Resend, connected
   apps, and transactional or newsletter email. Those have separate owners and
   remain required by supported hosted behavior.
-- Concepts added: one bounded deletion-only inbox schema transition plus local
-  automation retirement at the existing state owners. No new owner, service,
-  dependency, provider compatibility layer, or replacement delivery path was
-  added; local validation rejects email and generic hosted delivery fails
-  closed without an injected transport.
+- Concepts added: bounded deletion-only transitions for inbox schema, canonical
+  local automations, and legacy local auto-reply state, plus a permanent
+  negative secret-prefix tombstone at existing trust boundaries. No new owner,
+  service, dependency, provider compatibility layer, or replacement delivery
+  path was added; local validation rejects email and generic hosted delivery
+  fails closed without an injected transport.
 - Required continuation proof: zero active AgentMail code/config/current-doc
   references, local rejection coverage, retained Telegram/Linq and hosted email
   suites, generated-schema and deploy-policy checks, docs/legal/changelog

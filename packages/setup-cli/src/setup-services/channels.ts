@@ -117,8 +117,12 @@ export function normalizeSetupChannels(
 function isSetupManagedAutoReplyChannel(
   channel: string,
   platform: NodeJS.Platform,
-): channel is SetupChannel {
-  return isSetupChannel(channel) && isSetupChannelSupportedOnPlatform(channel, platform)
+): boolean {
+  return (
+    channel === 'email' ||
+    (isSetupChannel(channel) &&
+      isSetupChannelSupportedOnPlatform(channel, platform))
+  )
 }
 
 function isTelegramSetupConnector(connector: SetupListedConnector): boolean {

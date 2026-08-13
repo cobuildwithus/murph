@@ -202,6 +202,20 @@ export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
   }
 }
 
+export async function removeRetiredLocalEmailAutoReplyChannel(input: {
+  vault: string
+}): Promise<{
+  changed: boolean
+  state: AssistantAutomationState
+}> {
+  return reconcileManagedAssistantAutoReplyChannelsLocal({
+    desiredChannels: [],
+    isManagedChannel: (channel) => channel === 'email',
+    latestInputCursor: null,
+    vault: input.vault,
+  })
+}
+
 export async function enableAssistantAutoReplyChannelLocal(input: {
   channel: string
   inputSource?: AssistantInputSource

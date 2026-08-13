@@ -1071,6 +1071,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         OPENAI_API_KEY: "openai-secret",
       },
       userEnv: {
+        AGENTMAIL_API_KEY: "retired-provider-secret",
         CF_ACCOUNT_ID: "cf-account",
         CURL_CA_BUNDLE: "/tmp/user-curl-ca.pem",
         LD_PRELOAD: "/tmp/user-injected.so",

@@ -368,6 +368,7 @@ test('configureSetupChannels reuses and enables the Telegram connector while pre
     JSON.stringify({
       version: 1,
       autoReply: [
+        { channel: 'email', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
         { channel: 'linq', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
       ],
       updatedAt: TEST_TIMESTAMP,
@@ -1487,6 +1488,22 @@ test('createSetupServices reconciles the prior local email state through real se
       }),
       'utf8',
     )
+    const automationStatePath = resolveAssistantStatePaths(vaultPath).automationStatePath
+    await mkdir(path.dirname(automationStatePath), { recursive: true })
+    await writeFile(
+      automationStatePath,
+      JSON.stringify({
+        version: 1,
+        autoReply: [
+          { channel: 'email', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
+          { channel: 'telegram', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
+          { channel: 'linq', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
+          { channel: 'custom', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
+        ],
+        updatedAt: TEST_TIMESTAMP,
+      }),
+      'utf8',
+    )
     await upsertAutomation({
       continuityPolicy: 'fresh',
       instructions: 'Send the reminder.',
@@ -1591,14 +1608,13 @@ test('createSetupServices reconciles the prior local email state through real se
 
     const first = await services.setupHost({
       assistant,
-      channels: [],
       strict: true,
       toolchainRoot,
       vault: './vault',
     })
     assert.match(
       first.notes.join('\n'),
-      /Removed 2 retired local email inbox sources and paused 1 local email automation/u,
+      /Removed 2 retired local email inbox sources and 1 retired local email auto-reply setting, and paused 1 local email automation/u,
     )
     assert.deepEqual(first.bootstrap?.doctor.connectors, [
       {
@@ -1613,18 +1629,25 @@ test('createSetupServices reconciles the prior local email state through real se
       (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
       'paused',
     )
+    const afterFirstAutomationState = await readFile(automationStatePath, 'utf8')
+    assert.deepEqual(
+      (JSON.parse(afterFirstAutomationState) as {
+        autoReply: Array<{ channel: string }>
+      }).autoReply.map((entry) => entry.channel).sort(),
+      ['custom', 'linq', 'telegram'],
+    )
 
     const afterFirstSetup = await readFile(paths.inboxConfigPath, 'utf8')
     assert.equal(JSON.parse(afterFirstSetup).schemaVersion, 2)
     const second = await services.setupHost({
       assistant,
-      channels: [],
       strict: true,
       toolchainRoot,
       vault: './vault',
     })
     assert.equal(second.notes.some((note) => note.includes('retired local email')), false)
     assert.equal(await readFile(paths.inboxConfigPath, 'utf8'), afterFirstSetup)
+    assert.equal(await readFile(automationStatePath, 'utf8'), afterFirstAutomationState)
     assert.equal(
       (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
       'paused',
