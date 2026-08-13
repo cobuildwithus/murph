@@ -1,6 +1,6 @@
 # Model-authored Telegram rich content
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-13
 
@@ -34,7 +34,7 @@ Updated: 2026-08-13
 3. [x] Preserve semantic-card priority and route the new card through the existing response-card effect.
 4. [x] Add contract, tool, planning, rendering, delivery, prompt, and real-model regression proof.
 5. [x] Update durable product, architecture, security, reliability, and verification guidance.
-6. [ ] Run focused checks, inspect the full diff, push the candidate, complete required reviews and CI, then open the PR.
+6. [x] Run focused checks, inspect the full diff, push the candidate, complete required reviews and CI, then open the PR.
 
 ## Decisions
 
@@ -74,3 +74,7 @@ Updated: 2026-08-13
 - A live Telegram canary is not available in the current local environment.
   Mocked provider-boundary proof covers exact Rich HTML, definitive rejection,
   one fallback, and ambiguous-acceptance duplicate suppression.
+- Final ReviewGPT round 5 passed with no qualifying findings at
+  `3cb0dd2bc100f05f064fa29574da93d12828bc46`. Exact-head CI passed before the
+  final plan-only archive commit.
+Completed: 2026-08-13
