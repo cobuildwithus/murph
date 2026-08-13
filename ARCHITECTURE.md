@@ -980,10 +980,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   Final submission and credential capture remain trusted Web operations. The
   model supplies only restricted control selectors identified from the live page;
-  trusted code locates the deterministic ownership marker first and derives the
-  only application/form container from finite provider metadata before it proves
-  submit, credential, delete, and confirmation controls belong to that object.
-  It reads the client id and secret inside the browser boundary,
+  trusted code fills the server-derived ownership marker and submits within the
+  one provider-declared creation form, then reloads the trusted provider page and
+  derives the one marked application container before it proves credential,
+  delete, and confirmation controls belong to that object. The marker is not
+  exposed in the browser contract, and generic model-driven fills reject its
+  format. Trusted capture reads the client id and secret inside the browser boundary,
   seals them directly into `DeviceProviderApplication`, navigates away, scrubs
   transient values, and returns no credential-bearing result. Owned deletion
   uses the same marker-derived boundary; ambiguous absence retains the local

@@ -911,8 +911,16 @@ describe("hosted execution coverage gaps", () => {
         },
       }],
     })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      steps: [{
+        action: "fill",
+        target: { kind: "selector", value: "input[name=name]" },
+        value: "Murph Private Sync 0123456789ab",
+      }],
+    })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
+      applicationNameSelector: 'input[name="name"]',
       clientIdSelector: 'input[value^="secret-prefix"]',
       clientSecretSelector: 'input[name="client_secret"]',
       provider: "strava",

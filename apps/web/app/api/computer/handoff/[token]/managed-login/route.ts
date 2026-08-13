@@ -4,7 +4,7 @@ import {
   withHostedComputerToolFailureRuntimeLog,
 } from "@/src/lib/computer-use/runtime-log";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
-import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 
 export async function GET(
@@ -12,7 +12,7 @@ export async function GET(
   context: { params: Promise<{ token: string }> },
 ) {
   const token = await resolveDecodedRouteParam(context.params, "token");
-  const session = await requireHostedAppSessionFromRequest(request);
+  const session = await requireActiveHostedAppSessionFromRequest(request);
   const handoffUrl = new URL(
     `/computer/handoff/${encodeURIComponent(token)}`,
     request.url,

@@ -54,8 +54,6 @@ export interface MemberOwnedProviderSetupBrowserContract<
   application: {
     callbackUrl: string;
     category: string | null;
-    marker: string;
-    name: string;
     readOnlyScopes: readonly string[];
     website: string;
   };
@@ -79,9 +77,9 @@ const STRAVA_REGISTRATION = Object.freeze({
     applicationWebsite: "https://withmurph.ai",
     developerPortalUrl: "https://www.strava.com/settings/api",
     guidance: Object.freeze([
-      "Use the provider developer page to create one private application with the exact supplied name, website, category, callback URL, and read-only scopes.",
+      "Use the provider developer page to prepare one private application with the supplied website, category, callback URL, and read-only scopes. Leave the application name for the trusted capture boundary.",
       "Navigate and identify controls from the live page. Never rely on checked-in provider selectors or a provider-specific browser program.",
-      "Fill the final form with computer tools, but do not submit it with computer_act. Call provider_setup capture so final submission and credential sealing happen inside the trusted browser boundary.",
+      "Fill the reversible metadata fields with computer tools, but do not fill the application name or submit with computer_act. Call provider_setup capture so the trusted browser boundary names and submits the application before credential sealing.",
       "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption, not to create the application or copy credentials.",
     ]),
     safeLandingUrl: "https://www.strava.com/settings/api",
@@ -169,10 +167,6 @@ export function buildMemberOwnedProviderSetupBrowserContract(input: {
   if (!descriptor?.callbackPath || descriptor.defaultScopes.length === 0) {
     throw new TypeError("Provider setup OAuth metadata is incomplete.");
   }
-  const marker = buildMemberOwnedProviderApplicationMarker({
-    memberId: input.memberId,
-    provider: input.provider,
-  });
   return {
     application: {
       callbackUrl: new URL(
@@ -180,8 +174,6 @@ export function buildMemberOwnedProviderSetupBrowserContract(input: {
         `${publicBaseUrl.replace(/\/+$/u, "")}/`,
       ).toString(),
       category: registration.browser.applicationCategory,
-      marker,
-      name: marker,
       readOnlyScopes: descriptor.defaultScopes,
       website: registration.browser.applicationWebsite,
     },

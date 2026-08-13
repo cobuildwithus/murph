@@ -51,6 +51,41 @@ export const POST = withJsonError(async (
   });
 });
 
+export const PUT = withJsonError(async (
+  request: Request,
+  context: { params: Promise<{ provider: string }> },
+) => {
+  assertHostedOnboardingMutationOrigin(request);
+  const registration = await requireSupportedRegistration(context.params);
+  const provider = registration.coordinates.provider;
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const body = await readJsonObject(request, { limitBytes: 1_024 });
+  if (
+    Object.keys(body).length !== 1
+    || typeof body.setupId !== "string"
+    || body.setupId.length === 0
+  ) {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_HANDOFF_INVALID",
+      httpStatus: 400,
+      message: "Private provider setup handoff is invalid.",
+      retryable: false,
+    });
+  }
+  const handoffUrl = await createMemberOwnedProviderSetupService(provider)
+    .issueHandoff(auth.member.id, body.setupId);
+  const url = new URL(handoffUrl);
+  if (url.origin !== new URL(request.url).origin || !url.pathname.startsWith("/computer/handoff/")) {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_HANDOFF_INVALID",
+      httpStatus: 502,
+      message: "Private provider setup handoff is unavailable.",
+      retryable: true,
+    });
+  }
+  return jsonOk({ handoffUrl: `${url.pathname}${url.search}` });
+});
+
 export const DELETE = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },

@@ -162,13 +162,14 @@ credential-redacted observation. Do not use `computer_os_control` or
 
 Never submit the developer-app form with `computer_act`. Once the exact form is
 ready, call `provider_setup` with `action: "capture"` and runtime selectors for
-the final submit, client ID, and client secret fields. Trusted provider metadata
-locates the deterministic ownership marker and derives the exclusive application
-container; model-selected roots never authorize submission or credential reads.
-That trusted operation submits, reads the values inside the browser boundary, seals
-them directly, navigates away, and returns no credential value. Never ask for,
-read, copy, quote, log, screenshot, or preserve client IDs, client secrets, OAuth
-tokens, or other credentials.
+the application name, final submit, client ID, and client secret fields. Do not
+fill the application name yourself. The trusted operation derives and fills the
+ownership marker, submits the exact provider-declared creation form, reloads the
+trusted provider page, and derives the one marked application container before it
+reads and seals credentials. Model-selected selectors never grant ownership or
+credential-read authority. The operation navigates away and returns no credential
+value. Never ask for, read, copy, quote, log, screenshot, or preserve client IDs,
+client secrets, OAuth tokens, or other credentials.
 
 For sign-in, MFA, CAPTCHA, or a provider prerequisite, pause the same run with a
 secure handoff. The member completes only the interruption and returns to

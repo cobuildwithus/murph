@@ -254,6 +254,8 @@ class FakeProviderComputer implements ProviderSetupComputer {
     runId: input.runId,
     status: "completed",
   }));
+  readonly hasOwnedRunHandoff = vi.fn(async () => false);
+  readonly issueOwnedRunHandoff = vi.fn(async () => "/computer/handoff/synthetic");
   readonly actOwnedRun = vi.fn(async (
     _input: Parameters<ProviderSetupComputer["actOwnedRun"]>[0],
   ) => ({
@@ -332,7 +334,7 @@ describe("member-owned provider setup service", () => {
     expect(first.contract.application.callbackUrl).toBe(
       "https://web.example.test/api/device-sync/oauth/strava/callback",
     );
-    expect(first.contract.application.marker).toMatch(/^Murph Private Sync [a-f0-9]{12}$/u);
+    expect(first.contract.application).not.toHaveProperty("marker");
     expect(second.run.runId).toBe(first.run.runId);
     expect(computer.acquireOwnedRun).toHaveBeenNthCalledWith(1, expect.objectContaining({
       expectedRunId: null,
@@ -376,6 +378,36 @@ describe("member-owned provider setup service", () => {
       setupId: SETUP_ID,
       setupVersion: 2,
     });
+  });
+
+  it("projects and reissues only the exact setup-owned handoff", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup" });
+    const computer = new FakeProviderComputer();
+    computer.hasOwnedRunHandoff.mockResolvedValue(true);
+    const service = createService({ computer, store });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      action: "continue_handoff",
+      setupId: SETUP_ID,
+      status: "browser_setup",
+    });
+    await expect(service.issueHandoff(MEMBER_ID, SETUP_ID)).resolves.toBe(
+      "/computer/handoff/synthetic",
+    );
+    expect(computer.hasOwnedRunHandoff).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      ownerKey: SETUP_ID,
+      ownerPurpose: "member_owned_provider_setup",
+      runId: RUN_ID,
+    });
+    expect(computer.issueOwnedRunHandoff).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      ownerKey: SETUP_ID,
+      ownerPurpose: "member_owned_provider_setup",
+      runId: RUN_ID,
+    });
+
   });
 
   it("hands credentials directly to the sealed application owner without returning them", async () => {
@@ -505,7 +537,7 @@ describe("member-owned provider setup service", () => {
     });
 
     const trustedCode = computer.actOwnedRun.mock.calls[0]?.[0].code ?? "";
-    expect(trustedCode).toContain(prepared.contract.application.marker);
+    expect(trustedCode).toMatch(/Murph Private Sync [a-f0-9]{12}/u);
     expect(trustedCode).toContain("provider application ownership marker mismatch");
     expect(trustedCode).toContain("button.delete-application");
     expect(deleteApplication).toHaveBeenCalledWith(expect.objectContaining({
@@ -602,6 +634,7 @@ function createService(input: {
 function captureRequest() {
   return {
     action: "capture" as const,
+    applicationNameSelector: "[data-application-name]",
     clientIdSelector: "[data-client-id]",
     clientSecretSelector: "[data-client-secret]",
     provider: "strava",

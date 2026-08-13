@@ -108,7 +108,6 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 type SettingsSearchParams = {
-  accountDeletion?: string | string[] | undefined;
   addEmail?: string | string[] | undefined;
   addUsage?: string | string[] | undefined;
   familyInviteReturn?: string | string[] | undefined;
@@ -129,8 +128,6 @@ export default async function SettingsPage({
   searchParams: Promise<SettingsSearchParams>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const accountDeletionRetry =
-    readFirstSearchParamValue(resolvedSearchParams.accountDeletion) === "retry";
   const familyInviteReturnPath = parseHostedFamilyInviteReturnPath(
     readOnlySearchParamValue(
       resolvedSearchParams[HOSTED_FAMILY_INVITE_RETURN_PARAM],
@@ -713,7 +710,6 @@ export default async function SettingsPage({
               initialStatus={consentStatus}
             />
             <HostedDataPrivacySettings
-              accountDeletionRetry={accountDeletionRetry}
               authenticated={authenticated}
               authorizationEnabled
             />
@@ -729,7 +725,6 @@ export default async function SettingsPage({
             initialStatus={consentStatus}
           />
           <HostedDataPrivacySettings
-            accountDeletionRetry={accountDeletionRetry}
             authenticated={authenticated}
             authorizationEnabled={false}
           />

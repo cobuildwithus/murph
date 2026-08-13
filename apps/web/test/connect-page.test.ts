@@ -165,6 +165,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -172,7 +173,7 @@ afterEach(() => {
 });
 
 function createStravaSetupProjection(input: {
-  action?: "authorize" | "continue_oauth" | "disconnect_first" | "none";
+  action?: "authorize" | "continue_handoff" | "continue_oauth" | "disconnect_first" | "none";
   connected?: boolean;
   status?:
     | "authorized"
@@ -217,6 +218,7 @@ function createStravaSetupProjection(input: {
       presentation: {
         actionLabels: {
           authorize: "Continue",
+          continue_handoff: "Continue setup",
           continue_oauth: "Continue with Strava",
           disconnect_first: "Disconnect Strava first",
         },
@@ -6317,6 +6319,163 @@ test("ConnectSourcesGrid authorizes provider setup without redirecting into brow
   );
   assert.equal((fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.method, "POST");
   assert.equal(rendered.assign.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid discovers and reissues an exact setup handoff on the same open page", async () => {
+  vi.useFakeTimers();
+  const awaiting = createStravaSetupProjection({
+    action: "none",
+    status: "browser_setup",
+  }).strava;
+  const handoffReady = createStravaSetupProjection({
+    action: "continue_handoff",
+    status: "browser_setup",
+  }).strava;
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    if (init?.method === "PUT") {
+      return Response.json({
+        handoffUrl: "/computer/handoff/synthetic-capability",
+      });
+    }
+    return Response.json({
+      presentation: handoffReady.presentation,
+      provider: "strava",
+      setup: handoffReady.setup,
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [{
+        connectTarget: "strava",
+        description: "Rides, runs, workouts, route context, power, and training load.",
+        id: "strava",
+        logo: {
+          className: "h-auto max-h-9 w-auto max-w-[8rem] object-contain",
+          height: 20,
+          src: "/brand-logos/connect/strava.svg",
+          width: 96,
+        },
+        memberOwnedSetup: awaiting.setup,
+        memberOwnedSetupPresentation: awaiting.presentation,
+        memberOwnedSetupProvider: "strava" as const,
+        name: "Strava",
+      }],
+    }),
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+  const continueButton = rendered.container.querySelector(
+    'button[aria-label="Continue setup for Strava"]',
+  );
+  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    continueButton.click();
+  });
+
+  assert.equal(fetch.mock.calls.length, 2);
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/provider-setups/strava");
+  assert.equal((fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.method, "GET");
+  assert.equal((fetch.mock.calls[1]?.[1] as RequestInit | undefined)?.method, "PUT");
+  assert.deepEqual(JSON.parse(String(
+    (fetch.mock.calls[1]?.[1] as RequestInit | undefined)?.body,
+  )), { setupId: "dps_synthetic" });
+  assert.equal(
+    rendered.assign.mock.calls[0]?.[0],
+    "/computer/handoff/synthetic-capability",
+  );
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid discovers OAuth readiness on the same open page", async () => {
+  vi.useFakeTimers();
+  const authorized = createStravaSetupProjection({
+    action: "none",
+    status: "authorized",
+  }).strava;
+  const oauthReady = createStravaSetupProjection({
+    action: "continue_oauth",
+    status: "oauth_ready",
+  }).strava;
+  const fetch = vi.fn(async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    if (String(input).endsWith("/oauth") && init?.method === "POST") {
+      return Response.json({
+        authorizationUrl: "https://provider.example.test/oauth/authorize",
+        presentation: oauthReady.presentation,
+        provider: "strava",
+        setup: {
+          ...oauthReady.setup,
+          status: "oauth_in_progress",
+        },
+      });
+    }
+    return Response.json({
+      presentation: oauthReady.presentation,
+      provider: "strava",
+      setup: oauthReady.setup,
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [{
+        connectTarget: "strava",
+        description: "Rides, runs, workouts, route context, power, and training load.",
+        id: "strava",
+        logo: {
+          className: "h-auto max-h-9 w-auto max-w-[8rem] object-contain",
+          height: 20,
+          src: "/brand-logos/connect/strava.svg",
+          width: 96,
+        },
+        memberOwnedSetup: authorized.setup,
+        memberOwnedSetupPresentation: authorized.presentation,
+        memberOwnedSetupProvider: "strava" as const,
+        name: "Strava",
+      }],
+    }),
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+  const continueButton = rendered.container.querySelector(
+    'button[aria-label="Continue with Strava for Strava"]',
+  );
+  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    continueButton.click();
+  });
+
+  assert.equal(fetch.mock.calls.length, 2);
+  assert.equal(
+    fetch.mock.calls[1]?.[0],
+    "/api/settings/device-sync/provider-setups/strava/oauth",
+  );
+  assert.equal(
+    rendered.assign.mock.calls[0]?.[0],
+    "https://provider.example.test/oauth/authorize",
+  );
 
   await rendered.cleanup();
 });

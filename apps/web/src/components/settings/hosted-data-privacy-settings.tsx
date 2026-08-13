@@ -66,7 +66,6 @@ const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
 export function HostedDataPrivacySettings(props: {
-  accountDeletionRetry?: boolean;
   authenticated: boolean;
   authorizationEnabled?: boolean;
 }) {
@@ -76,14 +75,12 @@ export function HostedDataPrivacySettings(props: {
 
   return (
     <HostedDataPrivacySettingsAuthorized
-      accountDeletionRetry={props.accountDeletionRetry === true}
       authenticated={props.authenticated}
     />
   );
 }
 
 function HostedDataPrivacySettingsAuthorized(props: {
-  accountDeletionRetry: boolean;
   authenticated: boolean;
 }) {
   const { authorize } = useSensitiveActionAuthorization();
@@ -206,11 +203,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
       setDialogOpen(false);
       setConfirmationPhrase("");
     } catch (requestError) {
-      const providerHandoffUrl = readAccountDeletionProviderHandoffUrl(requestError);
-      if (providerHandoffUrl) {
-        window.location.assign(providerHandoffUrl);
-        return;
-      }
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
         reloadCurrentHostedAuthDocument();
@@ -291,15 +283,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
 
   return (
     <div className="flex flex-col gap-4">
-      {props.accountDeletionRetry ? (
-        <Alert aria-live="polite">
-          <AlertTitle>Provider sign-in complete</AlertTitle>
-          <AlertDescription>
-            Retry Delete account to finish removing your private provider application and Murph account.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
       {exportSuccess ? (
         <HostedDataExportSuccess message={exportSuccess} />
       ) : null}
@@ -410,27 +393,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
       </Dialog>
     </div>
   );
-}
-
-function readAccountDeletionProviderHandoffUrl(error: unknown): string | null {
-  if (
-    !(error instanceof HostedOnboardingApiError)
-    || error.code !== "ACCOUNT_DELETION_PROVIDER_HANDOFF_REQUIRED"
-  ) {
-    return null;
-  }
-  const handoffUrl = error.details?.handoffUrl;
-  if (typeof handoffUrl !== "string") {
-    return null;
-  }
-  try {
-    const url = new URL(handoffUrl, window.location.origin);
-    return url.origin === window.location.origin && url.pathname.startsWith("/computer/handoff/")
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 export function HostedDataExportSuccess({ message }: { message: string }) {

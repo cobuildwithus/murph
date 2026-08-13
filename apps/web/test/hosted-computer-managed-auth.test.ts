@@ -52,6 +52,70 @@ type MockComputerUseStore = ComputerUseStore & {
 };
 
 describe("Kernel managed-login handoffs", () => {
+  it("reissues only an exact setup-owned awaiting handoff", async () => {
+    const run = createRun({
+      checkpointContext: {
+        conversationId: "conversation_synthetic",
+        recipientKey: "recipient_synthetic",
+      },
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+    const handoff = createHandoff();
+    const store = createStore({ handoff, run });
+    const service = new ComputerUseService({
+      env: { HOSTED_WEB_BASE_URL: "https://join.example.test" },
+      kernel: {} as ComputerKernelClient,
+      now: () => NOW,
+      store,
+    });
+    const owner = {
+      memberId: run.memberId,
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup" as const,
+      runId: run.id,
+    };
+
+    await expect(service.hasOwnedRunHandoff(owner)).resolves.toBe(true);
+    await expect(service.issueOwnedRunHandoff(owner)).resolves.toMatch(
+      /^https:\/\/join\.example\.test\/computer\/handoff\//u,
+    );
+    expect(store.rotateManagedLoginHandoffCapability).toHaveBeenCalledTimes(1);
+    expect(store.requireOwnedRun).toHaveBeenCalledWith({
+      memberId: run.memberId,
+      runId: run.id,
+    });
+    await expect(service.issueOwnedRunHandoff({
+      ...owner,
+      ownerKey: "dps_other",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+
+    const expiredService = new ComputerUseService({
+      kernel: {} as ComputerKernelClient,
+      now: () => NOW,
+      store: createStore({
+        handoff: createHandoff({ status: "expired" }),
+        run,
+      }),
+    });
+    await expect(expiredService.hasOwnedRunHandoff(owner)).resolves.toBe(false);
+
+    const staleCheckpointService = new ComputerUseService({
+      kernel: {} as ComputerKernelClient,
+      now: () => NOW,
+      store: createStore({
+        handoff: createHandoff({
+          status: "checkpointing",
+          updatedAt: new Date("2026-06-17T11:55:00.000Z"),
+        }),
+        run,
+      }),
+    });
+    await expect(staleCheckpointService.hasOwnedRunHandoff(owner)).resolves.toBe(true);
+  });
+
   it("routes managed login without decrypting the task Live View", async () => {
     const run = createRun();
     const handoff = createHandoff();

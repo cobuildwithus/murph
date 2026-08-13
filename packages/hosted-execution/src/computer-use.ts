@@ -192,7 +192,10 @@ const hostedComputerControlActionSchema = z.discriminatedUnion("action", [
     action: z.literal("fill"),
     target: hostedComputerControlTargetSchema,
     value: z.string().max(2_000),
-  }).strict(),
+  }).strict().refine(
+    (step) => !/^Murph Private Sync [a-f0-9]{12}$/u.test(step.value.trim()),
+    { message: "Provider ownership markers are reserved for trusted capture." },
+  ),
   z.object({
     action: z.literal("select"),
     option: z.discriminatedUnion("kind", [

@@ -1628,7 +1628,7 @@ describe('assistant local PDF evidence guidance', () => {
       'For Strava (`strava`) and Trailbox (`trailbox`), /connect Continue authorizes; it starts no work',
     )
     expect(directGuidance).toContain(
-      'Capture owns submit/blind seal; never expose credentials',
+      'Leave the application name and submit to capture',
     )
     expect(directGuidance).toContain(
       'Pause for sign-in, MFA/CAPTCHA/prerequisites, then begin after return',

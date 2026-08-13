@@ -43,6 +43,7 @@ export interface MemberOwnedProviderSetupRecord<
 
 export type MemberOwnedProviderSetupAction =
   | "authorize"
+  | "continue_handoff"
   | "continue_oauth"
   | "disconnect_first"
   | "none";
@@ -158,6 +159,7 @@ export function readMemberOwnedProviderSetupBinding<TProvider extends string>(
 export function toMemberOwnedProviderSetupView<TProvider extends string>(
   setup: MemberOwnedProviderSetupRecord<TProvider>,
   presentation: MemberOwnedProviderSetupPresentation<TProvider>,
+  options: { handoffAvailable?: boolean } = {},
 ): MemberOwnedProviderSetupView<TProvider> {
   if (setup.provider !== presentation.provider) {
     throw new TypeError(
@@ -166,7 +168,13 @@ export function toMemberOwnedProviderSetupView<TProvider extends string>(
   }
 
   return {
-    action: resolveSetupAction(setup.status),
+    action: options.handoffAvailable && (
+      setup.status === "authorized"
+      || setup.status === "browser_setup"
+      || setup.status === "capturing"
+    )
+      ? "continue_handoff"
+      : resolveSetupAction(setup.status),
     applicationRevision: setup.providerApplicationRevision,
     connected: setup.status === "connected",
     message: presentation.messages[setup.status],

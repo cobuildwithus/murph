@@ -121,7 +121,6 @@ const mocks = vi.hoisted(() => ({
       props.usageActivityDetail,
     )),
   HostedDataPrivacySettings: vi.fn((props: {
-    accountDeletionRetry?: boolean;
     authenticated: boolean;
   }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
@@ -599,29 +598,6 @@ test("SettingsDataPrivacyPage redirects signed-in users to the settings privacy 
 
   await expect(SettingsDataPrivacyPage()).rejects.toThrow(
     "NEXT_REDIRECT:/settings#data-privacy",
-  );
-});
-
-test("SettingsDataPrivacyPage preserves account deletion retry guidance", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "canceled",
-      id: "member_123",
-      suspendedAt: new Date("2026-08-12T08:00:00.000Z"),
-    },
-    session: {
-      privyUserId: "did:privy:user_123",
-    },
-  });
-
-  const { default: SettingsDataPrivacyPage } =
-    await import("../app/(dashboard)/settings/data-privacy/page");
-
-  await expect(SettingsDataPrivacyPage({
-    searchParams: Promise.resolve({ accountDeletion: "retry" }),
-  })).rejects.toThrow(
-    "NEXT_REDIRECT:/settings?accountDeletion=retry#data-privacy",
   );
 });
 
@@ -1166,7 +1142,6 @@ test("SettingsPage reads the app session and persisted account settings into the
       initialStatus: null,
     }, undefined);
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
-      accountDeletionRetry: false,
       authenticated: true,
       authorizationEnabled: true,
     }, undefined);

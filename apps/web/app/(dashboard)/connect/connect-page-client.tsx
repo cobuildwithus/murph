@@ -80,6 +80,17 @@ interface MemberOwnedProviderOAuthResponse {
   setup: MemberOwnedProviderSetupView;
 }
 
+interface MemberOwnedProviderHandoffResponse {
+  handoffUrl: string;
+}
+
+const MEMBER_OWNED_SETUP_REVALIDATE_MS = 2_000;
+const MEMBER_OWNED_SETUP_ACTIVE_STATUSES = new Set([
+  "authorized",
+  "browser_setup",
+  "capturing",
+]);
+
 type ConnectStartOptions = {
   intentClaim?: string;
   preserveIntentDisclosure?: boolean;
@@ -359,6 +370,17 @@ export function ConnectSourcesGrid({
         await startOAuth();
         return;
       }
+      if (current?.action === "continue_handoff") {
+        const handoff = await requestHostedOnboardingJson<
+          MemberOwnedProviderHandoffResponse
+        >({
+          method: "PUT",
+          payload: { setupId: current.setupId },
+          url: `/api/settings/device-sync/provider-setups/${encodeURIComponent(provider)}`,
+        });
+        window.location.assign(handoff.handoffUrl);
+        return;
+      }
 
       const advanced = await requestHostedOnboardingJson<MemberOwnedProviderSetupMutationResponse>({
         method: "POST",
@@ -373,6 +395,59 @@ export function ConnectSourcesGrid({
     },
     [memberOwnedSetupBySourceId],
   );
+
+  useEffect(() => {
+    if (!authenticated) {
+      return;
+    }
+    const activeSources = sources.filter((source) => {
+      const setup = memberOwnedSetupBySourceId.get(source.id)
+        ?? source.memberOwnedSetup
+        ?? null;
+      return Boolean(
+        source.memberOwnedSetupProvider
+        && setup
+        && setup.action === "none"
+        && MEMBER_OWNED_SETUP_ACTIVE_STATUSES.has(setup.status),
+      );
+    });
+    if (activeSources.length === 0) {
+      return;
+    }
+    let stopped = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const revalidate = async () => {
+      if (document.visibilityState !== "hidden") {
+        await Promise.all(activeSources.map(async (source) => {
+          const provider = source.memberOwnedSetupProvider;
+          if (!provider) return;
+          try {
+            const projection = await requestHostedOnboardingJson<
+              MemberOwnedProviderSetupReadResponse
+            >({
+              method: "GET",
+              url: `/api/settings/device-sync/provider-setups/${encodeURIComponent(provider)}`,
+            });
+            if (!stopped) {
+              setMemberOwnedSetupBySourceId((values) =>
+                new Map(values).set(source.id, projection.setup),
+              );
+            }
+          } catch {
+            // The existing card state remains the safe retry surface.
+          }
+        }));
+      }
+      if (!stopped) {
+        timeout = setTimeout(() => void revalidate(), MEMBER_OWNED_SETUP_REVALIDATE_MS);
+      }
+    };
+    timeout = setTimeout(() => void revalidate(), MEMBER_OWNED_SETUP_REVALIDATE_MS);
+    return () => {
+      stopped = true;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [authenticated, memberOwnedSetupBySourceId, sources]);
 
   const cancelMemberOwnedProviderSetup = useCallback(
     async (source: ConnectSource): Promise<void> => {

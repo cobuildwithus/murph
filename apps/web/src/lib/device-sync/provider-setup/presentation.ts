@@ -3,6 +3,7 @@ import type { MemberOwnedProviderSetupPresentation } from "./types";
 export const STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION = {
   actionLabels: {
     authorize: "Continue",
+    continue_handoff: "Continue setup",
     continue_oauth: "Continue with Strava",
     disconnect_first: "Disconnect Strava first",
   },

@@ -71,6 +71,8 @@ describe("member-owned provider setup contract", () => {
       developerPortalUrl: "https://www.strava.com/settings/api",
       provider: "strava",
     });
+    expect(contract.application).not.toHaveProperty("marker");
+    expect(contract.application).not.toHaveProperty("name");
     expect(contract.guidance.join(" ")).toMatch(/live page/iu);
     expect(contract.guidance.join(" ")).toMatch(/trusted browser boundary/iu);
     expect(contract.guidance.join(" ")).not.toMatch(/input\[|button\.|data-testid|xpath/iu);
@@ -94,6 +96,7 @@ describe("member-owned provider setup contract", () => {
   it("accepts only the runtime selector handoff and rejects credential-shaped tool input", () => {
     const parsed = parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
+      applicationNameSelector: "[data-application-name]",
       clientIdSelector: "[data-client-id]",
       clientSecretSelector: "[data-client-secret]",
       provider: "strava",
@@ -116,6 +119,7 @@ describe("member-owned provider setup contract", () => {
 
   it("keeps final capture and deletion generic, exact, and blind", () => {
     const capture = buildBlindProviderCredentialCaptureCode({
+      applicationNameSelector: "#runtime-name",
       applicationContainerSelector: "form[data-owned-application]",
       clientIdSelector: "#runtime-client-id",
       clientSecretSelector: "#runtime-client-secret",
@@ -142,6 +146,52 @@ describe("member-owned provider setup contract", () => {
     expect(deletion).not.toMatch(/strava/iu);
   });
 
+  it("places the ownership marker only inside trusted submission before capture", async () => {
+    const page = createFixturePage(`
+      <form data-owned-creation>
+        <input class="application-name" value="" />
+        <button class="create" type="button">Create</button>
+      </form>
+    `);
+    const submittedNames: string[] = [];
+    await page.exposeFunction("recordSubmittedApplicationName", (name: string) => {
+      submittedNames.push(name);
+    });
+    await page.evaluate(() => {
+      document.querySelector(".create")?.addEventListener("click", () => {
+        const name = document.querySelector<HTMLInputElement>(".application-name")?.value;
+        void Reflect.get(window, "recordSubmittedApplicationName")(name ?? "");
+      });
+    });
+    page.setNavigationContent(`
+      <section data-owned-application>
+        <h3>Murph Private Sync fixture</h3>
+        <output class="client-id">right-id</output>
+        <output class="client-secret">right-secret</output>
+      </section>
+    `);
+    const code = buildBlindProviderCredentialCaptureCode({
+      applicationNameSelector: ".application-name",
+      applicationContainerSelector: "section[data-owned-application]",
+      clientIdSelector: ".client-id",
+      clientSecretSelector: ".client-secret",
+      creationFormSelector: "form[data-owned-creation]",
+      marker: "Murph Private Sync fixture",
+      revealSecretSelector: null,
+      safeLandingUrl: "about:blank",
+      submitSelector: ".create",
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<{ clientId: string; clientSecret: string }>;
+
+    await expect(run(page)).resolves.toEqual({
+      clientId: "right-id",
+      clientSecret: "right-secret",
+    });
+    expect(submittedNames).toEqual(["Murph Private Sync fixture"]);
+  });
+
   it("executes trusted capture against the exact marked form and rejects cross-object selectors", async () => {
     const page = createFixturePage(`
         <form data-owned-application>
@@ -159,6 +209,7 @@ describe("member-owned provider setup contract", () => {
         <button class="global-submit" type="button">Global create</button>
       `);
       const code = buildBlindProviderCredentialCaptureCode({
+        applicationNameSelector: null,
         applicationContainerSelector: "form[data-owned-application]",
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
@@ -186,6 +237,7 @@ describe("member-owned provider setup contract", () => {
         <output class="cross-secret">wrong-secret</output>
       `);
       const crossObject = buildBlindProviderCredentialCaptureCode({
+        applicationNameSelector: null,
         applicationContainerSelector: "form[data-owned-application]",
         clientIdSelector: ".cross-id",
         clientSecretSelector: ".cross-secret",
@@ -204,7 +256,7 @@ describe("member-owned provider setup contract", () => {
       );
   });
 
-  it("rejects duplicate deterministic markers before any irreversible control", async () => {
+  it("rejects duplicate persisted markers before any irreversible control", async () => {
     const page = createFixturePage(`
         <form data-owned-application>
           <input name="name" value="Murph Private Sync fixture" />
@@ -217,6 +269,7 @@ describe("member-owned provider setup contract", () => {
         </section>
       `);
       const code = buildBlindProviderCredentialCaptureCode({
+        applicationNameSelector: null,
         applicationContainerSelector: "[data-owned-application]",
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
@@ -224,13 +277,64 @@ describe("member-owned provider setup contract", () => {
         marker: "Murph Private Sync fixture",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
-        submitSelector: ".owned-submit",
+        submitSelector: null,
       });
       const run = new Function("page", `return (async () => {${code}})();`) as (
         page: FixturePage,
       ) => Promise<unknown>;
 
       await expect(run(page)).rejects.toThrow(/marker_ambiguous/u);
+  });
+
+  it("rejects a transient marker forged into an unrelated application after trusted reload", async () => {
+    const forged = `
+      <section data-owned-application>
+        <input class="forged-name" value="Murph Private Sync fixture" />
+        <output class="owned-id">wrong-id</output>
+        <output class="owned-secret">wrong-secret</output>
+        <button class="owned-delete" type="button">Delete</button>
+      </section>
+    `;
+    const page = createFixturePage(forged);
+    page.setNavigationContent(`
+      <section data-owned-application>
+        <input class="forged-name" value="Unrelated application" />
+        <output class="owned-id">wrong-id</output>
+        <output class="owned-secret">wrong-secret</output>
+        <button class="owned-delete" type="button">Delete</button>
+      </section>
+    `);
+
+    const capture = buildBlindProviderCredentialCaptureCode({
+      applicationNameSelector: null,
+      applicationContainerSelector: "section[data-owned-application]",
+      clientIdSelector: ".owned-id",
+      clientSecretSelector: ".owned-secret",
+      creationFormSelector: "form[data-owned-application]",
+      marker: "Murph Private Sync fixture",
+      revealSecretSelector: null,
+      safeLandingUrl: "about:blank",
+      submitSelector: null,
+    });
+    const runCapture = new Function(
+      "page",
+      `return (async () => {${capture}})();`,
+    ) as (page: FixturePage) => Promise<unknown>;
+    await expect(runCapture(page)).rejects.toThrow(/marker_ambiguous/u);
+
+    await page.setContent(forged);
+    const deletion = buildBlindOwnedApplicationDeleteCode({
+      applicationContainerSelector: "section[data-owned-application]",
+      confirmSelector: null,
+      deleteSelector: ".owned-delete",
+      marker: "Murph Private Sync fixture",
+      safeLandingUrl: "about:blank",
+    });
+    const runDelete = new Function(
+      "page",
+      `return (async () => {${deletion}})();`,
+    ) as (page: FixturePage) => Promise<unknown>;
+    await expect(runDelete(page)).rejects.toThrow(/marker_ambiguous/u);
   });
 
   it("derives one application authority when its marker is rendered in multiple fields", async () => {
@@ -243,6 +347,7 @@ describe("member-owned provider setup contract", () => {
         </section>
       `);
       const code = buildBlindProviderCredentialCaptureCode({
+        applicationNameSelector: null,
         applicationContainerSelector: "section[data-owned-application]",
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
@@ -350,6 +455,11 @@ describe("member-owned provider setup contract", () => {
       { ...SETUP, status: "disconnect_first" },
       STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
     ).action).toBe("disconnect_first");
+    expect(toMemberOwnedProviderSetupView(
+      { ...SETUP, status: "disconnect_first" },
+      STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+      { handoffAvailable: true },
+    ).action).toBe("disconnect_first");
   });
 });
 
@@ -366,6 +476,13 @@ class FixtureLocator {
   async click(): Promise<void> {
     const element = this.requireOne();
     await this.page.withGlobals(() => (element as HTMLElement).click());
+  }
+
+  async fill(value: string): Promise<void> {
+    const element = this.requireOne() as HTMLInputElement | HTMLTextAreaElement;
+    await this.page.withGlobals(() => {
+      element.value = value;
+    });
   }
 
   async count(): Promise<number> {
@@ -429,6 +546,7 @@ class FixtureLocator {
 
 class FixturePage {
   private document: Document;
+  private navigationContent: string | null = null;
   private url = "about:blank";
   private window: FixtureWindow;
 
@@ -453,6 +571,11 @@ class FixturePage {
 
   async goto(url: string): Promise<void> {
     this.url = url;
+    if (this.navigationContent !== null) {
+      ({ document: this.document, window: this.window } = parseFixtureDocument(
+        this.navigationContent,
+      ));
+    }
     this.installLocation();
   }
 
@@ -463,6 +586,10 @@ class FixturePage {
   async setContent(html: string): Promise<void> {
     ({ document: this.document, window: this.window } = parseFixtureDocument(html));
     this.installLocation();
+  }
+
+  setNavigationContent(html: string): void {
+    this.navigationContent = html;
   }
 
   async waitForFunction<TArgument>(

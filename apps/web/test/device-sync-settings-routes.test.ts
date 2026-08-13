@@ -24,11 +24,13 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   getConnectionStatus: vi.fn(),
   getStoredConnectionAccountForUser: vi.fn(),
+  issueMemberOwnedProviderSetupHandoff: vi.fn(),
   listConfiguredDeviceSyncPublicProviderDescriptors: vi.fn(),
   listConnectionSources: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   markMemberOwnedSetupDisconnected: vi.fn(),
+  readMemberOwnedProviderSetup: vi.fn(),
   readMemberOwnedProviderSetupRegistration: vi.fn(),
   probeRest: vi.fn(),
   prepareConnectionStart: vi.fn(),
@@ -54,7 +56,9 @@ vi.mock("@/src/lib/device-sync/provider-setup", () => ({
   createMemberOwnedProviderSetupService: () => ({
     authorizeAndContinue: mocks.authorizeMemberOwnedProviderSetup,
     cancel: mocks.cancelMemberOwnedProviderSetup,
+    issueHandoff: mocks.issueMemberOwnedProviderSetupHandoff,
     markDisconnected: mocks.markMemberOwnedSetupDisconnected,
+    read: mocks.readMemberOwnedProviderSetup,
   }),
   readMemberOwnedProviderSetupRegistration: mocks.readMemberOwnedProviderSetupRegistration,
 }));
@@ -509,6 +513,9 @@ describe("device sync settings routes", () => {
       status: "canceled",
       updatedAt: "2026-04-03T12:00:00.000Z",
     });
+    mocks.issueMemberOwnedProviderSetupHandoff.mockResolvedValue(
+      "https://join.example.test/computer/handoff/synthetic-capability",
+    );
     mocks.markMemberOwnedSetupDisconnected.mockResolvedValue(undefined);
     mocks.readMemberOwnedProviderSetupRegistration.mockReturnValue(null);
   });
@@ -1889,6 +1896,81 @@ describe("device sync settings routes", () => {
         action: "authorize",
         status: "canceled",
       },
+    });
+  });
+
+  it("issues a same-origin handoff only for the authenticated member's exact setup", async () => {
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValueOnce({
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+      presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    });
+
+    const response = await settingsDeviceSyncProviderSetupRoute.PUT(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/provider-setups/strava",
+        {
+          body: JSON.stringify({ setupId: "dps_synthetic" }),
+          headers: {
+            "content-type": "application/json",
+            origin: "https://join.example.test",
+          },
+          method: "PUT",
+        },
+      ),
+      createRouteContext({ provider: "strava" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(
+      expect.any(Request),
+    );
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(
+      expect.any(Request),
+    );
+    expect(mocks.issueMemberOwnedProviderSetupHandoff).toHaveBeenCalledWith(
+      "member_123",
+      "dps_synthetic",
+    );
+    await expect(response.json()).resolves.toEqual({
+      handoffUrl: "/computer/handoff/synthetic-capability",
+    });
+  });
+
+  it("rejects a provider handoff request without one exact setup id", async () => {
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValueOnce({
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+      presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    });
+
+    const response = await settingsDeviceSyncProviderSetupRoute.PUT(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/provider-setups/strava",
+        {
+          body: JSON.stringify({}),
+          headers: {
+            "content-type": "application/json",
+            origin: "https://join.example.test",
+          },
+          method: "PUT",
+        },
+      ),
+      createRouteContext({ provider: "strava" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.issueMemberOwnedProviderSetupHandoff).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "DEVICE_PROVIDER_SETUP_HANDOFF_INVALID" },
     });
   });
 

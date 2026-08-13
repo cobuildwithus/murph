@@ -1016,6 +1016,103 @@ export class ComputerUseService {
     });
   }
 
+  async hasOwnedRunHandoff(input: {
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<boolean> {
+    const run = await this.requireMemberOwnedProviderSetupStatusRun(input);
+    if (run.status !== "awaiting_user" || !run.pendingHandoffId) {
+      return false;
+    }
+    const handoff = await this.store.findHandoffByRun({
+      handoffId: run.pendingHandoffId,
+      runId: run.id,
+    });
+    return Boolean(
+      handoff
+      && handoff.status !== "completed"
+      && handoff.status !== "expired"
+      && !isFreshCheckpointingHandoff(handoff, this.now())
+      && isProviderSetupHandoffPurpose(handoff.purpose),
+    );
+  }
+
+  async issueOwnedRunHandoff(input: {
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<string> {
+    const run = await this.requireMemberOwnedProviderSetupStatusRun(input);
+    if (
+      run.status !== "awaiting_user"
+      || !run.pendingHandoffId
+      || !run.awaitingReason
+      || !run.pausedAt
+    ) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_HANDOFF_INCOMPLETE",
+        message: "Private provider setup is not waiting for a handoff.",
+      });
+    }
+    const handoff = await this.store.findHandoffByRun({
+      handoffId: run.pendingHandoffId,
+      runId: run.id,
+    });
+    if (!handoff || !isProviderSetupHandoffPurpose(handoff.purpose)) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_HANDOFF_INCOMPLETE",
+        message: "Private provider setup handoff is unavailable.",
+      });
+    }
+    const issued = await this.ensureAwaitingRunHandoff({
+      handoffPurpose: handoff.purpose,
+      memberId: input.memberId,
+      now: this.now(),
+      pauseDeliveryContext: run.checkpointContext
+        ? {
+            conversationId: run.checkpointContext.conversationId,
+            recipientKey: run.checkpointContext.recipientKey,
+            returnContactKind: handoff.returnContactKind,
+          }
+        : null,
+      run,
+      store: this.store,
+    });
+    if (!issued?.handoffUrl) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
+        message: "Private provider setup handoff is still being prepared.",
+        retryable: true,
+      });
+    }
+    return issued.handoffUrl;
+  }
+
+  private async requireMemberOwnedProviderSetupStatusRun(input: {
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<MemberOwnedProviderSetupRunRecord> {
+    const run = await this.store.requireOwnedRun({
+      memberId: input.memberId,
+      runId: input.runId,
+    });
+    if (
+      run.ownerKey !== input.ownerKey
+      || run.ownerPurpose !== input.ownerPurpose
+    ) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        message: "Computer run ownership could not be verified.",
+      });
+    }
+    return run;
+  }
+
   private async pauseForUserWithStore(
     input: {
       handoffPurpose: HostedComputerHandoffPurpose | null;
@@ -4618,6 +4715,7 @@ function buildMemberOwnedProviderSetupComputerActCode(
   return `
 const __murphSteps = ${JSON.stringify(input.steps)};
 const __murphCredentialHint = /(?:client\\s*(?:id|secret)|consumer\\s*(?:key|secret)|api\\s*(?:key|secret|token)|oauth\\s*(?:key|secret|token)|access\\s*token|refresh\\s*token|private\\s*key|password|credential|bearer\\s*token)/iu;
+const __murphOwnershipMarker = /^Murph Private Sync [a-f0-9]{12}$/u;
 const __murphCommitHint = /(?:^|\\b)(?:create|register|save|submit)(?:\\b|$)/iu;
 const __murphDestructiveHint = /(?:^|\\b)(?:delete|remove|revoke|reset|rotate|destroy|disconnect)(?:\\b|$)/iu;
 const __murphBlockedRequest = async (route) => {
@@ -4713,6 +4811,9 @@ try {
         const metadata = await __murphTargetMetadata(target);
         if (metadata.type === "password" || __murphCredentialHint.test(metadata.hints)) {
           throw new Error("MURPH_PROVIDER_SETUP_CREDENTIAL_FIELD_FORBIDDEN");
+        }
+        if (__murphOwnershipMarker.test(step.value.trim())) {
+          throw new Error("MURPH_PROVIDER_SETUP_OWNERSHIP_MARKER_FORBIDDEN");
         }
         await target.fill(step.value);
         break;
@@ -5290,6 +5391,14 @@ function isRetiredStaticPreviewHandoff(
   handoff: { purpose: PersistedComputerHandoffPurpose },
 ): handoff is { purpose: "screen_inspection" } {
   return handoff.purpose === "screen_inspection";
+}
+
+function isProviderSetupHandoffPurpose(
+  purpose: PersistedComputerHandoffPurpose,
+): purpose is HostedComputerHandoffPurpose {
+  return purpose === "login"
+    || purpose === "managed_login"
+    || purpose === "manual_browser_help";
 }
 
 function requireSupportedPersistedHandoffPurpose(
