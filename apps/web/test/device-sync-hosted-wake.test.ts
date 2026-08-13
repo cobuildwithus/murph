@@ -1,4 +1,3 @@
-import { createJunctionDeviceSyncProvider } from "@murphai/device-syncd";
 import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
@@ -9,7 +8,6 @@ import {
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "@murphai/device-syncd/junction-historical-backfill-progress";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
-import type { StoredDeviceSyncAccount } from "@murphai/device-syncd/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -354,6 +352,7 @@ function buildHostedConnectionSource(
   connectionId: string,
   sourceProviderSlug: string,
   overrides: Partial<{
+    lifecycleEpoch: number;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string;
@@ -378,6 +377,7 @@ function buildHostedConnectionSource(
     lastDataAt: "2026-03-26T11:59:00.000Z",
     lastErrorCode: null,
     lastErrorMessage: null,
+    lifecycleEpoch: 1,
     lastSeenAt: "2026-03-26T12:00:00.000Z",
     resourceAvailabilitySummary: { sleep: true },
     sourceInstanceKey,
@@ -856,7 +856,7 @@ describe("hosted device-sync wakes", () => {
     expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
   });
 
-  it("reopens companion weight history only for the new explicit-connect source epoch", async () => {
+  it("reopens schedule-time history only when live registration admits the explicit-connect source epoch", async () => {
     let currentConnection = buildHostedConnection({
       id: "dsc_junction_123",
       metadata: addJunctionHistoryCoverage(
@@ -899,6 +899,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         lastSeenAt: input.lastSeenAt ?? currentSource.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? currentSource.lifecycleEpoch,
         status: input.status ?? currentSource.status,
       };
       return currentSource;
@@ -926,9 +927,7 @@ describe("hosted device-sync wakes", () => {
       status: "disconnected",
       tx: mocks.prismaTx,
     }));
-    expect(mocks.upsertConnectionSource.mock.invocationCallOrder[0]!).toBeLessThan(
-      mocks.syncDurableConnectionState.mock.invocationCallOrder[0]!,
-    );
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(currentSource).toMatchObject({
       firstSeenAt: "2026-03-26T12:00:00.000Z",
       lastErrorCode: null,
@@ -940,7 +939,7 @@ describe("hosted device-sync wakes", () => {
       currentConnection.metadata,
       "apple_health_kit",
       "weight",
-    )).toBe(false);
+    )).toBe(true);
     expect(hasJunctionHistoryCoverage(
       currentConnection.metadata,
       "withings",
@@ -951,10 +950,7 @@ describe("hosted device-sync wakes", () => {
       "apple_health_kit",
       "caffeine",
     )).toBe(true);
-    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
-      expect.objectContaining({ metadata: currentConnection.metadata }),
-      mocks.prismaTx,
-    );
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
 
     const isSourceAccessActive = vi.fn(async () => true);
     mocks.registryGet.mockReturnValue({ connectionHandler: { isSourceAccessActive } });
@@ -968,59 +964,23 @@ describe("hosted device-sync wakes", () => {
       store,
     })).resolves.toBe("admitted");
     expect(currentSource.status).toBe("connected");
+    expect(currentSource.lifecycleEpoch).toBe(2);
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "apple_health_kit",
+      "weight",
+    )).toBe(false);
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "apple_health_kit",
+      "caffeine",
+    )).toBe(false);
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "withings",
+      "weight",
+    )).toBe(true);
 
-    const provider = createJunctionDeviceSyncProvider({
-      apiKey: "sk_us_junction-test",
-      clientUserIdSecret: "junction-client-user-id-secret",
-      environment: "sandbox",
-      fetchImpl: vi.fn(async () => {
-        throw new Error("Unexpected Junction request while scheduling.");
-      }),
-      region: "us",
-      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
-    });
-    const createScheduledJobs = provider.jobExecutor?.createScheduledJobs;
-    expect(createScheduledJobs).toBeDefined();
-    const scheduledAccount = {
-      ...currentConnection,
-      credential: {
-        kind: "provider_config" as const,
-        credentialMetadata: {},
-        providerConfigKey: "junction",
-      },
-      disconnectGeneration: 0,
-      hostedObservedConnectionRevision: 0,
-      hostedObservedTokenRevision: 0,
-      hostedObservedTokenVersion: null,
-      hostedObservedUpdatedAt: null,
-      localConnectionRevision: 0,
-      localTokenRevision: 0,
-      sources: [{
-        displayName: currentSource.displayName,
-        firstSeenAt: currentSource.firstSeenAt,
-        lastDataAt: currentSource.lastDataAt,
-        lastErrorCode: currentSource.lastErrorCode,
-        lastErrorMessage: currentSource.lastErrorMessage,
-        lastSeenAt: currentSource.lastSeenAt,
-        resourceAvailabilitySummary: currentSource.resourceAvailabilitySummary,
-        resourceCount: Object.keys(currentSource.resourceAvailabilitySummary).length,
-        sourceProviderSlug: currentSource.sourceProviderSlug,
-        status: currentSource.status,
-      }],
-    } satisfies StoredDeviceSyncAccount;
-    const scheduled = createScheduledJobs?.(
-      scheduledAccount,
-      "2026-03-27T12:00:00.000Z",
-    );
-
-    expect(scheduled?.jobs).toContainEqual(expect.objectContaining({
-      kind: "resource",
-      payload: expect.objectContaining({
-        historicalBackfill: true,
-        resource: "weight",
-        sourceProviderSlug: "apple_health_kit",
-      }),
-    }));
   });
 
   it("preserves future companion weight coverage while still creating the explicit-connect epoch", async () => {
@@ -1162,6 +1122,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         lastSeenAt: input.lastSeenAt ?? source.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? source.lifecycleEpoch,
         status: input.status ?? source.status,
       };
       return source;
@@ -2159,6 +2120,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? existing.lifecycleEpoch,
         status: input.status ?? existing.status,
       };
       sources = sources.map((source) => source.id === existing.id ? updated : source);
@@ -2323,6 +2285,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         lastSeenAt: input.lastSeenAt ?? source.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? source.lifecycleEpoch,
         status: input.status ?? source.status,
       };
       return source;
@@ -3352,7 +3315,7 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
-  it("reopens only the reconnected source's weight history after provider cleanup", async () => {
+  it("keeps history coverage scheduler-owned while provider cleanup prepares reconnect", async () => {
     let currentConnection = buildHostedConnection({
       displayName: "Junction",
       externalAccountId: "junction-user-established",
@@ -3384,6 +3347,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode,
         lastErrorMessage: input.lastErrorMessage,
         lastSeenAt: input.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? currentSource.lifecycleEpoch,
         status: input.status,
       };
       return currentSource;
@@ -3418,11 +3382,8 @@ describe("hosted device-sync wakes", () => {
       currentConnection.metadata,
       "withings",
       "weight",
-    )).toBe(false);
-    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
-      expect.objectContaining({ metadata: currentConnection.metadata }),
-      mocks.prismaTx,
-    );
+    )).toBe(true);
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
   it("does not issue a new Link while exact-source provider cleanup is in progress", async () => {

@@ -906,7 +906,7 @@ test("local shared-Junction target starts preserve established siblings through 
     assert.equal(afterFitbitCompletion.connectedAt, baseline.connectedAt);
     assert.equal(
       afterFitbitCompletion.localConnectionRevision,
-      afterFitbitRetry.localConnectionRevision,
+      afterFitbitRetry.localConnectionRevision + 1,
     );
     assert.equal(afterFitbitCompletion.localTokenRevision, afterFitbitRetry.localTokenRevision);
     assert.equal(
@@ -2166,7 +2166,7 @@ test("Junction terminal stale and malformed full jobs preserve the current water
   }
 });
 
-test("persisted provider-projected disconnects can recover an evidence-bearing pressure job", async () => {
+test("persisted provider-projected disconnects require explicit reconnect before pressure resumes", async () => {
   let now = new Date("2026-09-01T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-pressure-recovery");
   const providerState = {
@@ -2291,21 +2291,21 @@ test("persisted provider-projected disconnects can recover an evidence-bearing p
         connectionId: account.id,
         sourceProviderSlug: "omron",
       })[0]?.status,
-      "connected",
+      "disconnected",
     );
-    assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(importedSnapshots.length, 0);
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       store.getAccountById(account.id)?.metadata ?? {},
       "omron",
       "blood_pressure",
       1,
-    ), true);
+    ), false);
   } finally {
     close();
   }
 });
 
-test("hosted listed-only recovery publishes connected before pressure egress resumes", async () => {
+test("hosted listed-only projection cannot publish connected before explicit reconnect", async () => {
   let now = new Date("2026-09-01T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory(
     "murph-device-syncd-hosted-junction-pressure-recovery",
@@ -2468,7 +2468,7 @@ test("hosted listed-only recovery publishes connected before pressure egress res
         connectionId: account.id,
         sourceProviderSlug: "omron",
       })[0]?.status,
-      "connected",
+      "disconnected",
     );
     assert.equal(importedSnapshots.length, 0);
     publishLocalSourceToHostedAuthority();
@@ -2478,13 +2478,13 @@ test("hosted listed-only recovery publishes connected before pressure egress res
       await service.runWorkerOnce();
     }
 
-    assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(importedSnapshots.length, 0);
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       store.getAccountById(account.id)?.metadata ?? {},
       "omron",
       "blood_pressure",
       1,
-    ), true);
+    ), false);
   } finally {
     close();
   }
@@ -2609,6 +2609,7 @@ test("device sync job context lets providers update source projections", async (
       lastErrorMessage: null,
       firstSeenAt: sources[0]?.firstSeenAt,
       lastSeenAt: sources[0]?.lastSeenAt,
+      lifecycleEpoch: 1,
       lastDataAt: null,
       createdAt: sources[0]?.createdAt,
       updatedAt: sources[0]?.updatedAt,

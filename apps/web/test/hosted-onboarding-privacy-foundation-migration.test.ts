@@ -1096,6 +1096,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260811170000_hosted_physical_note_failure_reason",
       "20260811190000_hosted_linq_provider_event_diagnostics_retention_index",
       "20260812120000_hosted_runtime_latency_candidate_indexes",
+      "20260813150000_device_source_lifecycle_epoch",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(
@@ -2512,6 +2513,28 @@ describe("hosted Prisma baseline migration", () => {
     expect(migrationSql).toContain(
       'ON "hosted_product_feedback"("created_at", "kind")',
     );
+  });
+
+  it("adds the device-source lifecycle epoch as an expand-only column", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260813150000_device_source_lifecycle_epoch/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(schema).toMatch(
+      /lifecycleEpoch\s+Int\?\s+@default\(1\)\s+@map\("lifecycle_epoch"\)/u,
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "lifecycle_epoch" INTEGER DEFAULT 1',
+    );
+    expect(migrationSql).not.toContain("NOT NULL");
   });
 });
 

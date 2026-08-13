@@ -1025,7 +1025,10 @@ class DeviceSyncServiceController {
         },
         upsertConnectionSource: (input) => {
           ensureExecutionActive();
-          return this.store.upsertConnectionSource({
+          const upsertSource = provider.provider === "junction"
+            ? this.store.upsertJunctionConnectionSourceProjection.bind(this.store)
+            : this.store.upsertConnectionSource.bind(this.store);
+          return upsertSource({
             ...input,
             connectionId: currentAccount.id,
           });

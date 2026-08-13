@@ -27,6 +27,7 @@ interface StoredDeviceConnectionSourceRow {
   resource_availability_summary_json: string;
   last_error_code: string | null;
   last_error_message: string | null;
+  lifecycle_epoch: number;
   first_seen_at: string;
   last_seen_at: string;
   last_data_at: string | null;
@@ -85,6 +86,7 @@ const CONNECTION_SOURCE_ROW_SELECT = `
     resource_availability_summary_json,
     last_error_code,
     last_error_message,
+    lifecycle_epoch,
     first_seen_at,
     last_seen_at,
     last_data_at,
@@ -114,6 +116,13 @@ function expectNullableString(value: unknown, field: string): string | null {
   }
 
   return expectString(value, field);
+}
+
+function expectPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`Expected ${field} to be a positive integer.`);
+  }
+  return value;
 }
 
 function isDeviceConnectionSourceStatus(
@@ -343,6 +352,7 @@ function normalizeSourceInput(input: UpsertDeviceConnectionSourceInput): {
   resourceAvailabilitySummaryJson: string | undefined;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lifecycleEpoch: number | undefined;
   firstSeenAt: string;
   lastSeenAt: string;
   lastDataAt: string | null | undefined;
@@ -392,6 +402,9 @@ function normalizeSourceInput(input: UpsertDeviceConnectionSourceInput): {
           SOURCE_ERROR_MESSAGE_MAX_LENGTH,
         )
       : null,
+    lifecycleEpoch: hasOwnInputProperty(input, "lifecycleEpoch")
+      ? expectPositiveInteger(input.lifecycleEpoch, "lifecycleEpoch")
+      : undefined,
     firstSeenAt,
     lastSeenAt,
     // Undefined means "leave the stored arrival signal alone". Only hosted
@@ -434,6 +447,10 @@ function decodeConnectionSourceRow(row: SqliteRow): StoredDeviceConnectionSource
       row.last_error_message,
       "device_connection_source.last_error_message",
     ),
+    lifecycle_epoch: expectPositiveInteger(
+      row.lifecycle_epoch,
+      "device_connection_source.lifecycle_epoch",
+    ),
     first_seen_at: expectString(row.first_seen_at, "device_connection_source.first_seen_at"),
     last_seen_at: expectString(row.last_seen_at, "device_connection_source.last_seen_at"),
     last_data_at: expectNullableString(
@@ -460,6 +477,7 @@ function mapConnectionSourceRow(
     ),
     lastErrorCode: row.last_error_code,
     lastErrorMessage: row.last_error_message,
+    lifecycleEpoch: row.lifecycle_epoch,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
     lastDataAt: row.last_data_at,
@@ -489,6 +507,28 @@ export function upsertConnectionSource(
   return withImmediateTransaction(database, () =>
     upsertConnectionSourceInTransaction(database, input)
   );
+}
+
+/**
+ * Provider projection may refresh an existing Junction source, but it cannot
+ * consume a disconnected reconnect boundary owned by callback admission.
+ */
+export function upsertJunctionConnectionSourceProjection(
+  database: DatabaseSync,
+  input: UpsertDeviceConnectionSourceInput,
+): StoredDeviceConnectionSource {
+  return withImmediateTransaction(database, () => {
+    const normalized = normalizeSourceInput(input);
+    const existing = getConnectionSourceByInstanceKey(
+      database,
+      normalized.connectionId,
+      normalized.sourceInstanceKey,
+    );
+    if (existing?.status === "disconnected" && normalized.status !== "disconnected") {
+      return existing;
+    }
+    return upsertConnectionSourceInTransaction(database, input);
+  });
 }
 
 export function upsertConnectionSourceInTransaction(
@@ -531,6 +571,7 @@ export function upsertConnectionSourceInTransaction(
           resource_availability_summary_json = ?,
           last_error_code = ?,
           last_error_message = ?,
+          lifecycle_epoch = ?,
           first_seen_at = ?,
           last_seen_at = ?,
           last_data_at = ?,
@@ -543,6 +584,7 @@ export function upsertConnectionSourceInTransaction(
       resourceAvailabilitySummaryJson,
       lastErrorCode,
       lastErrorMessage,
+      normalized.lifecycleEpoch ?? existing.lifecycleEpoch,
       firstSeenAt,
       normalized.lastSeenAt,
       normalized.lastDataAt === undefined ? existing.lastDataAt : normalized.lastDataAt,
@@ -569,12 +611,13 @@ export function upsertConnectionSourceInTransaction(
       resource_availability_summary_json,
       last_error_code,
       last_error_message,
+      lifecycle_epoch,
       first_seen_at,
       last_seen_at,
       last_data_at,
       created_at,
       updated_at
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     normalized.connectionId,
@@ -585,6 +628,7 @@ export function upsertConnectionSourceInTransaction(
     resourceAvailabilitySummaryJson,
     lastErrorCode,
     lastErrorMessage,
+    normalized.lifecycleEpoch ?? 1,
     normalized.firstSeenAt,
     normalized.lastSeenAt,
     normalized.lastDataAt ?? null,

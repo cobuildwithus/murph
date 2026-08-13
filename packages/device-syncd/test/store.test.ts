@@ -39,6 +39,15 @@ function downgradeDeviceSyncStoreToV8(databasePath: string): void {
   database.close();
 }
 
+function downgradeDeviceSyncStoreToV9(databasePath: string): void {
+  const database = openSqliteRuntimeDatabase(databasePath);
+  database.exec(`
+    alter table device_connection_source drop column lifecycle_epoch;
+    pragma user_version = 9;
+  `);
+  database.close();
+}
+
 function downgradeDeviceSyncStoreToV7(databasePath: string): void {
   const database = openSqliteRuntimeDatabase(databasePath);
   database.exec(`
@@ -345,6 +354,14 @@ test("device sync store commits source admission with initial jobs atomically", 
       "disconnected",
     );
     assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch,
+      1,
+    );
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      account.localConnectionRevision,
+    );
+    assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:02:00.000Z", 60_000),
       null,
     );
@@ -369,11 +386,74 @@ test("device sync store commits source admission with initial jobs atomically", 
       "connected",
     );
     assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch,
+      2,
+    );
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      account.localConnectionRevision + 1,
+    );
+    assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:04:00.000Z", 60_000)?.id,
       committed[0]?.id,
     );
   } finally {
     store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store migrates existing v9 sources to lifecycle epoch one", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-v9-migration");
+  const databasePath = path.join(tempDir, "state.sqlite");
+
+  try {
+    let store = new SqliteDeviceSyncStore(databasePath);
+    const connection = store.upsertAccount({
+      connectedAt: "2026-07-01T00:00:00.000Z",
+      credential: { kind: "none" },
+      displayName: "Aggregator",
+      externalAccountId: "aggregator-lifecycle-account",
+      metadata: {},
+      provider: "aggregator",
+      scopes: [],
+    });
+    store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-01T00:00:00.000Z",
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    store.close();
+
+    downgradeDeviceSyncStoreToV9(databasePath);
+
+    store = new SqliteDeviceSyncStore(databasePath);
+    const [migrated] = store.listConnectionSources({ connectionId: connection.id });
+    assert.equal(migrated?.lifecycleEpoch, 1);
+
+    const advanced = store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-02T00:00:00.000Z",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    assert.equal(advanced.lifecycleEpoch, 2);
+    assert.equal(store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-03T00:00:00.000Z",
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }).lifecycleEpoch, 2);
+    store.close();
+  } finally {
     await rm(tempDir, {
       force: true,
       recursive: true,

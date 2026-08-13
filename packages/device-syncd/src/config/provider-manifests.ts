@@ -223,6 +223,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       occurredAt: stringJobField({ includeInHostedHint: true }),
       resource: stringJobField({ includeInHostedHint: true }),
       resourceCategory: stringJobField({ includeInHostedHint: true }),
+      sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),

@@ -113,6 +113,7 @@ function buildHostedRecord(
     keyVersion: string | null;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
+    lifecycleEpoch: number;
     lastSyncCompletedAt: string | null;
     lastSyncErrorAt: string | null;
     lastSyncStartedAt: string | null;
@@ -154,6 +155,7 @@ function buildHostedRecord(
     keyVersion: "kv_stored",
     lastErrorCode: null,
     lastErrorMessage: null,
+    lifecycleEpoch: 1,
     lastSyncCompletedAt: null,
     lastSyncErrorAt: null,
     lastSyncStartedAt: null,
@@ -251,6 +253,7 @@ function buildConnectionSource(
     connectionId: string;
     displayName: string | null;
     firstSeenAt: string;
+    lifecycleEpoch: number;
     lastDataAt: string | null;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
@@ -265,6 +268,7 @@ function buildConnectionSource(
     connectionId: "conn_123",
     displayName: "WHOOP",
     firstSeenAt: "2026-04-06T09:00:00.000Z",
+    lifecycleEpoch: 1,
     lastDataAt: null,
     lastErrorCode: null,
     lastErrorMessage: null,
@@ -1936,10 +1940,41 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
   });
 
   it.each([
-    "SOURCE_DISCONNECT_IN_PROGRESS",
-    "SOURCE_START_CLEANUP_IN_PROGRESS",
-    "SOURCE_USER_DISCONNECTED",
-  ])("does not let a runtime source projection cross the %s fence", async (lastErrorCode) => {
+    {
+      currentLifecycleEpoch: 1,
+      currentStatus: "disconnected" as const,
+      label: "disconnected lifecycle fence without an error sentinel",
+      lastErrorCode: null,
+      observedLifecycleEpoch: 1,
+      projectedLifecycleEpoch: 1,
+    },
+    ...[
+      "SOURCE_DISCONNECT_IN_PROGRESS",
+      "SOURCE_START_CLEANUP_IN_PROGRESS",
+      "SOURCE_USER_DISCONNECTED",
+    ].map((lastErrorCode) => ({
+      currentLifecycleEpoch: 1,
+      currentStatus: "disconnected" as const,
+      label: lastErrorCode,
+      lastErrorCode,
+      observedLifecycleEpoch: 1,
+      projectedLifecycleEpoch: 1,
+    })),
+    {
+      currentLifecycleEpoch: 2,
+      currentStatus: "connected" as const,
+      label: "stale lifecycle epoch",
+      lastErrorCode: null,
+      observedLifecycleEpoch: 1,
+      projectedLifecycleEpoch: 1,
+    },
+  ])("does not let a runtime source projection cross the $label", async ({
+    currentLifecycleEpoch,
+    currentStatus,
+    lastErrorCode,
+    observedLifecycleEpoch,
+    projectedLifecycleEpoch,
+  }) => {
     const connectionId = "conn_junction";
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId,
@@ -1953,13 +1988,14 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         connectionId,
         displayName: null,
         firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lifecycleEpoch: currentLifecycleEpoch,
         lastErrorCode,
         lastErrorMessage: null,
         lastSeenAt: "2026-04-06T10:00:00.000Z",
         resourceAvailabilitySummary: { sleep: true },
         sourceInstanceKey,
         sourceProviderSlug: "oura",
-        status: "disconnected",
+        status: currentStatus,
       }],
       record: buildHostedRecord({
         id: connectionId,
@@ -1981,9 +2017,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             sources: [{
               displayName: null,
               firstSeenAt: "2026-04-06T09:00:00.000Z",
+              lifecycleEpoch: projectedLifecycleEpoch,
               lastErrorCode: null,
               lastErrorMessage: null,
               lastSeenAt: "2026-04-06T10:05:00.000Z",
+              observedLifecycleEpoch,
               observedLastSeenAt: "2026-04-06T10:00:00.000Z",
               resourceAvailabilitySummary: { sleep: true },
               sourceInstanceKey,
@@ -3784,6 +3822,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       connectionId: record.id,
       displayName: `Source ${index + 1}`,
       firstSeenAt: "2026-04-06T09:00:00.000Z",
+      lifecycleEpoch: 1,
       lastDataAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,

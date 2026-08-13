@@ -8,6 +8,7 @@ import {
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedJunctionHistoricalBackfillMetadata,
@@ -26,6 +27,7 @@ import type {
 
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillProgress,
@@ -367,6 +369,8 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  /** Absent only during rolling deploys from a pre-epoch Web producer. */
+  lifecycleEpoch?: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -440,11 +444,13 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
   observedLastSeenAt: string | null;
+  observedLifecycleEpoch?: number | null;
   displayName?: string | null;
   status: DeviceConnectionSourceStatus;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  lifecycleEpoch?: number;
   firstSeenAt?: string | null;
   lastSeenAt: string;
   lastDataAt?: string | null;
@@ -743,6 +749,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   occurredAt: "isoTimestamp",
   resource: "string",
   resourceCategory: "string",
+  sourceLifecycleEpoch: "number",
   resourceId: "string",
   resourceType: "string",
   sourceEventType: "string",
@@ -1772,6 +1779,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
     lastErrorMessage: sanitizeHostedRuntimeErrorText(
       readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
     ),
+    ...(record.lifecycleEpoch === undefined
+      ? {}
+      : {
+          lifecycleEpoch: requirePositiveInteger(
+            record.lifecycleEpoch,
+            `${label}.lifecycleEpoch`,
+          ),
+        }),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
     // Absent means "produced before this field existed", which must stay
     // parseable: a runner-first deploy would otherwise reject every snapshot
@@ -1907,6 +1922,8 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
     "lastErrorCode",
     "lastErrorMessage",
     "lastSeenAt",
+    "lifecycleEpoch",
+    "observedLifecycleEpoch",
     "observedLastSeenAt",
     "resourceAvailabilitySummary",
     "sourceInstanceKey",
@@ -1936,6 +1953,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       record.observedLastSeenAt,
       `${label}.observedLastSeenAt`,
     ),
+    ...(record.observedLifecycleEpoch === undefined
+      ? {}
+      : {
+          observedLifecycleEpoch: readNullablePositiveInteger(
+            record.observedLifecycleEpoch,
+            `${label}.observedLifecycleEpoch`,
+          ),
+        }),
     sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`),
     sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     ...(record.displayName === undefined
@@ -1955,6 +1980,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       : {
           lastErrorMessage: sanitizeHostedRuntimeErrorText(
             readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
+          ),
+        }),
+    ...(record.lifecycleEpoch === undefined
+      ? {}
+      : {
+          lifecycleEpoch: requirePositiveInteger(
+            record.lifecycleEpoch,
+            `${label}.lifecycleEpoch`,
           ),
         }),
     ...(record.firstSeenAt === undefined

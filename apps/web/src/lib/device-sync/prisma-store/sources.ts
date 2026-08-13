@@ -24,6 +24,7 @@ export const hostedConnectionSourceRecordArgs = {
     id: true,
     lastErrorCode: true,
     lastErrorMessage: true,
+    lifecycleEpoch: true,
     lastSeenAt: true,
     lastDataAt: true,
     resourceAvailabilitySummaryJson: true,
@@ -47,6 +48,7 @@ export interface HostedDeviceConnectionSource {
   resourceAvailabilitySummary: DeviceConnectionSourceResourceAvailabilitySummary | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lifecycleEpoch: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -64,6 +66,7 @@ export interface UpsertHostedDeviceConnectionSourceInput {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary | null;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  lifecycleEpoch?: number;
   firstSeenAt?: string | null;
   lastSeenAt?: string | null;
   /** Omit to preserve the stored arrival signal; the reconcile projection must. */
@@ -124,6 +127,7 @@ export class PrismaHostedConnectionSourceStore {
     const hasResourceAvailabilitySummary = hasOwnInputProperty(input, "resourceAvailabilitySummary");
     const hasLastErrorCode = hasOwnInputProperty(input, "lastErrorCode");
     const hasLastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage");
+    const hasLifecycleEpoch = hasOwnInputProperty(input, "lifecycleEpoch");
     const hasLastDataAt = hasOwnInputProperty(input, "lastDataAt");
     const lastDataAt = hasLastDataAt ? maybeDate(input.lastDataAt) ?? null : null;
     const displayName = hasDisplayName
@@ -162,6 +166,10 @@ export class PrismaHostedConnectionSourceStore {
       update.lastErrorMessage = lastErrorMessage;
     }
 
+    if (hasLifecycleEpoch) {
+      update.lifecycleEpoch = requireSourceLifecycleEpoch(input.lifecycleEpoch);
+    }
+
     // Only an explicit value moves the arrival signal. The reconcile projection
     // omits it, so a source the provider still lists but no longer feeds keeps
     // its real last-delivery instant.
@@ -183,6 +191,9 @@ export class PrismaHostedConnectionSourceStore {
         id: generateHostedRandomPrefixedId("dcs"),
         lastErrorCode,
         lastErrorMessage,
+        lifecycleEpoch: hasLifecycleEpoch
+          ? requireSourceLifecycleEpoch(input.lifecycleEpoch)
+          : 1,
         lastSeenAt,
         lastDataAt,
         resourceAvailabilitySummaryJson: toNullablePrismaJsonValue(resourceAvailabilitySummary),
@@ -400,6 +411,7 @@ export function mapHostedConnectionSourceRecord(
     id: record.id,
     lastErrorCode: sanitizeSourceErrorCode(record.lastErrorCode),
     lastErrorMessage: omitHostedSqlErrorText(record.lastErrorMessage),
+    lifecycleEpoch: readSourceLifecycleEpoch(record.lifecycleEpoch),
     lastSeenAt: record.lastSeenAt.toISOString(),
     lastDataAt: record.lastDataAt?.toISOString() ?? null,
     resourceAvailabilitySummary: sanitizeResourceAvailabilitySummary(
@@ -410,6 +422,23 @@ export function mapHostedConnectionSourceRecord(
     status: normalizeSourceStatus(record.status),
     updatedAt: record.updatedAt.toISOString(),
   };
+}
+
+function requireSourceLifecycleEpoch(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw sourceContractError(
+      "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+      "Hosted device connection source lifecycle epochs must be positive integers.",
+    );
+  }
+  return value;
+}
+
+function readSourceLifecycleEpoch(value: unknown): number {
+  if (value === null || value === undefined || value === 0) {
+    return 1;
+  }
+  return requireSourceLifecycleEpoch(value);
 }
 
 function requireConnectionId(value: string): string {

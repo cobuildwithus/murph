@@ -7,9 +7,6 @@ import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
-import {
-  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
-} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -34,6 +31,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import {
   bucketHostedDeviceSyncEventToProviderSendDelay,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   measureHostedDeviceSyncProviderSendToWebhookMs,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
@@ -410,12 +408,6 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
-    await resetHostedJunctionWeightHistoryCoverageForSource({
-      connection,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
   });
 }
 
@@ -429,6 +421,7 @@ function hostedConnectionSourceMatchesReconnectProof(
   return expected.id === current.id
     && expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
+    && expected.lifecycleEpoch === current.lifecycleEpoch
     && expected.lastSeenAt === current.lastSeenAt
     && expected.sourceInstanceKey === current.sourceInstanceKey
     && expected.status === current.status;
@@ -514,11 +507,19 @@ export async function reconcileHostedDeviceSyncConnectionSourceRegistration(inpu
         return "admitted" as const;
       }
       if (source.status === "disconnected" && source.lastErrorCode === null) {
+        await input.store.syncDurableConnectionState({
+          ...connection,
+          metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+            metadata: connection.metadata,
+            providerSlug: sourceProviderSlug,
+          }),
+        }, tx);
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: source.sourceInstanceKey,
           sourceProviderSlug,
           status: "connected",
+          lifecycleEpoch: nextHostedSourceLifecycleEpoch(source.lifecycleEpoch),
           lastErrorCode: null,
           lastErrorMessage: null,
           lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt),
@@ -695,20 +696,6 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             lastSeenAt: sourceStartedAt,
             tx,
           });
-          const connection = await input.store.getConnectionForUser(
-            input.userId,
-            input.connectionId,
-            tx,
-          );
-          if (!connection) {
-            connectionChangedDuringDisconnectError();
-          }
-          await resetHostedJunctionWeightHistoryCoverageForSource({
-            connection,
-            sourceProviderSlug,
-            store: input.store,
-            tx,
-          });
           return { complete: true as const, source: preparedSource };
         },
       );
@@ -769,12 +756,6 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
-    await resetHostedJunctionWeightHistoryCoverageForSource({
-      connection,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
     return {
       connectionId: input.connectionId,
       lastSeenAt: preparedSource.lastSeenAt,
@@ -782,28 +763,6 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       sourceProviderSlug,
     };
   });
-}
-
-async function resetHostedJunctionWeightHistoryCoverageForSource(input: {
-  connection: PublicDeviceSyncAccount;
-  sourceProviderSlug: string;
-  store: PrismaDeviceSyncControlPlaneStore;
-  tx: HostedPrismaTransactionClient;
-}): Promise<void> {
-  const metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
-    metadata: input.connection.metadata,
-    providerSlug: input.sourceProviderSlug,
-    resource: "weight",
-    version: 1,
-  });
-  if (!metadata) {
-    return;
-  }
-
-  await input.store.syncDurableConnectionState({
-    ...input.connection,
-    metadata,
-  }, input.tx);
 }
 
 /**
@@ -1436,11 +1395,27 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         ) {
           throw connectionEstablishmentStaleError();
         }
+        if (currentSource?.status === "disconnected") {
+          await input.store.syncDurableConnectionState({
+            ...current,
+            metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+              metadata: current.metadata,
+              providerSlug: linkedSource.sourceProviderSlug,
+            }),
+          }, tx);
+        }
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: linkedSource.sourceInstanceKey,
           sourceProviderSlug: linkedSource.sourceProviderSlug,
           status: "connected",
+          ...(currentSource?.status === "disconnected"
+            ? {
+                lifecycleEpoch: nextHostedSourceLifecycleEpoch(
+                  currentSource.lifecycleEpoch,
+                ),
+              }
+            : {}),
           firstSeenAt: input.now,
           lastSeenAt: input.now,
           tx,
@@ -1645,6 +1620,18 @@ function nextHostedSourceLifecycleAt(previous: string | null): string {
     Date.now(),
     Number.isFinite(previousMs) ? previousMs + 1 : 0,
   )));
+}
+
+function nextHostedSourceLifecycleEpoch(previous: number): number {
+  if (!Number.isSafeInteger(previous) || previous < 1 || previous >= Number.MAX_SAFE_INTEGER) {
+    throw deviceSyncError({
+      code: "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+      message: "Device source lifecycle state was invalid. Reconnect the parent connection.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  return previous + 1;
 }
 
 function isHostedSourceConnectionStartOlder(

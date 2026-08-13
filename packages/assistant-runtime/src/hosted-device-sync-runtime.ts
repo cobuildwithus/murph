@@ -266,6 +266,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
           : { resourceAvailabilitySummary: source.resourceAvailabilitySummary }),
         lastErrorCode: source.lastErrorCode,
         lastErrorMessage: source.lastErrorMessage,
+        ...(source.lifecycleEpoch === undefined
+          ? {}
+          : { lifecycleEpoch: source.lifecycleEpoch }),
         firstSeenAt: source.firstSeenAt,
         lastSeenAt: source.lastSeenAt,
         // Merged monotonically below rather than taken verbatim: Web and the
@@ -392,6 +395,11 @@ function shouldPreserveLocalHydrationSource(input: {
 }): boolean {
   if (input.hostedConnectionEpochChanged) {
     return false;
+  }
+
+  const hostedLifecycleEpoch = input.source.lifecycleEpoch ?? 1;
+  if (input.localSource.lifecycleEpoch !== hostedLifecycleEpoch) {
+    return input.localSource.lifecycleEpoch > hostedLifecycleEpoch;
   }
 
   // An arrival can advance with no other field moving, so a lastSeenAt-only
@@ -1589,6 +1597,12 @@ function buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
         sourceInstanceKey: source.sourceInstanceKey,
         sourceProviderSlug: source.sourceProviderSlug,
         observedLastSeenAt: baseline?.lastSeenAt ?? null,
+        ...(baseline?.lifecycleEpoch === undefined
+          ? {}
+          : {
+              lifecycleEpoch: source.lifecycleEpoch,
+              observedLifecycleEpoch: baseline.lifecycleEpoch,
+            }),
         displayName: source.displayName ?? null,
         status: source.status,
         resourceAvailabilitySummary: { ...source.resourceAvailabilitySummary },
@@ -1624,6 +1638,10 @@ function hostedDeviceSyncRuntimeSourceUpdateMatchesBaseline(
     )
     && (baseline.lastErrorCode ?? null) === (update.lastErrorCode ?? null)
     && (baseline.lastErrorMessage ?? null) === (update.lastErrorMessage ?? null)
+    && (
+      update.lifecycleEpoch === undefined
+      || (baseline.lifecycleEpoch ?? 1) === update.lifecycleEpoch
+    )
     && baseline.firstSeenAt === (update.firstSeenAt ?? null)
     && baseline.lastSeenAt === update.lastSeenAt
     && (baseline.lastDataAt ?? null) === (update.lastDataAt ?? null);

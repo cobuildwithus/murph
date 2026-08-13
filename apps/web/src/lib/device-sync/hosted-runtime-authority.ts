@@ -607,6 +607,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               ...(Object.prototype.hasOwnProperty.call(source, "lastErrorMessage")
                 ? { lastErrorMessage: source.lastErrorMessage ?? null }
                 : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lifecycleEpoch")
+                ? { lifecycleEpoch: source.lifecycleEpoch }
+                : {}),
               ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
                 ? { firstSeenAt: source.firstSeenAt ?? null }
                 : {}),
@@ -1345,6 +1348,7 @@ function toHostedRuntimeConnectionSourceSnapshot(
     firstSeenAt: source.firstSeenAt,
     lastErrorCode: source.lastErrorCode,
     lastErrorMessage: source.lastErrorMessage,
+    lifecycleEpoch: source.lifecycleEpoch,
     lastSeenAt: source.lastSeenAt,
     lastDataAt: source.lastDataAt,
     resourceCount: countHostedRuntimeConnectionSourceResources(
@@ -1478,6 +1482,33 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
     let update = normalized.update;
     const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
     const currentLastSeenAt = current?.lastSeenAt ?? null;
+
+    if (
+      current
+      && update.observedLifecycleEpoch !== undefined
+      && current.lifecycleEpoch !== update.observedLifecycleEpoch
+    ) {
+      staleCount += 1;
+      continue;
+    }
+
+    if (
+      current
+      && update.lifecycleEpoch !== undefined
+      && current.lifecycleEpoch !== update.lifecycleEpoch
+    ) {
+      staleCount += 1;
+      continue;
+    }
+
+    if (
+      input.provider.trim().toLowerCase() === "junction"
+      && current?.status === "disconnected"
+      && update.status === "connected"
+    ) {
+      staleCount += 1;
+      continue;
+    }
 
     if (current && isHostedSourceDisconnectFenced(current)) {
       staleCount += 1;
@@ -1613,6 +1644,10 @@ function hostedRuntimeSourceUpdateMatchesCurrent(
     )
     && current.lastErrorCode === (update.lastErrorCode ?? null)
     && current.lastErrorMessage === (update.lastErrorMessage ?? null)
+    && (
+      update.lifecycleEpoch === undefined
+      || current.lifecycleEpoch === update.lifecycleEpoch
+    )
     && current.firstSeenAt === (update.firstSeenAt ?? null)
     && current.lastSeenAt === update.lastSeenAt
     // A push carrier can deliver without any other field moving, so an

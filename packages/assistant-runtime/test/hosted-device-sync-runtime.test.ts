@@ -1019,6 +1019,7 @@ describe("hosted device-sync runtime", () => {
             {
               displayName: "Garmin",
               firstSeenAt: "2026-04-01T09:00:00.000Z",
+              lifecycleEpoch: 1,
               lastErrorCode: null,
               lastErrorMessage: null,
               lastSeenAt,
@@ -1162,6 +1163,7 @@ describe("hosted device-sync runtime", () => {
         {
           displayName: seededSource.displayName,
           firstSeenAt: seededSource.firstSeenAt,
+          lifecycleEpoch: seededSource.lifecycleEpoch,
           lastErrorCode: seededSource.lastErrorCode,
           lastErrorMessage: seededSource.lastErrorMessage,
           lastSeenAt: seededSource.lastSeenAt,
@@ -1173,6 +1175,7 @@ describe("hosted device-sync runtime", () => {
         {
           displayName: "Garmin",
           firstSeenAt: "2026-04-01T09:00:00.000Z",
+          lifecycleEpoch: 1,
           lastErrorCode: null,
           lastErrorMessage: null,
           lastSeenAt: "2026-04-04T09:00:00.000Z",
@@ -1193,6 +1196,7 @@ describe("hosted device-sync runtime", () => {
           {
             displayName: "Garmin updated",
             firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lifecycleEpoch: 1,
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:12:00.000Z",
@@ -1239,6 +1243,7 @@ describe("hosted device-sync runtime", () => {
         lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
         lastErrorMessage: "Historical data remained incomplete.",
         firstSeenAt: refreshedSource.firstSeenAt,
+        lifecycleEpoch: refreshedSource.lifecycleEpoch,
         lastSeenAt: "2026-04-06T09:15:00.000Z",
       });
 
@@ -1256,6 +1261,45 @@ describe("hosted device-sync runtime", () => {
       assert.equal(preservedSource?.status, "error");
       assert.equal(preservedSource?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
       assert.equal(preservedSource?.lastSeenAt, "2026-04-06T09:15:00.000Z");
+
+      snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_source_hydration",
+        externalAccountId: connected.account.externalAccountId,
+        sources: [
+          {
+            displayName: "Garmin reconnected",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lifecycleEpoch: 2,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:14:00.000Z",
+            lastDataAt: null,
+            resourceCount: 3,
+            resourceAvailabilitySummary: {
+              activity: true,
+              hypnogram: true,
+              sleep: true,
+            },
+            sourceInstanceKey: "hosted-source-garmin",
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:21:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const [reconnectedSource] = getStore(service).listConnectionSources({
+        connectionId: connected.account.id,
+      });
+
+      assert.equal(reconnectedSource?.lifecycleEpoch, 2);
+      assert.equal(reconnectedSource?.status, "connected");
+      assert.equal(reconnectedSource?.lastErrorCode, null);
+      assert.equal(reconnectedSource?.lastSeenAt, "2026-04-06T09:14:00.000Z");
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

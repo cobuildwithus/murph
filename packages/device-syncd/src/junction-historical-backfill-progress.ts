@@ -533,6 +533,39 @@ export function removeJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
   return metadata;
 }
 
+/**
+ * Exact-source reconnect admission clears schedule-time history evidence in
+ * the caller's existing database transaction. Blood pressure is provider-pull
+ * completion evidence and is intentionally not reset here.
+ */
+export function clearJunctionScheduleTimeExtendedHistoryCoverageForProvider(input: {
+  metadata: Record<string, unknown>;
+  providerSlug: string;
+}): Record<string, unknown> {
+  let metadata = { ...input.metadata };
+
+  for (const resource of JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS) {
+    if (resource === "blood_pressure") {
+      continue;
+    }
+    const version = JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(resource);
+    if (version === undefined) {
+      continue;
+    }
+    const cleared = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata,
+      providerSlug: input.providerSlug,
+      resource,
+      version,
+    });
+    if (cleared) {
+      metadata = cleared;
+    }
+  }
+
+  return metadata;
+}
+
 export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
   metadata: Record<string, unknown>,
   providerSlug: string,
