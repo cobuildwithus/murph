@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -644,7 +644,10 @@ empty-tree handoff without candidate bytes or a second implementation, local
 terminal recovery before remote synchronization, foreign deterministic-branch
 preservation, exact retained-handoff and branch-nonexistence lease
 authorization, plus
-retryable infrastructure separation and next-issue advancement,
+retryable post-worker authority infrastructure after the parent commit,
+unchanged-PR ancestor normalization that preserves the pre-remote PR-head
+marker while discarding unpushed candidate bytes without a push, non-ancestor
+and projection-drift rejection, and next-issue advancement,
 100-plus-record
 cursor pagination before parent cardinality, clean post-commit/pre-first-push
 resume without a second implementation request or child, exact parent-local

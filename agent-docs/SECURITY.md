@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Non-Negotiable Rules
 
@@ -1201,7 +1201,14 @@ Last verified: 2026-08-12
   expected-SHA lease so a concurrent creator wins and Frog fails closed. Model
   prose never enters that PR.
   ReviewGPT/browser/command/GitHub infrastructure unavailability remains
-  retryable and does not manufacture a terminal classification.
+  retryable and does not manufacture a terminal classification. In particular,
+  the post-worker task refresh happens after the parent commit and outside the
+  worker-output classifier. If that refresh proves task drift while one
+  unchanged exact parent-owned PR remains at an ancestor head, the private
+  terminal marker is bound to that PR head before remote calls; the parent then
+  revalidates the exact projection and ancestry, discards the unpushed local
+  descendant, and edits only the PR body. It never pushes those candidate bytes,
+  and projection drift, missing ancestry, or foreign ownership fails closed.
 - Automatic merge authority is narrower than change authority. The parent
   requires valid preliminary/final ReviewGPT evidence, the exact open PR,
   nonempty green required checks, and a clean current-base merge. It then

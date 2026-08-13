@@ -2399,6 +2399,50 @@ export function authorizedTerminalHandoffLease(options: {
   return options.observedRemoteHead ?? "";
 }
 
+export function normalizeUnpushedDescendantToPullRequestHead(
+  worktree: string,
+  localHead: string,
+  pullRequestHead: string,
+): string {
+  for (const head of [localHead, pullRequestHead]) {
+    if (!/^[0-9a-f]{40}$/u.test(head)) {
+      throw new Error("existing pull request handoff head is invalid");
+    }
+  }
+  if (requireCommand("git", ["rev-parse", "HEAD"], worktree) !== localHead) {
+    throw new Error("local repair head changed before existing pull request handoff");
+  }
+  if (localHead === pullRequestHead) return pullRequestHead;
+  const available = runCommand(
+    "git",
+    ["cat-file", "-e", `${pullRequestHead}^{commit}`],
+    worktree,
+  );
+  const ancestry = available.status === 0
+    ? runCommand(
+      "git",
+      ["merge-base", "--is-ancestor", pullRequestHead, localHead],
+      worktree,
+    )
+    : available;
+  if (ancestry.status !== 0) {
+    throw new Error("existing pull request head is not an ancestor of local repair");
+  }
+  requireCommand("git", ["reset", "--hard", pullRequestHead], worktree);
+  requireCommand(
+    "git",
+    ["clean", "-ffdx", "-e", FROG_AUTOFIX_PR_BODY_PATH],
+    worktree,
+  );
+  if (
+    requireCommand("git", ["rev-parse", "HEAD"], worktree) !== pullRequestHead
+    || requireCommand("git", ["status", "--porcelain"], worktree)
+  ) {
+    throw new Error("existing pull request handoff did not discard local candidate bytes");
+  }
+  return pullRequestHead;
+}
+
 function persistRepairHandoff(options: {
   branch: string;
   expectedPullRequest: BranchPullRequestRecord | null;
@@ -2422,10 +2466,14 @@ function persistRepairHandoff(options: {
   let body: string;
   const bodyPath = path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH);
   if (options.expectedPullRequest) {
+    // The descendant is intentionally disposable. Persist the terminal marker
+    // against the already observed PR head so an interruption before the
+    // remote recheck or local reset still resumes the exact human handoff.
+    const dispositionHead = options.expectedPullRequest.headRefOid;
     body = renderTerminalRepairHandoffBody({
       failure: options.failure,
       firstHead,
-      head,
+      head: dispositionHead,
       issueNumber: options.issueNumber,
       task: options.task,
     });
@@ -2501,12 +2549,29 @@ function persistRepairHandoff(options: {
     fetchMain(options.primary);
     verifyIssueAuthority(options.primary, options.issueNumber);
     if (
-      existing.headRefOid !== head
-      || !isParentOwnedPullRequest(existing, operator, options.branch)
+      !isParentOwnedPullRequest(existing, operator, options.branch)
       || (options.expectedPullRequest
         && !samePullRequestProjection(existing, options.expectedPullRequest))
     ) {
       throw new Error("terminal repair handoff lost exact pull request authority");
+    }
+    if (existing.headRefOid !== head) {
+      if (!options.expectedPullRequest) {
+        throw new Error("terminal repair handoff lost exact pull request authority");
+      }
+      head = normalizeUnpushedDescendantToPullRequestHead(
+        options.worktree,
+        head,
+        existing.headRefOid,
+      );
+      body = renderTerminalRepairHandoffBody({
+        failure: options.failure,
+        firstHead,
+        head,
+        issueNumber: options.issueNumber,
+        task: options.task,
+      });
+      writePrivateFileAtomically(bodyPath, body, 0o600);
     }
     const current = branchOpenPullRequest(
       options.primary,
@@ -2984,11 +3049,6 @@ async function runEditOnlyCycle(options: {
     throw new TerminalPrePullRequestFailure(workerFailure);
   }
   try {
-    refreshAndRequireCommittedFrictionTask(
-      options.primary,
-      options.issueNumber,
-      options.task,
-    );
     const workerBody = validatedWorkerPrBody(
       options.worktree,
       options.issueNumber,
@@ -3013,6 +3073,14 @@ async function runEditOnlyCycle(options: {
     ) throw error;
     throw new TerminalPrePullRequestFailure("worker-output");
   }
+  // Fresh remote task authority is deliberately outside the deterministic
+  // worker-output classifier. Infrastructure failure here leaves the exact
+  // parent commit resumable; a real identity mismatch keeps its typed handoff.
+  refreshAndRequireCommittedFrictionTask(
+    options.primary,
+    options.issueNumber,
+    options.task,
+  );
 }
 
 function issueIsClosed(root: string, issueNumber: number): boolean {

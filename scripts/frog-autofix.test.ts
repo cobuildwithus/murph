@@ -72,6 +72,7 @@ import {
   reusableRepairPhase,
   restoreRecoveredHandoffBeforeWorktreeRecovery,
   isEmptyRepairHandoffCommit,
+  normalizeUnpushedDescendantToPullRequestHead,
   TerminalPrePullRequestFailure,
   terminalWorkerFailureClass,
   trustedReviewControlPaths,
@@ -991,7 +992,20 @@ describe("Frog autofix guards", () => {
     expect(terminalHandoff).toContain("handoffTree !== mainTree");
     expect(terminalHandoff.indexOf("writePrivateFileAtomically(bodyPath"))
       .toBeLessThan(terminalHandoff.indexOf("authenticatedOperator(options.primary)"));
+    expect(terminalHandoff).toContain(
+      "const dispositionHead = options.expectedPullRequest.headRefOid",
+    );
     expect(terminalHandoff).toContain("authorizedTerminalHandoffLease({");
+    expect(terminalHandoff).toContain(
+      "normalizeUnpushedDescendantToPullRequestHead(",
+    );
+    expect(terminalHandoff.indexOf("samePullRequestProjection(existing"))
+      .toBeLessThan(terminalHandoff.indexOf(
+        "normalizeUnpushedDescendantToPullRequestHead(",
+      ));
+    expect(terminalHandoff.indexOf(
+      "normalizeUnpushedDescendantToPullRequestHead(",
+    )).toBeLessThan(terminalHandoff.indexOf("updateParentPullRequestBody("));
     expect(terminalHandoff).toContain(
       "--force-with-lease=refs/heads/${options.branch}:${authorizedLeaseHead}",
     );
@@ -1223,8 +1237,12 @@ describe("Frog autofix guards", () => {
       source.indexOf("async function runEditOnlyCycle"),
       source.indexOf("function issueIsClosed"),
     );
-    expect(editOnly.indexOf("refreshAndRequireCommittedFrictionTask("))
-      .toBeGreaterThan(editOnly.indexOf("const result = await runWorker("));
+    const refresh = editOnly.indexOf("refreshAndRequireCommittedFrictionTask(");
+    expect(refresh).toBeGreaterThan(editOnly.indexOf("const result = await runWorker("));
+    expect(refresh).toBeGreaterThan(editOnly.indexOf("commitParentOwnedChanges("));
+    expect(refresh).toBeGreaterThan(
+      editOnly.indexOf('throw new TerminalPrePullRequestFailure("worker-output")'),
+    );
   });
 
   it("materializes only the exact immutable committed Frog task for reviews", () => {
@@ -2635,6 +2653,43 @@ describe("Frog autofix guards", () => {
         observedRemoteHead: "c".repeat(40),
         previousHandoffHead: head,
       })).toThrow("unproven remote issue branch");
+
+      writeFileSync(path.join(root, "tracked.txt"), "descendant candidate\n");
+      writeFileSync(pendingBodyPath, pendingBody);
+      writeFileSync(ignoredCandidate, "discard descendant residue\n");
+      git("add", "tracked.txt");
+      git("commit", "--quiet", "-m", "local descendant");
+      const descendantHead = git("rev-parse", "HEAD");
+      expect(normalizeUnpushedDescendantToPullRequestHead(
+        root,
+        descendantHead,
+        head,
+      )).toBe(head);
+      expect(git("rev-parse", "HEAD")).toBe(head);
+      expect(readFileSync(path.join(root, "tracked.txt"), "utf8")).toBe("main\n");
+      expect(readFileSync(pendingBodyPath, "utf8")).toBe(pendingBody);
+      expect(existsSync(ignoredCandidate)).toBe(false);
+
+      writeFileSync(path.join(root, "tracked.txt"), "second descendant\n");
+      git("add", "tracked.txt");
+      git("commit", "--quiet", "-m", "second local descendant");
+      const secondDescendant = git("rev-parse", "HEAD");
+      const mainTree = git("rev-parse", "origin/main^{tree}");
+      const mainHead = git("rev-parse", "origin/main");
+      const siblingHead = git(
+        "commit-tree",
+        mainTree,
+        "-p",
+        mainHead,
+        "-m",
+        "non-ancestor sibling",
+      );
+      expect(() => normalizeUnpushedDescendantToPullRequestHead(
+        root,
+        secondDescendant,
+        siblingHead,
+      )).toThrow("not an ancestor");
+      expect(git("rev-parse", "HEAD")).toBe(secondDescendant);
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

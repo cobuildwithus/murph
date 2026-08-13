@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Current Guardrails
 
@@ -267,6 +267,15 @@ Last verified: 2026-08-12
   checks and a
   current-base conflict instead publish the existing review-findings handoff so
   the oldest issue cannot pin later work.
+  The post-worker task refresh is outside deterministic worker-output
+  classification and follows the parent commit. A fetch or GitHub failure
+  therefore leaves that exact commit resumable, while a proven task-identity
+  change enters the terminal handoff path. When an unchanged exact parent-owned
+  PR remains at an ancestor head, that path records the PR-head disposition
+  before remote calls, proves the projection and ancestry, discards the
+  unpushed descendant, and updates only the existing body. It does not push the
+  stale candidate; changed projection, non-ancestor state, or foreign ownership
+  fails closed.
 - Both implementation prompts require an explicit foul-play assessment before
   edits. The exact committed friction binding and repository instruction
   hierarchy own task intent. Fresh implementation ReviewGPT does not request or

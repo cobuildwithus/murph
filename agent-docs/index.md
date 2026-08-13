@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Purpose
 
@@ -47,7 +47,10 @@ closure and bounded never-closed recovery that refuses a deliberate reopen, dura
 descendant/closed-unmerged findings/retrospective
 handoffs for terminal checks and conflicts, fixed-body empty-tree human
 handoff for terminal pre-PR implementation/worker outcomes without a second
-implementation, pre-remote local disposition recovery, and exact retained-head
+implementation, retryable post-commit task refresh outside worker-output
+classification, pre-remote local disposition recovery, unchanged-PR
+ancestor-only descendant discard and exact-body handoff without a push, and
+exact retained-head
 or nonexistence lease authorization that preserves foreign deterministic
 branches, one absolute process-group-bounded
 invocation, a native-advisory-serialized two-hour LaunchAgent, and bounded

@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Local Frog Autofix
 
@@ -94,6 +94,10 @@ the exact retained neutral handoff head from an interrupted parent push can
 authorize a lease-based refresh, while a branch-creation push uses an explicit
 nonexistence lease. It never requests a second implementation; browser,
 ReviewGPT, command, and GitHub infrastructure unavailability remains retryable.
+The post-worker task refresh runs only after the parent has committed the local
+candidate and outside deterministic worker-output classification, so an
+infrastructure failure preserves that exact resumable commit while an actual
+task-identity change remains a typed terminal handoff.
 Review responses, model proof,
 browser access, and downloaded patches remain in an owner-only parent transient
 directory outside the issue worktree. Only a clean fresh branch may install
@@ -116,6 +120,12 @@ refreshes `origin/main` and revalidates exact open Frog App author, label, and
 one protected-main binding authority immediately before push, then repeats that
 refresh and revalidation immediately before creating a new draft PR. Existing
 PR recovery still edits the one parent-owned PR after the first checkpoint.
+If that checkpoint discovers task drift after a clean unpushed local descendant
+was committed, the parent first persists a private marker for the unchanged
+exact PR head, proves the expected parent-owned projection is unchanged and
+that its head is an ancestor of the local candidate, discards the descendant,
+and updates only that PR body. It never pushes the stale candidate; projection
+drift, missing ancestry, or foreign ownership fails closed.
 Preliminary and final ReviewGPT run through Murph's canonical packager and
 state files from a detached parent-only checkout. The archive contains the
 exact validated parent-local body rather than refetching mutable presentation;
