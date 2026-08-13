@@ -88,9 +88,9 @@ Updated: 2026-08-12
   explicitly preserved historical records.
 - Affected package typechecks, operator-config, inbox-services, setup-cli,
   assistant-cli, inboxd, assistant-runtime, Cloudflare env/deploy tests, built
-  runtime preparation, and generated config-schema drift checks pass. Final
-  assistant-engine and CLI reruns, exact-head CI, and ReviewGPT audit rounds are
-  still pending.
+  runtime preparation, generated config-schema drift checks, assistant-engine,
+  and CLI suites pass. Exact-head CI and ReviewGPT audit rounds are still
+  pending.
 - The preliminary ReviewGPT specialist pass found one accepted high-severity
   upgrade defect plus its associated medium-severity proof gap: a prior
   versioned local-email connector invalidated the whole retained inbox config,
@@ -111,6 +111,21 @@ Updated: 2026-08-12
   carried the retired subprocessor after the Markdown source changed. The PDF
   generator, legal index, manifest, and current/versioned August 12 artifacts
   now agree; the published dated PDFs from prior versions remain immutable.
+- Final ReviewGPT round 2 reviewed pre-remediation head `04c00f81cf` and returned
+  three original-PR findings. The persisted-config finding is accepted and
+  resolved by the version-2 reconciliation above. The legal version-identity
+  portion is accepted and resolved by the new August 12 source/index/generator,
+  current alias, manifest, and versioned PDFs. Its request to keep AgentMail in
+  the current register for old installed binaries is rejected: those binaries
+  use a locally supplied credential, are not part of the current code or
+  supported provider set, and retain their dated disclosure artifacts; keeping
+  the provider in the current register would make the current document false.
+- Round 2 also found an accepted local prompt gap: automation guidance still
+  suggested asking for email-routing details before the command rejected the
+  route. Local guidance now names Telegram/Linq as the supported automation
+  routes and redirects email intent before soliciting any route data; hosted
+  email guidance remains unchanged. Focused assembled-prompt tests cover both
+  sides of that boundary.
 
 ## Change-shape retrospective
 
@@ -151,6 +166,16 @@ Updated: 2026-08-12
   scans. The broad assistant-engine run passed every other file at the default
   heap, while its largest local-service file passed separately with an 8 GB
   heap after the default 4 GB worker exhausted memory.
+- Complete provider-input measurement used the pinned real Codex App Server,
+  a hermetic Responses endpoint, `gpt-5.6-terra` with low reasoning, the built
+  assistant CLI contract, and production code mode against exact merge base
+  `023ec1b6e7` and the corrected working head. The individual local Telegram
+  request changed from 30,877 tokens / 140,841 bytes to 30,918 tokens / 141,071
+  bytes: +41 tokens (+0.1328%) and +230 bytes, entirely in the developer-message
+  `input` item. The hosted group Linq request remained 27,598 tokens / 127,911
+  bytes. No selected provider field besides `input` changed. Paths and volatile
+  identifiers were normalized, and the temporary capture harness and artifacts
+  were removed after measurement.
 - Exact corrected-head GitHub Actions and subsequent ReviewGPT rounds remain
   required before closure.
 - Expected outcomes: retained providers work through their existing owners,
