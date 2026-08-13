@@ -1290,7 +1290,7 @@ const supplementIntakeEventFieldsShape = {
 
 const activitySessionEventFieldsShape = {
   activityType: patternedString(SLUG_PATTERN),
-  durationMinutes: integerSchema(1),
+  durationMinutes: integerSchema(1).optional(),
   distanceKm: numberSchema(0).optional(),
   ...experimentLinkShape,
   workout: workoutSessionSchema,

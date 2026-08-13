@@ -914,6 +914,66 @@ test('Strong CSV import requires weight provenance, commits once, and returns bo
   assert.equal(correctedReplay.rawStored, false)
 })
 
+test('Strong CSV import keeps structured sets when source duration is unknown', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-strong-duration-')
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutSliceCli()
+
+  await runWorkoutCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'UTC',
+  ])
+
+  const csvPath = path.join(parentRoot, 'strong-duration.csv')
+  await writeFile(csvPath, [
+    'Date,Workout Name,Duration,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE',
+    '2026-04-08 10:00:00,Malformed,45m unexpected,Squat,1,100,5,0,0,,,',
+    '2026-04-09 10:00:00,Over range,30h 1m,Press,1,80,8,0,0,,,',
+    '2026-04-10 10:00:00,Missing,,Row,1,60,10,0,0,,,',
+    '',
+  ].join('\n'), 'utf8')
+
+  const imported = requireData((await runWorkoutCli<{
+    createdCount: number
+    lookupIds: string[]
+    warnings: string[]
+  }>(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'kg',
+  ])).envelope)
+  assert.equal(imported.createdCount, 3)
+  assert.equal(imported.lookupIds.length, 3)
+  assert.match(imported.warnings.join(' '), /duration/u)
+
+  for (const lookupId of imported.lookupIds) {
+    const shown = requireData((await runWorkoutCli<{
+      entity: {
+        data: {
+          durationMinutes?: number
+          workout?: { exercises?: Array<{ sets?: unknown[] }> }
+        }
+      }
+    }>(cli, [
+      'workout',
+      'show',
+      lookupId,
+      '--vault',
+      vaultRoot,
+    ])).envelope)
+    assert.equal(shown.entity.data.durationMinutes, undefined)
+    assert.equal(shown.entity.data.workout?.exercises?.[0]?.sets?.length, 1)
+  }
+})
+
 test('workout CSV manifests omit arbitrary source headers from storage and public output', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-header-privacy-')
   cleanupPaths.push(parentRoot)

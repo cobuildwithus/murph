@@ -196,6 +196,7 @@ describe("workout-model", () => {
     assert.equal(buildWorkoutTitle("running", 45), "45-minute run");
     assert.equal(buildWorkoutTitle("strength-training", 60, "  Full Body  "), "Full Body");
     assert.equal(buildWorkoutTitle("mobility-flow", 30), "30-minute mobility flow");
+    assert.equal(buildWorkoutTitle("strength-training"), "Strength Training");
 
     const sessionFromSummary = buildWorkoutSessionFromSummary({
       note: "Done.",
@@ -1243,6 +1244,281 @@ describe("workout-import", () => {
       assert.equal(correctedReplay.importedCount, 0);
       assert.equal(correctedReplay.skippedExistingCount, 1);
       assert.equal(correctedReplay.rawStored, false);
+    });
+  });
+
+  test("imports sessions with unknown duration and preserves them through correction and refresh", async () => {
+    await withTempDir(async (tempDir) => {
+      await initializeVault({
+        vaultRoot: tempDir,
+        title: "Workout Duration Test Vault",
+        timezone: "UTC",
+      });
+      const header = "Date,Workout Name,Duration,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE";
+      const originalText = [
+        header,
+        "2026-04-08 10:00:00,Malformed,45m unexpected,Squat,1,100,5,0,0,,,",
+        "2026-04-09 10:00:00,Over range,30h 1m,Press,1,80,8,0,0,,,",
+        "2026-04-10 10:00:00,Missing,,Row,1,60,10,0,0,,,",
+        "",
+      ].join("\n");
+      const csvPath = path.join(tempDir, "unknown-duration.csv");
+      await writeFile(csvPath, originalText, "utf8");
+      const generatedIds = [
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      ];
+      const workoutImportModule = (await importWithMocks(
+        "../src/usecases/workout-import.ts",
+        {
+          "../src/runtime-import.js": () => ({
+            loadRuntimeModule: vi.fn(async (specifier: string) => {
+              if (specifier === "@murphai/core") return coreRuntime;
+              if (specifier === "@murphai/importers") return importersRuntime;
+              if (specifier === "@murphai/runtime-state") {
+                return { generateUlid: () => generatedIds.shift()! };
+              }
+              throw new Error("Unexpected runtime module.");
+            }),
+          }),
+        },
+      )) as typeof import("../src/usecases/workout-import.ts");
+
+      const inspection = await workoutImportModule.inspectWorkoutCsvImport({
+        vault: tempDir,
+        file: csvPath,
+        weightUnit: "kg",
+      });
+      assert.equal(inspection.importable, true);
+      assert.equal(inspection.estimatedWorkouts, 3);
+      assert.match(inspection.warnings.join(" "), /duration/u);
+
+      const imported = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        weightUnit: "kg",
+      });
+      assert.equal(imported.createdCount, 3);
+      const originalPlan = importersRuntime.planWorkoutCsvImport({
+        text: originalText,
+        timeZone: "UTC",
+        weightUnit: "kg",
+      });
+      const importedRecords = await Promise.all(originalPlan.sessions.map((session) =>
+        coreRuntime.findEventByExternalRef({
+          vaultRoot: tempDir,
+          system: "strong",
+          resourceType: "workout-session",
+          resourceId: session.sourceWorkoutId,
+        })));
+      for (const record of importedRecords) {
+        assert.equal(record?.kind, "activity_session");
+        if (!record || record.kind !== "activity_session") {
+          throw new Error("Expected an imported activity session.");
+        }
+        assert.equal(record.durationMinutes, undefined);
+        assert.equal(record.workout.endedAt, undefined);
+        assert.equal(record.workout.exercises[0]?.sets.length, 1);
+      }
+
+      const structuredWithoutDuration = workoutModule.buildStructuredWorkoutActivitySessionDraft({
+        payload: {
+          title: "45 minute challenge",
+          workout: {
+            sourceApp: "strong",
+            routineName: "45 minute challenge",
+            exercises: [{
+              name: "Squat",
+              order: 1,
+              sets: [{ order: 1, reps: 5 }],
+            }],
+          },
+        },
+        source: "import",
+      });
+      assert.equal(structuredWithoutDuration.durationMinutes, undefined);
+
+      const replay = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        weightUnit: "kg",
+      });
+      assert.equal(replay.importedCount, 0);
+      assert.equal(replay.skippedExistingCount, 3);
+
+      const corrected = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        weightUnit: "lb",
+        correctUnits: true,
+      });
+      assert.equal(corrected.supersededCount, 3);
+      const correctedRecords = await Promise.all(originalPlan.sessions.map((session) =>
+        coreRuntime.findEventByExternalRef({
+          vaultRoot: tempDir,
+          system: "strong",
+          resourceType: "workout-session",
+          resourceId: session.sourceWorkoutId,
+        })));
+      for (const record of correctedRecords) {
+        assert.equal(record?.kind, "activity_session");
+        if (!record || record.kind !== "activity_session") {
+          throw new Error("Expected a corrected activity session.");
+        }
+        assert.equal(record.durationMinutes, undefined);
+        assert.equal(record.workout.endedAt, undefined);
+        assert.equal(record.workout.exercises[0]?.sets[0]?.weightUnit, "lb");
+      }
+
+      const expandedText = [
+        originalText.trimEnd(),
+        "2026-04-11 10:00:00,Known,20m,Deadlift,1,120,5,0,0,,,",
+        "",
+      ].join("\n");
+      const expandedPath = path.join(tempDir, "unknown-duration-expanded.csv");
+      await writeFile(expandedPath, expandedText, "utf8");
+      const expanded = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: expandedPath,
+        weightUnit: "lb",
+      });
+      assert.equal(expanded.createdCount, 1);
+      assert.equal(expanded.skippedExistingCount, 3);
+      for (const session of originalPlan.sessions) {
+        const record = await coreRuntime.findEventByExternalRef({
+          vaultRoot: tempDir,
+          system: "strong",
+          resourceType: "workout-session",
+          resourceId: session.sourceWorkoutId,
+        });
+        assert.equal(
+          record?.kind === "activity_session" ? record.durationMinutes : null,
+          undefined,
+        );
+      }
+    });
+  });
+
+  test("attaches structured imports only to raw batches with matching provenance", async () => {
+    await withTempDir(async (tempDir) => {
+      const csvText = [
+        "Date,Workout Name,Duration,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE",
+        "2026-04-08 10:00:00,Upper,45m,Press,1,100,5,0,0,,Scoped evidence,",
+        "",
+      ].join("\n");
+      const generatedIds = [
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+      ];
+      const workoutImportModule = (await importWithMocks(
+        "../src/usecases/workout-import.ts",
+        {
+          "../src/runtime-import.js": () => ({
+            loadRuntimeModule: vi.fn(async (specifier: string) => {
+              if (specifier === "@murphai/core") return coreRuntime;
+              if (specifier === "@murphai/importers") return importersRuntime;
+              if (specifier === "@murphai/runtime-state") {
+                return { generateUlid: () => generatedIds.shift()! };
+              }
+              throw new Error("Unexpected runtime module.");
+            }),
+          }),
+        },
+      )) as typeof import("../src/usecases/workout-import.ts");
+
+      await initializeVault({
+        vaultRoot: tempDir,
+        title: "Workout Raw Provenance Test Vault",
+        timezone: "UTC",
+      });
+      const csvPath = path.join(tempDir, "raw-provenance.csv");
+      await writeFile(csvPath, csvText, "utf8");
+      const unresolved = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        storeRawOnly: true,
+      });
+      assert.equal(unresolved.weightUnit, null);
+
+      const confirmed = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        weightUnit: "kg",
+      });
+      assert.equal(confirmed.createdCount, 1);
+      assert.equal(confirmed.rawStored, true);
+      assert.notEqual(confirmed.rawFile, unresolved.rawFile);
+      assert.ok(confirmed.manifestFile);
+      const confirmedManifest = JSON.parse(
+        await readFile(path.join(tempDir, confirmed.manifestFile), "utf8"),
+      ) as { provenance: { weightUnit: string | null } };
+      assert.equal(confirmedManifest.provenance.weightUnit, "kg");
+      const confirmedPlan = importersRuntime.planWorkoutCsvImport({
+        text: csvText,
+        timeZone: "UTC",
+        weightUnit: "kg",
+      });
+      const confirmedEvent = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: confirmedPlan.sessions[0]?.sourceWorkoutId ?? "missing",
+      });
+      assert.deepEqual(confirmedEvent?.rawRefs, [confirmed.rawFile]);
+
+      const replay = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        weightUnit: "kg",
+      });
+      assert.equal(replay.importedCount, 0);
+      assert.equal(replay.skippedExistingCount, 1);
+
+      const expandedPath = path.join(tempDir, "raw-provenance-expanded.csv");
+      await writeFile(expandedPath, [
+        csvText.trimEnd(),
+        "2026-04-09 10:00:00,Lower,30m,Squat,1,120,5,0,0,,Second session,",
+        "",
+      ].join("\n"), "utf8");
+      const expanded = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: expandedPath,
+        weightUnit: "kg",
+      });
+      assert.equal(expanded.createdCount, 1);
+      assert.equal(expanded.skippedExistingCount, 1);
+
+      const matchingVault = path.join(tempDir, "matching");
+      await initializeVault({
+        vaultRoot: matchingVault,
+        title: "Matching Workout Raw Provenance Test Vault",
+        timezone: "UTC",
+      });
+      const matchingCsvPath = path.join(matchingVault, "raw-provenance.csv");
+      await writeFile(matchingCsvPath, csvText, "utf8");
+      const matchingRaw = await workoutImportModule.importWorkoutCsv({
+        vault: matchingVault,
+        file: matchingCsvPath,
+        weightUnit: "kg",
+        storeRawOnly: true,
+      });
+      const rawFilesBefore = await coreRuntime.walkVaultFiles(matchingVault, "raw/workouts");
+      const matchingImport = await workoutImportModule.importWorkoutCsv({
+        vault: matchingVault,
+        file: matchingCsvPath,
+        weightUnit: "kg",
+      });
+      assert.equal(matchingImport.createdCount, 1);
+      assert.equal(matchingImport.rawStored, false);
+      assert.equal(matchingImport.rawFile, matchingRaw.rawFile);
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(matchingVault, "raw/workouts"),
+        rawFilesBefore,
+      );
     });
   });
 

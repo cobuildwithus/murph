@@ -227,6 +227,18 @@ Updated: 2026-08-12
   derived exercise mode. The fence now covers only exercise identity/order and
   set array order. Selected-axis projections still reject edited load or
   distance values, and expected-latest fences still reject concurrent changes.
+- Final ReviewGPT round 11 found that the planner deliberately preserved
+  sessions with missing, malformed, or over-range durations, but the canonical
+  activity-session contract still required a duration and rejected the batch.
+  Canonical structured workouts now allow an unknown duration, omit it without
+  inventing a value, and retain every otherwise valid exercise and set through
+  replay, unit correction, and refreshed-snapshot reconciliation.
+- Final ReviewGPT round 11 also found that a structured import could attach to
+  an exact raw-only batch whose unresolved unit provenance differed from the
+  confirmed plan. An unattached raw-only batch is now reused only when provider,
+  delimiter, timezone, weight unit, and distance unit all match exactly;
+  otherwise the structured import stores and attaches a correctly provenanced
+  immutable batch.
 
 ## Verification
 
@@ -276,3 +288,12 @@ Updated: 2026-08-12
   Unit-correction coverage proves notes, reps, duration, RPE, and exercise mode
   survive, while a positional set-order edit and a selected-axis load edit both
   still fail closed.
+- Round 11 remediation proof: contract parsing accepts structured activity
+  sessions without a proven duration; production-runtime usecase coverage
+  imports malformed, over-range, and missing-duration sessions with all sets,
+  then preserves them through replay, correction, and expansion. A separate
+  production-runtime test proves unresolved raw-only units create a new
+  confirmed manifest and attachment, while exact matching provenance still
+  reuses the original raw batch. Focused contracts (12), importer planner (27),
+  workout usecase (20), and CLI (10) tests pass; contracts artifacts and the
+  affected contracts, core, query, and vault-usecases typechecks pass.

@@ -263,7 +263,7 @@ function resolveStructuredDurationMinutes(input: {
   payloadDurationMinutes?: number
   structuredWorkout?: WorkoutSession
   fallbackText?: string
-}): number {
+}): number | undefined {
   const explicitDurationMinutes =
     typeof input.explicitDurationMinutes === 'number'
       ? validateDurationMinutes(input.explicitDurationMinutes)
@@ -286,6 +286,10 @@ function resolveStructuredDurationMinutes(input: {
   )
   if (derivedDurationMinutes !== null) {
     return derivedDurationMinutes
+  }
+
+  if (input.structuredWorkout) {
+    return undefined
   }
 
   if (input.fallbackText) {
@@ -440,7 +444,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
     title,
     note,
     activityType: activityDescriptor.activityType,
-    durationMinutes,
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
     ...(typeof distanceKm === 'number' ? { distanceKm } : {}),
     workout: structuredWorkout,
   }) as ActivitySessionDraft

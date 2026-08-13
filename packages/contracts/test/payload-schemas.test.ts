@@ -57,6 +57,33 @@ test("sleep session records accept only explicit canonical main-sleep and nap id
   assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "rest" }).success, false);
 });
 
+test("activity session records preserve structured workouts when duration is unknown", () => {
+  const record = eventRecordSchema.parse({
+    schemaVersion: "murph.event.v1",
+    id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F1",
+    kind: "activity_session",
+    occurredAt: "2026-03-15T22:00:00.000Z",
+    recordedAt: "2026-03-15T23:00:00.000Z",
+    dayKey: "2026-03-15",
+    timeZone: "UTC",
+    source: "import",
+    title: "Strength",
+    activityType: "strength-training",
+    workout: {
+      sourceApp: "strong",
+      exercises: [{
+        name: "Squat",
+        order: 1,
+        sets: [{ order: 1, reps: 5 }],
+      }],
+    },
+  });
+
+  assert.equal(record.kind, "activity_session");
+  assert.equal(record.durationMinutes, undefined);
+  assert.equal(record.workout.exercises[0]?.sets[0]?.reps, 5);
+});
+
 test("condition and blood-test scaffolds validate against import payload schemas", () => {
   const condition = healthEntityDefinitionByKind.get("condition");
   const bloodTest = healthEntityDefinitionByKind.get("blood_test");

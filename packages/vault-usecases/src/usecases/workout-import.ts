@@ -987,7 +987,12 @@ async function resolveExistingWorkoutEvidence(input: {
     const rawFile = candidate.rawFile
     const matches = eventsByRawFile[index] ?? []
     if (matches.length === 0) {
-      rawOnlyFile = rawOnlyFile ?? rawFile
+      const provenanceMatches = candidate.source === input.plan.source
+        && candidate.delimiter === input.plan.delimiter
+        && candidate.timeZone === input.plan.timeZone
+        && candidate.weightUnit === input.plan.weightUnit
+        && candidate.distanceUnit === input.plan.distanceUnit
+      if (provenanceMatches) rawOnlyFile = rawOnlyFile ?? rawFile
       continue
     }
     const mapping = mappingFromAttachedEvents(input.plan, matches)
@@ -1048,7 +1053,6 @@ async function resolveExistingWorkoutEvidence(input: {
       }
       continue
     }
-    rawOnlyFile = rawOnlyFile ?? rawFile
   }
 
   if (foundAmbiguousCanonicalEvidence) {
