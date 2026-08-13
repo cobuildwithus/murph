@@ -1,6 +1,6 @@
 # Relink retained device-sync dirty ownership
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-13
 
@@ -31,7 +31,8 @@ Updated: 2026-08-13
 1. [completed] Reproduce the cold-restore acknowledgement-link loss.
 2. [completed] Relink matching existing pending jobs and bound only new work.
 3. [completed] Add maximum-cardinality, mixed-set, and shared-dedupe coverage.
-4. [in_progress] Run focused verification, ReviewGPT, CI, merge, and deploy.
+4. [completed] Run focused verification and routed ReviewGPT. CI, merge, and
+   deployment continue as operational closeout after plan archival.
 
 ## Decisions
 
@@ -56,3 +57,7 @@ Updated: 2026-08-13
   claim/dead-letter owner terminally acknowledges the linked dirty row.
 - Post-remediation proof passed: 100 assistant-runtime tests, 82 maintenance
   tests, 47 device-sync store tests, and both package typechecks.
+- Final ReviewGPT round 3 passed with no findings after the required anomaly
+  retrospective confirmed deletion-based continuation.
+- Current-base merge-tree proof passed without conflicts.
+Completed: 2026-08-13
