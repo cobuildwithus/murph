@@ -3926,6 +3926,9 @@ function collectVariableBindings(
   contents: string,
 ): Map<string, VariableBinding[]> {
   const scopes = collectLexicalScopes(sourceFile);
+  const conditionalAssignmentStarts = collectConditionalAssignmentStarts(
+    sourceFile,
+  );
   const bindings = new Map<string, VariableBinding[]>();
   traverseFast(sourceFile, (node) => {
     if (
@@ -3943,7 +3946,8 @@ function collectVariableBindings(
       const lexicalScope = findInnermostLexicalScope(scopes, node.start ?? 0);
       current.push({
         definitive:
-          previous === null || previous.scopeStart === lexicalScope.start,
+          !conditionalAssignmentStarts.has(node.start ?? 0) &&
+          (previous === null || previous.scopeStart === lexicalScope.start),
         identifierStart: node.left.start ?? node.start ?? 0,
         initializer: node.right,
         scopeEnd: previous?.scopeEnd ?? lexicalScope.end,
@@ -3973,6 +3977,62 @@ function collectVariableBindings(
     bindings.set(node.id.name, current);
   });
   return bindings;
+}
+
+function collectConditionalAssignmentStarts(sourceFile: Node): Set<number> {
+  const starts = new Set<number>();
+  const collectFrom = (root: Node): void => {
+    if (isFunction(root)) {
+      return;
+    }
+    traverseFast(root, (node) => {
+      if (node !== root && isFunction(node)) {
+        return traverseFast.skip;
+      }
+      if (isAssignmentExpression(node)) {
+        starts.add(node.start ?? 0);
+      }
+    });
+  };
+
+  traverseFast(sourceFile, (node) => {
+    switch (node.type) {
+      case "ConditionalExpression":
+        collectFrom(node.consequent);
+        collectFrom(node.alternate);
+        break;
+      case "DoWhileStatement":
+      case "WhileStatement":
+        collectFrom(node.body);
+        break;
+      case "ForInStatement":
+      case "ForOfStatement":
+        collectFrom(node.body);
+        break;
+      case "ForStatement":
+        collectFrom(node.body);
+        if (node.update) {
+          collectFrom(node.update);
+        }
+        break;
+      case "IfStatement":
+        collectFrom(node.consequent);
+        if (node.alternate) {
+          collectFrom(node.alternate);
+        }
+        break;
+      case "LogicalExpression":
+        collectFrom(node.right);
+        break;
+      case "SwitchCase":
+        for (const statement of node.consequent) {
+          collectFrom(statement);
+        }
+        break;
+    }
+  });
+
+  return starts;
 }
 
 function collectLexicalScopes(sourceFile: Node): LexicalScope[] {

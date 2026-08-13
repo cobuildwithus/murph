@@ -232,8 +232,9 @@ Updated: 2026-08-13
 
 Current evidence:
 
-- Focused guard suite: 92 tests passed after the round-7 correction.
-- Repository-tool suite: 35 files and 602 tests passed after refreshing the
+- Focused guard suite: 93 tests passed after the round-7 correction and the
+  conditional-assignment provenance follow-up.
+- Repository-tool suite: 35 files and 603 tests passed after refreshing the
   already-declared, lockfile-frozen ElevenLabs dependency.
 - Tools and operator-config TypeScript no-emit checks: passed.
 - `pnpm provider-requests:guard`: intentionally exits 1 with 39 findings after

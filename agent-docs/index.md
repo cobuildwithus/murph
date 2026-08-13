@@ -9,8 +9,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 
 The external-provider request guard, including its registered providers,
 structural presigned/internal/xAI exceptions, raw HTTP transport discovery,
-effective assignment and fetch invocation provenance, SDK fetch-adapter and
-handwritten wire-contract detection, and exact current failure inventory, is
+conditional-aware effective assignment and fetch invocation provenance, SDK
+fetch-adapter and handwritten wire-contract detection, and exact current failure inventory, is
 specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.

@@ -188,6 +188,25 @@ describe("check-provider-request-boundaries", () => {
       ]);
   });
 
+  it("does not let conditional assignments erase provider provenance", () => {
+    const matches = rawHttpViolations(
+      [
+        "let unbraced = 'https://api.openai.com/v1/responses';",
+        "if (process.env.USE_INTERNAL) unbraced = '/api/status';",
+        "fetch(unbraced);",
+        "let logical = 'https://api.openai.com/v1/responses';",
+        "process.env.USE_INTERNAL && (logical = '/api/status');",
+        "fetch(logical);",
+        "let ternary = 'https://api.openai.com/v1/responses';",
+        "process.env.USE_INTERNAL ? (ternary = '/api/status') : undefined;",
+        "fetch(ternary);",
+      ].join("\n"),
+      "apps/web/src/lib/openai/runtime.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 6, 9]);
+  });
+
   it("keeps provider-neutral exact callbacks outside provider fallback", () => {
     const matches = rawHttpViolations(
       [

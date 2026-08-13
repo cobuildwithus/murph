@@ -305,8 +305,10 @@ Last verified: 2026-08-12
   literals or provider-configured URL data. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest
   chronological declaration or simple assignment in the variable's lexical
-  owner. Only exact one-hop wrappers that forward each argument in place
-  inherit transport identity. The guard resolves standard fetch `.call`
+  owner. Assignments reached only through conditional branches, short-circuit
+  expressions, switch cases, or loop bodies remain possible values and cannot
+  erase earlier provider provenance. Only exact one-hop wrappers that forward
+  each argument in place inherit transport identity. The guard resolves standard fetch `.call`
   through the underlying transport target. It admits `.apply` argument
   semantics only for a direct, closed array expression without a spread or
   hole; mutable tuple identifiers fail closed. Opaque exact fetch-compatible
