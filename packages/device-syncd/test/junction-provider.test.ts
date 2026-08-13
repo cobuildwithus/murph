@@ -1081,6 +1081,44 @@ test.each([
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
 });
 
+test("Junction deployed full-job progress resumes once and emits only scalar successors", async () => {
+  const requestedResources: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+    )?.[1];
+    if (!resource) {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    requestedResources.push(decodeURIComponent(resource));
+    return createJsonResponse({ groups: {} });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["steps", "heartrate"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext(),
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor: JSON.stringify({
+        v: 1,
+        a: "steps",
+        // The deployed envelope validated completed resources against the
+        // global registry, even if the current config later became narrower.
+        i: ["distance"],
+      }),
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedResources, ["steps"]);
+  assert.equal(result.scheduledJobs?.[0]?.payload?.timeseriesResourceCursor, "heartrate");
+});
+
 test("Junction direct workout_stream unit completes a three-page workout index", async () => {
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => [],
@@ -16202,6 +16240,11 @@ test("Junction scalar timeseries resource continuation fails closed before provi
     { timeseriesResourceCursor: "" },
     { timeseriesResourceCursor: "removed_resource" },
     { timeseriesResourceCursor: JSON.stringify({ v: 1, i: ["steps"] }) },
+    { timeseriesResourceCursor: JSON.stringify({ v: 2, a: "steps", i: [] }) },
+    { timeseriesResourceCursor: JSON.stringify({ v: 1, a: "steps", i: ["steps"] }) },
+    { timeseriesResourceCursor: JSON.stringify({ v: 1, a: "steps", i: ["distance", "distance"] }) },
+    { timeseriesResourceCursor: JSON.stringify({ v: 1, a: "steps", i: ["removed_resource"] }) },
+    { timeseriesResourceCursor: JSON.stringify({ v: 1, a: "steps", i: [], extra: true }) },
     {
       timeseriesResourceCursor: "steps",
       workoutStreamCursor: JSON.stringify({

@@ -3080,7 +3080,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       v: 1,
       i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
     });
-    const timeseriesResourceCursor = "body_mass_index";
+    const timeseriesResourceCursor = JSON.stringify({
+      v: 1,
+      a: "body_mass_index",
+      i: ["distance"],
+    });
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {

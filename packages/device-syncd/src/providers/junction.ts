@@ -192,6 +192,10 @@ interface JunctionDailyTimeseriesImportResult extends JunctionTimeseriesImportRe
 }
 
 const JUNCTION_WORKOUT_STREAM_PROGRESS_VERSION = 1;
+const JUNCTION_DEPLOYED_FULL_JOB_PROGRESS_VERSION = 1;
+const JUNCTION_ALLOWED_TIMESERIES_RESOURCE_SET = new Set<string>(
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+);
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   acceptedProviderRecordCount: number;
@@ -6566,7 +6570,51 @@ function normalizeFullJobTimeseriesResourceCursor(
   resources: readonly string[],
 ): string | null {
   const cursor = normalizeJunctionResourceName(value);
-  return cursor && resources.includes(cursor) ? cursor : null;
+  if (cursor && resources.includes(cursor)) {
+    return cursor;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  let parsedValue: unknown;
+  try {
+    parsedValue = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  const parsed = readPlainObject(parsedValue);
+  const activeResource = normalizeJunctionResourceName(parsed?.a);
+  const completedResources = parsed?.i;
+  if (
+    !parsed
+    || parsed.v !== JUNCTION_DEPLOYED_FULL_JOB_PROGRESS_VERSION
+    || Object.keys(parsed).some((key) => key !== "a" && key !== "i" && key !== "v")
+    || !activeResource
+    || !resources.includes(activeResource)
+    || !Array.isArray(completedResources)
+    || completedResources.length > JUNCTION_ALLOWED_TIMESERIES_RESOURCES.length
+    || !completedResources.every(
+      (resource) =>
+        normalizeJunctionResourceName(resource) === resource
+        && JUNCTION_ALLOWED_TIMESERIES_RESOURCE_SET.has(resource),
+    )
+  ) {
+    return null;
+  }
+  const sortedCompletedResources = [...completedResources].sort();
+  if (
+    new Set(sortedCompletedResources).size !== sortedCompletedResources.length
+    || sortedCompletedResources.includes(activeResource)
+    || JSON.stringify({
+      v: JUNCTION_DEPLOYED_FULL_JOB_PROGRESS_VERSION,
+      a: activeResource,
+      i: sortedCompletedResources,
+    }) !== value
+  ) {
+    return null;
+  }
+  return activeResource;
 }
 
 function isFullJobTimeseriesContinuation(job: DeviceSyncJobRecord): boolean {
