@@ -632,10 +632,10 @@ Recent daily and sleep projection owners derive the member's current civil date
 from the validated vault timezone and admit only that date and the prior six
 civil dates. Each available public source receives its own tagged record and
 `date.source` key; up to eight sources therefore produce at most 56 complete
-records without cross-source ranking or truncation. `workouts.v0` retains its
-seven day records and tags each workout item instead. A missing or invalid vault
-timezone fails these civil-date scopes closed. `workouts.v0` retains its
-separate global calendar-close semantics.
+records without cross-source ranking or truncation. `workouts.v0` instead keeps
+seven day records, tags each workout item, and retains its separate global
+calendar-close semantics. A missing or invalid vault timezone fails the other
+civil-date scopes closed.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
 `pending` parser/model status before Web emits `pending`, exact seven-day consent
 copy, or fresh projection work. Deploy Web before any backfill clears a legacy
