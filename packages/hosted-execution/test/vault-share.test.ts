@@ -23,6 +23,7 @@ import {
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
@@ -1835,6 +1836,83 @@ describe("workouts.v0 delivery records", () => {
     ).toThrow(
       new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
     );
+  });
+
+  it("admits thirteen workouts per source across eight sources", () => {
+    const sources = Array.from(
+      { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+      (_, sourceIndex) => {
+        const source = `source-${sourceIndex}`;
+        return { label: source, source };
+      },
+    );
+    const workouts = sources.flatMap((source) =>
+      Array.from(
+        { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+        (_, workoutIndex) => ({
+          kind: "running",
+          minutes: 1,
+          source,
+          startLocalMs: workoutIndex,
+        }),
+      )
+    );
+
+    expect(workouts).toHaveLength(
+      HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
+    );
+    expect(parseHostedVaultShareDeliveryRecord(
+      {
+        ...VALID_WORKOUTS_RECORD,
+        data: { ...VALID_WORKOUTS_RECORD.data, workouts },
+      },
+      WORKOUTS_SCOPE,
+    ).data).toMatchObject({ workouts });
+
+    const firstSource = sources[0];
+    if (!firstSource) {
+      throw new Error("Missing bounded public source fixture.");
+    }
+    expect(() => parseHostedVaultShareDeliveryRecord(
+      {
+        ...VALID_WORKOUTS_RECORD,
+        data: {
+          ...VALID_WORKOUTS_RECORD.data,
+          workouts: Array.from(
+            { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY + 1 },
+            (_, workoutIndex) => ({
+              kind: "running",
+              minutes: 1,
+              source: firstSource,
+              startLocalMs: workoutIndex,
+            }),
+          ),
+        },
+      },
+      WORKOUTS_SCOPE,
+    )).toThrow(/at most 13 entries per public source/u);
+
+    expect(() => parseHostedVaultShareDeliveryRecord(
+      {
+        ...VALID_WORKOUTS_RECORD,
+        data: {
+          ...VALID_WORKOUTS_RECORD.data,
+          workouts: Array.from(
+            { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES + 1 },
+            (_, sourceIndex) => {
+              const source = `source-${sourceIndex}`;
+              return {
+                kind: "running",
+                minutes: 1,
+                source: { label: source, source },
+                startLocalMs: sourceIndex,
+              };
+            },
+          ),
+        },
+      },
+      WORKOUTS_SCOPE,
+    )).toThrow(/across at most 8 sources/u);
   });
 
   it("rejects invalid per-workout local clocks, durations, and kinds", () => {

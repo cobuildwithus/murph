@@ -25,6 +25,7 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
@@ -35,6 +36,7 @@ import {
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
   HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -136,10 +138,10 @@ const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope("workouts.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
 const MAXIMUM_WIDTH_WORKOUT_MINUTES = 0.0000030024105450300988;
-const MAXIMUM_WIDTH_WORKOUT_SOURCE = {
-  label: "x".repeat(80),
-  source: "x".repeat(80),
-};
+function maximumWidthWorkoutSource(sourceIndex: number) {
+  const source = `${String.fromCharCode(97 + sourceIndex)}${"x".repeat(79)}`;
+  return { label: source, source };
+}
 
 const ACTIVE_SHARE = {
   destinationMemberId: "member_referee",
@@ -191,7 +193,9 @@ function deliveryEffectControls() {
   };
 }
 
-function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRequest {
+function workoutsDeliveryBody(
+  workoutsPerSource: number,
+): HostedVaultShareDeliverRequest {
   return {
     expectedGenerationToken: CURRENT_GENERATION_TOKEN,
     projectionKind: "workouts.v0",
@@ -206,11 +210,16 @@ function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRe
             date,
             timeSemantics: "canonical-event-zone-or-vault-zone.v0",
             workouts: Array.from(
-              { length: workoutsPerDay },
+              {
+                length: workoutsPerSource
+                  * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
+              },
               (_, workoutIndex) => ({
                 kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
                 minutes: MAXIMUM_WIDTH_WORKOUT_MINUTES,
-                source: MAXIMUM_WIDTH_WORKOUT_SOURCE,
+                source: maximumWidthWorkoutSource(
+                  Math.floor(workoutIndex / workoutsPerSource),
+                ),
                 startLocalMs: 86_399_999 - workoutIndex,
               }),
             ),
@@ -355,10 +364,23 @@ describe("vault-share deliver route", () => {
 
     expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
     expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
-      new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
+      new RegExp(
+        `at most ${HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY} source-tagged entries`,
+        "u",
+      ),
     );
     expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
-    expect(bodyBytes).toBe(38_652);
+    expect(body.records[0]?.data).toMatchObject({
+      workouts: expect.arrayContaining([
+        expect.objectContaining({ source: maximumWidthWorkoutSource(0) }),
+        expect.objectContaining({
+          source: maximumWidthWorkoutSource(
+            HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES - 1,
+          ),
+        }),
+      ]),
+    });
+    expect(bodyBytes).toBeGreaterThan(250 * 1024);
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );

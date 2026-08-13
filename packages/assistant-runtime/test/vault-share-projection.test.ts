@@ -13,11 +13,13 @@ import {
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -46,6 +48,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   captureHostedVaultShareProjectionBestEffort,
+  HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerCapturedHostedVaultShareProjectionBestEffort,
   readProjectableActivityDistanceDays,
@@ -291,6 +294,7 @@ function activitySessionRow(input: {
   isWorkout?: boolean;
   observedAt?: string;
   recordIds?: string[];
+  source?: ActivitySessionProjectionRow["source"];
   sourceKind?: string;
   startedAt?: string | null;
   timeZone?: string | null;
@@ -308,6 +312,7 @@ function activitySessionRow(input: {
     recordIds,
     sourceFamily: "event",
     sourceKind: input.sourceKind ?? "activity_session",
+    ...(input.source === undefined ? {} : { source: input.source }),
     startedAt: input.startedAt ?? `${input.date}T12:00:00.000Z`,
     ...(input.timeZone === undefined ? {} : { timeZone: input.timeZone }),
   };
@@ -3521,7 +3526,7 @@ describe("selectProjectableWorkoutsDays", () => {
     ]);
   });
 
-  it("fails the whole projection when a deduplicated day exceeds the per-day bound", () => {
+  it("fails the whole projection when a legacy unsourced day exceeds the per-day bound", () => {
     const rows = Array.from(
       { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY + 1 },
       (_, index) => activitySessionRow({
@@ -3541,6 +3546,175 @@ describe("selectProjectableWorkoutsDays", () => {
       rows,
       vaultTimeZone: "UTC",
     })).toEqual([]);
+  });
+
+  it("keeps thirteen workouts per public source and fails on a source's fourteenth", () => {
+    const sources = Array.from(
+      { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+      (_, sourceIndex) => {
+        const source = `source-${sourceIndex}`;
+        return { label: source, source };
+      },
+    );
+    const rows = sources.flatMap((source, sourceIndex) =>
+      Array.from(
+        { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+        (_, workoutIndex) => activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 5,
+          recordIds: [`evt_source_${sourceIndex}_${workoutIndex}`],
+          source,
+          startedAt: new Date(
+            Date.parse("2026-07-03T00:00:00.000Z")
+              + workoutIndex * 10 * 60 * 1_000,
+          ).toISOString(),
+          timeZone: "UTC",
+        }),
+      )
+    );
+
+    const selected = selectProjectableWorkoutsDays({
+      nowMs,
+      rows,
+      vaultTimeZone: "UTC",
+    });
+    const workouts = findWorkoutsRecord(selected, ACTIVITY_DAY.date)?.data.workouts;
+    expect(workouts).toHaveLength(
+      HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
+        * HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+    );
+    expect(new Set(workouts?.map((workout) => workout.source?.source))).toEqual(
+      new Set(sources.map((source) => source.source)),
+    );
+
+    const overflowSource = sources[0];
+    if (!overflowSource) {
+      throw new Error("Missing bounded public source fixture.");
+    }
+
+    expect(selectProjectableWorkoutsDays({
+      nowMs,
+      rows: [
+        ...rows,
+        activitySessionRow({
+          activityKind: "cycling",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 5,
+          recordIds: ["evt_source_0_overflow"],
+          source: overflowSource,
+          startedAt: "2026-07-03T03:00:00.000Z",
+          timeZone: "UTC",
+        }),
+      ],
+      vaultTimeZone: "UTC",
+    })).toEqual([]);
+  });
+
+  it("reads the complete source-tagged workout capacity across its eight-date source window", async () => {
+    const sourceDates = [
+      "2026-06-27",
+      "2026-06-28",
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+    ];
+    const providers = [
+      "coros",
+      "fitbit",
+      "garmin",
+      "oura",
+      "polar",
+      "strava",
+      "suunto",
+      "whoop",
+    ];
+    const records = sourceDates.flatMap((sourceDate) =>
+      providers.flatMap((provider) =>
+        Array.from(
+          { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+          (_, workoutIndex) => {
+            const startedAt = new Date(
+              Date.parse(`${sourceDate}T10:00:00.000Z`)
+                + workoutIndex * 10 * 60 * 1_000,
+            ).toISOString();
+            return {
+              schemaVersion: "murph.event.v1",
+              id: `evt_capacity_${sourceDate}_${provider}_${workoutIndex}`,
+              kind: "activity_session",
+              occurredAt: startedAt,
+              dayKey: sourceDate,
+              recordedAt: `${sourceDate}T20:00:00.000Z`,
+              startAt: startedAt,
+              timeZone: "Pacific/Kiritimati",
+              source: "device",
+              externalRef: {
+                system: provider,
+                resourceType: "workout",
+                resourceId: `capacity-${sourceDate}-${provider}-${workoutIndex}`,
+              },
+              activityType: "running",
+              durationMinutes: 5,
+            };
+          },
+        )
+      )
+    );
+    expect(records).toHaveLength(
+      HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
+        * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1),
+    );
+    const vaultRoot = await createActivitySessionVault(records);
+    const overBoundVaultRoot = await createActivitySessionVault([
+      ...records,
+      {
+        ...records[records.length - 1],
+        id: "evt_capacity_overflow",
+        externalRef: {
+          system: "whoop",
+          resourceType: "workout",
+          resourceId: "capacity-overflow",
+        },
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableWorkoutsDays(vaultRoot);
+      expect(selected).toHaveLength(HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW);
+      for (const record of selected) {
+        if (!("workouts" in record.data)) {
+          throw new Error("Expected a maximum source-tagged workout record.");
+        }
+        expect(record.data.workouts).toHaveLength(
+          HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
+        );
+        const countsBySource = new Map<string, number>();
+        for (const workout of record.data.workouts) {
+          const source = workout.source?.source;
+          if (!source) {
+            throw new Error("Expected canonical public workout provenance.");
+          }
+          countsBySource.set(source, (countsBySource.get(source) ?? 0) + 1);
+        }
+        expect(countsBySource.size).toBe(HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+        expect([...countsBySource.values()]).toEqual(
+          Array.from(
+            { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+            () => HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+          ),
+        );
+      }
+      await expect(readProjectableWorkoutsDays(overBoundVaultRoot))
+        .resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+      await rm(overBoundVaultRoot, { recursive: true, force: true });
+    }
   });
 
   it("fails closed rather than publishing a partial day when workout details are missing", () => {
@@ -4571,10 +4745,14 @@ describe("selectProjectableActivityMinutesDays", () => {
     expect(activitySessionReader).not.toContain("readVault(");
   });
 
-  it("fails closed when activity-session source rows exceed the read cap", async () => {
+  it("fails closed when activity-session source rows exceed the composed read cap", async () => {
     const startMs = Date.parse("2026-07-03T07:00:00.000Z");
     const vaultRoot = await createActivitySessionVault(Array.from(
-      { length: 501 },
+      {
+        length: HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
+          * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1)
+          + 1,
+      },
       (_, index) => ({
         schemaVersion: "murph.event.v1",
         id: `evt_run_overflow_${index}`,

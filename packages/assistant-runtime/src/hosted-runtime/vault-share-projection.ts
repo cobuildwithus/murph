@@ -30,15 +30,16 @@ import {
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+  hostedVaultShareWorkoutsFitDailyCapacity,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY,
   HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
-  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   resolveHostedVaultShareDataSource,
   type HostedVaultShareActivityDistanceProjectionSpec,
   type HostedVaultShareActivityMinutesProjectionSpec,
@@ -81,9 +82,6 @@ const DAY_MAX_MINUTES = 24 * 60;
 const DAY_MAX_DISTANCE_METERS = 1_000_000;
 const DAY_MAX_SESSIONS = 100;
 const ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO = 0.8;
-// Above the source cap, fail closed instead of emitting partial daily projections.
-const ACTIVITY_SESSION_SOURCE_ROW_LIMIT = 500;
-const ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT = ACTIVITY_SESSION_SOURCE_ROW_LIMIT + 1;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   { length: 21 },
@@ -97,6 +95,15 @@ export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 6;
 export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 7;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 6;
+
+// Workouts read one preceding source date so a positive-offset event zone can
+// still populate the oldest projected date. Admit the complete source-tagged
+// workout shape for that eight-date read, then probe one row beyond it so every
+// activity projection still fails closed rather than consuming a partial read.
+const ACTIVITY_SESSION_SOURCE_ROW_LIMIT =
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
+  * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1);
+const ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT = ACTIVITY_SESSION_SOURCE_ROW_LIMIT + 1;
 
 const HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE = "Etc/GMT+12";
 
@@ -1700,10 +1707,15 @@ export function selectProjectableWorkoutsDays(
     }
     const group = groups.get(candidate.row.date) ?? [];
     group.push(candidate);
-    if (group.length > HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY) {
+    groups.set(candidate.row.date, group);
+  }
+
+  for (const candidates of groups.values()) {
+    if (!hostedVaultShareWorkoutsFitDailyCapacity(
+      candidates.map((candidate) => candidate.workout),
+    )) {
       return [];
     }
-    groups.set(candidate.row.date, group);
   }
 
   return windowDates.map((date): HostedVaultShareDeliveryRecord => {

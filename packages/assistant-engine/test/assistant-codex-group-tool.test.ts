@@ -29,9 +29,11 @@ import {
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
 } from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
 
@@ -151,6 +153,36 @@ function maximumEscapedHeartRateZoneRecords() {
     };
   });
   return records;
+}
+
+function maximumSourceTaggedWorkoutRecords() {
+  const date = "2026-07-18";
+  const workouts = Array.from(
+    { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+    (_, sourceIndex) => {
+      const source = `source-${sourceIndex}`;
+      return Array.from(
+        { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+        (_, workoutIndex) => ({
+          kind: "running",
+          minutes: 5,
+          source: { label: source, source },
+          startLocalMs: sourceIndex * 60_000 + workoutIndex,
+        }),
+      );
+    },
+  ).flat();
+
+  return [{
+    data: {
+      calendarClosedThroughDate: date,
+      date,
+      timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+      workouts,
+    },
+    occurredAt: `${date}T00:00:00.000Z`,
+    recordKey: date,
+  }];
 }
 
 describe("murph.group dynamic tool", () => {
@@ -1925,6 +1957,67 @@ describe("murph.group dynamic tool", () => {
     expect(serialized.match(/2026-07-18/gu)).toHaveLength(1);
     expect(serialized.match(/canonical-event-zone-or-vault-zone\.v0/gu))
       .toHaveLength(1);
+  });
+
+  it("keeps thirteen workouts from each of eight sources in ordinary group reads", async () => {
+    const records = maximumSourceTaggedWorkoutRecords();
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_maximum_workouts",
+        participantId: "participant_maximum_workouts",
+        projections: [{
+          dataStatus: "available" as const,
+          grantedAt: "2026-07-18T12:00:00.000Z",
+          grantStatus: "granted" as const,
+          projectionScope: { projectionKind: "workouts.v0" as const },
+          projectionScopeKey: "workouts.v0",
+          records,
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workouts.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "workouts.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const projection = readFirstProjection(readGroupToolPayload(result));
+    const workouts = projection.days?.["2026-07-18"];
+    expect(workouts).toHaveLength(
+      HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
+        * HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+    );
+    const serialized = JSON.stringify(workouts);
+    for (
+      let sourceIndex = 0;
+      sourceIndex < HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
+      sourceIndex += 1
+    ) {
+      expect(serialized.match(new RegExp(
+        `"source":"source-${sourceIndex}"`,
+        "gu",
+      ))).toHaveLength(HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY);
+    }
+    expect(serialized).not.toContain("member_internal_maximum_workouts");
   });
 
   it("keeps every workouts day value an array and hoists its completion watermark", async () => {
@@ -5927,6 +6020,106 @@ describe("murph.group email actions", () => {
     ]) {
       expect(modelText).not.toContain(hidden);
     }
+  });
+
+  it("keeps thirteen workouts from each of eight sources in group-email reads", async () => {
+    const projectionScope = { projectionKind: "workouts.v0" as const };
+    const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
+      if (request.action !== "prepare_email") {
+        throw new Error("Expected group email preparation.");
+      }
+      return {
+        action: "prepare_email",
+        result: {
+          authorizationProof: "authorization-proof-hidden",
+          groupId: "group-id-hidden",
+          missingEmailParticipants: [],
+          participants: [{
+            authorizedShares: [{
+              projectionScopeKey: "workouts.v0",
+              shareId: "share-workouts-hidden",
+            }],
+            hasEmail: true,
+            memberId: "member_maximum_workouts_email",
+          }],
+          status: "ok",
+        },
+      };
+    });
+    const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_maximum_workouts_email",
+        participantId: "participant_maximum_workouts_email",
+        projections: [{
+          dataStatus: "available" as const,
+          grantedAt: "2026-07-18T12:00:00.000Z",
+          grantStatus: "granted" as const,
+          projectionScope,
+          projectionScopeKey: "workouts.v0",
+          records: maximumSourceTaggedWorkoutRecords(),
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workouts.v0"],
+      status: "ok",
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      audience: "group_email",
+      projectionScopes: [projectionScope],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group email shared-read request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentScheduledAutomationAuthority: () => ({
+          automationId: "automation-maximum-workouts-update",
+          occurrenceAt: "2026-07-18T13:00:00.000Z",
+        }),
+        groupEmailRequest,
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      audience: "group_email",
+      result: {
+        recipientCount: 1,
+        status: "ok",
+      },
+    });
+    const projection = readFirstProjection(payload);
+    const workouts = projection.days?.["2026-07-18"];
+    expect(workouts).toHaveLength(
+      HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
+        * HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+    );
+    const serialized = JSON.stringify(payload);
+    for (
+      let sourceIndex = 0;
+      sourceIndex < HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
+      sourceIndex += 1
+    ) {
+      expect(serialized.match(new RegExp(
+        `"source":"source-${sourceIndex}"`,
+        "gu",
+      ))).toHaveLength(HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY);
+    }
+    expect(serialized).not.toContain("authorization-proof-hidden");
+    expect(serialized).not.toContain("member_maximum_workouts_email");
+    expect(serialized).not.toContain("share-workouts-hidden");
   });
 
   it("keeps the escaped maximum heart-rate-zone source set in group-email reads", async () => {

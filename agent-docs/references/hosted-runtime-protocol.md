@@ -637,8 +637,16 @@ civil dates. Each available public source receives its own tagged record and
 `date.source` key; up to eight sources therefore produce at most 56 complete
 records without cross-source ranking or truncation. `workouts.v0` instead keeps
 seven day records, tags each workout item, and retains its separate global
-calendar-close semantics. A missing or invalid vault timezone fails the other
-civil-date scopes closed. Public source identity is part of every existing
+calendar-close semantics. It retains up to thirteen workouts per public source
+per day across the same eight-source admission bound, while legacy unsourced
+days retain the original thirteen-workout limit. Any per-source or source-count
+overflow fails the complete projection closed, and the legal 104-item daily
+maximum remains within the shared 320 KiB delivery and encrypted-snapshot
+authority. The shared canonical activity-session read admits the complete 832
+rows for the workout producer's eight-date source horizon and uses one extra
+query row only to detect overflow; larger reads still fail closed. A missing or
+invalid vault timezone fails the other civil-date
+scopes closed. Public source identity is part of every existing
 health scope, including active v0 grants; scope keys and grant/revoke controls
 do not change, and each member-facing permission describes the source-aware
 share in one short sentence.

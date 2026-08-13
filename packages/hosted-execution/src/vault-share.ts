@@ -522,10 +522,13 @@ export const HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS =
   "canonical-workout-day" as const;
 export const HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS =
   "canonical-event-zone-or-vault-zone.v0" as const;
-// Thirteen workouts per day is the bounded disclosure contract. Public source tags
-// are included in the delivery/snapshot byte ceilings; parsers reject overflow
-// rather than truncating a day or dropping a source.
+// Legacy unsourced snapshots retain the original thirteen-workout daily bound.
+// Source-tagged snapshots apply that same bound independently to each admitted
+// public source; parsers reject overflow rather than truncating a day or source.
 export const HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY = 13;
+export const HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY =
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY
+  * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
 export const HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH = 80;
 /**
  * Providers can emit a real workout with no usable sport name; WHOOP maps an
@@ -626,6 +629,32 @@ export interface HostedVaultShareWorkoutsDayData {
   date: string;
   timeSemantics: typeof HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS;
   workouts: HostedVaultShareWorkout[];
+}
+
+export function hostedVaultShareWorkoutsFitDailyCapacity(
+  workouts: readonly HostedVaultShareWorkout[],
+): boolean {
+  if (
+    workouts.length
+      > HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
+  ) {
+    return false;
+  }
+
+  const countsBySource = new Map<string, number>();
+  for (const workout of workouts) {
+    const source = workout.source?.source;
+    if (!source) {
+      return workouts.length <= HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY;
+    }
+    const count = (countsBySource.get(source) ?? 0) + 1;
+    if (count > HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY) {
+      return false;
+    }
+    countsBySource.set(source, count);
+  }
+
+  return countsBySource.size <= HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
 }
 
 export interface HostedVaultShareActivityMinutesDayData {
@@ -1851,14 +1880,22 @@ function parseHostedVaultShareWorkoutsDayData(
     data.workouts,
     "Vault share workouts data workouts",
   );
-  if (rawWorkouts.length > HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY) {
+  if (
+    rawWorkouts.length
+      > HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
+  ) {
     throw new TypeError(
-      `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries.`,
+      `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY} source-tagged entries.`,
     );
   }
   const workouts = rawWorkouts.map((workout, index) =>
     parseHostedVaultShareWorkout(workout, index)
   );
+  if (!hostedVaultShareWorkoutsFitDailyCapacity(workouts)) {
+    throw new TypeError(
+      `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries per public source, across at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} sources; legacy unsourced data remains limited to ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries.`,
+    );
+  }
   const timeSemantics = requireString(
     data.timeSemantics,
     "Vault share workouts data timeSemantics",

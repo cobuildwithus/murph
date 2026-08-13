@@ -299,9 +299,12 @@ never stored in the share snapshot.
 Every newly produced shared health observation carries canonical public source
 provenance. Daily health records use a stable `date.source` key and expose one
 record per available source; `workouts.v0` keeps its seven-day envelope and tags
-each workout item. Cross-source values are never ranked, selected, merged, or
-dropped. Normalization is limited to duplicate facts that already belong to the
-same public source. Meal-derived totals identify Murph as their source, while
+each workout item. Its original thirteen-workout daily bound applies separately
+to each admitted source, so a legal eight-source day can retain 104 tagged
+workouts; legacy unsourced days remain bounded to thirteen. Cross-source values
+are never ranked, selected, merged, or dropped. Normalization is limited to
+duplicate facts that already belong to the same public source. Meal-derived
+totals identify Murph as their source, while
 single-owner profile, timezone, and group-email authority records remain
 unchanged. The existing `device-sync-status.v0` item list already represents
 each source independently. Source-bearing recent-date scopes admit up to eight

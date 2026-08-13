@@ -2,11 +2,12 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
-  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -71,6 +72,7 @@ const WORKOUTS_KEY = buildHostedVaultShareProjectionScopeKey(
 );
 const DEVICE_KEY = buildHostedVaultShareProjectionScopeKey(DEVICE_SCOPE);
 const GRANTED_AT = new Date("2026-07-30T12:00:00.000Z");
+const MAXIMUM_WIDTH_WORKOUT_MINUTES = 0.0000030024105450300988;
 
 type TestProjectionScope =
   | typeof PROFILE_SCOPE
@@ -133,6 +135,42 @@ function snapshot(input: {
       projectionScopeKey: share.projectionScopeKey,
     },
   });
+}
+
+function maximumWidthWorkoutRecords(): HostedVaultShareDeliveryRecord[] {
+  return Array.from(
+    { length: HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS },
+    (_, dayIndex): HostedVaultShareDeliveryRecord => {
+      const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+      return {
+        data: {
+          calendarClosedThroughDate: "2026-07-23",
+          date,
+          timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+          workouts: Array.from(
+            { length: HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY },
+            (_, workoutIndex) => {
+              const sourceIndex = Math.floor(
+                workoutIndex / HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+              );
+              const source = `${String.fromCharCode(97 + sourceIndex)}${"x".repeat(79)}`;
+              return {
+                kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
+                minutes: MAXIMUM_WIDTH_WORKOUT_MINUTES,
+                source: { label: source, source },
+                startLocalMs: 86_399_999 - workoutIndex,
+              };
+            },
+          ),
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "A".repeat(
+          HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+        ),
+      };
+    },
+  );
 }
 
 function installCiphertexts(values: Record<string, string>): void {
@@ -211,6 +249,86 @@ function createPrisma(input: {
     prisma: createPrismaClientTestDouble({ $transaction: transaction }),
     transaction,
   };
+}
+
+async function replaceAndReadProjectionRecords(input: {
+  id: string;
+  memberId: string;
+  participantId: string;
+  projectionScope: TestProjectionScope;
+  records: HostedVaultShareDeliveryRecord[];
+}): Promise<readonly HostedVaultShareDeliveryRecord[]> {
+  const row = shareRow(input);
+  let projectionSnapshotCiphertext: string | null = null;
+  const plaintextByCiphertext = new Map<string, string>();
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(value) {
+      const plaintext = plaintextByCiphertext.get(value.value);
+      if (plaintext === undefined) {
+        throw new Error("Synthetic projection ciphertext was not stored.");
+      }
+      return plaintext;
+    },
+    encrypt(value) {
+      const ciphertext = `ciphertext_${input.id}`;
+      plaintextByCiphertext.set(ciphertext, value.value);
+      return ciphertext;
+    },
+  });
+
+  const hostedVaultShareFindMany = vi.fn().mockImplementation(
+    (args: { where?: { id?: unknown } }) => Promise.resolve(
+      args.where?.id
+        ? [{ id: row.id, projectionSnapshotCiphertext }]
+        : [row],
+    ),
+  );
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ version: 7n }]),
+    deviceConnection: { findMany: vi.fn().mockResolvedValue([]) },
+    hostedGroup: {
+      findUnique: vi.fn().mockResolvedValue({
+        members: [{ id: input.participantId, memberId: input.memberId }],
+      }),
+    },
+    hostedVaultShare: {
+      findMany: hostedVaultShareFindMany,
+      updateMany: vi.fn().mockImplementation((value: {
+        data: { projectionSnapshotCiphertext: string };
+      }) => {
+        projectionSnapshotCiphertext = value.data.projectionSnapshotCiphertext;
+        return Promise.resolve({ count: 1 });
+      }),
+    },
+  };
+  const prisma = createPrismaClientTestDouble({
+    $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+      await callback(tx)
+    ),
+  });
+
+  await expect(replaceHostedVaultShareProjectionSnapshot({
+    prisma,
+    records: input.records,
+    share: {
+      destinationMemberId: row.destinationMemberId,
+      grantorMemberId: row.grantorMemberId,
+      id: row.id,
+      projectionKind: input.projectionScope.projectionKind,
+      projectionScope: input.projectionScope,
+      projectionScopeKey: row.projectionScopeKey,
+    },
+    sourceWorkspaceVersion: "7",
+  })).resolves.toBe("replaced");
+  const result = await readHostedGroupSharedDataByRuntimeMemberId({
+    prisma,
+    projectionScopes: [input.projectionScope],
+    runtimeMemberId: RUNTIME_MEMBER_ID,
+  });
+  if (result.status !== "ok") {
+    throw new Error("Expected the projected group snapshot to be readable.");
+  }
+  return result.members[0]?.projections[0]?.records ?? [];
 }
 
 describe("readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId", () => {
@@ -456,42 +574,8 @@ describe("readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId", () 
 
 describe("workouts.v0 snapshot bounds", () => {
   it("keeps the maximum parser-valid eight-date workout snapshot within its byte limit", () => {
-    // This finite in-range value exercises the longest JSON number spelling used
-    // by the bounded duration field rather than relying only on integer minutes.
-    const maximumWidthMinutes = 0.0000030024105450300988;
-    const maximumWidthSource = {
-      label: "x".repeat(80),
-      source: "x".repeat(80),
-    };
-    expect(JSON.stringify(maximumWidthMinutes)).toHaveLength(24);
-
-    const records = Array.from(
-      { length: HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS },
-      (_, dayIndex): HostedVaultShareDeliveryRecord => {
-        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
-        return {
-          data: {
-            calendarClosedThroughDate: "2026-07-23",
-            date,
-            timeSemantics: "canonical-event-zone-or-vault-zone.v0",
-            workouts: Array.from(
-              { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
-              (_, workoutIndex) => ({
-                kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
-                minutes: maximumWidthMinutes,
-                source: maximumWidthSource,
-                startLocalMs: 86_399_999 - workoutIndex,
-              }),
-            ),
-          },
-          occurredAt: `${date}T00:00:00.000Z`,
-          recordKey: date,
-          sourceRevision: "A".repeat(
-            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
-          ),
-        };
-      },
-    );
+    expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
+    const records = maximumWidthWorkoutRecords();
 
     const serialized = snapshot({
       id: "share_workouts_maximum",
@@ -502,9 +586,26 @@ describe("workouts.v0 snapshot bounds", () => {
     const encoder = new TextEncoder();
 
     const snapshotBytes = encoder.encode(serialized).byteLength;
-    expect(snapshotBytes).toBe(38_528);
+    expect(snapshotBytes).toBeGreaterThan(250 * 1024);
     expect(snapshotBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+    );
+    const firstRecord = records[0];
+    if (!firstRecord || !("workouts" in firstRecord.data)) {
+      throw new Error("Missing maximum workouts fixture.");
+    }
+    const sourceCounts = new Map<string, number>();
+    for (const workout of firstRecord.data.workouts) {
+      const source = workout.source?.source;
+      if (!source) throw new Error("Missing maximum workout source fixture.");
+      sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+    }
+    expect(sourceCounts.size).toBe(HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+    expect([...sourceCounts.values()]).toEqual(
+      Array.from(
+        { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+        () => HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+      ),
     );
   });
 
@@ -617,86 +718,29 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         source: { label: "Garmin", source: "garmin" },
       },
     ];
-    const row = shareRow({
+    await expect(replaceAndReadProjectionRecords({
       id: "share_projected_sleep",
       memberId,
+      participantId: "participant_projected_sleep",
       projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
-    });
-    let projectionSnapshotCiphertext: string | null = null;
-    const plaintextByCiphertext = new Map<string, string>();
-    setHostedSecureBoxStringTestCodecForTests({
-      decrypt(input) {
-        const plaintext = plaintextByCiphertext.get(input.value);
-        if (plaintext === undefined) {
-          throw new Error("Synthetic projection ciphertext was not stored.");
-        }
-        return plaintext;
-      },
-      encrypt(input) {
-        const ciphertext = "ciphertext_projected_sleep";
-        plaintextByCiphertext.set(ciphertext, input.value);
-        return ciphertext;
-      },
-    });
-
-    const hostedVaultShareFindMany = vi.fn().mockImplementation(
-      (args: { where?: { id?: unknown } }) => Promise.resolve(
-        args.where?.id
-          ? [{
-              id: row.id,
-              projectionSnapshotCiphertext,
-            }]
-          : [row],
-      ),
-    );
-    const tx = {
-      $queryRaw: vi.fn().mockResolvedValue([{ version: 7n }]),
-      deviceConnection: { findMany: vi.fn().mockResolvedValue([]) },
-      hostedGroup: {
-        findUnique: vi.fn().mockResolvedValue({
-          members: [{ id: "participant_projected_sleep", memberId }],
-        }),
-      },
-      hostedVaultShare: {
-        findMany: hostedVaultShareFindMany,
-        updateMany: vi.fn().mockImplementation((input: {
-          data: { projectionSnapshotCiphertext: string };
-        }) => {
-          projectionSnapshotCiphertext = input.data.projectionSnapshotCiphertext;
-          return Promise.resolve({ count: 1 });
-        }),
-      },
-    };
-    const prisma = createPrismaClientTestDouble({
-      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
-        await callback(tx)
-      ),
-    });
-
-    await expect(replaceHostedVaultShareProjectionSnapshot({
-      prisma,
       records,
-      share: {
-        destinationMemberId: row.destinationMemberId,
-        grantorMemberId: row.grantorMemberId,
-        id: row.id,
-        projectionKind: DEEP_SLEEP_SOURCES_SCOPE.projectionKind,
-        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
-        projectionScopeKey: row.projectionScopeKey,
-      },
-      sourceWorkspaceVersion: "7",
-    })).resolves.toBe("replaced");
-    const result = await readHostedGroupSharedDataByRuntimeMemberId({
-      prisma,
-      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
-      runtimeMemberId: RUNTIME_MEMBER_ID,
-    });
+    })).resolves.toEqual(records);
+  });
 
-    expect(result.status).toBe("ok");
-    if (result.status !== "ok") {
-      throw new Error("Expected the projected group snapshot to be readable.");
-    }
-    expect(result.members[0]?.projections[0]?.records).toEqual(records);
+  it("reads the maximum source-tagged workout snapshot after encrypted replacement", async () => {
+    const records = maximumWidthWorkoutRecords();
+    const readRecords = await replaceAndReadProjectionRecords({
+      id: "share_projected_maximum_workouts",
+      memberId: "member_projected_maximum_workouts",
+      participantId: "participant_projected_maximum_workouts",
+      projectionScope: WORKOUTS_SCOPE,
+      records,
+    });
+    expect(readRecords).toEqual(records.map((record) => ({
+      data: record.data,
+      occurredAt: record.occurredAt,
+      recordKey: record.recordKey,
+    })));
   });
 
   it("reports an active readable grant as pending until its first snapshot materializes", async () => {

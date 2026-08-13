@@ -154,7 +154,12 @@ the synthetic UTC midnight used only for civil-date identity.
 The same source-preserving rule applies across steps, sleep duration and times,
 sleep stages, activity metrics and selectors, workout-day summaries, heart-rate
 zones, workouts, and nutrition totals. `workouts.v0` tags each workout item
-inside its existing day record; the other dated health scopes tag the record.
+inside its existing day record and admits up to thirteen workouts independently
+for each of eight public sources on a day. Legacy unsourced workout days retain
+their original thirteen-item limit, and any source-specific or combined-source
+overflow fails the complete projection closed rather than dropping a workout.
+The maximum legal 104-item day stays inside the shared 320 KiB delivery and
+encrypted-snapshot bound. The other dated health scopes tag the record.
 Duplicate normalization may resolve multiple facts within one public source,
 but it never compares sources to pick a group-share winner. Single-owner
 profile, timezone, and group-email authority records stay unsourced, and
