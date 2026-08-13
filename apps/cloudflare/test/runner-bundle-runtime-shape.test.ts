@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("post-bundle dependency pruning", () => {
-  it("removes unused Zod variants while retaining the live root and v4 runtimes", async () => {
+  it("removes unused Zod variants while retaining the live root, v3, and v4 runtimes", async () => {
     const bundleDir = await mkdtemp(
       path.join(tmpdir(), "murph-runner-runtime-shape-"),
     );
@@ -37,13 +37,13 @@ describe("post-bundle dependency pruning", () => {
     temporaryDirectories.push(bundleDir);
     const retainedZodPaths = [
       path.join(zodPackageDir, "index.js"),
+      path.join(zodPackageDir, "v3", "index.js"),
       path.join(zodPackageDir, "v4", "classic", "index.js"),
       path.join(zodPackageDir, "v4", "core", "index.js"),
       path.join(zodPackageDir, "v4", "locales", "en.js"),
     ];
     const removedZodPaths = [
       path.join(zodPackageDir, "src", "index.ts"),
-      path.join(zodPackageDir, "v3", "index.js"),
       path.join(zodPackageDir, "mini", "index.js"),
       path.join(zodPackageDir, "v4-mini", "index.js"),
       path.join(zodPackageDir, "v4", "mini", "index.js"),
@@ -68,6 +68,7 @@ describe("post-bundle dependency pruning", () => {
       path.join(bundleDir, "dist", "consumer.js"),
       [
         `import "${zodPackageName}"`,
+        `import "${zodPackageName}/v3"`,
         `import "${zodPackageName}/v4"`,
         `import "${zodPackageName}/v4/core"`,
         "",
@@ -95,20 +96,20 @@ describe("post-bundle dependency pruning", () => {
     );
 
     temporaryDirectories.push(bundleDir);
-    await mkdir(path.join(bundleDir, "node_modules", "zod", "v3"), {
+    await mkdir(path.join(bundleDir, "node_modules", "zod", "mini"), {
       recursive: true,
     });
     await mkdir(path.join(bundleDir, "dist"), { recursive: true });
     const zodPackageName = ["zo", "d"].join("");
     await writeFile(
       path.join(bundleDir, "dist", "consumer.js"),
-      `import "${zodPackageName}/v3"\n`,
+      `import "${zodPackageName}/mini"\n`,
       "utf8",
     );
 
     await expect(
       pruneBundledRunnerDependencies(bundleDir),
-    ).rejects.toThrow(/imports zod\/v3/);
+    ).rejects.toThrow(/imports zod\/mini/);
   });
 });
 

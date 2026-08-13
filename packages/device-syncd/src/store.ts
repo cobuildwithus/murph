@@ -369,6 +369,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      preserveLastSyncCompletedAt?: boolean;
     } = {},
   ): boolean {
     return markStoredSyncSucceeded(this.database, accountId, now, disconnectGeneration, options);
@@ -555,6 +556,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      preserveLastSyncCompletedAt?: boolean;
     };
     workerId: string;
   }): boolean {
@@ -641,6 +643,7 @@ export class SqliteDeviceSyncStore {
     retryAt: string | null,
     retryable: boolean,
     retainUntilSuccess = false,
+    replacementPayload?: Record<string, unknown>,
   ): boolean {
     return failDeviceSyncJobIfOwned(this.database, {
       code,
@@ -649,6 +652,7 @@ export class SqliteDeviceSyncStore {
       now,
       retryAt,
       retryable,
+      ...(replacementPayload === undefined ? {} : { replacementPayload }),
       retainUntilSuccess,
       workerId,
     });

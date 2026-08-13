@@ -306,6 +306,8 @@ Last verified: 2026-08-12
   their exact default expressions, simple identifier assignments retain their
   chronological right-hand sides and lexical owner, and only exact one-hop
   wrappers that forward each argument in place inherit transport identity. The
+  guard also resolves the standard fetch `.call` and statically closed `.apply`
+  invocation forms before classifying their provider-bound arguments. The
   lexical census includes destructured parameter shadows, property paths, and
   types. Assigned CommonJS namespaces remain transports only while the nearest
   declaration identity is unchanged. Provider facts follow exact properties in closed object/array
@@ -339,8 +341,9 @@ Last verified: 2026-08-12
   later assignment, property writes, spreads, computed or duplicate
   properties, custom serialization, or prototype hooks. These are structural,
   purpose-specific exceptions, not line- or provider-wide suppression; the
-  xAI, transfer URL, transfer-header, and streamed-R2 proofs are restricted to
-  their audited owner paths.
+  source comments do not suppress a finding. The xAI, transfer URL,
+  transfer-header, and streamed-R2 proofs are restricted to their audited owner
+  paths.
   Register each newly verified provider SDK and host explicitly; the guard does
   not claim coverage for an unregistered provider or a provider endpoint whose
   dataflow has no registered host or provider identifier. The opt-in

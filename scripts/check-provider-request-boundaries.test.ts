@@ -32,6 +32,10 @@ function violationsOfKind(
   );
 }
 
+function rawHttpViolations(source: string, relativePath = "scripts/example.mjs") {
+  return violationsOfKind("raw-provider-http", source, relativePath);
+}
+
 describe("check-provider-request-boundaries", () => {
   it("recognizes direct tsx execution even when the module URL has a query", () => {
     expect(
@@ -64,6 +68,41 @@ describe("check-provider-request-boundaries", () => {
     ).toEqual([2]);
   });
 
+  it("includes JavaScript operational scripts in the production scan", () => {
+    expect(providerRequestSourceExtensions).toContain(".cjs");
+    expect(providerRequestSourceExtensions).toContain(".js");
+    expect(providerRequestSourceExtensions).toContain(".mjs");
+  });
+
+  it("does not treat assembled deployment output as authored provider source", () => {
+    expect(shouldSkipProviderRequestDirectory(".deploy")).toBe(true);
+  });
+
+  it("excludes JavaScript tests and TypeScript declaration variants", () => {
+    for (const relativePath of [
+      "scripts/example.spec.cjs",
+      "scripts/example.test.cjs",
+      "scripts/example.spec.js",
+      "scripts/example.test.js",
+      "scripts/example.spec.mjs",
+      "scripts/example.test.mjs",
+      "scripts/example.d.cts",
+      "scripts/example.d.mts",
+      "scripts/example.d.ts",
+    ]) {
+      expect(shouldScanProviderRequestSourceFile(relativePath)).toBe(false);
+    }
+    for (const relativePath of [
+      "scripts/example.cjs",
+      "scripts/example.js",
+      "scripts/example.mjs",
+      "scripts/example.mts",
+      "scripts/example.ts",
+    ]) {
+      expect(shouldScanProviderRequestSourceFile(relativePath)).toBe(true);
+    }
+  });
+
   it("blocks direct and nested object spreads in Stripe request arguments", () => {
     expect(blockedLines([
       "stripe.checkout.sessions.create({",
@@ -72,6 +111,27 @@ describe("check-provider-request-boundaries", () => {
       "  metadata: { ...metadata },",
       "});",
     ].join("\n"))).toEqual([3, 4]);
+  });
+
+  it("recognizes fetch call/apply indirection without shifting provider evidence", () => {
+    const matches = rawHttpViolations([
+      "const openAiUrl = 'https://api.openai.com/v1/responses';",
+      "fetch.call(undefined, openAiUrl, { method: 'POST' });",
+      "fetch.apply(undefined, [openAiUrl, { method: 'POST' }]);",
+      "const openAiArgs: Parameters<typeof fetch> = [openAiUrl];",
+      "fetch.apply(undefined, openAiArgs);",
+    ].join("\n"));
+
+    expect(matches.map((match) => match.line)).toEqual([2, 3, 5]);
+  });
+
+  it("does not allow source comments to suppress provider HTTP", () => {
+    const matches = rawHttpViolations([
+      "// provider-request-boundary-allow-next-line: sdk-transport-adapter",
+      "fetch('https://api.exa.ai/search', { method: 'POST' });",
+    ].join("\n"));
+
+    expect(matches.map((match) => match.line)).toEqual([2]);
   });
 
   it("follows local request and nested metadata variables", () => {
@@ -168,6 +228,37 @@ describe("check-provider-request-boundaries", () => {
         (match) => match.line,
       ),
     ).toEqual([3]);
+  });
+
+  it("covers Resend typed request builders and client operations", () => {
+    expect(blockedLines([
+      "import { Resend, type CreateBatchOptions, type CreateEmailOptions } from 'resend';",
+      "const email: CreateEmailOptions = { from, subject, text, to, ...optional };",
+      "const batch: CreateBatchOptions = [{ from, subject, text, to, ...optional }];",
+      "const resend = new Resend(apiKey);",
+      "resend.emails.send(email, { ...requestOptions });",
+      "resend.batch.send(batch);",
+    ].join("\n"))).toEqual([2, 3, 5]);
+  });
+
+  it("covers the newly adopted official provider clients", () => {
+    expect(blockedLines([
+      "import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';",
+      "import { KeyManagementServiceClient } from '@google-cloud/kms';",
+      "import { LettersApi } from '@lob/lob-typescript-sdk';",
+      "import { Exa } from 'exa-js';",
+      "import { GoogleAuth } from 'google-auth-library';",
+      "const elevenLabs = new ElevenLabsClient({ apiKey });",
+      "const kms = new KeyManagementServiceClient();",
+      "const letters = new LettersApi(configuration);",
+      "const exa = new Exa(apiKey);",
+      "const auth = new GoogleAuth(options);",
+      "elevenLabs.textToSpeech.convert(voiceId, { ...speech });",
+      "kms.encrypt({ ...request });",
+      "letters.create({ ...letter });",
+      "exa.search(query, { ...searchOptions });",
+      "auth.getClient({ ...authOptions });",
+    ].join("\n"))).toEqual([11, 12, 13, 14, 15]);
   });
 
   it("covers Composio typed builders and the generated provider client", () => {

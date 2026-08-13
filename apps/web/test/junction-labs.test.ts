@@ -19,7 +19,9 @@ afterEach(() => {
 describe("Junction labs provider boundary", () => {
   it("searches the fixed US origin, locally filters kind, and preserves catalog price text", async () => {
     const expectedResults = Array.from({ length: 45 }, (_, index) => ({
+      id: index + 1,
       name: `Included marker ${index + 1}`,
+      required: false,
       slug: `included-marker-${index + 1}`,
     }));
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
@@ -32,7 +34,10 @@ describe("Junction labs provider boundary", () => {
       expect(url.searchParams.get("include_pricing")).toBe("true");
       expect(url.searchParams.get("page")).toBe("1");
       expect(url.searchParams.get("size")).toBe("50");
-      expect(new Headers(init?.headers).get("x-vital-api-key")).toBe(FIXTURE_API_KEY);
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-vital-api-key")).toBe(FIXTURE_API_KEY);
+      expect(headers.get("x-fern-sdk-name")).toBe("@junction-api/sdk");
+      expect(headers.get("x-fern-sdk-version")).toBe("1.2.0");
       expect(init).toMatchObject({
         cache: "no-store",
         method: "GET",
@@ -40,7 +45,7 @@ describe("Junction labs provider boundary", () => {
       });
 
       return jsonResponse({
-        data: [
+        markers: [
           junctionMarker({
             expected_results: expectedResults,
             price: "219.9900",
@@ -155,10 +160,16 @@ describe("Junction labs provider boundary", () => {
             `lab-${labId}`,
             {
               lab_id: labId,
-              patient_service_centers: { within_radius: 2 },
+              patient_service_centers: {
+                appointment_with_vital: false,
+                radius: "20",
+                within_radius: 2,
+              },
+              supported_bill_types: [],
             },
           ])),
-          phlebotomy: { is_served: false },
+          phlebotomy: { is_served: false, providers: [] },
+          zip_code: "10001",
         });
       }
 
@@ -170,7 +181,7 @@ describe("Junction labs provider boundary", () => {
       inFlight -= 1;
 
       const common = pscLocation({
-        distance: String(6 - labId),
+        distance: 6 - labId,
         metadata: {
           city: "Example City",
           first_line: `${labId} Sample Avenue`,
@@ -186,9 +197,9 @@ describe("Junction labs provider boundary", () => {
       return jsonResponse({
         lab_id: labId,
         patient_service_centers: labId === 1
-          ? [common, { ...common, distance: "9" }]
+          ? [common, { ...common, distance: 9 }]
           : [common],
-        slug: `lab-${labId}`,
+        slug: "labcorp",
       });
     });
 
@@ -221,7 +232,8 @@ describe("Junction labs provider boundary", () => {
   it("returns a clean not-served result without PSC calls when the area has no coverage", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({
       central_labs: {},
-      phlebotomy: { is_served: false },
+      phlebotomy: { is_served: false, providers: [] },
+      zip_code: "10001",
     }));
 
     const result = await executeJunctionLabsTool({
@@ -276,23 +288,40 @@ describe("Junction labs provider boundary", () => {
       central_labs: {
         labcorp: {
           lab_id: 7,
-          patient_service_centers: { within_radius: 1 },
+          patient_service_centers: {
+            appointment_with_vital: false,
+            radius: "25",
+            within_radius: 1,
+          },
+          supported_bill_types: [],
         },
       },
-      phlebotomy: { is_served: false },
+      phlebotomy: { is_served: false, providers: [] },
+      zip_code: "10001",
     };
+    const locallyMalformedLocation = pscLocation({
+      metadata: {
+        city: "Example City",
+        first_line: "1 Sample Avenue",
+        name: " ",
+        phone_number: null,
+        second_line: null,
+        state: "NY",
+        zip_code: "10001",
+      },
+    });
     const fetchImpl = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse(area))
       .mockResolvedValueOnce(jsonResponse({
         lab_id: 7,
-        patient_service_centers: [{ metadata: {} }],
+        patient_service_centers: [locallyMalformedLocation],
         slug: "labcorp",
       }))
       .mockResolvedValueOnce(jsonResponse(area))
       .mockResolvedValueOnce(jsonResponse({
         lab_id: 7,
         patient_service_centers: [
-          { metadata: {} },
+          locallyMalformedLocation,
           pscLocation(),
         ],
         slug: "labcorp",
@@ -437,6 +466,33 @@ describe("Junction labs provider boundary", () => {
     expectAbortedSignal(providerSignal);
   });
 
+  it("rejects a response that arrives after the caller aborts even when fetch ignores the signal", async () => {
+    const caller = new AbortController();
+    let releaseResponse!: () => void;
+    const responseReady = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      await responseReady;
+      return jsonResponse({ markers: [], page: 1, pages: 0, total: 0 });
+    });
+    const pending = executeJunctionLabsTool({
+      action: "search",
+      query: "metabolic",
+    }, {
+      ...dependencies(fetchImpl),
+      signal: caller.signal,
+      timeoutMs: 1_000,
+    });
+
+    caller.abort();
+    releaseResponse();
+
+    const error = await captureHostedError(pending);
+    expect(error.code).toBe("LABS_TEMPORARILY_UNAVAILABLE");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects blank, padded, and oversized API key values before provider egress", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
@@ -472,6 +528,7 @@ function junctionMarker(overrides: Record<string, unknown> = {}): Record<string,
     common_tat_days: 3,
     description: "A fixture catalog description.",
     expected_results: [],
+    id: 1,
     is_orderable: true,
     lab_id: 7,
     name: "Fixture health panel",
@@ -487,8 +544,8 @@ function junctionMarker(overrides: Record<string, unknown> = {}): Record<string,
 
 function pscLocation(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    capabilities: ["appointment_scheduling"],
-    distance: "1.5",
+    capabilities: ["appointment_scheduling_via_junction"],
+    distance: 1.5,
     location: { lat: 40.75, lng: -73.99 },
     metadata: {
       city: "Example City",
@@ -500,6 +557,7 @@ function pscLocation(overrides: Record<string, unknown> = {}): Record<string, un
       zip_code: "10001",
     },
     site_code: "fixture-site",
+    supported_bill_types: [],
     ...overrides,
   };
 }

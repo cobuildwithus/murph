@@ -57,6 +57,7 @@ const skippedDirectoryNames = new Set([
   ".next",
   ".next-dev",
   ".next-smoke",
+  ".deploy",
   "__tests__",
   "build",
   "coverage",
@@ -351,7 +352,7 @@ const providerClientFactoryNames = new Set([
   "requireHostedStripeApi",
 ]);
 const providerRequestTypeNamePattern =
-  /(?:ConnectionOptions|MediaPart|MessageContent|Params?(?:NonStreaming|Streaming)?|RequestOptions|TextPart)$/u;
+  /(?:ConnectionOptions|Create(?:Batch|Email)(?:Request)?Options|MediaPart|MessageContent|Params?(?:NonStreaming|Streaming)?|RequestOptions|TextPart)$/u;
 
 type ProviderRequestBoundaryViolationKind =
   | "handwritten-provider-transport"
@@ -1477,6 +1478,10 @@ interface ProviderHttpCandidate {
   readonly providers: readonly RegisteredProviderBoundary[];
 }
 
+interface ProviderHttpCallShape {
+  readonly urlArgument: Node;
+}
+
 interface LocalFunctionRange {
   readonly end: number;
   readonly name: string;
@@ -1506,10 +1511,8 @@ function collectRawProviderHttpViolations(input: {
     ) {
       return;
     }
-    const urlArgument = node.arguments.find(
-      (argument) => argument.type !== "ArgumentPlaceholder",
-    );
-    if (!urlArgument) {
+    const callShape = readProviderHttpCallShape(node);
+    if (!callShape) {
       return;
     }
 
@@ -1518,9 +1521,7 @@ function collectRawProviderHttpViolations(input: {
       before: node.start ?? Number.MAX_SAFE_INTEGER,
       bindings: input.bindings,
       contents: input.contents,
-      node: urlArgument.type === "SpreadElement"
-        ? urlArgument.argument
-        : urlArgument,
+      node: callShape.urlArgument,
       resolving: new Set(),
     });
     if (
@@ -1563,9 +1564,7 @@ function collectRawProviderHttpViolations(input: {
           contents: input.contents,
           provider,
           relativePath: input.relativePath,
-          urlArgument: urlArgument.type === "SpreadElement"
-            ? urlArgument.argument
-            : urlArgument,
+          urlArgument: callShape.urlArgument,
           urlFacts: requestFacts,
         })
       )
@@ -1615,6 +1614,45 @@ function collectRawProviderHttpViolations(input: {
       "raw-provider-http",
     );
   }
+}
+
+function readProviderHttpCallShape(
+  call: CallExpression | OptionalCallExpression,
+): ProviderHttpCallShape | null {
+  const callee = unwrapExpression(call.callee);
+  if (isMemberExpression(callee) || isOptionalMemberExpression(callee)) {
+    const method = readPropertyName(callee.property);
+    if (method === "call") {
+      const urlArgument = call.arguments[1];
+      return urlArgument && urlArgument.type !== "ArgumentPlaceholder"
+        ? {
+            urlArgument: urlArgument.type === "SpreadElement"
+              ? urlArgument.argument
+              : urlArgument,
+          }
+        : null;
+    }
+    if (method === "apply") {
+      const tuple = call.arguments[1];
+      return tuple && tuple.type !== "ArgumentPlaceholder"
+        ? {
+            urlArgument: tuple.type === "SpreadElement"
+              ? tuple.argument
+              : tuple,
+          }
+        : null;
+    }
+  }
+  const [urlArgument] = call.arguments.filter(
+    (argument) => argument.type !== "ArgumentPlaceholder",
+  );
+  return urlArgument
+    ? {
+        urlArgument: urlArgument.type === "SpreadElement"
+          ? urlArgument.argument
+          : urlArgument,
+      }
+    : null;
 }
 
 function collectLocalFunctionRanges(sourceFile: Node): LocalFunctionRange[] {
@@ -1699,7 +1737,6 @@ function collectHandwrittenProviderTransportViolations(input: {
     if (!isConcreteHandwrittenTransportDeclaration(declaration.name, declarationText)) {
       return;
     }
-
     recordViolationAtPosition(
       {
         boundary:
@@ -3591,6 +3628,13 @@ function isFetchLikeCallTarget(input: {
   }
 
   if (isMemberExpression(expression) || isOptionalMemberExpression(expression)) {
+    const fetchInvocationMethod = readPropertyName(expression.property);
+    if (["call", "apply"].includes(fetchInvocationMethod ?? "")) {
+      return isFetchLikeCallTarget({
+        ...input,
+        node: expression.object,
+      });
+    }
     const directRequiredModule = readRequiredModuleName(expression.object);
     if (directRequiredModule) {
       if (!isUnshadowedGlobalIdentifier({
@@ -4237,12 +4281,12 @@ async function scanDirectory(
   for (const entry of entries) {
     const entryRelativePath = path.posix.join(relativePath, entry.name);
     if (entry.isDirectory()) {
-      if (!shouldSkipDirectory(entry.name)) {
+      if (!shouldSkipProviderRequestDirectory(entry.name)) {
         await scanDirectory(entryRelativePath, violations);
       }
       continue;
     }
-    if (!entry.isFile() || !shouldScanSourceFile(entryRelativePath)) {
+    if (!entry.isFile() || !shouldScanProviderRequestSourceFile(entryRelativePath)) {
       continue;
     }
     const contents = await readFile(path.join(repoRoot, entryRelativePath), "utf8");
@@ -4267,16 +4311,8 @@ export function shouldScanProviderRequestSourceFile(relativePath: string): boole
     sourceExtensions.has(path.posix.extname(relativePath));
 }
 
-function shouldScanSourceFile(relativePath: string): boolean {
-  return shouldScanProviderRequestSourceFile(relativePath);
-}
-
 export function shouldSkipProviderRequestDirectory(name: string): boolean {
   return skippedDirectoryNames.has(name) || name.startsWith(".next");
-}
-
-function shouldSkipDirectory(name: string): boolean {
-  return shouldSkipProviderRequestDirectory(name);
 }
 
 function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string {
