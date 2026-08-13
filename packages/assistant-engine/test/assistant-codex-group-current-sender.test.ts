@@ -191,7 +191,12 @@ describe("murph.group current-sender intent", () => {
     expect(events).toEqual(["notice", "request"]);
     expect(progressDelivery.send).toHaveBeenCalledWith(
       "I’ll ask your Murph and share the answer here.",
-      { deliveryContextOrdinal: 3, required: true, source: "system" },
+      {
+        deliveryContextOrdinal: 3,
+        required: true,
+        source: "system",
+        targetInputId: EARLIER_SENDER_INPUT_ID,
+      },
     );
     expect(groupRequest).toHaveBeenCalledWith({
       action: "ask_current_sender",
@@ -230,6 +235,97 @@ describe("murph.group current-sender intent", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(groupRequest).not.toHaveBeenCalled();
+  });
+
+  it("binds simultaneous group notices to their own exact message refs", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderGroupPreviewedMessageRefs: new Set<string>(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({
+      acceptedInputIds: [EARLIER_SENDER_INPUT_ID, NEWEST_SENDER_INPUT_ID],
+      request: groupRequest,
+    });
+
+    for (const [ordinal, messageRef] of [
+      [0, EARLIER_SENDER_INPUT_ID],
+      [1, NEWEST_SENDER_INPUT_ID],
+    ] as const) {
+      await executeMurphDynamicToolRequest({
+        deliveryContextOrdinal: ordinal,
+        env: {},
+        fetchImpl: fetch,
+        groupSharedReadTurnState: sharedState,
+        hostedToolContext,
+        nextUsageOrdinal: () => ordinal + 1,
+        progressDelivery,
+        request: parseCurrentSenderRequest({ messageRef }),
+      });
+    }
+
+    expect(progressDelivery.send).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ targetInputId: EARLIER_SENDER_INPUT_ID }),
+    );
+    expect(progressDelivery.send).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({ targetInputId: NEWEST_SENDER_INPUT_ID }),
+    );
+    expect(groupRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        origin: expect.objectContaining({
+          assistantInputId: EARLIER_SENDER_INPUT_ID,
+        }),
+      }),
+    );
+    expect(groupRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        origin: expect.objectContaining({
+          assistantInputId: NEWEST_SENDER_INPUT_ID,
+        }),
+      }),
+    );
+  });
+
+  it("does not duplicate a group notice when the same request replays", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderGroupPreviewedMessageRefs: new Set<string>(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const execute = () => executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+
+    await execute();
+    await execute();
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
+    expect(groupRequest).toHaveBeenCalledTimes(2);
   });
 
   it("keeps private and clarification paths silent in the group", async () => {

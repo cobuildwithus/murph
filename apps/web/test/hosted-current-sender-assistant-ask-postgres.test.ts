@@ -22,6 +22,9 @@ import {
 import {
   readHostedMailboxWakeByItemId,
 } from "@/src/lib/hosted-mailbox/store";
+import {
+  upsertHostedMemberTelegramRoutingBindingTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   deleteHostedCurrentSenderAssistantAskFixture,
@@ -260,6 +263,96 @@ describe.skipIf(!runPostgresProof)(
         await expect(prisma.hostedMailboxItem.count({
           where: { id: { in: [...requestIds] } },
         })).resolves.toBe(0);
+      } finally {
+        if (fixture) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("keeps a failed private clarification claimable after its route appears", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const now = new Date();
+      let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
+
+      try {
+        fixture = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          priorQuestion: "Could my Murph answer this?",
+          prisma,
+          question: "Privately, please.",
+        });
+        if (!fixture.priorAssistantInputId) {
+          throw new Error("Expected a synthetic clarification source message.");
+        }
+        await requestHostedGroupCurrentSenderAssistantAsk({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "clarification",
+          now,
+          origin: {
+            assistantInputId: fixture.priorAssistantInputId,
+            kind: "accepted_input",
+            sessionId: "session_synthetic_private_clarification",
+          },
+          prisma,
+        });
+        await prisma.hostedMemberRouting.deleteMany({
+          where: { memberId: fixture.senderMemberId },
+        });
+
+        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "current_sender",
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "continuation",
+          now,
+          origin: fixture.origin,
+          prisma,
+        })).resolves.toMatchObject({
+          mailboxWake: null,
+          result: { status: "unavailable" },
+        });
+        await expect(prisma.hostedGroupCurrentSenderClarification.findUnique({
+          where: {
+            groupRuntimeMemberId_targetMemberId: {
+              groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+              targetMemberId: fixture.senderMemberId,
+            },
+          },
+        })).resolves.toMatchObject({
+          resolvedAudience: null,
+          resolvedByAssistantInputId: null,
+        });
+
+        await prisma.$transaction((tx) =>
+          upsertHostedMemberTelegramRoutingBindingTx({
+            memberId: fixture!.senderMemberId,
+            prisma: tx,
+            telegramThreadId: `telegram_direct_recovered_${fixture!.telegramUserId}`,
+            telegramUserId: fixture!.telegramUserId,
+          })
+        );
+        const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.priorAssistantInputId,
+        });
+        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "current_sender",
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "continuation",
+          now,
+          origin: fixture.origin,
+          prisma,
+        })).resolves.toEqual({
+          mailboxWake: {
+            expectedUserId: fixture.senderMemberId,
+            mailboxItemId: requestId,
+          },
+          result: { status: "accepted" },
+        });
+        await expect(prisma.hostedMailboxItem.count({
+          where: { id: requestId },
+        })).resolves.toBe(1);
       } finally {
         if (fixture) {
           await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });

@@ -4402,6 +4402,7 @@ async function executeGroupTool(input: {
           deliveryContextOrdinal: input.deliveryContextOrdinal,
           required: true,
           source: 'system',
+          targetInputId: input.request.messageRef,
         },
       )
       if (preview.kind !== 'sent') {

@@ -119,7 +119,26 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
-    $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
+    $transaction: async (run: (tx: typeof fakeTx) => Promise<unknown>) => {
+      const itemSnapshot = new Map(storedItems);
+      const wakeSnapshot = new Map(storedWakes);
+      const clarificationSnapshot = new Map(
+        [...pendingClarifications].map(([key, value]) => [key, { ...value }]),
+      );
+      try {
+        return await run(fakeTx);
+      } catch (error) {
+        storedItems.clear();
+        storedWakes.clear();
+        pendingClarifications.clear();
+        for (const [key, value] of itemSnapshot) storedItems.set(key, value);
+        for (const [key, value] of wakeSnapshot) storedWakes.set(key, value);
+        for (const [key, value] of clarificationSnapshot) {
+          pendingClarifications.set(key, value);
+        }
+        throw error;
+      }
+    },
   }),
 }));
 
@@ -510,6 +529,80 @@ describe("hosted current-sender Assistant Ask authority", () => {
     expect(requireRequestedWake(requestId).ask.question).toBe(
       "Can my Murph answer this?",
     );
+  });
+
+  it("keeps a private clarification retryable until its direct route is available", async () => {
+    sourceWakes.set(CURRENT_INPUT_ID, createSourceWake({
+      text: "Can my Murph answer this?",
+    }));
+    await requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "clarification",
+      now: NOW,
+      origin: origin(),
+    });
+
+    const unavailableResponseInputId = `ain_${"c".repeat(32)}`;
+    sourceWakes.set(unavailableResponseInputId, createSourceWake({
+      occurredAt: "2026-07-27T19:59:59.500Z",
+      text: "Send it privately.",
+    }));
+    directRouteAvailable = false;
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "current_sender",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "continuation",
+      now: NOW,
+      origin: origin(unavailableResponseInputId),
+    })).resolves.toMatchObject({
+      mailboxWake: null,
+      result: { status: "unavailable" },
+    });
+    expect(
+      pendingClarifications.get(
+        `${GROUP_RUNTIME_MEMBER_ID}:${CURRENT_SENDER_MEMBER_ID}`,
+      ),
+    ).toMatchObject({
+      resolvedAudience: null,
+      resolvedByAssistantInputId: null,
+    });
+    expect(storedItems.size).toBe(0);
+
+    const retryResponseInputId = `ain_${"f".repeat(32)}`;
+    sourceWakes.set(retryResponseInputId, createSourceWake({
+      occurredAt: "2026-07-27T19:59:59.750Z",
+      text: "Private is best.",
+    }));
+    directRouteAvailable = true;
+    const retry = await requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "current_sender",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "continuation",
+      now: NOW,
+      origin: origin(retryResponseInputId),
+    });
+    const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      originAssistantInputId: CURRENT_INPUT_ID,
+    });
+    expect(retry).toEqual({
+      mailboxWake: {
+        expectedUserId: CURRENT_SENDER_MEMBER_ID,
+        mailboxItemId: requestId,
+      },
+      result: { status: "accepted" },
+    });
+    expect(requireRequestedWake(requestId).ask.target.kind).toBe(
+      "group_sender_private",
+    );
+    expect(
+      pendingClarifications.get(
+        `${GROUP_RUNTIME_MEMBER_ID}:${CURRENT_SENDER_MEMBER_ID}`,
+      ),
+    ).toMatchObject({
+      resolvedAudience: "current_sender",
+      resolvedByAssistantInputId: retryResponseInputId,
+    });
   });
 
   it("admits two independent natural requests from one mixed-sender batch", async () => {

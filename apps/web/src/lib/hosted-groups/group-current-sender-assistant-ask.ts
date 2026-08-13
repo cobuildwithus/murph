@@ -128,6 +128,14 @@ export interface HostedGroupCurrentSenderAssistantAskAdmission {
   result: HostedRuntimeGroupCurrentSenderDirectResult;
 }
 
+class HostedCurrentSenderAdmissionRollback extends Error {
+  constructor(
+    readonly admission: HostedGroupCurrentSenderAssistantAskAdmission,
+  ) {
+    super("Hosted current-sender admission did not commit.");
+  }
+}
+
 export function createHostedGroupCurrentSenderAssistantAskRequestId(input: {
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
@@ -238,103 +246,126 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
       prisma,
     });
   }
-  const audience = input.audience!;
-  const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
-    groupRuntimeMemberId,
-    originAssistantInputId: origin.assistantInputId,
-  });
-  const requestId = requestIds[0];
-
-  return prisma.$transaction(async (tx) => {
-    await acquireHostedCurrentSenderAssistantAskLocksTx(tx, requestIds);
-    const existingItems: Array<{
-      item: NonNullable<Awaited<ReturnType<typeof readHostedMailboxItemById>>>;
-      requestId: string;
-    }> = [];
-    for (const candidateId of requestIds) {
-      const item = await readHostedMailboxItemById({ mailboxItemId: candidateId, prisma: tx });
-      if (item) existingItems.push({ item, requestId: candidateId });
-    }
-    if (existingItems.length > 1) {
-      return unavailableHostedCurrentSenderAdmission("request_conflict");
-    }
-    const existing = existingItems[0];
-    if (existing) {
-      return replayHostedGroupCurrentSenderAssistantAskTx({
-        audience,
-        existingDedupeKey: existing.item.dedupeKey,
-        existingKind: existing.item.kind,
-        existingUserId: existing.item.userId,
-        expiresAt: existing.item.expiresAt ?? null,
-        groupRuntimeMemberId,
-        now,
-        origin,
-        requestId: existing.requestId,
-        tx,
-      });
-    }
-
-    const sourceAuthority = await readHostedGroupCurrentSenderSourceAuthorityTx({
-      expectedGroupRuntimeMemberId: groupRuntimeMemberId,
+  return await prisma.$transaction(async (tx) =>
+    await requestHostedGroupCurrentSenderAssistantAskTx({
+      audience: input.audience!,
+      groupRuntimeMemberId,
       now,
       origin,
       tx,
-    });
-    if (!sourceAuthority) {
-      return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
-    }
-    const targetKind = targetKindForHostedCurrentSenderAudience(audience);
-    const permissionText = permissionTextForHostedCurrentSenderAudience(audience);
-    const authority = {
-      audience,
-      groupRuntimeMemberId,
-      occurredAt: sourceAuthority.occurredAt,
-      permissionDigest: createHostedGroupCurrentSenderPermissionDigest(permissionText),
-      permissionText,
-      personalReadAllowed: true,
-      question: sourceAuthority.question,
-      requestId,
-      sourceChannel: sourceAuthority.sourceChannel,
-      targetMemberId: sourceAuthority.targetMemberId,
-    } satisfies HostedGroupCurrentSenderAssistantAskAuthority;
-    if (
-      audience === "current_sender"
-      && !await resolveHostedGroupCurrentSenderPrivateDestination({ authority, tx })
-    ) {
-      return unavailableHostedCurrentSenderAdmission(HOSTED_GROUP_CURRENT_SENDER_DIRECT_ROUTE_GUIDANCE);
-    }
+    })
+  );
+}
 
-    const occurredAt = now.toISOString();
-    const expiresAt = new Date(now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS).toISOString();
-    const wake = buildHostedExecutionAssistantAskRequestedWake({
-      ask: {
-        expiresAt,
-        origin,
-        question: authority.question,
-        target: {
-          groupRuntimeMemberId,
-          kind: targetKind,
-          permissionDigest: authority.permissionDigest,
-        },
-      },
-      eventId: requestId,
-      memberId: authority.targetMemberId,
-      occurredAt,
-    });
-    const append = await appendHostedMailboxEnvelopeWithIdentityTx({
-      envelope: wake,
-      expiresAt,
-      itemId: requestId,
-      tx,
-    });
-    if (append.dedupeConflict || append.item.id !== requestId) {
-      return unavailableHostedCurrentSenderAdmission("request_conflict");
-    }
-    return {
-      mailboxWake: { expectedUserId: authority.targetMemberId, mailboxItemId: requestId },
-      result: { status: "accepted" },
-    };
+async function requestHostedGroupCurrentSenderAssistantAskTx(input: {
+  audience: HostedGroupCurrentSenderAudience;
+  groupRuntimeMemberId: string;
+  now: Date;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupCurrentSenderAssistantAskAdmission> {
+  const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
+    groupRuntimeMemberId: input.groupRuntimeMemberId,
+    originAssistantInputId: input.origin.assistantInputId,
   });
+  const requestId = requestIds[0];
+
+  await acquireHostedCurrentSenderAssistantAskLocksTx(input.tx, requestIds);
+  const existingItems: Array<{
+    item: NonNullable<Awaited<ReturnType<typeof readHostedMailboxItemById>>>;
+    requestId: string;
+  }> = [];
+  for (const candidateId of requestIds) {
+    const item = await readHostedMailboxItemById({
+      mailboxItemId: candidateId,
+      prisma: input.tx,
+    });
+    if (item) existingItems.push({ item, requestId: candidateId });
+  }
+  if (existingItems.length > 1) {
+    return unavailableHostedCurrentSenderAdmission("request_conflict");
+  }
+  const existing = existingItems[0];
+  if (existing) {
+    return replayHostedGroupCurrentSenderAssistantAskTx({
+      audience: input.audience,
+      existingDedupeKey: existing.item.dedupeKey,
+      existingKind: existing.item.kind,
+      existingUserId: existing.item.userId,
+      expiresAt: existing.item.expiresAt ?? null,
+      groupRuntimeMemberId: input.groupRuntimeMemberId,
+      now: input.now,
+      origin: input.origin,
+      requestId: existing.requestId,
+      tx: input.tx,
+    });
+  }
+
+  const sourceAuthority = await readHostedGroupCurrentSenderSourceAuthorityTx({
+    expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
+    now: input.now,
+    origin: input.origin,
+    tx: input.tx,
+  });
+  if (!sourceAuthority) {
+    return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
+  }
+  const targetKind = targetKindForHostedCurrentSenderAudience(input.audience);
+  const permissionText = permissionTextForHostedCurrentSenderAudience(input.audience);
+  const authority = {
+    audience: input.audience,
+    groupRuntimeMemberId: input.groupRuntimeMemberId,
+    occurredAt: sourceAuthority.occurredAt,
+    permissionDigest: createHostedGroupCurrentSenderPermissionDigest(permissionText),
+    permissionText,
+    personalReadAllowed: true,
+    question: sourceAuthority.question,
+    requestId,
+    sourceChannel: sourceAuthority.sourceChannel,
+    targetMemberId: sourceAuthority.targetMemberId,
+  } satisfies HostedGroupCurrentSenderAssistantAskAuthority;
+  if (
+    input.audience === "current_sender"
+    && !await resolveHostedGroupCurrentSenderPrivateDestination({
+      authority,
+      tx: input.tx,
+    })
+  ) {
+    return unavailableHostedCurrentSenderAdmission(HOSTED_GROUP_CURRENT_SENDER_DIRECT_ROUTE_GUIDANCE);
+  }
+
+  const occurredAt = input.now.toISOString();
+  const expiresAt = new Date(
+    input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  ).toISOString();
+  const wake = buildHostedExecutionAssistantAskRequestedWake({
+    ask: {
+      expiresAt,
+      origin: input.origin,
+      question: authority.question,
+      target: {
+        groupRuntimeMemberId: input.groupRuntimeMemberId,
+        kind: targetKind,
+        permissionDigest: authority.permissionDigest,
+      },
+    },
+    eventId: requestId,
+    memberId: authority.targetMemberId,
+    occurredAt,
+  });
+  const append = await appendHostedMailboxEnvelopeWithIdentityTx({
+    envelope: wake,
+    expiresAt,
+    itemId: requestId,
+    tx: input.tx,
+  });
+  if (append.dedupeConflict || append.item.id !== requestId) {
+    return unavailableHostedCurrentSenderAdmission("request_conflict");
+  }
+  return {
+    mailboxWake: { expectedUserId: authority.targetMemberId, mailboxItemId: requestId },
+    result: { status: "accepted" },
+  };
 }
 
 async function createHostedGroupCurrentSenderClarification(input: {
@@ -396,93 +427,104 @@ async function continueHostedGroupCurrentSenderAssistantAsk(input: {
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   prisma: HostedCurrentSenderAssistantAskPrismaClient;
 }): Promise<HostedGroupCurrentSenderAssistantAskAdmission> {
-  const originalOrigin = await input.prisma.$transaction(async (tx) => {
-    const responseSource = await readHostedGroupCurrentSenderSourceAuthorityTx({
-      expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
-      now: input.now,
-      origin: input.origin,
-      tx,
-    });
-    if (!responseSource) {
-      return null;
-    }
-    const pending = await tx.hostedGroupCurrentSenderClarification.findUnique({
-      where: {
-        groupRuntimeMemberId_targetMemberId: {
-          groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
-          targetMemberId: responseSource.targetMemberId,
-        },
-      },
-    });
-    if (
-      !pending
-      || pending.expiresAt <= input.now
-      || BigInt(responseSource.causalSeq) <= pending.sourceCausalSeq
-      || (
-        pending.resolvedByAssistantInputId !== null
-        && (
-          pending.resolvedByAssistantInputId !== input.origin.assistantInputId
-          || pending.resolvedAudience !== input.audience
-        )
-      )
-    ) {
-      return null;
-    }
-    if (pending.resolvedByAssistantInputId === null) {
-      const claimed = await tx.hostedGroupCurrentSenderClarification.updateMany({
-        data: {
-          resolvedAudience: input.audience,
-          resolvedByAssistantInputId: input.origin.assistantInputId,
-        },
+  let admission: HostedGroupCurrentSenderAssistantAskAdmission | null;
+  try {
+    admission = await input.prisma.$transaction(async (tx) => {
+      const responseSource = await readHostedGroupCurrentSenderSourceAuthorityTx({
+        expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
+        now: input.now,
+        origin: input.origin,
+        tx,
+      });
+      if (!responseSource) {
+        return null;
+      }
+      const pending = await tx.hostedGroupCurrentSenderClarification.findUnique({
         where: {
-          expiresAt: pending.expiresAt,
-          groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
-          originAssistantInputId: pending.originAssistantInputId,
-          originSessionId: pending.originSessionId,
-          resolvedByAssistantInputId: null,
-          targetMemberId: responseSource.targetMemberId,
+          groupRuntimeMemberId_targetMemberId: {
+            groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+            targetMemberId: responseSource.targetMemberId,
+          },
         },
       });
-      if (claimed.count !== 1) {
-        const resolved = await tx.hostedGroupCurrentSenderClarification.findUnique({
+      if (
+        !pending
+        || pending.expiresAt <= input.now
+        || BigInt(responseSource.causalSeq) <= pending.sourceCausalSeq
+        || (
+          pending.resolvedByAssistantInputId !== null
+          && (
+            pending.resolvedByAssistantInputId !== input.origin.assistantInputId
+            || pending.resolvedAudience !== input.audience
+          )
+        )
+      ) {
+        return null;
+      }
+      if (pending.resolvedByAssistantInputId === null) {
+        const claimed = await tx.hostedGroupCurrentSenderClarification.updateMany({
+          data: {
+            resolvedAudience: input.audience,
+            resolvedByAssistantInputId: input.origin.assistantInputId,
+          },
           where: {
-            groupRuntimeMemberId_targetMemberId: {
-              groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
-              targetMemberId: responseSource.targetMemberId,
-            },
+            expiresAt: pending.expiresAt,
+            groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+            originAssistantInputId: pending.originAssistantInputId,
+            originSessionId: pending.originSessionId,
+            resolvedByAssistantInputId: null,
+            targetMemberId: responseSource.targetMemberId,
           },
         });
-        if (
-          !resolved
-          || resolved.expiresAt <= input.now
-          || resolved.originAssistantInputId !== pending.originAssistantInputId
-          || resolved.originSessionId !== pending.originSessionId
-          || resolved.resolvedAudience !== input.audience
-          || resolved.resolvedByAssistantInputId !== input.origin.assistantInputId
-        ) {
-          return null;
+        if (claimed.count !== 1) {
+          const resolved = await tx.hostedGroupCurrentSenderClarification.findUnique({
+            where: {
+              groupRuntimeMemberId_targetMemberId: {
+                groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+                targetMemberId: responseSource.targetMemberId,
+              },
+            },
+          });
+          if (
+            !resolved
+            || resolved.expiresAt <= input.now
+            || resolved.originAssistantInputId !== pending.originAssistantInputId
+            || resolved.originSessionId !== pending.originSessionId
+            || resolved.resolvedAudience !== input.audience
+            || resolved.resolvedByAssistantInputId !== input.origin.assistantInputId
+          ) {
+            return null;
+          }
         }
       }
+      const originalAdmission = await requestHostedGroupCurrentSenderAssistantAskTx({
+        audience: input.audience,
+        groupRuntimeMemberId: input.groupRuntimeMemberId,
+        now: input.now,
+        origin: {
+          assistantInputId: pending.originAssistantInputId,
+          kind: "accepted_input",
+          sessionId: pending.originSessionId,
+        },
+        tx,
+      });
+      if (originalAdmission.result.status !== "accepted") {
+        throw new HostedCurrentSenderAdmissionRollback(originalAdmission);
+      }
+      return originalAdmission;
+    });
+  } catch (error) {
+    if (error instanceof HostedCurrentSenderAdmissionRollback) {
+      return error.admission;
     }
-    return {
-      assistantInputId: pending.originAssistantInputId,
-      kind: "accepted_input" as const,
-      sessionId: pending.originSessionId,
-    };
-  });
-  if (!originalOrigin) {
+    throw error;
+  }
+  if (!admission) {
     return unavailableHostedCurrentSenderAdmission(
       HOSTED_GROUP_CURRENT_SENDER_CLARIFICATION_GUIDANCE,
     );
   }
-  return await requestHostedGroupCurrentSenderAssistantAsk({
-    audience: input.audience,
-    groupRuntimeMemberId: input.groupRuntimeMemberId,
-    mode: "new",
-    now: input.now,
-    origin: originalOrigin,
-    prisma: input.prisma,
-  });
+  return admission;
 }
 
 type HostedGroupCurrentSenderAuthorityReadInput = {

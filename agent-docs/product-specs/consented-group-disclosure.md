@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Decision
 
@@ -40,18 +40,21 @@ current group turn as its sole source authority. `ask_current_sender` accepts
 only that opaque `message_ref`; multiple independent requests in the same turn
 can each be submitted. Trusted runtime code verifies the ref belongs to the
 accepted turn, and Web reopens its stored wake, preserves native reply evidence,
-resolves its author, and accepts only a flat message that explicitly asks Murph
-to consult that author's personal Murph. Web also fixes the audience before
-personal-model work:
-explicit private/direct/DM wording requires a current same-channel direct route;
-otherwise the originating group is the default. Conflicting audience wording,
-native replies, quotations, negative requests, unclear addressing, or
-context-dependent wording create no personal read.
+and resolves its author. The group model infers the requested answer audience
+from the conversation. A group answer requires a trusted advance notice bound
+to the same exact accepted input before personal-model work begins; a private
+answer requires a current same-channel direct route. When the audience is
+genuinely unclear, the model asks a natural clarification and Web retains only
+a short-lived group-and-sender pointer to the exact original source. The same
+speaker's later accepted input may resolve it, and a failed admission leaves the
+pointer claimable. No exact response format is required from the person.
 
-The existing requested-wake target kind and permission digest persist that fixed
-audience. The private candidate and fresh outgoing reviewer may only allow or
-deny the answer under the fixed permission; no model output may select a member,
-route, or audience. Group answers use the existing group completion. Private
+Web derives the member, route, question, and replay identity from the exact
+stored source; the model never supplies those values. The existing
+requested-wake target kind and permission digest persist the inferred audience
+as fixed authority. The private candidate and fresh outgoing reviewer may only
+allow or deny the answer under the fixed permission. Group answers use the
+existing group completion. Private
 answers use the existing exact-text notification on the admitted channel. If a
 private route disappears after admission or at provider entry, or if the
 request expires before prepare, the private answer is discarded and the

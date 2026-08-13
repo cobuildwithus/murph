@@ -1631,6 +1631,157 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
   })
 })
 
+test('sendAssistantMessageLocal resolves required progress to one exact accepted message', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-selected-progress-target-',
+  )
+  tempRoots.push(context.parentRoot)
+  const acceptedMessage = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:01.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Bind progress to this message.',
+      },
+      conversation: {
+        accountId: 'telegram-account',
+        actorId: 'telegram-actor',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:00.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '987654329',
+        threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_selected_progress_target',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const newerMessage = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:02.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'This newer speaker remains the generic context.',
+      },
+      conversation: {
+        accountId: 'telegram-account',
+        actorId: 'telegram-actor-newer',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:01.000Z',
+      receivedAt: '2026-04-22T10:00:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '987654330',
+        threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_newer_progress_context',
+        laneSeq: '2',
+      }),
+    },
+  })
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    realMessageTargetSelection: true,
+    session,
+  })
+  let unavailableProgressKind: string | null = null
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.progressDelivery?.send(
+      'Sharing after the exact source is reviewed.',
+      {
+        deliveryContextOrdinal: 0,
+        required: true,
+        source: 'system',
+        targetInputId: acceptedMessage.inputId,
+      },
+    )
+    unavailableProgressKind = (await providerInput.progressDelivery?.send(
+      'This target must fail closed.',
+      {
+        deliveryContextOrdinal: 0,
+        required: true,
+        source: 'system',
+        targetInputId: 'ain_ffffffffffffffffffffffffffffffff',
+      },
+    ))?.kind ?? null
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        session,
+        transcriptResponse: '',
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: acceptedMessage.inputId,
+            version: acceptedMessage.schema,
+          },
+          id: acceptedMessage.inputId,
+          source: 'assistant-input',
+        },
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: newerMessage.inputId,
+            version: newerMessage.schema,
+          },
+          id: newerMessage.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
+    deliverResponse: true,
+    deliveryReplyToMessageId: '987654330',
+    prompt: 'Review the selected source.',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
+  expect(unavailableProgressKind).toBe('failed')
+  expect(mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.input)
+    .toMatchObject({
+      deliveryNativeReplyRequested: true,
+      deliveryReplyToMessageId: '987654329',
+    })
+})
+
 test('sendAssistantMessageLocal fails closed before reply delivery when second-pass target authority is lost', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-stale-reply-target-',
