@@ -7,7 +7,7 @@ import {
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
 } from "@murphai/device-syncd/connect-config";
-import { listDeviceSyncProviderCatalog } from "@murphai/device-syncd";
+import { listDeviceSyncProviderCatalog } from "@murphai/device-syncd/config";
 
 import { readHostedDeviceSyncPublicBaseUrl } from "../../hosted-web/public-url";
 import {
