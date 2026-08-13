@@ -412,16 +412,15 @@ describe("public loader seams", () => {
     expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(2);
     expect(loadRuntimeModuleMock).toHaveBeenLastCalledWith("@murphai/core");
 
-    await expect(
-      workoutsModule.inspectWorkoutCsvImport({
-        vault: "./vault",
-        file: csvFile,
-      }),
-    ).resolves.toMatchObject({
+    const inspection = await workoutsModule.inspectWorkoutCsvImport({
+      vault: "./vault",
+      file: csvFile,
+    });
+    expect(inspection).toMatchObject({
       sourceFile: csvFile,
-      headers: ["workout name", "date", "exercise name", "weight", "reps"],
       importable: true,
     });
+    expect(inspection).not.toHaveProperty("headers");
     expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(4);
     expect(loadRuntimeModuleMock).toHaveBeenLastCalledWith("@murphai/importers");
     expect(loadVaultMock).toHaveBeenCalledWith({ vaultRoot: "./vault" });

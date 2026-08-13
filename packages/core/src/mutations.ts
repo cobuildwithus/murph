@@ -7,6 +7,7 @@ import type {
   EventAttachment,
   EventImportDecision,
   EventImportRetractionDecision,
+  EventImportUpsertDecision,
   ExternalRef,
   EventKind,
   EventRecord,
@@ -1771,6 +1772,7 @@ type PreparedEventImportDecision =
       action: "upsert";
       allowsKindReplacement: boolean;
       entry: PreparedJsonlEntry<EventRecord>;
+      expectedLatest?: EventImportUpsertDecision["expectedLatest"];
     }
   | {
       action: "retract";
@@ -2962,6 +2964,29 @@ async function reconcileEventImportDecisionsByExternalRef(
     },
   );
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
+
+  for (const decision of decisions) {
+    signal?.throwIfAborted();
+    if (decision.action !== "upsert" || !decision.expectedLatest) {
+      continue;
+    }
+    const externalRef = decision.entry.record.externalRef;
+    const latestById = index.latestById.get(decision.expectedLatest.eventId);
+    const latestByRef = externalRef
+      ? index.latestByRefKey.get(eventExternalRefKey(externalRef))?.record
+      : undefined;
+    if (
+      !latestById
+      || latestById.id !== latestByRef?.id
+      || eventSpineRevision(latestById) !== decision.expectedLatest.lifecycleRevision
+    ) {
+      throw new VaultError(
+        "EVENT_EXPECTED_LATEST_MISMATCH",
+        "An imported event changed after it was inspected; the whole batch was rejected without writes.",
+      );
+    }
+  }
+
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
   const forceAppendIds = new Set<string>();
   const eventIds: string[] = [];
@@ -5552,6 +5577,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         action: "upsert",
         allowsKindReplacement: true,
         entry: { relativePath: toEventLedgerFile(record.occurredAt), record },
+        ...(decision.expectedLatest ? { expectedLatest: decision.expectedLatest } : {}),
       });
     } catch (error) {
       failures.push({

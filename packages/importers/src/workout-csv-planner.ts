@@ -476,8 +476,33 @@ function normalizeSetType(value: string | undefined, detectedSource: WorkoutCsvS
   return "normal";
 }
 
-function stableWorkoutSessionKey(rawTimestamp: string): string {
-  const canonicalSourceTimestamp = normalizeFlexibleTimestamp(rawTimestamp, "UTC");
+function sourceTimestampDomain(rawTimestamp: string): "instant" | "wall" {
+  const trimmed = rawTimestamp.trim();
+  return /^(?:[+-]?\d{10}|[+-]?\d{13})$/u.test(trimmed)
+    || /(?:z|gmt|utc|[+-]\d{2}:?\d{2})$/iu.test(trimmed)
+    ? "instant"
+    : "wall";
+}
+
+function canonicalSourceTimestampIdentity(
+  rawDate: string | undefined,
+  rawTime: string | undefined,
+): string | undefined {
+  const normalizedDate = normalizeOptionalText(rawDate);
+  const normalizedTime = normalizeOptionalText(rawTime);
+  const rawTimestamp = normalizedTime && /^\d{4}-\d{2}-\d{2}(?:[T\s]|$)/u.test(normalizedTime)
+    ? normalizedTime
+    : [normalizedDate, normalizedTime].filter(Boolean).join(" ");
+  if (!rawTimestamp) return undefined;
+  const canonicalSourceTimestamp = normalizeWorkoutTimestamp(normalizedDate, normalizedTime, "UTC");
+  if (!canonicalSourceTimestamp) {
+    throw new TypeError("Workout source timestamp cannot be normalized safely.");
+  }
+  return `${sourceTimestampDomain(rawTimestamp)}:${canonicalSourceTimestamp}`;
+}
+
+function stableWorkoutSessionKey(rawDate: string | undefined, rawStartTime: string | undefined): string {
+  const canonicalSourceTimestamp = canonicalSourceTimestampIdentity(rawDate, rawStartTime);
   if (!canonicalSourceTimestamp) {
     throw new TypeError("Workout source timestamp cannot be normalized safely.");
   }
@@ -489,8 +514,10 @@ function stableWorkoutSessionKey(rawTimestamp: string): string {
 
 function stableWorkoutEndTimeKey(rawDate: string | undefined, rawEndTime: string): string {
   const sourceDate = /^\d{4}-\d{2}-\d{2}/u.exec(rawDate ?? "")?.[0] ?? rawDate;
-  const canonicalSourceTimestamp = normalizeWorkoutTimestamp(sourceDate, rawEndTime, "UTC")
-    ?? [sourceDate, rawEndTime].filter(Boolean).join(" ").trim();
+  const canonicalSourceTimestamp = canonicalSourceTimestampIdentity(sourceDate, rawEndTime);
+  if (!canonicalSourceTimestamp) {
+    throw new TypeError("Workout source end timestamp cannot be normalized safely.");
+  }
   return createHash("sha256")
     .update(canonicalSourceTimestamp)
     .digest("hex")
@@ -772,7 +799,7 @@ function buildSessions(input: {
     }
     titleByOccurredAt.set(occurredAt, title);
 
-    const sourceSessionKey = stableWorkoutSessionKey(rawTimestamp);
+    const sourceSessionKey = stableWorkoutSessionKey(rawDate, rawStartTime);
     const sourceWorkoutId = stableWorkoutSourceId(input.source, sourceSessionKey);
     let session = sessions.get(sourceWorkoutId);
     if (!session) {

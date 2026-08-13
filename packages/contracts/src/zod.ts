@@ -1421,10 +1421,18 @@ export const versionedExternalRefSchema = externalRefSchema.extend({
   version: writableIsoDateTimeString(200),
 });
 
+export const expectedLatestEventSchema = z
+  .object({
+    eventId: idSchema(ID_PREFIXES.event),
+    lifecycleRevision: z.number().int().positive(),
+  })
+  .strict();
+
 export const eventImportUpsertDecisionSchema = z
   .object({
     action: z.literal("upsert"),
     payload: publicEventImportJsonlRowPayloadSchema,
+    expectedLatest: expectedLatestEventSchema.optional(),
   })
   .strict();
 

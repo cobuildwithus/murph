@@ -140,6 +140,11 @@ interface WorkoutExternalIdentity {
   facet?: string
 }
 
+interface WorkoutExpectedLatest extends JsonObject {
+  eventId: string
+  lifecycleRevision: number
+}
+
 interface WorkoutRawRefMatch {
   attachment: EventRecord
   latest: EventRecord
@@ -191,6 +196,7 @@ function buildWorkoutEventDecisions(
   existingExternalRefs?: readonly WorkoutExternalIdentity[],
   mappingRevision = WORKOUT_CSV_MAPPING_REVISION,
   existingPayloads?: readonly (JsonObject | null | undefined)[],
+  expectedLatest?: readonly (WorkoutExpectedLatest | undefined)[],
 ): { decisions: JsonObject[], suppressedDeletedCount: number } {
   let suppressedDeletedCount = 0
   const decisions = plan.sessions.flatMap((session, index): JsonObject[] => {
@@ -203,6 +209,7 @@ function buildWorkoutEventDecisions(
       return [{
         action: 'upsert',
         payload: existingPayload,
+        ...(expectedLatest?.[index] ? { expectedLatest: expectedLatest[index] } : {}),
       }]
     }
     const existingExternalRef = existingExternalRefs?.[index]
@@ -962,12 +969,13 @@ async function resolveExistingWorkoutEvidence(input: {
       const evidence = {
         rawFile,
         ...mapping,
-        currentUnitsMatch:
-          (candidate.weightUnit === undefined && candidate.distanceUnit === undefined)
-          || (
-            candidate.weightUnit === (input.plan.weightUnit ?? null)
-            && candidate.distanceUnit === (input.plan.distanceUnit ?? null)
-          ),
+        currentUnitsMatch: mapping.records.every((record, sessionIndex) =>
+          record.kind === 'activity_session'
+          && JSON.stringify(unitOwnedProjection(record.workout, record.distanceKm))
+            === JSON.stringify(unitOwnedProjection(
+              input.plan.sessions[sessionIndex]?.workout,
+              input.plan.sessions[sessionIndex]?.distanceKm,
+            ))),
         ...(originalTimeZone ? { originalTimeZone } : {}),
         ...(candidate.source ? { originalSource: candidate.source } : {}),
         ...(candidate.delimiter ? { originalDelimiter: candidate.delimiter } : {}),
@@ -1038,6 +1046,13 @@ function unitOwnedProjection(
         addedWeightKg: set.addedWeightKg,
       })),
     })),
+  }
+}
+
+function expectedLatestForRecord(record: EventRecord): WorkoutExpectedLatest {
+  return {
+    eventId: record.id,
+    lifecycleRevision: record.lifecycle?.revision ?? 1,
   }
 }
 
@@ -1251,6 +1266,7 @@ function buildDialectCorrectionPayload(input: {
 function mapBatchError(error: unknown): unknown {
   return toVaultCliError(error, {
     EVENT_BATCH_INVALID: { code: 'contract_invalid' },
+    EVENT_EXPECTED_LATEST_MISMATCH: { code: 'conflict' },
     EVENT_SOURCE_REVISION_CONFLICT: { code: 'conflict' },
     EVENT_SOURCE_REVISION_UNORDERED: { code: 'conflict' },
     EVENT_KIND_MISMATCH: { code: 'conflict' },
@@ -1370,18 +1386,20 @@ export async function importWorkoutCsv(input: {
   const sourceDialectCorrection = existingEvidence.records !== undefined
     && existingEvidence.canonicalSourceMatches === false
   if (
-    existingEvidence.currentMappingReplay
+    existingEvidence.records
     && !existingEvidence.currentUnitsMatch
     && !input.correctUnits
   ) {
     throw new VaultCliError(
       'conflict',
-      'This exact workout CSV was imported with different unit choices. Confirm the correction and rerun with --correct-units.',
+      'This exact workout CSV does not match the selected units. Confirm the prior provider and rerun with --correct-units before any provider correction.',
     )
   }
   if (
-    existingEvidence.currentMappingReplay
-    && !input.correctUnits
+    (
+      (input.correctUnits && existingEvidence.currentUnitsMatch)
+      || (existingEvidence.currentMappingReplay && !input.correctUnits)
+    )
     && !sourceDialectCorrection
   ) {
     return {
@@ -1504,6 +1522,7 @@ export async function importWorkoutCsv(input: {
   })
   const rawFile = existingEvidence.rawFile ?? batch.rawFile
   let existingPayloads: Array<JsonObject | null | undefined> | undefined
+  let expectedLatest: Array<WorkoutExpectedLatest | undefined> | undefined
   if (requiresEvidenceCorrection) {
     const records = correctedRecords!
     const originalPlan = originalCorrectionPlan!
@@ -1533,18 +1552,22 @@ export async function importWorkoutCsv(input: {
       return buildUnitCorrectionPayload({
         record,
         session: plan.sessions[index]!,
-        ownershipSessions: unitOwnershipPlans.map((ownershipPlan) =>
-          ownershipPlan.sessions[index]!),
+        ownershipSessions: [
+          originalPlan.sessions[index]!,
+          ...unitOwnershipPlans.map((ownershipPlan) => ownershipPlan.sessions[index]!),
+        ],
         mappingRevision,
         correctWeight: input.weightUnit !== undefined,
         correctDistance: input.distanceUnit !== undefined,
       })
     })
+    expectedLatest = records.map(expectedLatestForRecord)
   } else if (existingEvidence.records) {
     existingPayloads = existingEvidence.records.map((record) =>
       record.lifecycle?.state === 'deleted'
         ? null
         : eventRecordPayloadWithRevision(record, mappingRevision))
+    expectedLatest = existingEvidence.records.map(expectedLatestForRecord)
   } else {
     const priorRecords = await resolvePriorSnapshotRecords({
       core,
@@ -1556,6 +1579,8 @@ export async function importWorkoutCsv(input: {
     if (priorRecords.some((record) => record !== undefined)) {
       existingPayloads = priorRecords.map((record) =>
         record === null ? null : record ? eventRecordToImportPayload(record) : undefined)
+      expectedLatest = priorRecords.map((record) =>
+        record ? expectedLatestForRecord(record) : undefined)
     }
   }
   const { decisions, suppressedDeletedCount } = buildWorkoutEventDecisions(
@@ -1564,6 +1589,7 @@ export async function importWorkoutCsv(input: {
     existingExternalRefs,
     mappingRevision,
     existingPayloads,
+    expectedLatest,
   )
   let preview: WorkoutImportBatchResult
   try {

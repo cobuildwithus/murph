@@ -162,6 +162,55 @@ describe("planWorkoutCsvImport", () => {
     }
   });
 
+  test("keeps wall times separate from explicit instants while canonicalizing equivalent offsets", () => {
+    for (const source of ["strong", "hevy"] as const) {
+      const build = (
+        date: string,
+        startTime: string,
+        endTime: string,
+        timeZone: string,
+      ) => planWorkoutCsvImport({
+        text: [
+          "Workout Name,Date,Start Time,End Time,Exercise Name,Set Order,Reps",
+          `Upper,${date},${startTime},${endTime},Press,1,8`,
+        ].join("\n"),
+        timeZone,
+        source,
+      }).sessions[0]!;
+
+      const wall = build("2026-03-08", "10:00", "11:00", "UTC");
+      const wallWithSeconds = build("2026-03-08", "10:00:00", "11:00:00", "Europe/London");
+      const explicitUtc = build("", "2026-03-08T10:00:00Z", "2026-03-08T11:00:00Z", "UTC");
+      const explicitOffset = build(
+        "",
+        "2026-03-08T05:00:00-05:00",
+        "2026-03-08T06:00:00-05:00",
+        "America/Chicago",
+      );
+      const crossingMidnight = build(
+        "",
+        "2026-03-08T23:30:00-06:00",
+        "2026-03-09T00:30:00-06:00",
+        "America/Chicago",
+      );
+      const crossingMidnightUtc = build(
+        "",
+        "2026-03-09T05:30:00Z",
+        "2026-03-09T06:30:00Z",
+        "Europe/London",
+      );
+
+      assert.equal(wall.sourceSessionKey, wallWithSeconds.sourceSessionKey);
+      assert.equal(wall.sourceEndTimeKey, wallWithSeconds.sourceEndTimeKey);
+      assert.notEqual(wall.sourceSessionKey, explicitUtc.sourceSessionKey);
+      assert.notEqual(wall.sourceEndTimeKey, explicitUtc.sourceEndTimeKey);
+      assert.equal(explicitUtc.sourceSessionKey, explicitOffset.sourceSessionKey);
+      assert.equal(explicitUtc.sourceEndTimeKey, explicitOffset.sourceEndTimeKey);
+      assert.equal(crossingMidnight.sourceSessionKey, crossingMidnightUtc.sourceSessionKey);
+      assert.equal(crossingMidnight.sourceEndTimeKey, crossingMidnightUtc.sourceEndTimeKey);
+    }
+  });
+
   test("rejects an explicit source that conflicts with provider-specific headers", () => {
     assert.throws(
       () => planWorkoutCsvImport({

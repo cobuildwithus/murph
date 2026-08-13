@@ -177,6 +177,23 @@ Updated: 2026-08-12
   Public inspection output and its typed CLI contract no longer contain source
   headers. CLI proof uses sentinel row values and a near-limit single-cell file
   to keep output private and constant-sized.
+- Final ReviewGPT round 7 found that exact-evidence correction could race a
+  member edit or deletion between preview and apply, and that identical
+  correction retries always minted another revision. Explicit batch decisions
+  now carry an optional expected event ID and lifecycle revision; core validates
+  every expectation under the canonical write lock before reconciling any row.
+  Identical confirmed corrections return a no-op before minting a revision.
+- Final ReviewGPT round 7 also found that source identity conflated a naive wall
+  time with an explicit instant that happened to normalize to the same UTC
+  spelling. Source start/end identities now tag their temporal domain while
+  still canonicalizing equivalent wall-time spellings and equivalent explicit
+  offsets, including midnight crossings.
+- Final ReviewGPT round 7 also found that legacy manifests without unit fields
+  were treated as compatible with every later unit choice. Compatibility now
+  comes from the aligned latest canonical unit projection. A shipped unitless
+  projection is accepted only as the exact correction ownership baseline, so
+  the first explicit unit choice requires confirmation and writes the selected
+  units without replacing member-owned fields.
 
 ## Verification
 
@@ -196,3 +213,12 @@ Updated: 2026-08-12
   7,521 rows into 915 sessions with 23 deterministic repairs, 23 ignored
   rest-timer rows, zero skipped rows, and explicit weight and distance unit
   gates; no import was performed. PR CI and final ReviewGPT remain pending.
+- Round 7 remediation proof: importer timestamp coverage (27 tests), focused
+  workout import and public-loader coverage (21 tests), the full core package
+  suite (784 tests), contracts artifact verification, all four affected package
+  typechecks, diff checks, and the identifier/privacy scan pass. The correction
+  tests prove identical retries leave event and audit revisions unchanged, an
+  edit between preview and apply rejects without a correction write, edit and
+  delete fences reject a two-event core batch atomically, and a legacy unitless
+  Strong event requires and accepts an exact-evidence unit correction. Final
+  ReviewGPT and exact-head PR CI remain pending.
