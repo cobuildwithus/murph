@@ -28,44 +28,43 @@ batch write. Keep raw rows out of model context and user-facing replies.
    of minting attempt-local provenance. Keep the
    returned document id and raw file ref. This is the durable source if mapping
    cannot safely finish; a temporary script or JSONL file is not durable proof.
-2. Use a small local Python 3 script and only the standard-library `csv`,
+2. Immediately run `vault-cli document workout-import-status <raw-file-ref>
+   --format json`. If `imported` is true, the atomic workout import for this
+   exact source completed in an earlier attempt. Stop before Python or JSONL
+   generation and tell the member the source was already imported. This check
+   uses immutable event-ledger history, so it remains true after a workout is
+   edited or deleted.
+3. Use a small local Python 3 script and only the standard-library `csv`,
    `datetime`, `hashlib`, and `json` modules. Inspect headers, dialect, bounded
    samples, row count, and privacy-safe aggregate values locally. Never print
    the complete source, expand all rows into model context, or make one model or
    CLI call per row or set.
-3. Run `vault-cli event payload-schema --for import-jsonl --kind
+4. Run `vault-cli event payload-schema --for import-jsonl --kind
    activity_session --format json`. Treat that returned schema as authoritative;
    do not rely on a remembered payload shape.
-4. Determine one source-backed grouping key per workout and map the complete
+5. Determine one source-backed grouping key per workout and map the complete
    source to one temporary JSONL row per workout. Attach the preserved raw file
    ref through the schema-supported provenance field. Resolve all consequential
    meanings: grouping, local date/time and timezone, positive duration, units,
    activity type, exercise names and order, set order and type, reps, load,
    distance, and notes. Preserve source values without inventing precision.
-5. If the source cannot prove one of those meanings, ask one targeted question
+6. If the source cannot prove one of those meanings, ask one targeted question
    that presents the inferred column mapping and the unresolved choice. Never
    guess. A user-approved default such as one duration for every workout is
    valid provenance; an unspoken default is not.
 
 ## Make replay behavior explicit
 
-- Add `externalRef` only when a deterministic, unique session identity can be
-  derived from stable source fields. A provider session id is best. The verified
-  immutable raw-source digest plus a unique, normalized source-backed workout
-  key makes replay of that exact artifact safe, but does not make a later
-  refreshed export safe; disclose that limitation when it applies. Never use row number,
-  row order, or a model-created label as identity.
-- Check uniqueness before writing JSONL. Use a stable lowercase slug for
-  `system` and `resourceType`; keep `resourceId` deterministic and within the
-  returned schema. Do not invent `externalRef.version` unless the source
-  provides a version with proved ordering semantics.
-- Always use `event import-jsonl --conflict-policy reject` for this generic
-  workflow. An identical external-reference replay may skip, but changed
-  content must fail closed instead of superseding a workout that may have been
-  edited after import.
-- Without a stable identity, say before apply that the batch is append-only and
-  a repeat can duplicate workouts. Apply it at most once for the current request
-  and never blindly retry after an ambiguous failure.
+- Do not add model-authored `externalRef` values. Exact-source recovery belongs
+  to the preserved raw reference and immutable event history, not a temporary
+  transformer's namespace or normalization choices.
+- A refreshed export with different bytes is a new source. The generic path
+  cannot safely infer provider corrections, edits, or deletions across exports;
+  disclose that limitation. Strong and Hevy retain those richer semantics.
+- Apply at most once for the current request and never blindly retry an
+  ambiguous failure. A later attempt repeats the exact-source status check
+  before transforming: a completed atomic batch stops there; an absent batch
+  may proceed.
 
 ## Validate, apply, and verify
 
@@ -74,14 +73,14 @@ batch write. Keep raw rows out of model context and user-facing replies.
    rows by reason, and the mapped date range. Do not log raw rows.
 2. Dry-run the complete file:
 
-   `vault-cli event import-jsonl --input @<temporary.jsonl> --conflict-policy reject --format json`
+   `vault-cli event import-jsonl --input @<temporary.jsonl> --source-raw-ref-once <raw-file-ref> --format json`
 
    Require `receivedCount` to equal the grouped-workout count. Explain any
    ignored source rows. Stop on validation errors or surprising skips or
    supersedes; do not narrow the batch until it passes.
 3. Confirm the JSONL SHA-256 is unchanged, then apply those exact bytes once:
 
-   `vault-cli event import-jsonl --input @<temporary.jsonl> --conflict-policy reject --apply --format json`
+   `vault-cli event import-jsonl --input @<temporary.jsonl> --source-raw-ref-once <raw-file-ref> --apply --format json`
 
 4. Treat the apply receipt as the batch result. Confirm a bounded,
    representative selection through canonical `event list` or `show` reads,

@@ -94,6 +94,7 @@ declare module 'incur' {
       'document list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
+      'document workout-import-status': { args: { rawRef: string }; options: { requestId?: string } }
       'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
       'encounter payload-schema': { args: {}; options: {} }
       'encounter scaffold': { args: {}; options: { requestId?: string } }
@@ -104,7 +105,7 @@ declare module 'incur' {
       'event encounter add': { args: {}; options: { requestId?: string; encounterType: string; location?: string; providerId?: string; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event exposure add': { args: {}; options: { requestId?: string; exposureType: string; substance: string; duration?: string; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event import-json': { args: {}; options: { requestId?: string; input: string } }
-      'event import-jsonl': { args: {}; options: { requestId?: string; input: string; apply: boolean; conflictPolicy: "supersede" | "reject" } }
+      'event import-jsonl': { args: {}; options: { requestId?: string; input: string; apply: boolean; sourceRawRefOnce?: string } }
       'event list': { args: {}; options: { requestId?: string; kind?: string; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }

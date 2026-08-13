@@ -3756,6 +3756,24 @@
                     }
                   }
                 },
+                "workout-import-status": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
                 "edit": {
                   "type": "object",
                   "additionalProperties": false,
@@ -9086,14 +9104,10 @@
                           "description": "Apply the import. Without this flag the command only reports what it would create, skip, or update.",
                           "type": "boolean"
                         },
-                        "conflictPolicy": {
-                          "default": "supersede",
-                          "description": "How changed content for an existing externalRef is handled. `supersede` updates in place; `reject` fails the whole batch while identical replays still skip.",
+                        "sourceRawRefOnce": {
+                          "description": "Reject the whole batch if any workout has ever referenced this raw source. Every row must be an externalRef-free activity_session that references the same source.",
                           "type": "string",
-                          "enum": [
-                            "supersede",
-                            "reject"
-                          ]
+                          "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
                         }
                       }
                     }

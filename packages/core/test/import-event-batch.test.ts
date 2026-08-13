@@ -10,6 +10,7 @@ import {
   deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
+  hasEventKindReferencedRawRef,
   importEventBatch,
   initializeVault,
   listHistoryEvents,
@@ -67,6 +68,25 @@ function buildObservationPayload(dayOfMonth: number, facet: string, value: numbe
       resourceType: "sleep",
       resourceId: `sleep-2026-03-${day}`,
       facet,
+    },
+  };
+}
+
+function buildActivitySessionPayload(rawRef: string, durationMinutes = 45) {
+  return {
+    kind: "activity_session",
+    occurredAt: "2026-03-13T17:00:00.000Z",
+    source: "import",
+    title: "Strength training",
+    activityType: "strength-training",
+    durationMinutes,
+    rawRefs: [rawRef],
+    workout: {
+      exercises: [{
+        name: "Squat",
+        order: 1,
+        sets: [{ order: 1, reps: 5 }],
+      }],
     },
   };
 }
@@ -192,6 +212,128 @@ test("importEventBatch dry-run reports counts without writing", async () => {
 
   const shardPath = result.eventShardPaths[0]!;
   await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
+});
+
+test("source-guarded workout batches land once and retain completion through edits and deletion", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-guard");
+  const rawRef = "raw/documents/workout-source.csv";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, rawRef)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, rawRef), "session,exercise\na,Squat\n", "utf8");
+
+  const dryRun = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(rawRef)],
+    rejectIfSourceRawRefAlreadyImported: rawRef,
+  });
+  assert.equal(dryRun.applied, false);
+  assert.equal(dryRun.createdCount, 1);
+  assert.equal(await hasEventKindReferencedRawRef({
+    vaultRoot,
+    rawRef,
+    kind: "activity_session",
+  }), false);
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(rawRef)],
+    rejectIfSourceRawRefAlreadyImported: rawRef,
+    apply: true,
+  });
+  assert.equal(applied.applied, true);
+  assert.equal(applied.createdCount, 1);
+  assert.equal(await hasEventKindReferencedRawRef({
+    vaultRoot,
+    rawRef,
+    kind: "activity_session",
+  }), true);
+
+  const eventId = applied.eventIds[0];
+  assert.ok(eventId);
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      ...buildActivitySessionPayload(rawRef),
+      id: eventId,
+      title: "Member-edited workout",
+      rawRefs: [],
+    },
+  });
+  await deleteEvent({ vaultRoot, eventId });
+  assert.equal(await hasEventKindReferencedRawRef({
+    vaultRoot,
+    rawRef,
+    kind: "activity_session",
+  }), true);
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [buildActivitySessionPayload(rawRef, 60)],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ALREADY_IMPORTED");
+      return true;
+    },
+  );
+});
+
+test("source-guarded workout batches reject any non-workout or unreferenced row atomically", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-guard-contract");
+  const rawRef = "raw/documents/workout-source.csv";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, rawRef)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, rawRef), "session,exercise\na,Squat\n", "utf8");
+  const activity = buildActivitySessionPayload(rawRef);
+  const invalidRow = buildSleepSessionPayload(10, { rawRefs: [rawRef] });
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [activity, invalidRow],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ROW_INVALID");
+      return true;
+    },
+  );
+
+  assert.equal(await hasEventKindReferencedRawRef({
+    vaultRoot,
+    rawRef,
+    kind: "activity_session",
+  }), false);
+  assert.equal(await findEventByExternalRef({
+    vaultRoot,
+    system: invalidRow.externalRef.system,
+    resourceType: invalidRow.externalRef.resourceType,
+    resourceId: invalidRow.externalRef.resourceId,
+  }), null);
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [{
+        ...activity,
+        externalRef: {
+          system: "model-authored",
+          resourceType: "workout-session",
+          resourceId: "session-a",
+        },
+      }],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ROW_INVALID");
+      return true;
+    },
+  );
 });
 
 test("importEventBatch apply writes all rows once and re-runs are idempotent", async () => {
@@ -470,80 +612,6 @@ test("importEventBatch supersedes changed content for an existing externalRef in
     revision!.kind === "sleep_session" ? revision!.durationMinutes : null,
     415,
   );
-});
-
-test("importEventBatch reject policy preserves existing externalRef content atomically", async () => {
-  const vaultRoot = await makeVault("murph-event-batch-reject-conflict");
-  const original = buildSleepSessionPayload(10);
-  await importEventBatch({
-    vaultRoot,
-    payloads: [original],
-    apply: true,
-  });
-
-  const replay = await importEventBatch({
-    vaultRoot,
-    payloads: [original],
-    conflictPolicy: "reject",
-    apply: true,
-  });
-  assert.equal(replay.applied, false);
-  assert.equal(replay.skippedExistingCount, 1);
-
-  await assert.rejects(
-    importEventBatch({
-      vaultRoot,
-      payloads: [
-        buildSleepSessionPayload(11),
-        buildSleepSessionPayload(10, { title: "Changed imported title" }),
-      ],
-      conflictPolicy: "reject",
-      apply: true,
-    }),
-    (error) => {
-      assert.equal(error instanceof VaultError, true);
-      assert.equal(
-        (error as VaultError).code,
-        "EVENT_EXTERNAL_REF_CONTENT_CONFLICT",
-      );
-      return true;
-    },
-  );
-
-  const stored = await findEventByExternalRef({
-    vaultRoot,
-    system: original.externalRef.system,
-    resourceType: original.externalRef.resourceType,
-    resourceId: original.externalRef.resourceId,
-  });
-  assert.equal(stored?.title, original.title);
-  assert.equal(stored?.lifecycle?.revision, undefined);
-});
-
-test("importEventBatch rejects unsupported payload conflict policies", async () => {
-  const vaultRoot = await makeVault("murph-event-batch-invalid-conflict-policy");
-
-  await assert.rejects(
-    importEventBatchFromRuntime({
-      vaultRoot,
-      payloads: [buildSleepSessionPayload(10)],
-      conflictPolicy: "overwrite",
-      apply: true,
-    }),
-    (error) => {
-      assert.equal(error instanceof VaultError, true);
-      assert.equal((error as VaultError).code, "EVENT_BATCH_INVALID");
-      return true;
-    },
-  );
-
-  const stored = await findEventByExternalRef({
-    vaultRoot,
-    system: "whoop",
-    resourceType: "sleep",
-    resourceId: "sleep-2026-03-10",
-  });
-  assert.equal(stored, null);
 });
 
 test("importEventBatch does not let an older source revision replace a newer event", async () => {

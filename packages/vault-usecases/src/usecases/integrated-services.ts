@@ -1014,6 +1014,18 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       return listDocumentsUseCase(input)
     },
+    async hasWorkoutHistoryForRawSource(input: CommandContext & { rawRef: string }) {
+      const core = await loadCoreRuntime()
+      return {
+        vault: input.vault,
+        rawRef: input.rawRef,
+        imported: await core.hasEventKindReferencedRawRef({
+          vaultRoot: input.vault,
+          rawRef: input.rawRef,
+          kind: 'activity_session',
+        }),
+      }
+    },
     async showDocumentManifest(input: CommandContext & {
       id: string
     }) {

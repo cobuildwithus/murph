@@ -809,6 +809,11 @@ export const vaultCliCommandDescriptors = [
         description: 'Show the immutable raw-import manifest for one imported document.',
       },
       {
+        path: ['document', 'workout-import-status'],
+        description:
+          'Check whether workout history has ever been imported from one preserved raw source.',
+      },
+      {
         path: ['document', 'edit'],
         description: 'Edit one imported document event from typed fields.',
       },
@@ -819,7 +824,12 @@ export const vaultCliCommandDescriptors = [
     ],
     directVaultServiceBindings: {
       importers: ['importDocument'],
-      query: ['showDocument', 'listDocuments', 'showDocumentManifest'],
+      query: [
+        'showDocument',
+        'listDocuments',
+        'showDocumentManifest',
+        'hasWorkoutHistoryForRawSource',
+      ],
     },
     register({ cli, services }) {
       registerDocumentCommands(cli, services)
@@ -1392,8 +1402,8 @@ export const vaultCliCommandDescriptors = [
           {
             description: 'Dry-run a bulk import to see created/skipped/updated counts.',
             options: {
-              conflictPolicy: 'reject',
               input: '@events.jsonl',
+              sourceRawRefOnce: 'raw/documents/workout-export.csv',
               vault: './vault',
             },
           },
@@ -1401,14 +1411,14 @@ export const vaultCliCommandDescriptors = [
             description: 'Apply the same bulk import after the dry-run counts look right.',
             options: {
               apply: true,
-              conflictPolicy: 'reject',
               input: '@events.jsonl',
+              sourceRawRefOnce: 'raw/documents/workout-export.csv',
               vault: './vault',
             },
           },
         ],
         hint:
-          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId. Include externalRef for retry-safe dedupe; use --conflict-policy reject when changed content must fail instead of updating an existing event. Rows without externalRef are append-only and create fresh events on each apply. Dry-run by default; --apply writes.',
+          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId. For a preserved workout CSV, --source-raw-ref-once requires every row to be an externalRef-free activity_session referencing that raw source and rejects the whole batch once any historical workout has referenced it. Other imports with externalRef use ordinary retry-safe dedupe; rows without externalRef are append-only. Dry-run by default; --apply writes.',
       },
       {
         path: ['event', 'payload-schema'],

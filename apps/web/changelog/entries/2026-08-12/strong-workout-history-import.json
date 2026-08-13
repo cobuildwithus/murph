@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Bring your workout history into Murph",
     "summary": "Murph can now inspect and import Strong and Hevy workout exports as one historical batch, and can safely adapt other clear workout CSV layouts without rebuilding each set by hand.",
-    "details": "Murph checks the whole file before writing, asks for consequential source, timing, grouping, or unit details instead of guessing, and validates a complete batch before saving it. Strong and Hevy imports keep their richer raw-file, refresh, edit, deletion, and replay protections; other layouts use the same canonical workout records, refuse changed replays that could overwrite an edited workout, and finish with a bounded confirmation read.",
+    "details": "Murph checks the whole file before writing, asks for consequential source, timing, grouping, or unit details instead of guessing, and validates a complete batch before saving it. Strong and Hevy imports keep their richer raw-file, refresh, edit, deletion, and replay protections; other layouts preserve the exact source, stop safely when that source was already imported, and finish with a bounded confirmation read.",
     "relevanceTags": ["workouts", "imports", "strong", "hevy", "csv", "privacy"],
     "sourcePullRequests": [1734, 1769]
   }

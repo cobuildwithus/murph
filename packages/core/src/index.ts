@@ -327,6 +327,7 @@ export {
   findCaptureByLookup,
   findEventByExternalRef,
   findEventsByRawRefs,
+  hasEventKindReferencedRawRef,
   readStoredCaptureLookupIndex,
   runGeneratedImageCaptureRetention,
   buildSleepSessionEventDraft,

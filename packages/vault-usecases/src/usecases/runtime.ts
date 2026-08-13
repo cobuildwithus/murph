@@ -71,6 +71,7 @@ function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
     Array.isArray(value.REQUIRED_DIRECTORIES) &&
     hasCallableMembers(value, [
       "applyCanonicalWriteBatch",
+      "hasEventKindReferencedRawRef",
       "initializeVault",
       "validateVault",
       "repairVault",

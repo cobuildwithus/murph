@@ -25,6 +25,7 @@ import type {
 } from "@murphai/contracts";
 import {
   assertContractId,
+  collectEventRawReferencePaths,
   compareIsoTimestampsAscending,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
@@ -85,6 +86,7 @@ import {
 import {
   buildEventImportDecisionRecord,
   buildPublicEventImportRecord,
+  hasEventKindReferencedRawRef,
   loadEventLedgerShardsById,
   selectLatestMatchedEvent,
   toEventLedgerFile,
@@ -2964,7 +2966,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
 async function reconcileEventImportDecisionsByExternalRef(
   vaultRoot: string,
   decisions: readonly PreparedEventImportDecision[],
-  conflictPolicy: "supersede" | "reject",
   signal?: AbortSignal | null,
 ): Promise<EventImportReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
@@ -3152,15 +3153,6 @@ async function reconcileEventImportDecisionsByExternalRef(
         skippedExistingCount += 1;
         continue;
       }
-    }
-
-    if (conflictPolicy === "reject") {
-      throw new VaultError(
-        "EVENT_EXTERNAL_REF_CONTENT_CONFLICT",
-        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-          `${externalRef.facet ? `#${externalRef.facet}` : ""}" already exists with different content; ` +
-          "the whole batch was rejected without writes.",
-      );
     }
 
     if (latest.kind !== entry.record.kind && !decision.allowsKindReplacement) {
@@ -5579,7 +5571,7 @@ export interface ImportEventPayloadBatchInput {
   vaultRoot: string;
   payloads: readonly LooseRecord[];
   decisions?: never;
-  conflictPolicy?: "supersede" | "reject";
+  rejectIfSourceRawRefAlreadyImported?: string;
   apply?: boolean;
   signal?: AbortSignal | null;
 }
@@ -5588,7 +5580,7 @@ export interface ImportEventDecisionBatchInput {
   vaultRoot: string;
   decisions: readonly LooseRecord[];
   payloads?: never;
-  conflictPolicy?: never;
+  rejectIfSourceRawRefAlreadyImported?: never;
   apply?: boolean;
   signal?: AbortSignal | null;
 }
@@ -5682,23 +5674,15 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
       "Event batch must define exactly one of payloads or decisions.",
     );
   }
-  if (
-    input.conflictPolicy !== undefined
-    && input.conflictPolicy !== "supersede"
-    && input.conflictPolicy !== "reject"
-  ) {
+  const sourceRawRef = usesPayloads
+    ? input.rejectIfSourceRawRefAlreadyImported?.trim()
+    : undefined;
+  if (usesPayloads && input.rejectIfSourceRawRefAlreadyImported !== undefined && !sourceRawRef) {
     throw new VaultError(
       "EVENT_BATCH_INVALID",
-      'Event batch conflictPolicy must be "supersede" or "reject".',
+      "Event batch source raw reference must not be empty.",
     );
   }
-  if (usesDecisions && input.conflictPolicy !== undefined) {
-    throw new VaultError(
-      "EVENT_BATCH_INVALID",
-      "Event import decisions do not accept a payload conflict policy.",
-    );
-  }
-  const conflictPolicy = input.conflictPolicy ?? "supersede";
   const normalizedRows = usesDecisions
     ? normalizeImportEventBatchDecisions(input.decisions, signal)
     : normalizeImportEventBatchPayloads(input.payloads, signal);
@@ -5783,11 +5767,47 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     );
   }
 
+  if (sourceRawRef) {
+    const invalidSourceIndexes = decisions.flatMap((decision, index) =>
+      decision.action === "upsert"
+      && decision.entry.record.kind === "activity_session"
+      && decision.entry.record.externalRef === undefined
+      && collectEventRawReferencePaths(decision.entry.record).includes(sourceRawRef)
+        ? []
+        : [index],
+    );
+    if (invalidSourceIndexes.length > 0) {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_ROW_INVALID",
+        "Every event in a source-guarded batch must be an externalRef-free activity session that references the guarded raw source; nothing was imported.",
+        { indexes: invalidSourceIndexes.slice(0, EVENT_BATCH_FAILURE_REPORT_LIMIT) },
+      );
+    }
+
+    if (await statAndHashVaultFile(vaultRoot, sourceRawRef) === null) {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_RAW_REF_MISSING",
+        "The guarded raw source does not exist as a vault file; nothing was imported.",
+      );
+    }
+
+    const sourceAlreadyImported = await hasEventKindReferencedRawRef({
+      vaultRoot,
+      rawRef: sourceRawRef,
+      kind: "activity_session",
+    });
+    if (sourceAlreadyImported) {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_ALREADY_IMPORTED",
+        "This raw source already has workout history in the event ledger; nothing was imported.",
+      );
+    }
+  }
+
   signal?.throwIfAborted();
   const reconciliation = await reconcileEventImportDecisionsByExternalRef(
     vaultRoot,
     decisions,
-    conflictPolicy,
     signal,
   );
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {

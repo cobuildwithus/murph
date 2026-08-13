@@ -15,12 +15,41 @@ import {
   rawImportManifestResultSchema,
 } from '@murphai/vault-usecases/records'
 import { registerArtifactBackedEntityGroup } from './entity-command-groups.js'
-import { commonListLimitOptionSchema } from './command-factory-primitives.js'
+import {
+  commonListLimitOptionSchema,
+  type AnyFactoryCommandConfig,
+} from './command-factory-primitives.js'
 import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+
+const workoutImportStatusResultSchema = z.object({
+  vault: pathSchema,
+  rawRef: pathSchema,
+  imported: z.boolean(),
+})
+
+function createWorkoutImportStatusCommand(services: VaultServices): AnyFactoryCommandConfig {
+  return {
+    name: 'workout-import-status',
+    description: 'Check whether workout history has ever been imported from one preserved raw source.',
+    args: z.object({
+      rawRef: z
+        .string()
+        .regex(/^raw\/[A-Za-z0-9._/-]+$/u, 'Expected a vault-relative raw/* path.'),
+    }),
+    output: workoutImportStatusResultSchema,
+    async run({ args, options, requestId }) {
+      return services.query.hasWorkoutHistoryForRawSource({
+        vault: String(options.vault ?? ''),
+        requestId,
+        rawRef: String(args.rawRef ?? ''),
+      })
+    },
+  }
+}
 
 export function registerDocumentCommands(
   cli: Cli.Cli,
@@ -113,6 +142,7 @@ export function registerDocumentCommands(
       },
     },
     additionalCommands: [
+      createWorkoutImportStatusCommand(services),
       createEventBackedEntityEditCommandConfig({
         arg: {
           name: 'id',

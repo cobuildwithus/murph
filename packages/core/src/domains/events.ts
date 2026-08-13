@@ -53,6 +53,7 @@ export {
   deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
+  hasEventKindReferencedRawRef,
   upsertEvent,
 } from "./events/ledger.ts";
 export {
