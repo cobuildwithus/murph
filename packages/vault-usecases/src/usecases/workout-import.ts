@@ -133,6 +133,11 @@ interface PriorRawWorkoutFile extends ExactRawWorkoutFile {
   text: string
 }
 
+interface PriorWorkoutSnapshotEvidence {
+  files: PriorRawWorkoutFile[]
+  matchesByFile: WorkoutRawRefMatch[][]
+}
+
 interface WorkoutExternalIdentity {
   system: string
   resourceType: string
@@ -718,28 +723,38 @@ function comparableSourceSession(session: PlannedWorkoutCsvSession) {
   }
 }
 
-async function resolvePriorSnapshotRecords(input: {
+async function loadPriorWorkoutSnapshotEvidence(input: {
   core: WorkoutImportCoreRuntime
-  importers: WorkoutImportersRuntime
   vault: string
-  plan: WorkoutCsvImportPlan
-  text: string
-}): Promise<Array<EventRecord | null | undefined>> {
-  const priorFiles = await findPriorRawWorkoutFiles(input)
-  if (priorFiles.length === 0) return new Array(input.plan.sessions.length)
-  const eventsByRawFile = await input.core.findEventsByRawRefs({
+}): Promise<PriorWorkoutSnapshotEvidence> {
+  const files = await findPriorRawWorkoutFiles(input)
+  if (files.length === 0) return { files, matchesByFile: [] }
+  const matchesByFile = await input.core.findEventsByRawRefs({
     vaultRoot: input.vault,
-    rawRefs: priorFiles.map((candidate) => candidate.rawFile),
+    rawRefs: files.map((candidate) => candidate.rawFile),
     resourceType: 'workout-session',
   })
+  return { files, matchesByFile }
+}
+
+function resolvePriorSnapshotMatches(input: {
+  importers: WorkoutImportersRuntime
+  plan: WorkoutCsvImportPlan
+  text: string
+  evidence: PriorWorkoutSnapshotEvidence
+  allowedRecordSources?: readonly WorkoutCsvSource[]
+}): Array<WorkoutRawRefMatch | undefined> {
+  const allowedRecordSources = new Set<string>(
+    input.allowedRecordSources ?? [input.plan.source],
+  )
   const currentIndexesByKey = new Map(
     input.plan.sessions.map((session, index) => [session.sourceSessionKey, index]),
   )
-  const alignedRecords = new Array<EventRecord | undefined>(input.plan.sessions.length)
+  const alignedMatches = new Array<WorkoutRawRefMatch | undefined>(input.plan.sessions.length)
   let exactPartialEvidence = false
 
-  for (const [candidateIndex, candidate] of priorFiles.entries()) {
-    const matches = eventsByRawFile[candidateIndex] ?? []
+  for (const [candidateIndex, candidate] of input.evidence.files.entries()) {
+    const matches = input.evidence.matchesByFile[candidateIndex] ?? []
     if (matches.length === 0) continue
     if (candidate.text === input.text) exactPartialEvidence = true
     const recordTimeZones = new Set(matches
@@ -771,11 +786,14 @@ async function resolvePriorSnapshotRecords(input: {
       )
     }
     const attachedSources = new Set(matches.flatMap(({ latest }) =>
-      latest.kind === 'activity_session' ? [latest.workout.sourceApp] : []))
+      latest.kind === 'activity_session' && latest.workout.sourceApp
+        ? [latest.workout.sourceApp]
+        : []))
     const hasCurrentOverlap = priorPlan.sessions.some((session) =>
       currentIndexesByKey.has(session.sourceSessionKey))
     const isCurrentProviderHistory = candidate.source === input.plan.source
-      || (attachedSources.size === 1 && attachedSources.has(input.plan.source))
+      || (attachedSources.size === 1
+        && attachedSources.has(input.plan.source))
     if (!hasCurrentOverlap && !isCurrentProviderHistory) continue
     if (priorPlan.sessions.some((session) =>
       !currentIndexesByKey.has(session.sourceSessionKey))) {
@@ -938,7 +956,8 @@ async function resolvePriorSnapshotRecords(input: {
         record.lifecycle?.state !== 'deleted'
         && (
           record.kind !== 'activity_session'
-          || record.workout.sourceApp !== input.plan.source
+          || !record.workout.sourceApp
+          || !allowedRecordSources.has(record.workout.sourceApp)
         )
       ) {
         throw new VaultCliError(
@@ -946,30 +965,30 @@ async function resolvePriorSnapshotRecords(input: {
           'Prior workout sessions use a different provider dialect; correct the exact prior file first. Nothing was imported.',
         )
       }
-      const selected = alignedRecords[currentIndex]
-      if (selected && selected.id !== record.id) {
+      const selected = alignedMatches[currentIndex]
+      if (selected && selected.latest.id !== record.id) {
         throw new VaultCliError(
           'conflict',
           'Prior workout snapshots map one source session to conflicting event identities; nothing was imported.',
         )
       }
-      alignedRecords[currentIndex] = selected ?? record
+      alignedMatches[currentIndex] = selected ?? match
     })
   }
 
-  if (exactPartialEvidence && alignedRecords.some((record) => record === undefined)) {
+  if (exactPartialEvidence && alignedMatches.some((match) => match === undefined)) {
     throw new VaultCliError(
       'conflict',
       'Exact prior workout snapshot cannot resolve every source session identity; nothing was imported.',
     )
   }
 
-  return alignedRecords.map((record) =>
-    record?.lifecycle?.state === 'deleted' ? null : record)
+  return alignedMatches
 }
 
 async function resolveExistingWorkoutEvidence(input: {
   core: WorkoutImportCoreRuntime
+  importers: WorkoutImportersRuntime
   vault: string
   text: string
   plan: WorkoutCsvImportPlan
@@ -1007,6 +1026,7 @@ async function resolveExistingWorkoutEvidence(input: {
   })
   let rawOnlyFile: string | undefined
   let foundAmbiguousCanonicalEvidence = false
+  let priorSnapshotEvidence: PriorWorkoutSnapshotEvidence | undefined
   let selectedEvidence: {
     rawFile: string
     externalRefs: WorkoutExternalIdentity[]
@@ -1037,7 +1057,53 @@ async function resolveExistingWorkoutEvidence(input: {
       if (provenanceMatches) rawOnlyFile = rawOnlyFile ?? rawFile
       continue
     }
-    const mapping = mappingFromAttachedEvents(input.plan, matches)
+    let mapping = mappingFromAttachedEvents(input.plan, matches)
+    if (!mapping && matches.length < input.plan.sessions.length) {
+      const recordTimeZones = new Set(matches
+        .map((match) => match.attachment.timeZone)
+        .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
+      const originalTimeZone = recordTimeZones.size === 1
+        ? [...recordTimeZones][0]
+        : candidate.timeZone
+      if (!originalTimeZone) {
+        throw new VaultCliError(
+          'conflict',
+          'Exact prior workout evidence does not prove its original timezone; nothing was imported.',
+        )
+      }
+      let exactPlan: WorkoutCsvImportPlan
+      try {
+        exactPlan = input.importers.planWorkoutCsvImport({
+          text: input.text,
+          timeZone: originalTimeZone,
+          source: candidate.source,
+          delimiter: candidate.delimiter,
+          weightUnit: candidate.weightUnit ?? undefined,
+          distanceUnit: candidate.distanceUnit ?? undefined,
+        })
+      } catch {
+        throw new VaultCliError(
+          'conflict',
+          'Exact prior workout raw evidence cannot be parsed safely for identity reconciliation; nothing was imported.',
+        )
+      }
+      priorSnapshotEvidence ??= await loadPriorWorkoutSnapshotEvidence({
+        core: input.core,
+        vault: input.vault,
+      })
+      const reconciledMatches = resolvePriorSnapshotMatches({
+        importers: input.importers,
+        plan: exactPlan,
+        text: input.text,
+        evidence: priorSnapshotEvidence,
+        allowedRecordSources: [exactPlan.source, input.plan.source],
+      })
+      if (reconciledMatches.every(
+        (match): match is WorkoutRawRefMatch => match !== undefined,
+      )) {
+        mapping = mappingFromAttachedEvents(input.plan, reconciledMatches)
+      }
+    }
     if (mapping) {
       const recordTimeZones = new Set(mapping.matches
         .map((match) => match.attachment.timeZone)
@@ -1490,6 +1556,7 @@ export async function importWorkoutCsv(input: {
 
   const existingEvidence = await resolveExistingWorkoutEvidence({
     core,
+    importers,
     vault: input.vault,
     text,
     plan,
@@ -1692,13 +1759,18 @@ export async function importWorkoutCsv(input: {
         : eventRecordPayloadWithRevision(record, mappingRevision))
     expectedLatest = existingEvidence.records.map(expectedLatestForRecord)
   } else {
-    const priorRecords = await resolvePriorSnapshotRecords({
+    const priorEvidence = await loadPriorWorkoutSnapshotEvidence({
       core,
-      importers,
       vault: input.vault,
+    })
+    const priorMatches = resolvePriorSnapshotMatches({
+      importers,
       plan,
       text,
+      evidence: priorEvidence,
     })
+    const priorRecords = priorMatches.map((match) =>
+      match?.latest.lifecycle?.state === 'deleted' ? null : match?.latest)
     if (priorRecords.some((record) => record !== undefined)) {
       existingPayloads = priorRecords.map((record) =>
         record === null ? null : record ? eventRecordToImportPayload(record) : undefined)

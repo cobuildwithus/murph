@@ -259,6 +259,15 @@ Updated: 2026-08-12
   splits the public JSONL input shape from the broader persisted record shape
   and reasserts the ordinary structured-write result invariant before any
   runtime dependency or canonical write.
+- Final ReviewGPT round 14 proved that an exact expanded snapshot attached only
+  its newly created sessions to the new raw file, so later provider or unit
+  correction could not recover the overlapping sessions still attached to the
+  earlier snapshot. Exact partial evidence now uses the same bounded prior-raw
+  reconciliation owner as ordinary refresh: it aligns immutable attachments
+  and latest revisions across the verified snapshot chain, then applies the
+  existing correction ownership and expected-latest fences to the complete
+  ordered session set. It neither creates replacement identities nor adds the
+  expanded raw ref to unchanged overlapping events.
 
 ## Round 13 renewed retrospective
 
@@ -349,3 +358,10 @@ Updated: 2026-08-12
   route still preserves unknown-duration sessions. Six focused files passed 85
   tests; contracts artifacts, CLI schema generation, scenario integrity, and
   affected contracts, core, query, vault-usecases, and CLI typechecks passed.
+- Round 14 remediation proof: the production-runtime workout use-case suite
+  imports a two-session snapshot, preserves a member edit and tombstone while
+  adding a third session from an expanded snapshot, corrects that exact
+  expanded snapshot from Strong to Hevy and then from pounds to kilograms,
+  preserves all three canonical identities and the tombstone, stores no new
+  raw evidence, replays as a no-op, and rejects an expected-latest race. The
+  complete focused workout-import file passes 21 tests.

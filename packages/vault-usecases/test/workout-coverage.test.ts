@@ -1668,9 +1668,9 @@ describe("workout-import", () => {
         timezone: "UTC",
       });
       const text = [
-        "Workout Name,Date,Start Time,End Time,Duration,Exercise Name,Set Order,Weight,Weight Unit,Reps",
-        "Upper,2026-04-08,10:00,10:45,45,Press,1,40,kg,8",
-        "Lower,2026-04-09,11:00,11:30,30,Row,1,50,kg,10",
+        "Workout Name,Date,Start Time,End Time,Duration,Exercise Name,Set Order,Weight,Reps",
+        "Upper,2026-04-08,10:00,10:45,45,Press,1,40,8",
+        "Lower,2026-04-09,11:00,11:30,30,Row,1,50,10",
       ].join("\n");
       const csvPath = path.join(tempDir, "lifecycle.csv");
       await writeFile(csvPath, text, "utf8");
@@ -1680,13 +1680,32 @@ describe("workout-import", () => {
         "01ARZ3NDEKTSV4RRFFQ69G5FAX",
         "01ARZ3NDEKTSV4RRFFQ69G5FAY",
         "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB1",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB2",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB3",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB4",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB5",
       ];
+      let afterNextPreview: (() => Promise<void>) | undefined;
+      const fencedCoreRuntime = {
+        ...coreRuntime,
+        importEventBatch: async (input: Parameters<typeof coreRuntime.importEventBatch>[0]) => {
+          const result = await coreRuntime.importEventBatch(input);
+          if (!input.apply && afterNextPreview) {
+            const callback = afterNextPreview;
+            afterNextPreview = undefined;
+            await callback();
+          }
+          return result;
+        },
+      };
       const workoutImportModule = (await importWithMocks(
         "../src/usecases/workout-import.ts",
         {
           "../src/runtime-import.js": () => ({
             loadRuntimeModule: vi.fn(async (specifier: string) => {
-              if (specifier === "@murphai/core") return coreRuntime;
+              if (specifier === "@murphai/core") return fencedCoreRuntime;
               if (specifier === "@murphai/importers") return importersRuntime;
               if (specifier === "@murphai/runtime-state") {
                 return { generateUlid: () => generatedIds.shift()! };
@@ -1701,12 +1720,14 @@ describe("workout-import", () => {
         vault: tempDir,
         file: csvPath,
         source: "strong",
+        weightUnit: "lb",
       });
       assert.equal(imported.createdCount, 2);
       const plan = importersRuntime.planWorkoutCsvImport({
         text,
         timeZone: "UTC",
         source: "strong",
+        weightUnit: "lb",
       });
       const records = await Promise.all(plan.sessions.map((session) =>
         coreRuntime.findEventByExternalRef({
@@ -1740,7 +1761,7 @@ describe("workout-import", () => {
         lookup: edited.id,
         entityLabel: "workout session",
         expectedKinds: ["activity_session"],
-        set: ["workout.exercises.0.sets.0.weight=77"],
+        set: ['tags=["member-edit"]'],
       });
       await coreRuntime.deleteEvent({ vaultRoot: tempDir, eventId: removed.id });
 
@@ -1748,6 +1769,7 @@ describe("workout-import", () => {
         vault: tempDir,
         file: csvPath,
         source: "strong",
+        weightUnit: "lb",
       });
       assert.equal(exactReplay.importedCount, 0);
       assert.equal(exactReplay.skippedExistingCount, 2);
@@ -1758,12 +1780,7 @@ describe("workout-import", () => {
         resourceType: "workout-session",
         resourceId: plan.sessions[0]!.sourceWorkoutId,
       });
-      assert.equal(
-        exactReplayEdit?.kind === "activity_session"
-          ? exactReplayEdit.workout.exercises[0]?.sets[0]?.weight
-          : undefined,
-        77,
-      );
+      assert.deepEqual(exactReplayEdit?.tags, ["member-edit"]);
       await coreRuntime.updateVaultSummary({
         vaultRoot: tempDir,
         timezone: "America/Los_Angeles",
@@ -1771,7 +1788,7 @@ describe("workout-import", () => {
 
       const expandedText = [
         text.replace(",10:00,", ",10:00:00,"),
-        "New Session,2026-04-10,09:00:00,09:30:00,30,Squat,1,60,kg,5",
+        "New Session,2026-04-10,09:00:00,09:30:00,30,Squat,1,60,5",
       ].join("\n");
       const changedStartPath = path.join(tempDir, "changed-start.csv");
       await writeFile(
@@ -1785,6 +1802,7 @@ describe("workout-import", () => {
           vault: tempDir,
           file: changedStartPath,
           source: "strong",
+          weightUnit: "lb",
         }),
         /source session is missing or changed/u,
       );
@@ -1804,6 +1822,7 @@ describe("workout-import", () => {
           vault: tempDir,
           file: changedEndPath,
           source: "strong",
+          weightUnit: "lb",
         }),
         /source session changed/u,
       );
@@ -1818,6 +1837,7 @@ describe("workout-import", () => {
         vault: tempDir,
         file: expandedPath,
         source: "strong",
+        weightUnit: "lb",
       });
       assert.equal(expanded.createdCount, 1);
       assert.equal(expanded.supersededCount, 0);
@@ -1832,12 +1852,7 @@ describe("workout-import", () => {
       assert.equal(retainedEdit?.id, edited.id);
       assert.equal(retainedEdit?.title, "Member-edited title");
       assert.equal(retainedEdit?.occurredAt, "2026-04-08T12:00:00.000Z");
-      assert.equal(
-        retainedEdit?.kind === "activity_session"
-          ? retainedEdit.workout.exercises[0]?.sets[0]?.weight
-          : undefined,
-        77,
-      );
+      assert.deepEqual(retainedEdit?.tags, ["member-edit"]);
       assert.equal(await coreRuntime.findEventByExternalRef({
         vaultRoot: tempDir,
         system: "strong",
@@ -1848,10 +1863,164 @@ describe("workout-import", () => {
         vault: tempDir,
         file: expandedPath,
         source: "strong",
+        weightUnit: "lb",
       });
       assert.equal(expandedReplay.importedCount, 0);
       assert.equal(expandedReplay.skippedExistingCount, 3);
       assert.equal(expandedReplay.rawStored, false);
+
+      const expandedPlan = importersRuntime.planWorkoutCsvImport({
+        text: expandedText,
+        timeZone: "UTC",
+        source: "strong",
+        weightUnit: "lb",
+      });
+      const addedBeforeCorrection = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: expandedPlan.sessions[2]!.sourceWorkoutId,
+      });
+      assert.ok(addedBeforeCorrection);
+      const rawFilesBeforeCorrection = await coreRuntime.walkVaultFiles(tempDir, "raw/workouts");
+      const providerCorrected = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: expandedPath,
+        source: "hevy",
+        weightUnit: "lb",
+      });
+      assert.equal(providerCorrected.createdCount, 0);
+      assert.equal(providerCorrected.supersededCount, 2);
+      assert.equal(providerCorrected.skippedExistingCount, 1);
+      assert.equal(providerCorrected.rawStored, false);
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesBeforeCorrection,
+      );
+      const providerCorrectedEdit = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[0]!.sourceWorkoutId,
+      });
+      const providerCorrectedAdded = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: expandedPlan.sessions[2]!.sourceWorkoutId,
+      });
+      assert.equal(providerCorrectedEdit?.id, edited.id);
+      assert.equal(providerCorrectedEdit?.title, "Member-edited title");
+      assert.equal(providerCorrectedEdit?.occurredAt, "2026-04-08T12:00:00.000Z");
+      assert.deepEqual(providerCorrectedEdit?.tags, ["member-edit"]);
+      assert.equal(
+        providerCorrectedEdit?.kind === "activity_session"
+          ? providerCorrectedEdit.workout.sourceApp
+          : undefined,
+        "hevy",
+      );
+      assert.equal(providerCorrectedAdded?.id, addedBeforeCorrection.id);
+      assert.equal(await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[1]!.sourceWorkoutId,
+      }), null);
+
+      const unitCorrected = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: expandedPath,
+        source: "hevy",
+        weightUnit: "kg",
+        correctUnits: true,
+      });
+      assert.equal(unitCorrected.createdCount, 0);
+      assert.equal(unitCorrected.supersededCount, 2);
+      assert.equal(unitCorrected.skippedExistingCount, 1);
+      assert.equal(unitCorrected.rawStored, false);
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesBeforeCorrection,
+      );
+      const unitCorrectedEdit = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[0]!.sourceWorkoutId,
+      });
+      const unitCorrectedAdded = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: expandedPlan.sessions[2]!.sourceWorkoutId,
+      });
+      assert.equal(unitCorrectedEdit?.id, edited.id);
+      assert.equal(unitCorrectedEdit?.title, "Member-edited title");
+      assert.deepEqual(unitCorrectedEdit?.tags, ["member-edit"]);
+      assert.equal(
+        unitCorrectedEdit?.kind === "activity_session"
+          ? unitCorrectedEdit.workout.exercises[0]?.sets[0]?.weightUnit
+          : undefined,
+        "kg",
+      );
+      assert.equal(unitCorrectedAdded?.id, addedBeforeCorrection.id);
+      assert.equal(
+        unitCorrectedAdded?.kind === "activity_session"
+          ? unitCorrectedAdded.workout.exercises[0]?.sets[0]?.weightUnit
+          : undefined,
+        "kg",
+      );
+
+      const correctedReplay = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: expandedPath,
+        source: "hevy",
+        weightUnit: "kg",
+      });
+      assert.equal(correctedReplay.importedCount, 0);
+      assert.equal(correctedReplay.skippedExistingCount, 3);
+      assert.equal(correctedReplay.rawStored, false);
+
+      assert.ok(unitCorrectedAdded);
+      afterNextPreview = async () => {
+        await editEventRecord({
+          vault: tempDir,
+          lookup: unitCorrectedAdded.id,
+          entityLabel: "workout session",
+          expectedKinds: ["activity_session"],
+          set: ["activityType=mobility"],
+        });
+      };
+      await assert.rejects(
+        workoutImportModule.importWorkoutCsv({
+          vault: tempDir,
+          file: expandedPath,
+          source: "hevy",
+          weightUnit: "lb",
+          correctUnits: true,
+        }),
+        /changed after it was inspected/u,
+      );
+      const afterRace = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: expandedPlan.sessions[2]!.sourceWorkoutId,
+      });
+      assert.equal(
+        afterRace?.kind === "activity_session" ? afterRace.activityType : undefined,
+        "mobility",
+      );
+      assert.equal(
+        afterRace?.kind === "activity_session"
+          ? afterRace.workout.exercises[0]?.sets[0]?.weightUnit
+          : undefined,
+        "kg",
+      );
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesBeforeCorrection,
+      );
     });
   });
 
