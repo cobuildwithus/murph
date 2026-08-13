@@ -1629,6 +1629,7 @@ function commitParentOwnedChanges(
 }
 
 export const trustedReviewControlPaths = [
+  ".agents/skills/frog/SKILL.md",
   ".npmrc",
   ".pnpmfile.cjs",
   "package.json",
@@ -1672,7 +1673,7 @@ function prepareTrustedReviewCheckout(
   return realpathSync(checkout);
 }
 
-export function materializeCommittedFrictionTask(
+export function materializeCommittedFrogReviewEvidence(
   primary: string,
   checkout: string,
   issueNumber: number,
@@ -1695,7 +1696,37 @@ export function materializeCommittedFrictionTask(
     }, null, 2)}\n`,
     0o600,
   );
-  return [taskRelative, manifestRelative];
+
+  const skillPath = ".agents/skills/frog/SKILL.md";
+  const skillBlob = runCommand("git", ["show", `origin/main:${skillPath}`], primary);
+  if (
+    skillBlob.status !== 0
+    || !skillBlob.stdout
+    || Buffer.byteLength(skillBlob.stdout) > 64 * 1024
+  ) {
+    throw new Error("committed Frog skill is empty or exceeds its bound");
+  }
+  const skillRelative = "audit-packages/frog-autofix-skill.md";
+  writePrivateFileAtomically(
+    path.join(checkout, skillRelative),
+    skillBlob.stdout,
+    0o600,
+  );
+  const skillManifestRelative = "audit-packages/frog-autofix-skill.json";
+  writePrivateFileAtomically(
+    path.join(checkout, skillManifestRelative),
+    `${JSON.stringify({
+      path: skillPath,
+      sha256: sha256(skillBlob.stdout),
+    }, null, 2)}\n`,
+    0o600,
+  );
+  return [
+    taskRelative,
+    manifestRelative,
+    skillRelative,
+    skillManifestRelative,
+  ];
 }
 
 function removeTrustedReviewCheckout(primary: string, checkout: string) {
@@ -1728,7 +1759,7 @@ export function buildParentReviewArchive(
     `${label}-package`,
   );
   try {
-    const taskPaths = materializeCommittedFrictionTask(
+    const taskPaths = materializeCommittedFrogReviewEvidence(
       primary,
       checkout,
       issueNumber,
@@ -1951,7 +1982,7 @@ function runCanonicalPullRequestReview(options: {
   const expectedBodyPath = path.join(checkout, FROG_AUTOFIX_PR_BODY_PATH);
   mkdirSync(path.dirname(expectedBodyPath), { mode: 0o700, recursive: true });
   writePrivateFileAtomically(expectedBodyPath, options.expectedBody, 0o600);
-  const taskPaths = materializeCommittedFrictionTask(
+  const taskPaths = materializeCommittedFrogReviewEvidence(
     options.primary,
     checkout,
     options.issueNumber,

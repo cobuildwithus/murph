@@ -11,7 +11,8 @@ Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
 protected PR merges, one authenticated-operator/same-repository PR predicate,
 fully traversed deterministic-branch PR history plus latest-body-editor
-provenance with parent-local baseline preservation and foreign-descendant
+provenance with parent-local baseline preservation, exact protected-main Frog
+skill materialization in parent-built review archives, and foreign-descendant
 handoff plus pre-synchronization exact/ancestor local-handoff restoration, GitHub-owned
 implement/resume recovery state including clean
 post-commit/pre-first-push continuation and exact parent-local body/head

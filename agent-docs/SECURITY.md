@@ -103,7 +103,12 @@ Last verified: 2026-08-13
   cannot request a second implementation patch. Both implementation and
   canonical-review archives contain one parent-materialized task blob read
   directly from its exact `origin/main` friction path, plus a path/digest
-  manifest. The parent stores that same identity only in trusted local/PR
+  manifest. They also contain a parent-materialized copy and digest manifest
+  for the exact `origin/main` Frog skill because the worker prompt requires it
+  and the packager's ordinary scan excludes that dot-directory source. The
+  skill path is a trusted review control, so its movement invalidates review
+  evidence rather than silently omitting an instruction owner. The parent
+  stores task identity only in trusted local/PR
   metadata, fetches before every post-wait comparison, and revalidates it at
   both final merge
   fences. Any edit, move, deletion, replacement, or binding drift revokes

@@ -27,7 +27,12 @@ only issue datum placed in the parent worker prompt. Issue content remains
 outside model-work authority. Fresh implementation ReviewGPT does not request
 or use the GitHub connector and derives the task only from the exact committed
 friction blob materialized from `origin/main`, with its source path and digest,
-plus repository instructions. The same immutable task evidence accompanies
+plus repository instructions. Because the dot-directory skill is outside the
+packager's ordinary scan, the parent also materializes the exact
+`.agents/skills/frog/SKILL.md` blob from `origin/main` with its path and digest
+into both implementation and canonical-review archives. The skill is part of
+the trusted review-control inventory, so candidate or default-branch drift
+revokes older evidence. The same immutable task evidence accompanies
 canonical review. The parent retains that exact path/digest in its private
 pre-PR provenance and authenticated PR body, then compares it with a fresh
 `origin/main` read after every long wait and at both final merge fences. The

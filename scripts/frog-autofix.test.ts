@@ -62,7 +62,7 @@ import {
   discoverEligibleIssues,
   expectedPullRequestBodyDisposition,
   exactReviewPassRunnerHead,
-  materializeCommittedFrictionTask,
+  materializeCommittedFrogReviewEvidence,
   mergedIssueClosureAction,
   mergedPullRequestForClosure,
   loadedRunnerControlsMatch,
@@ -278,8 +278,10 @@ describe("Frog autofix guards", () => {
 
   it("keeps every ReviewGPT preset in the trusted parent control inventory", () => {
     expect(trustedReviewControlPaths).toContain("scripts/chatgpt-review-presets");
+    expect(trustedReviewControlPaths).toContain(".agents/skills/frog/SKILL.md");
     const root = mkdtempSync(path.join(tmpdir(), "frog-review-controls-"));
     const presetDirectory = path.join(root, "scripts", "chatgpt-review-presets");
+    const skillDirectory = path.join(root, ".agents", "skills", "frog");
     const git = (...args: string[]) => {
       const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
       if (result.status !== 0) {
@@ -289,8 +291,10 @@ describe("Frog autofix guards", () => {
     };
     try {
       mkdirSync(presetDirectory, { recursive: true });
+      mkdirSync(skillDirectory, { recursive: true });
       mkdirSync(path.join(root, "scripts"), { recursive: true });
       writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "trusted\n");
+      writeFileSync(path.join(skillDirectory, "SKILL.md"), "trusted\n");
       writeFileSync(path.join(root, "package.json"), "{}\n");
       writeFileSync(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
       writeFileSync(
@@ -315,6 +319,7 @@ describe("Frog autofix guards", () => {
         "scripts/package-audit-context-full.sh",
         "scripts/review-gpt-pr-head-preflight.sh",
         "scripts/chatgpt-review-presets/pr-deep-review.md",
+        ".agents/skills/frog/SKILL.md",
       ]) {
         writeFileSync(path.join(root, changedPath), `candidate ${changedPath}\n`);
         git("add", changedPath);
@@ -1762,7 +1767,7 @@ describe("Frog autofix guards", () => {
     );
   });
 
-  it("materializes only the exact immutable committed Frog task for reviews", () => {
+  it("materializes the exact committed Frog task and skill for reviews", () => {
     const root = mkdtempSync(path.join(tmpdir(), "frog-committed-task-"));
     const checkout = path.join(root, "checkout");
     mkdirSync(checkout);
@@ -1777,11 +1782,15 @@ describe("Frog autofix guards", () => {
       git("config", "user.email", "automation@example.invalid");
       const selected = ".agents/friction-log/selected/friction.md";
       const unrelated = ".agents/friction-log/unrelated/friction.md";
+      const frogSkill = ".agents/skills/frog/SKILL.md";
       mkdirSync(path.join(root, path.dirname(selected)), { recursive: true });
       mkdirSync(path.join(root, path.dirname(unrelated)), { recursive: true });
+      mkdirSync(path.join(root, path.dirname(frogSkill)), { recursive: true });
       const content = "---\nissue: 'cobuildwithus/murph#42'\n---\n\nTrusted task.\n";
+      const skillContent = "---\nname: frog\n---\n\nTrusted Frog instructions.\n";
       writeFileSync(path.join(root, selected), content);
       writeFileSync(path.join(root, unrelated), "---\ntitle: unrelated\n---\n");
+      writeFileSync(path.join(root, frogSkill), skillContent);
       git("add", ".agents");
       git("commit", "--quiet", "-m", "tasks");
       git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
@@ -1794,7 +1803,7 @@ describe("Frog autofix guards", () => {
       });
       const expectedTask = committedFrictionTask(root, 42);
       expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(true);
-      const alwaysPaths = materializeCommittedFrictionTask(
+      const alwaysPaths = materializeCommittedFrogReviewEvidence(
         root,
         checkout,
         42,
@@ -1803,6 +1812,8 @@ describe("Frog autofix guards", () => {
       expect(alwaysPaths).toEqual([
         "audit-packages/frog-autofix-task.md",
         "audit-packages/frog-autofix-task.json",
+        "audit-packages/frog-autofix-skill.md",
+        "audit-packages/frog-autofix-skill.json",
       ]);
       expect(readFileSync(
         path.join(checkout, "audit-packages/frog-autofix-task.md"),
@@ -1812,6 +1823,14 @@ describe("Frog autofix guards", () => {
         path.join(checkout, "audit-packages/frog-autofix-task.json"),
         "utf8",
       )).toContain(createHash("sha256").update(content).digest("hex"));
+      expect(readFileSync(
+        path.join(checkout, "audit-packages/frog-autofix-skill.md"),
+        "utf8",
+      )).toBe(skillContent);
+      expect(readFileSync(
+        path.join(checkout, "audit-packages/frog-autofix-skill.json"),
+        "utf8",
+      )).toContain(createHash("sha256").update(skillContent).digest("hex"));
       expect(existsSync(path.join(checkout, unrelated))).toBe(false);
 
       const source = readFileSync(
@@ -1821,11 +1840,11 @@ describe("Frog autofix guards", () => {
       expect(source.slice(
         source.indexOf("export function buildParentReviewArchive"),
         source.indexOf("function runParentReview"),
-      )).toContain("materializeCommittedFrictionTask(");
+      )).toContain("materializeCommittedFrogReviewEvidence(");
       expect(source.slice(
         source.indexOf("function runCanonicalPullRequestReview"),
         source.indexOf("function downloadImplementationPatch"),
-      )).toContain("materializeCommittedFrictionTask(");
+      )).toContain("materializeCommittedFrogReviewEvidence(");
 
       const updated = content.replace("Trusted task.", "Updated task.");
       writeFileSync(path.join(root, selected), updated);

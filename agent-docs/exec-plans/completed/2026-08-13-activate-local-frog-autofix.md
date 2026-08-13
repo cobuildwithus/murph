@@ -82,8 +82,10 @@ Decision: continue unchanged as one indivisible target-embedded feature. The
 immutable first-reviewed head is
 `745591dc912bbf2ed32cfd6aa7c2acd1a4180c57`. ReviewGPT round 1 found no code
 defect and required this retrospective because that head contains 6,544
-authored-source additions. The runtime source has not changed since that head,
-so review-driven source growth is zero.
+authored-source additions. Review-driven runtime growth is limited to the
+smallest correction at the existing archive-materialization boundary after the
+preliminary specialist gate proved the prompt's required Frog skill was absent
+from both parent-built ReviewGPT archives.
 
 The irreducible current requirement is one operator-controlled invocation that
 takes at most one authenticated, committed Frog task through candidate
@@ -102,8 +104,10 @@ without the later reconciliation phase. Splitting also creates cross-version
 recovery states and repeats review of the same trust inventory. Shrinking to a
 manual pre-publication handoff removes the requested delivery outcome, while a
 hosted redesign adds a service, credentials, and a queue. The intended source
-shape therefore remains 6,544 additions and zero deletions; this documentation
-record is the only post-round-1 movement and does not change runtime behavior.
+shape remains one feature. The post-round-1 correction adds no state owner or
+workflow: it materializes the exact protected-main skill plus a digest manifest
+beside the already materialized task evidence and treats that skill as a
+trusted review control.
 
 Retained concepts and owners:
 
