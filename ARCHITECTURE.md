@@ -188,10 +188,14 @@ process-group ownership.
 
 The native mutating shell entry reconciles the clean primary dependency tree
 with `pnpm install --frozen-lockfile --ignore-scripts` before loading the
-TypeScript parent. Dependency-control changes, including lock-only resolution
-updates, make an automatic primary advance exit once so the next invocation
-reconciles and loads the new executable graph. The lockfile is part of the
-trusted ReviewGPT control inventory, so dependency drift during review or CI
+TypeScript parent. A dependency-free Node bootstrap starts pnpm in its own exact
+process group, applies a fixed 30-minute deadline, and after timeout or an
+early leader exit confirms the whole group is gone before returning and
+releasing the native invocation gate. Dependency-control changes, including
+lock-only resolution updates, make an automatic primary advance exit once so
+the next invocation reconciles and loads the new executable graph. The
+bootstrap is loaded-runner authority and the lockfile is part of the trusted
+ReviewGPT control inventory, so runner or dependency drift during review or CI
 revokes older evidence through the same handoff.
 
 ## Accepted-Message Targeting

@@ -545,6 +545,7 @@ export function buildCodexWorkerArguments(options: {
 
 const localAgentScriptPaths = new Set([
   "scripts/frog-autofix",
+  "scripts/frog-autofix-bootstrap",
   "scripts/frog-autofix-command.ts",
   "scripts/frog-autofix-finalize.ts",
   "scripts/frog-autofix-lib.ts",

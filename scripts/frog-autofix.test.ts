@@ -1182,9 +1182,16 @@ describe("Frog autofix guards", () => {
 
   it("keeps the shell entrypoint executable, root-owned, and clears ambient tokens", () => {
     const wrapperPath = path.join(repositoryRoot, "scripts", "frog-autofix");
+    const bootstrapPath = path.join(
+      repositoryRoot,
+      "scripts",
+      "frog-autofix-bootstrap",
+    );
     const wrapper = readFileSync(wrapperPath, "utf8");
     expect(statSync(wrapperPath).mode & 0o111).not.toBe(0);
+    expect(statSync(bootstrapPath).mode & 0o111).not.toBe(0);
     expect(spawnSync("bash", ["-n", wrapperPath]).status).toBe(0);
+    expect(spawnSync("node", ["--check", bootstrapPath]).status).toBe(0);
     expect(wrapper).toContain('cd "$repo_root"');
     expect(wrapper).toContain("GH_TOKEN");
     expect(wrapper).toContain("GITHUB_TOKEN");
@@ -1193,7 +1200,7 @@ describe("Frog autofix guards", () => {
     expect(wrapper).toContain("MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD=1");
     expect(wrapper).toContain('install|uninstall|run)');
     const reconcile = wrapper.indexOf(
-      'pnpm --dir "$repo_root" install --frozen-lockfile --ignore-scripts',
+      '/usr/bin/env node "$repo_root/scripts/frog-autofix-bootstrap" "$repo_root"',
     );
     expect(reconcile).toBeGreaterThan(wrapper.indexOf("unset \\"));
     expect(reconcile).toBeLessThan(wrapper.indexOf('tsx_bin="$repo_root'));
@@ -1234,6 +1241,10 @@ describe("Frog autofix guards", () => {
         path.join(repositoryRoot, "scripts", "frog-autofix"),
         path.join(scripts, "frog-autofix"),
       );
+      copyFileSync(
+        path.join(repositoryRoot, "scripts", "frog-autofix-bootstrap"),
+        path.join(scripts, "frog-autofix-bootstrap"),
+      );
       writeFileSync(path.join(bin, "pnpm"), [
         "#!/bin/sh",
         'test "$1" = "--dir"',
@@ -1249,6 +1260,7 @@ describe("Frog autofix guards", () => {
         'printf "%s\\n" "$*" > "$FROG_PARENT_MARKER"',
       ].join("\n"));
       chmodSync(path.join(bin, "pnpm"), 0o755);
+      chmodSync(path.join(scripts, "frog-autofix-bootstrap"), 0o755);
       chmodSync(path.join(root, "node_modules", ".bin", "tsx"), 0o755);
       writeFileSync(path.join(root, ".gitignore"), "bin/\nnode_modules/\nreconciled\nparent-started\n");
       const git = (...args: string[]) => {
@@ -1258,7 +1270,12 @@ describe("Frog autofix guards", () => {
       git("init", "--quiet");
       git("config", "user.name", "Automation");
       git("config", "user.email", "automation@example.invalid");
-      git("add", ".gitignore", "scripts/frog-autofix");
+      git(
+        "add",
+        ".gitignore",
+        "scripts/frog-autofix",
+        "scripts/frog-autofix-bootstrap",
+      );
       git("commit", "--quiet", "-m", "fixture");
       const result = spawnSync(
         "bash",
@@ -1278,6 +1295,220 @@ describe("Frog autofix guards", () => {
       expect(result.status, result.stderr).toBe(0);
       expect(readFileSync(parentMarker, "utf8"))
         .toBe("scripts/frog-autofix.ts run\n");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("bounds dependency reconciliation and reaps resistant descendants", () => {
+    if (process.platform === "win32") return;
+    const root = mkdtempSync(path.join(tmpdir(), "frog-bootstrap-supervision-"));
+    const bin = path.join(root, "bin");
+    const modePath = path.join(root, "mode");
+    const fixturePath = path.join(root, "pnpm-fixture.cjs");
+    const childPidPath = path.join(root, "child.pid");
+    const childReadyPath = path.join(root, "child.ready");
+    const bootstrapPath = path.join(
+      repositoryRoot,
+      "scripts",
+      "frog-autofix-bootstrap",
+    );
+    const invoke = () => spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        [
+          'const { pathToFileURL } = await import("node:url");',
+          "const bootstrapPath = process.argv[1];",
+          "const repoRoot = process.argv[2];",
+          "process.argv[1] = process.execPath;",
+          "const bootstrap = await import(pathToFileURL(bootstrapPath).href);",
+          "process.exitCode = await bootstrap.reconcileDependencies(repoRoot, {",
+          "  deadlineMs: 1_000,",
+          "  terminationGraceMs: 100,",
+          "});",
+        ].join("\n"),
+        bootstrapPath,
+        root,
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FROG_BOOTSTRAP_CHILD_PID: childPidPath,
+          FROG_BOOTSTRAP_CHILD_READY: childReadyPath,
+          FROG_BOOTSTRAP_MODE: modePath,
+          FROG_PNPM_FIXTURE: fixturePath,
+          FROG_REAL_NODE: process.execPath,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+        },
+        timeout: 10_000,
+      },
+    );
+    const childExists = () => {
+      const childPid = Number.parseInt(readFileSync(childPidPath, "utf8"), 10);
+      try {
+        process.kill(childPid, 0);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+        throw error;
+      }
+    };
+    try {
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(path.join(bin, "pnpm"), [
+        "#!/bin/sh",
+        'exec "$FROG_REAL_NODE" "$FROG_PNPM_FIXTURE" "$@"',
+      ].join("\n"));
+      writeFileSync(fixturePath, [
+        'const { existsSync, readFileSync, writeFileSync } = require("node:fs");',
+        'const { spawn } = require("node:child_process");',
+        'const child = spawn(process.execPath, ["-e", [',
+        '  "const { writeFileSync } = require(\\"node:fs\\");",',
+        '  "process.on(\\"SIGTERM\\", () => {});",',
+        '  "writeFileSync(process.argv[1], \\"ready\\");",',
+        '  "setInterval(() => {}, 1000);",',
+        '].join("\\n"), process.env.FROG_BOOTSTRAP_CHILD_READY], { stdio: "ignore" });',
+        'writeFileSync(process.env.FROG_BOOTSTRAP_CHILD_PID, String(child.pid));',
+        "const ready = setInterval(() => {",
+        '  if (!existsSync(process.env.FROG_BOOTSTRAP_CHILD_READY)) return;',
+        "  clearInterval(ready);",
+        '  if (readFileSync(process.env.FROG_BOOTSTRAP_MODE, "utf8") === "leader-exits") {',
+        "    process.exit(0);",
+        "  }",
+        '  process.on("SIGTERM", () => process.exit(0));',
+        "  setInterval(() => {}, 1000);",
+        "}, 5);",
+      ].join("\n"));
+      chmodSync(path.join(bin, "pnpm"), 0o755);
+
+      writeFileSync(modePath, "hangs");
+      let result = invoke();
+      expect(result.status, result.stderr).toBe(124);
+      expect(existsSync(childPidPath), JSON.stringify({
+        error: result.error?.message,
+        stderr: result.stderr,
+        stdout: result.stdout,
+      })).toBe(true);
+      expect(childExists()).toBe(false);
+
+      writeFileSync(modePath, "leader-exits");
+      result = invoke();
+      expect(result.status, result.stderr).toBe(2);
+      expect(childExists()).toBe(false);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("releases the native lock after bootstrap cleanup for the next invocation", () => {
+    if (process.platform !== "darwin") return;
+    const root = mkdtempSync(path.join(tmpdir(), "frog-bootstrap-lock-"));
+    const scripts = path.join(root, "scripts");
+    const bin = path.join(root, "bin");
+    const fakeHome = path.join(root, "home");
+    const childReadyPath = path.join(root, "child.ready");
+    const fixturePath = path.join(root, "pnpm-fixture.cjs");
+    const parentMarker = path.join(root, "parent-started");
+    const bootstrapPath = path.join(scripts, "frog-autofix-bootstrap");
+    const wrapperPath = path.join(scripts, "frog-autofix");
+    const invoke = () => spawnSync("bash", [wrapperPath, "run"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FROG_BOOTSTRAP_PATH: bootstrapPath,
+        FROG_BOOTSTRAP_CHILD_READY: childReadyPath,
+        FROG_PARENT_MARKER: parentMarker,
+        FROG_PNPM_FIXTURE: fixturePath,
+        FROG_REAL_NODE: process.execPath,
+        HOME: fakeHome,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 10_000,
+    });
+    try {
+      mkdirSync(scripts, { recursive: true });
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(fakeHome, { recursive: true });
+      mkdirSync(path.join(root, "node_modules", ".bin"), { recursive: true });
+      copyFileSync(
+        path.join(repositoryRoot, "scripts", "frog-autofix"),
+        wrapperPath,
+      );
+      copyFileSync(
+        path.join(repositoryRoot, "scripts", "frog-autofix-bootstrap"),
+        bootstrapPath,
+      );
+      writeFileSync(path.join(bin, "node"), [
+        "#!/bin/sh",
+        'case "$1" in',
+        '*/scripts/frog-autofix-bootstrap)',
+        "  exec \"$FROG_REAL_NODE\" --input-type=module --eval '",
+        'const { pathToFileURL } = await import("node:url");',
+        "const bootstrapPath = process.argv[1];",
+        "const repoRoot = process.argv[2];",
+        "process.argv[1] = process.execPath;",
+        "const bootstrap = await import(pathToFileURL(bootstrapPath).href);",
+        "process.exitCode = await bootstrap.reconcileDependencies(repoRoot, {",
+        "  deadlineMs: 1_000,",
+        "  terminationGraceMs: 100,",
+        "});",
+        "' \"$1\" \"$2\" ;;",
+        "esac",
+        'exec "$FROG_REAL_NODE" "$@"',
+      ].join("\n"));
+      writeFileSync(path.join(bin, "pnpm"), [
+        "#!/bin/sh",
+        'exec "$FROG_REAL_NODE" "$FROG_PNPM_FIXTURE" "$@"',
+      ].join("\n"));
+      writeFileSync(fixturePath, [
+        'const { writeFileSync } = require("node:fs");',
+        'writeFileSync(process.env.FROG_BOOTSTRAP_CHILD_READY, "ready");',
+        'process.on("SIGTERM", () => process.exit(0));',
+        "setInterval(() => {}, 1000);",
+      ].join("\n"));
+      writeFileSync(path.join(root, "node_modules", ".bin", "tsx"), [
+        "#!/bin/sh",
+        'touch "$FROG_PARENT_MARKER"',
+      ].join("\n"));
+      chmodSync(path.join(bin, "node"), 0o755);
+      chmodSync(path.join(bin, "pnpm"), 0o755);
+      chmodSync(path.join(root, "node_modules", ".bin", "tsx"), 0o755);
+      chmodSync(bootstrapPath, 0o755);
+      chmodSync(wrapperPath, 0o755);
+      writeFileSync(
+        path.join(root, ".gitignore"),
+        "bin/\nhome/\nnode_modules/\nchild.ready\nparent-started\npnpm-fixture.cjs\n",
+      );
+      const git = (...args: string[]) => {
+        const command = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+        expect(command.status, command.stderr).toBe(0);
+      };
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      git("add", ".gitignore", "scripts/frog-autofix", "scripts/frog-autofix-bootstrap");
+      git("commit", "--quiet", "-m", "fixture");
+
+      const first = invoke();
+      expect(first.status, JSON.stringify({
+        error: first.error?.message,
+        signal: first.signal,
+        stderr: first.stderr,
+        stdout: first.stdout,
+      })).toBe(124);
+
+      writeFileSync(path.join(bin, "pnpm"), [
+        "#!/bin/sh",
+        "exit 0",
+      ].join("\n"));
+      chmodSync(path.join(bin, "pnpm"), 0o755);
+      const second = invoke();
+      expect(second.status, second.stderr).toBe(0);
+      expect(existsSync(parentMarker)).toBe(true);
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -2501,6 +2732,7 @@ describe("Frog autofix guards", () => {
     })).toBe(true);
     for (const localPath of [
       "scripts/frog-autofix",
+      "scripts/frog-autofix-bootstrap",
       "scripts/frog-autofix-command.ts",
       "scripts/frog-autofix-finalize.ts",
       "scripts/frog-autofix-lib.ts",
@@ -2633,6 +2865,7 @@ describe("Frog autofix guards", () => {
 
   it("continues after unrelated primary advances and restarts for loaded runner changes", () => {
     expect(primaryAdvanceRequiresRestart(["apps/web/app/page.tsx"])).toBe(false);
+    expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-bootstrap"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix.ts"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-parent.ts"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["package.json"])).toBe(true);
@@ -2647,6 +2880,7 @@ describe("Frog autofix guards", () => {
     try {
       mkdirSync(path.join(root, "scripts"), { recursive: true });
       mkdirSync(path.join(root, "apps", "web"), { recursive: true });
+      writeFileSync(path.join(root, "scripts", "frog-autofix-bootstrap"), "trusted\n");
       writeFileSync(path.join(root, "scripts", "frog-autofix-finalize.ts"), "trusted\n");
       writeFileSync(path.join(root, "apps", "web", "page.tsx"), "unrelated\n");
       git("init", "--quiet");
@@ -2723,7 +2957,7 @@ describe("Frog autofix guards", () => {
       expect(recoveredReviewPassState(root, persistedPass, loadedHead).authorityDrift)
         .toBe(false);
 
-      writeFileSync(path.join(root, "scripts", "frog-autofix-finalize.ts"), "replaced\n");
+      writeFileSync(path.join(root, "scripts", "frog-autofix-bootstrap"), "replaced\n");
       git("add", ".");
       git("commit", "--quiet", "-m", "replace loaded authority");
       git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));

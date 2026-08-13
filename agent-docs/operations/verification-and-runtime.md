@@ -664,8 +664,10 @@ with unrelated main movement allowed and exact-head handoff before response
 acceptance, merge, or issue closure on loaded authority drift,
 candidate-and-runner-bound persisted PASS recovery that rejects legacy or
 drifted evidence across restarts, plus frozen scriptless primary dependency
-reconciliation before the mutating parent loads and lockfile coverage in the
-trusted review-control inventory,
+reconciliation before the mutating parent loads, dependency-free exact-process-
+group supervision with a fixed deadline and confirmed descendant cleanup before
+native-lock release, bootstrap loaded-runner coverage, and lockfile coverage in
+the trusted review-control inventory,
 operator-handoff preservation during a blocked model review, non-closing exact
 issue binding across short and full-URL forms plus parent-only post-merge
 closure and never-closed retry that refuses deliberate reopen,

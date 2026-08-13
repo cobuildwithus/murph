@@ -609,6 +609,7 @@ function resolvePrimaryWorktree(root: string): string {
 
 const loadedRunnerPaths = [
   "scripts/frog-autofix",
+  "scripts/frog-autofix-bootstrap",
   "scripts/frog-autofix.ts",
   "scripts/frog-autofix-command.ts",
   "scripts/frog-autofix-finalize.ts",

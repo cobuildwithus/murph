@@ -78,7 +78,7 @@ case "${1:-}" in
       echo "Primary worktree must be clean before dependency reconciliation." >&2
       exit 2
     fi
-    pnpm --dir "$repo_root" install --frozen-lockfile --ignore-scripts
+    /usr/bin/env node "$repo_root/scripts/frog-autofix-bootstrap" "$repo_root"
     ;;
 esac
 

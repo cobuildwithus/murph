@@ -333,8 +333,13 @@ Last verified: 2026-08-13
   cannot be accepted, merged, or followed by issue closure. Persisted
   specialist/final PASS records include their producing runner head and are
   reusable after restart only while that runner's loaded paths still match
-  fresh `main`; missing, malformed, or drifted binding uses the handoff. The last scope
-  evaluation cannot fetch past that fence: it uses the caller-fetched ref, then
+  fresh `main`; missing, malformed, or drifted binding uses the handoff. Before
+  that parent loads, a dependency-free bootstrap bounds frozen scriptless pnpm
+  reconciliation to 30 minutes inside one exact process group. Timeout or an
+  early leader exit reaps that complete group before the native lock releases,
+  so a stalled install cannot hold the queue indefinitely or leave a descendant
+  overlapping the next invocation. The last scope evaluation cannot fetch past
+  that fence: it uses the caller-fetched ref, then
   the parent performs the final task comparison. A local terminal marker is
   recovered before remote synchronization. Remote replacement is authorized
   only by an exact locally retained neutral handoff head from a proven parent

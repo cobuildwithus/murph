@@ -19,6 +19,8 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
   restart under newer authority could reuse review evidence from the old one.
 - Automatic primary source advancement could leave parent ReviewGPT and helper
   binaries installed from an older manifest or lockfile.
+- Pre-parent dependency reconciliation had no deadline or owned process-group
+  cleanup, so a hung pnpm tree could retain the native gate indefinitely.
 
 ## Design
 
@@ -45,6 +47,9 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
 - Reconcile the clean primary dependency tree with frozen lockfile and disabled
   lifecycle scripts before loading the mutating parent, include the lockfile in
   trusted review controls, and restart once after dependency-control advances.
+- Run that reconciliation through a dependency-free bootstrap with one exact
+  process group, a fixed deadline, graceful termination, forced termination
+  only for the proven group, and confirmed cleanup before returning.
 
 ## Verification
 
@@ -70,4 +75,5 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
 - [x] Fence accepted review evidence and final merge on the loaded runner version.
 - [x] Bind persisted PASS evidence to its producing runner version.
 - [x] Reconcile primary executable dependencies before mutating parent startup.
+- [x] Bound and reap the dependency bootstrap before native-lock release.
 - [ ] Verify, commit, push, and continue exact-head review and CI.
