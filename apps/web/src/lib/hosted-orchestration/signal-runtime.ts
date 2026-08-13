@@ -251,7 +251,7 @@ export async function signalHostedProviderSetupContinuationRuntime(
   input: SignalHostedProviderSetupContinuationInput,
 ): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
-  await assertHostedManualRunAiUsageAllowed({
+  await assertHostedProviderSetupContinuationAllowedRuntime({
     prisma,
     userId: input.userId,
   });
@@ -265,6 +265,16 @@ export async function signalHostedProviderSetupContinuationRuntime(
     providerSetup: input.providerSetup,
     resignalDuplicate: false,
     signalFailureMode: "best_effort",
+    userId: input.userId,
+  });
+}
+
+export async function assertHostedProviderSetupContinuationAllowedRuntime(input: {
+  prisma?: PrismaClient;
+  userId: string;
+}): Promise<void> {
+  await assertHostedManualRunAiUsageAllowed({
+    prisma: input.prisma ?? getPrisma(),
     userId: input.userId,
   });
 }

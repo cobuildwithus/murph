@@ -5000,6 +5000,17 @@ function readRequiredComputerProviderCredentials(
     });
   }
   const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length === 1
+    && record.kind === "pre_submit_failed"
+  ) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_PRE_SUBMIT_FAILED",
+      httpStatus: 502,
+      message: "Provider application submission was not attempted.",
+      retryable: true,
+    });
+  }
   const keys = Object.keys(record).sort();
   if (keys.length !== 2 || keys[0] !== "clientId" || keys[1] !== "clientSecret") {
     throw computerUseError({

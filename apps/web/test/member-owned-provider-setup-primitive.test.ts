@@ -192,6 +192,41 @@ describe("member-owned provider setup contract", () => {
     expect(submittedNames).toEqual(["Murph Private Sync fixture"]);
   });
 
+  it("reports proven pre-submit failure but fences an unknown submit outcome", async () => {
+    const page = createFixturePage(`
+      <form data-owned-creation>
+        <input class="application-name" value="" />
+      </form>
+    `);
+    const code = buildBlindProviderCredentialCaptureCode({
+      applicationNameSelector: ".application-name",
+      applicationContainerSelector: "section[data-owned-application]",
+      clientIdSelector: ".client-id",
+      clientSecretSelector: ".client-secret",
+      creationFormSelector: "form[data-owned-creation]",
+      marker: "Murph Private Sync fixture",
+      revealSecretSelector: null,
+      safeLandingUrl: "about:blank",
+      submitSelector: ".create",
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<unknown>;
+
+    await expect(run(page)).resolves.toEqual({ kind: "pre_submit_failed" });
+    expect(page.clickSelectors).toEqual([]);
+
+    await page.setContent(`
+      <form data-owned-creation>
+        <input class="application-name" value="" />
+        <button class="create" type="button">Create</button>
+      </form>
+    `);
+    page.setClickErrorOnce(new Error("submit outcome unknown"));
+    await expect(run(page)).rejects.toThrow("submit outcome unknown");
+    expect(page.clickSelectors).toEqual([".create"]);
+  });
+
   it("executes trusted capture against the exact marked form and rejects cross-object selectors", async () => {
     const page = createFixturePage(`
         <form data-owned-application>
@@ -334,7 +369,7 @@ describe("member-owned provider setup contract", () => {
       "page",
       `return (async () => {${deletion}})();`,
     ) as (page: FixturePage) => Promise<unknown>;
-    await expect(runDelete(page)).rejects.toThrow(/marker_ambiguous/u);
+    await expect(runDelete(page)).resolves.toEqual({ kind: "already_deleted" });
   });
 
   it("derives one application authority when its marker is rendered in multiple fields", async () => {
@@ -365,6 +400,77 @@ describe("member-owned provider setup contract", () => {
         clientId: "right-id",
         clientSecret: "right-secret",
       });
+  });
+
+  it("converges an authoritative absent application without another delete click", async () => {
+    const page = createFixturePage(`
+      <section data-owned-application>
+        <h3>Unrelated application</h3>
+        <button class="owned-delete" type="button">Delete</button>
+      </section>
+    `);
+    const clicks: string[] = [];
+    await page.exposeFunction("recordAbsentDeleteClick", () => clicks.push("delete"));
+    await page.evaluate(() => {
+      document.querySelector(".owned-delete")?.addEventListener("click", () => {
+        void Reflect.get(window, "recordAbsentDeleteClick")();
+      });
+    });
+    const code = buildBlindOwnedApplicationDeleteCode({
+      applicationContainerSelector: "section[data-owned-application]",
+      confirmSelector: null,
+      deleteSelector: ".owned-delete",
+      marker: "Murph Private Sync fixture",
+      safeLandingUrl: "about:blank",
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<{ kind: string }>;
+
+    await expect(run(page)).resolves.toEqual({ kind: "already_deleted" });
+    expect(clicks).toEqual([]);
+  });
+
+  it("keeps deletion fenced when the authoritative landing is unavailable", async () => {
+    const page = createFixturePage(`
+      <section data-owned-application>
+        <h3>Murph Private Sync fixture</h3>
+        <button class="owned-delete" type="button">Delete</button>
+      </section>
+    `);
+    page.setNavigationErrorOnce(new Error("safe landing unavailable"));
+    const code = buildBlindOwnedApplicationDeleteCode({
+      applicationContainerSelector: "section[data-owned-application]",
+      confirmSelector: null,
+      deleteSelector: ".owned-delete",
+      marker: "Murph Private Sync fixture",
+      safeLandingUrl: "about:blank",
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<unknown>;
+
+    await expect(run(page)).rejects.toThrow("safe landing unavailable");
+    expect(page.clickSelectors).toEqual([]);
+  });
+
+  it("keeps deletion fenced when multiple exact ownership markers exist", async () => {
+    const page = createFixturePage(`
+      <section data-owned-application><h3>Murph Private Sync fixture</h3></section>
+      <section data-owned-application><h3>Murph Private Sync fixture</h3></section>
+    `);
+    const code = buildBlindOwnedApplicationDeleteCode({
+      applicationContainerSelector: "section[data-owned-application]",
+      confirmSelector: null,
+      deleteSelector: ".owned-delete",
+      marker: "Murph Private Sync fixture",
+      safeLandingUrl: "about:blank",
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<unknown>;
+
+    await expect(run(page)).rejects.toThrow(/marker_ambiguous/u);
   });
 
   it("confines deletion to the marked application and the dialog it opens", async () => {
@@ -476,6 +582,11 @@ class FixtureLocator {
   async click(): Promise<void> {
     const element = this.requireOne();
     await this.page.withGlobals(() => (element as HTMLElement).click());
+    this.page.recordClick(this.selector);
+    const error = this.page.consumeClickError();
+    if (error) {
+      throw error;
+    }
   }
 
   async fill(value: string): Promise<void> {
@@ -545,8 +656,11 @@ class FixtureLocator {
 }
 
 class FixturePage {
+  readonly clickSelectors: string[] = [];
+  private clickErrorOnce: Error | null = null;
   private document: Document;
   private navigationContent: string | null = null;
+  private navigationErrorOnce: Error | null = null;
   private url = "about:blank";
   private window: FixtureWindow;
 
@@ -570,6 +684,11 @@ class FixturePage {
   }
 
   async goto(url: string): Promise<void> {
+    const navigationError = this.navigationErrorOnce;
+    this.navigationErrorOnce = null;
+    if (navigationError) {
+      throw navigationError;
+    }
     this.url = url;
     if (this.navigationContent !== null) {
       ({ document: this.document, window: this.window } = parseFixtureDocument(
@@ -588,8 +707,26 @@ class FixturePage {
     this.installLocation();
   }
 
+  setClickErrorOnce(error: Error): void {
+    this.clickErrorOnce = error;
+  }
+
   setNavigationContent(html: string): void {
     this.navigationContent = html;
+  }
+
+  setNavigationErrorOnce(error: Error): void {
+    this.navigationErrorOnce = error;
+  }
+
+  consumeClickError(): Error | null {
+    const error = this.clickErrorOnce;
+    this.clickErrorOnce = null;
+    return error;
+  }
+
+  recordClick(selector: string): void {
+    this.clickSelectors.push(selector);
   }
 
   async waitForFunction<TArgument>(

@@ -31,7 +31,10 @@ import {
   type MemberOwnedProviderSetupRegistration,
 } from "./registry";
 import { PrismaDeviceProviderSetupStore } from "./store";
-import { requestMemberOwnedProviderSetupContinuation } from "./continuation";
+import {
+  assertMemberOwnedProviderSetupContinuationAllowed,
+  requestMemberOwnedProviderSetupContinuation,
+} from "./continuation";
 import {
   readMemberOwnedProviderSetupBinding,
   toMemberOwnedProviderSetupView,
@@ -187,6 +190,8 @@ export class MemberOwnedProviderSetupService {
   private readonly resolveApplication: ResolveApplication;
   private readonly saveApplication: SaveApplication;
   private readonly store: ProviderSetupStore;
+  private readonly assertContinuationAllowed:
+    typeof assertMemberOwnedProviderSetupContinuationAllowed;
   private readonly requestContinuation: typeof requestMemberOwnedProviderSetupContinuation;
 
   constructor(
@@ -198,6 +203,7 @@ export class MemberOwnedProviderSetupService {
       now?: () => Date;
       readApplicationView?: ReadApplicationView;
       registration?: MemberOwnedProviderSetupRegistration;
+      assertContinuationAllowed?: typeof assertMemberOwnedProviderSetupContinuationAllowed;
       requestContinuation?: typeof requestMemberOwnedProviderSetupContinuation;
       resolveApplication?: ResolveApplication;
       saveApplication?: SaveApplication;
@@ -219,6 +225,8 @@ export class MemberOwnedProviderSetupService {
       ?? readDeviceProviderApplicationView;
     this.resolveApplication = input.resolveApplication
       ?? resolveDeviceProviderApplication;
+    this.assertContinuationAllowed = input.assertContinuationAllowed
+      ?? assertMemberOwnedProviderSetupContinuationAllowed;
     this.requestContinuation = input.requestContinuation
       ?? requestMemberOwnedProviderSetupContinuation;
     this.saveApplication = input.saveApplication ?? saveDeviceProviderApplication;
@@ -297,25 +305,56 @@ export class MemberOwnedProviderSetupService {
     memberId: string,
     expectedSetupId?: string,
   ): Promise<MemberOwnedProviderSetupView> {
-    const view = await this.authorize(memberId, expectedSetupId);
-    const setup = await this.store.readOwned({
-      memberId,
-      provider: this.registration.coordinates.provider,
-      setupId: view.setupId,
-    });
+    let setup = await this.requireSetup(memberId, expectedSetupId);
+    setup = await this.reconcile(setup, true);
+    let continuationAdmissionProven = false;
+    const retryableStatus = setup.status === "pending" || setup.status === "canceled"
+      ? {
+          completedAt: setup.completedAt,
+          status: setup.status,
+        }
+      : null;
+    if (setup.status === "pending" || setup.status === "canceled") {
+      await this.assertContinuationAllowed(memberId);
+      continuationAdmissionProven = true;
+      setup = await this.transition(setup, {
+        completedAt: null,
+        status: "authorized",
+      });
+    }
     if (
       setup.status === "authorized"
       || setup.status === "browser_setup"
       || setup.status === "capturing"
     ) {
-      await this.requestContinuation({
-        handoffId: null,
-        memberId,
-        provider: setup.provider,
-        runId: null,
-        setupId: setup.id,
-        setupVersion: setup.version,
-      });
+      if (!continuationAdmissionProven) {
+        await this.assertContinuationAllowed(memberId);
+      }
+      try {
+        await this.requestContinuation({
+          handoffId: null,
+          memberId,
+          provider: setup.provider,
+          runId: null,
+          setupId: setup.id,
+          setupVersion: setup.version,
+        });
+      } catch (error) {
+        if (retryableStatus) {
+          const latest = await this.store.readOwned({
+            memberId,
+            provider: setup.provider,
+            setupId: setup.id,
+          });
+          if (
+            latest.status === "authorized"
+            && latest.version === setup.version
+          ) {
+            await this.transition(latest, retryableStatus);
+          }
+        }
+        throw error;
+      }
     }
     return this.toView(setup);
   }
@@ -412,7 +451,8 @@ export class MemberOwnedProviderSetupService {
     const binding = readMemberOwnedProviderSetupBinding(setup);
     const contract = this.browserContract(memberId);
 
-    await this.computer.captureAndSealProviderCredentialsInOwnedRun({
+    try {
+      await this.computer.captureAndSealProviderCredentialsInOwnedRun({
         code: buildBlindProviderCredentialCaptureCode({
           applicationNameSelector: recovery
             ? null
@@ -452,6 +492,23 @@ export class MemberOwnedProviderSetupService {
         runId: request.runId,
         timeoutMs: PROVIDER_SETUP_BROWSER_TIMEOUT_MS,
       });
+    } catch (error) {
+      if (!recovery && isTrustedPreSubmitCaptureFailure(error)) {
+        const latest = await this.store.readOwned({
+          memberId,
+          provider: setup.provider,
+          setupId: setup.id,
+        });
+        if (
+          latest.status === "capturing"
+          && latest.version === captureVersion
+          && latest.browserRunId === request.runId
+        ) {
+          await this.transition(latest, { status: "browser_setup" });
+        }
+      }
+      throw error;
+    }
 
     const saved = await this.store.readOwned({
       memberId,
@@ -532,7 +589,7 @@ export class MemberOwnedProviderSetupService {
       runId: request.runId,
       timeoutMs: PROVIDER_SETUP_BROWSER_TIMEOUT_MS,
     });
-    requireBrowserMutationResult(result.result, "deleted");
+    requireBrowserMutationResult(result.result);
     return this.finishApplicationDeletion(setup, request.runId);
   }
 
@@ -1046,7 +1103,9 @@ const exactVisibleIn = async (root, selector, label) => {
   }
   return locator;
 };
-${input.submitSelector && input.applicationNameSelector ? `const creationForms = page.locator(${JSON.stringify(input.creationFormSelector)});
+${input.submitSelector && input.applicationNameSelector ? `let submissionStarted = false;
+try {
+const creationForms = page.locator(${JSON.stringify(input.creationFormSelector)});
 await creationForms.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
 if (await creationForms.count() !== 1 || !await creationForms.isVisible().catch(() => false)) {
   throw new Error("provider creation form must resolve to one visible element");
@@ -1061,7 +1120,13 @@ await applicationName.fill(${JSON.stringify(input.marker)});
 if (await readField(applicationName) !== ${JSON.stringify(input.marker)}) {
   throw new Error("provider application ownership marker was not placed");
 }
-await (await exactVisibleIn(creationForm, ${JSON.stringify(input.submitSelector)}, "submit selector")).click();
+const trustedSubmit = await exactVisibleIn(creationForm, ${JSON.stringify(input.submitSelector)}, "submit selector");
+submissionStarted = true;
+await trustedSubmit.click();
+} catch (error) {
+  if (!submissionStarted) return { kind: "pre_submit_failed" };
+  throw error;
+}
 await page.waitForLoadState("domcontentloaded").catch(() => undefined);` : ""}
 await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });
 const root = await deriveAuthority();
@@ -1086,7 +1151,13 @@ export function buildBlindOwnedApplicationDeleteCode(input: {
   return `
 const authorityAttribute = "data-murph-provider-delete-authority";
 const existingDialogAttribute = "data-murph-provider-existing-dialog";
-await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });
+await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "load" });
+await page.waitForLoadState("networkidle", { timeout: 15000 });
+const loadedUrl = new URL(await page.evaluate(() => window.location.href));
+const safeLandingUrl = new URL(${JSON.stringify(input.safeLandingUrl)});
+if (loadedUrl.origin !== safeLandingUrl.origin || loadedUrl.pathname !== safeLandingUrl.pathname) {
+  throw new Error("provider application safe landing is unavailable");
+}
 const authority = await page.evaluate(({ authorityAttribute, containerSelector, expectedMarker }) => {
   const readExact = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
     ? element.value.trim()
@@ -1097,7 +1168,8 @@ const authority = await page.evaluate(({ authorityAttribute, containerSelector, 
   const markers = candidates.filter((element) => readExact(element) === expectedMarker);
   document.querySelectorAll('[' + authorityAttribute + ']').forEach((element) => element.removeAttribute(authorityAttribute));
   const roots = Array.from(new Set(markers.map((marker) => marker.closest(containerSelector))));
-  if (markers.length === 0 || roots.length !== 1) return { kind: "marker_ambiguous" };
+  if (markers.length === 0) return { kind: "absent" };
+  if (roots.length !== 1) return { kind: "marker_ambiguous" };
   const root = roots[0];
   if (!root || root === document.body || root === document.documentElement) {
     return { kind: "container_ambiguous" };
@@ -1109,6 +1181,9 @@ const authority = await page.evaluate(({ authorityAttribute, containerSelector, 
   containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
   expectedMarker: ${JSON.stringify(input.marker)},
 });
+if (authority.kind === "absent") {
+  return { kind: "already_deleted" };
+}
 if (authority.kind !== "ok") {
   throw new Error("provider application ownership marker mismatch: " + authority.kind);
 }
@@ -1159,14 +1234,16 @@ return { kind: "deleted" };
 
 function requireBrowserMutationResult(
   value: unknown,
-  expectedKind: "deleted",
 ): void {
+  const kind = value && typeof value === "object" && !Array.isArray(value)
+    ? Reflect.get(value, "kind")
+    : null;
   if (
     !value
     || typeof value !== "object"
     || Array.isArray(value)
     || Object.keys(value).length !== 1
-    || Reflect.get(value, "kind") !== expectedKind
+    || (kind !== "already_deleted" && kind !== "deleted")
   ) {
     throw deviceSyncError({
       code: "DEVICE_PROVIDER_SETUP_BROWSER_RESULT_INVALID",
@@ -1175,6 +1252,15 @@ function requireBrowserMutationResult(
       retryable: true,
     });
   }
+}
+
+function isTrustedPreSubmitCaptureFailure(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && Reflect.get(error, "code")
+      === "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_PRE_SUBMIT_FAILED"
+  );
 }
 
 function assertDistinctRuntimeSelectors(

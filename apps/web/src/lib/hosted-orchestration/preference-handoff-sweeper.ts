@@ -187,7 +187,8 @@ function createHostedPreferenceHandoffCandidateStore(
             AND "lane_counter"."lane" = "item"."lane"
           WHERE "item"."kind" IN (
               'runtime.browser-vault-refresh-requested',
-              'runtime.maintenance-requested'
+              'runtime.maintenance-requested',
+              'runtime.provider-setup-continuation-requested'
             )
             AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})

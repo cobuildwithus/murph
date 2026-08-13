@@ -263,7 +263,7 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
-  it("selects pending browser-vault and maintenance wakes in the shared mailbox sweep", async () => {
+  it("selects pending browser-vault, maintenance, and provider-setup wakes in the shared mailbox sweep", async () => {
     mocks.queryRaw.mockResolvedValueOnce([{
       mailboxItemId: "mailbox_browser_refresh",
       userId: "member_browser_refresh",
@@ -289,6 +289,9 @@ describe("hosted preference handoff sweeper", () => {
     );
     expect(sql).toContain(
       "'runtime.maintenance-requested'",
+    );
+    expect(sql).toContain(
+      "'runtime.provider-setup-continuation-requested'",
     );
     expect(sql).toContain(
       '"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)',

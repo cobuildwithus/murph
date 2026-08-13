@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import {
+  assertHostedProviderSetupContinuationAllowedRuntime,
   signalHostedProviderSetupContinuationRuntime,
 } from "../../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../../prisma";
@@ -45,6 +46,12 @@ export async function requestMemberOwnedProviderSetupContinuation(
     providerSetup,
     userId: input.memberId,
   });
+}
+
+export async function assertMemberOwnedProviderSetupContinuationAllowed(
+  memberId: string,
+): Promise<void> {
+  await assertHostedProviderSetupContinuationAllowedRuntime({ userId: memberId });
 }
 
 export function buildMemberOwnedProviderSetupContinuationEventId(input: {

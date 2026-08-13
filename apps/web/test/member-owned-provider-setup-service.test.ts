@@ -380,6 +380,49 @@ describe("member-owned provider setup service", () => {
     });
   });
 
+  it("keeps setup retryable when continuation admission is refused before authorization", async () => {
+    const store = new MemorySetupStore();
+    const computer = new FakeProviderComputer();
+    const requestContinuation = vi.fn(async () => undefined);
+    const admissionError = new Error("synthetic admission refusal");
+    const service = createService({
+      assertContinuationAllowed: vi.fn(async () => {
+        throw admissionError;
+      }),
+      computer,
+      requestContinuation,
+      store,
+    });
+
+    await expect(service.authorizeAndContinue(MEMBER_ID)).rejects.toBe(
+      admissionError,
+    );
+    expect(store.setup).toMatchObject({
+      status: "pending",
+      version: 1,
+    });
+    expect(requestContinuation).not.toHaveBeenCalled();
+  });
+
+  it("restores the retryable state when durable continuation append is refused", async () => {
+    const store = new MemorySetupStore();
+    const computer = new FakeProviderComputer();
+    const appendError = new Error("synthetic mailbox append refusal");
+    const service = createService({
+      computer,
+      requestContinuation: vi.fn(async () => {
+        throw appendError;
+      }),
+      store,
+    });
+
+    await expect(service.authorizeAndContinue(MEMBER_ID)).rejects.toBe(
+      appendError,
+    );
+    expect(store.setup).toMatchObject({ status: "pending" });
+    expect(store.transitions).toEqual(["authorized", "pending"]);
+  });
+
   it("projects and reissues only the exact setup-owned handoff", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup" });
@@ -513,6 +556,31 @@ describe("member-owned provider setup service", () => {
     expect(code).toContain("provider application ownership marker mismatch");
   });
 
+  it("restores browser setup after a trusted failure proven before submit", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
+    const computer = new FakeProviderComputer();
+    computer.ambiguousCaptureErrorOnce = Object.assign(
+      new Error("trusted pre-submit selector failure"),
+      {
+        code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_PRE_SUBMIT_FAILED",
+      },
+    );
+    const service = createService({ computer, store });
+
+    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).rejects.toThrow(
+      "trusted pre-submit selector failure",
+    );
+    expect(store.setup).toMatchObject({
+      browserRunId: RUN_ID,
+      status: "browser_setup",
+      version: 5,
+    });
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      status: "canceled",
+    });
+  });
+
   it("verifies the ownership marker in the trusted browser operation before exact deletion", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
@@ -555,6 +623,45 @@ describe("member-owned provider setup service", () => {
       providerApplicationRevision: null,
       status: "deleted",
     });
+  });
+
+  it("converges deletion after the provider succeeded but its result was lost", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      providerApplicationId: APPLICATION_ID,
+      providerApplicationRevision: 3,
+      status: "oauth_ready",
+    });
+    const computer = new FakeProviderComputer();
+    computer.actOwnedRun
+      .mockRejectedValueOnce(new Error("synthetic post-delete transport loss"))
+      .mockResolvedValueOnce({
+        result: { kind: "already_deleted" },
+        title: "Provider applications",
+        url: CUSTOM_REGISTRATION.browser.safeLandingUrl,
+      });
+    const deleteApplication = vi.fn(async (input: Parameters<MemorySetupStore["deleteCapturedApplication"]>[0]) => {
+      store.deleteCapturedApplication(input);
+    });
+    const service = createService({ computer, deleteApplication, store });
+    const prepared = await service.prepareDeletion(MEMBER_ID);
+    const request = {
+      action: "delete" as const,
+      confirmSelector: "button.confirm-delete",
+      deleteSelector: "button.delete-application",
+      provider: "strava" as const,
+      runId: prepared.run.runId,
+      setupId: prepared.setup.setupId,
+    };
+
+    await expect(service.deleteOwnedApplication(MEMBER_ID, request)).rejects.toThrow(
+      "synthetic post-delete transport loss",
+    );
+    await expect(service.deleteOwnedApplication(MEMBER_ID, request)).resolves.toMatchObject({
+      status: "deleted",
+    });
+    expect(computer.actOwnedRun).toHaveBeenCalledTimes(2);
+    expect(deleteApplication).toHaveBeenCalledTimes(1);
   });
 
   it("starts OAuth only for the exact sealed application binding", async () => {
@@ -608,6 +715,7 @@ describe("member-owned provider setup service", () => {
 });
 
 function createService(input: {
+  assertContinuationAllowed?: ServiceOptions["assertContinuationAllowed"];
   computer: FakeProviderComputer;
   createIngress?: ServiceOptions["createIngress"];
   deleteApplication?: ServiceOptions["deleteApplication"];
@@ -617,6 +725,8 @@ function createService(input: {
   store: MemorySetupStore;
 }): MemberOwnedProviderSetupService {
   return new MemberOwnedProviderSetupService("strava", {
+    assertContinuationAllowed: input.assertContinuationAllowed
+      ?? (async () => undefined),
     computer: input.computer,
     createIngress: input.createIngress,
     deleteApplication: input.deleteApplication,
