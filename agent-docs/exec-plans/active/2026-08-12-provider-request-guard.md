@@ -1,0 +1,87 @@
+# Expand the external provider request guard
+
+Status: active
+Created: 2026-08-12
+Updated: 2026-08-12
+
+## Goal
+
+- Make the external provider guard detect production SDK bypasses instead of
+  only validating request objects at a small registered set of SDK call sites.
+- Preserve the narrow raw-transport exceptions required for presigned byte
+  transfers, internal traffic, generic runner proxying, dynamic SMART/FHIR
+  endpoints, providers without a verified provider-owned TypeScript SDK, and
+  xAI's OpenAI-compatible extensions.
+
+## Success criteria
+
+- The guard scans relevant operational JavaScript modules as well as
+  TypeScript sources.
+- Raw provider fetches, handwritten provider request/response contracts, and
+  configurable provider origins are mechanically rejected unless a narrow,
+  documented exception applies.
+- Focused regression fixtures cover the reported Junction, Linq, OpenAI, and
+  operational-script blind spots plus every accepted exception class.
+- The guard and its documentation no longer overstate their coverage.
+- Focused verification, exact-head CI, preliminary ReviewGPT specialists, and
+  the final ReviewGPT loop complete with no unresolved accepted finding.
+
+## Scope
+
+- In scope:
+  - `scripts/check-provider-request-boundaries.ts` and its focused tests.
+  - The guard's registered provider and exception policy.
+  - Durable security/testing documentation that describes the guard.
+- Out of scope:
+  - Migrating individual provider call sites to SDKs; sibling work owns those
+    corrections.
+  - Changing provider behavior, credentials, retries, timeouts, or product
+    flows.
+
+## Constraints
+
+- ReviewGPT authors the first implementation patch; the parent inspects,
+  applies, integrates, and verifies it.
+- Prefer one explicit guard policy over a second inventory or detector.
+- Exceptions must be path- and purpose-scoped rather than provider-wide.
+- Keep direct identifiers, credentials, private provider payloads, and local
+  filesystem paths out of durable artifacts.
+
+## Risks and mitigations
+
+1. Risk: broad URL matching flags internal traffic or provider byte transfers.
+   Mitigation: prove each allowed transport class with explicit fixtures and
+   require narrow exception metadata.
+2. Risk: the guard is coupled to current migrated call-site syntax.
+   Mitigation: use semantic AST evidence and mutation-style fixtures for the
+   bypass classes rather than exact source-text snapshots.
+3. Risk: the guard lands before sibling SDK migrations and makes CI red.
+   Mitigation: keep the PR active, rebase only when the sibling migrations are
+   available, and require a clean current-base guard run before merge.
+
+## Tasks
+
+1. [ ] Inventory the current guard, tests, provider call sites, and exception
+   classes.
+2. [ ] Ask ReviewGPT for a bounded implementation patch and inspect every hunk.
+3. [ ] Apply the accepted implementation, strengthen focused tests, and update
+   truthful documentation.
+4. [ ] Run focused verification and direct positive/negative guard scenarios.
+5. [ ] Push the exact candidate, run preliminary and final ReviewGPT audits
+   with CI, remediate accepted findings, and close this plan.
+
+## Decisions
+
+- This is internal-only verification tooling; changelog is not applicable.
+- The final guard is expected to fail against unmigrated production bypasses;
+  merge readiness requires the sibling SDK migrations to remove those failures
+  or a narrowly justified registered exception.
+
+## Verification
+
+- `pnpm provider-requests:guard`
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage scripts/check-provider-request-boundaries.test.ts`
+- `pnpm test:repo-tools`
+- `pnpm test:diff scripts/check-provider-request-boundaries.ts scripts/check-provider-request-boundaries.test.ts agent-docs/SECURITY.md agent-docs/references/testing-ci-map.md`
+- `git diff --check`
+- Exact-head CI and routed ReviewGPT passes.
