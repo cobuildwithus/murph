@@ -42,7 +42,9 @@ body with pre/post-wait and pre-persistence drift checks that preserve a new
 operator handoff, plus fresh trusted-control fences after every long canonical
 review and immediately before merge, and matching fences from the invocation's
 loaded-runner head to fresh `main` so old in-memory authority cannot merge under
-superseded policy, an explicit Frog-script merge allowlist with one canonical
+superseded policy, candidate-and-runner-bound PASS recovery across restarts,
+and frozen scriptless primary dependency reconciliation with lockfile drift in
+the trusted review surface, an explicit Frog-script merge allowlist with one canonical
 issue-bound completed-plan exception and exclusions for policy, skills,
 friction tasks, general documentation, and GitHub Actions helpers, one
 non-closing issue binding with parent-only post-merge

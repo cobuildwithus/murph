@@ -1,4 +1,6 @@
 import {
+  chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -46,6 +48,7 @@ import {
   assertExpectedPullRequestBody,
   authorizedTerminalHandoffLease,
   bodyHasExactReviewPass,
+  bodyHasCurrentReviewPass,
   bodyHandoff,
   bodyHandoffRecord,
   bodyWithParentMetadata,
@@ -58,12 +61,14 @@ import {
   createEmptyRepairHandoffCommit,
   discoverEligibleIssues,
   expectedPullRequestBodyDisposition,
+  exactReviewPassRunnerHead,
   materializeCommittedFrictionTask,
   mergedIssueClosureAction,
   mergedPullRequestForClosure,
   loadedRunnerControlsMatch,
   primaryAdvanceRequiresRestart,
   recoverablePullRequestBody,
+  recoveredReviewPassState,
   recoveredReviewHandoffBody,
   requiredCheckWatchHandoff,
   requireImplementationCompletion,
@@ -287,6 +292,7 @@ describe("Frog autofix guards", () => {
       mkdirSync(path.join(root, "scripts"), { recursive: true });
       writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "trusted\n");
       writeFileSync(path.join(root, "package.json"), "{}\n");
+      writeFileSync(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
       writeFileSync(
         path.join(root, "scripts", "package-audit-context-full.sh"),
         "trusted\n",
@@ -305,6 +311,7 @@ describe("Frog autofix guards", () => {
       expect(trustedReviewControlsMatch(root, root)).toBe(true);
       for (const changedPath of [
         "package.json",
+        "pnpm-lock.yaml",
         "scripts/package-audit-context-full.sh",
         "scripts/review-gpt-pr-head-preflight.sh",
         "scripts/chatgpt-review-presets/pr-deep-review.md",
@@ -474,6 +481,7 @@ describe("Frog autofix guards", () => {
 
   it("replaces child-authored review metadata with exact parent state", () => {
     const head = "c".repeat(40);
+    const runnerHead = "e".repeat(40);
     const body = bodyWithParentMetadata(
       `Frog autofix issue: #42\nFrog autofix final review: PASS at ${"0".repeat(40)}\n`,
       {
@@ -481,11 +489,20 @@ describe("Frog autofix guards", () => {
         handoff: "review-findings",
         handoffHead: head,
         specialistHead: head,
+        specialistRunnerHead: runnerHead,
       },
     );
     expect(body.match(/^ReviewGPT first-reviewed head:/gmu)).toHaveLength(1);
-    expect(bodyHasExactReviewPass(body, "specialist", head)).toBe(true);
-    expect(bodyHasExactReviewPass(body, "final", head)).toBe(false);
+    expect(bodyHasExactReviewPass(body, "specialist", head, runnerHead)).toBe(true);
+    expect(exactReviewPassRunnerHead(body, "specialist", head)).toBe(runnerHead);
+    expect(bodyHasExactReviewPass(body, "final", head, runnerHead)).toBe(false);
+    expect(() => bodyWithParentMetadata(body, {
+      specialistHead: head,
+    })).toThrow("requires its runner head");
+    expect(() => bodyWithParentMetadata(body, {
+      specialistHead: head,
+      specialistRunnerHead: "invalid",
+    })).toThrow("runner metadata is invalid");
     expect(bodyHandoff(body, head)).toBe("review-findings");
     expect(bodyHandoffRecord(body)).toEqual({
       head,
@@ -515,7 +532,9 @@ describe("Frog autofix guards", () => {
         "Frog autofix issue: #42",
         `ReviewGPT first-reviewed head: ${head}`,
         `Frog autofix specialist review: PASS at ${head}`,
+        `Frog autofix specialist review runner: ${runnerHead}`,
         `Frog autofix final review: PASS at ${head}`,
+        `Frog autofix final review runner: ${runnerHead}`,
         `Frog autofix handoff: review-findings at ${head}`,
       ].join("\n"),
       editor: { login: "different-operator" },
@@ -524,7 +543,7 @@ describe("Frog autofix guards", () => {
       number: 42,
       state: "OPEN" as const,
     };
-    expect(bodyHasExactReviewPass(forged.body, "final", head)).toBe(true);
+    expect(bodyHasExactReviewPass(forged.body, "final", head, runnerHead)).toBe(true);
     expect(hasParentOwnedPullRequestBody(forged, authenticatedOperator))
       .toBe(false);
     expect(completedHandoffIssueNumbers([forged], authenticatedOperator).size)
@@ -813,8 +832,10 @@ describe("Frog autofix guards", () => {
         renderRecoveredPullRequestBody(42),
         {
           finalHead: trustedHead,
+          finalRunnerHead: trustedHead,
           firstHead: trustedHead,
           specialistHead: trustedHead,
+          specialistRunnerHead: trustedHead,
         },
       );
       expect(resolveReviewBaselineState(
@@ -833,9 +854,19 @@ describe("Frog autofix guards", () => {
         handoff: null,
         requiresHumanHandoff: false,
       });
-      expect(bodyHasExactReviewPass(exactPassBody, "specialist", trustedHead))
+      expect(bodyHasExactReviewPass(
+        exactPassBody,
+        "specialist",
+        trustedHead,
+        trustedHead,
+      ))
         .toBe(true);
-      expect(bodyHasExactReviewPass(exactPassBody, "final", trustedHead))
+      expect(bodyHasExactReviewPass(
+        exactPassBody,
+        "final",
+        trustedHead,
+        trustedHead,
+      ))
         .toBe(true);
     } finally {
       rmSync(root, { force: true, recursive: true });
@@ -1161,6 +1192,11 @@ describe("Frog autofix guards", () => {
     expect(wrapper).toContain("/usr/bin/lockf -t 0");
     expect(wrapper).toContain("MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD=1");
     expect(wrapper).toContain('install|uninstall|run)');
+    const reconcile = wrapper.indexOf(
+      'pnpm --dir "$repo_root" install --frozen-lockfile --ignore-scripts',
+    );
+    expect(reconcile).toBeGreaterThan(wrapper.indexOf("unset \\"));
+    expect(reconcile).toBeLessThan(wrapper.indexOf('tsx_bin="$repo_root'));
     expect(wrapper).toContain('exec "$tsx_bin" scripts/frog-autofix.ts "$@"');
     const implementation = readFileSync(
       path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
@@ -1182,6 +1218,69 @@ describe("Frog autofix guards", () => {
     expect(implementation).not.toContain(
       "rmSync(supportRoot, { recursive: false })",
     );
+  });
+
+  it("reconciles frozen primary tooling before loading the mutating parent", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "frog-primary-tooling-"));
+    const scripts = path.join(root, "scripts");
+    const bin = path.join(root, "bin");
+    const marker = path.join(root, "reconciled");
+    const parentMarker = path.join(root, "parent-started");
+    try {
+      mkdirSync(scripts, { recursive: true });
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(path.join(root, "node_modules", ".bin"), { recursive: true });
+      copyFileSync(
+        path.join(repositoryRoot, "scripts", "frog-autofix"),
+        path.join(scripts, "frog-autofix"),
+      );
+      writeFileSync(path.join(bin, "pnpm"), [
+        "#!/bin/sh",
+        'test "$1" = "--dir"',
+        'test "$2" = "$FROG_PRIMARY_ROOT"',
+        'test "$3" = "install"',
+        'test "$4" = "--frozen-lockfile"',
+        'test "$5" = "--ignore-scripts"',
+        'touch "$FROG_RECONCILE_MARKER"',
+      ].join("\n"));
+      writeFileSync(path.join(root, "node_modules", ".bin", "tsx"), [
+        "#!/bin/sh",
+        'test -f "$FROG_RECONCILE_MARKER"',
+        'printf "%s\\n" "$*" > "$FROG_PARENT_MARKER"',
+      ].join("\n"));
+      chmodSync(path.join(bin, "pnpm"), 0o755);
+      chmodSync(path.join(root, "node_modules", ".bin", "tsx"), 0o755);
+      writeFileSync(path.join(root, ".gitignore"), "bin/\nnode_modules/\nreconciled\nparent-started\n");
+      const git = (...args: string[]) => {
+        const command = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+        expect(command.status, command.stderr).toBe(0);
+      };
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      git("add", ".gitignore", "scripts/frog-autofix");
+      git("commit", "--quiet", "-m", "fixture");
+      const result = spawnSync(
+        "bash",
+        [path.join(scripts, "frog-autofix"), "run"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            FROG_PARENT_MARKER: parentMarker,
+            FROG_PRIMARY_ROOT: root,
+            FROG_RECONCILE_MARKER: marker,
+            MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD: "1",
+            PATH: `${bin}:${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(parentMarker, "utf8"))
+        .toBe("scripts/frog-autofix.ts run\n");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   it("admits only one real contender through the stable native acquisition gate", () => {
@@ -2536,6 +2635,8 @@ describe("Frog autofix guards", () => {
     expect(primaryAdvanceRequiresRestart(["apps/web/app/page.tsx"])).toBe(false);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix.ts"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-parent.ts"])).toBe(true);
+    expect(primaryAdvanceRequiresRestart(["package.json"])).toBe(true);
+    expect(primaryAdvanceRequiresRestart(["pnpm-lock.yaml"])).toBe(true);
 
     const root = mkdtempSync(path.join(tmpdir(), "frog-loaded-runner-"));
     const git = (...args: string[]) => {
@@ -2556,6 +2657,56 @@ describe("Frog autofix guards", () => {
       const loadedHead = git("rev-parse", "HEAD");
       git("update-ref", "refs/remotes/origin/main", loadedHead);
       expect(loadedRunnerControlsMatch(root, loadedHead)).toBe(true);
+      const persistedPass = bodyWithParentMetadata(
+        renderRecoveredPullRequestBody(42),
+        {
+          finalHead: loadedHead,
+          finalRunnerHead: loadedHead,
+          firstHead: loadedHead,
+          specialistHead: loadedHead,
+          specialistRunnerHead: loadedHead,
+        },
+      );
+      expect(bodyHasCurrentReviewPass(
+        root,
+        persistedPass,
+        "final",
+        loadedHead,
+      )).toBe(true);
+      expect(recoveredReviewPassState(root, persistedPass, loadedHead)).toEqual({
+        authorityDrift: false,
+        finalPassed: true,
+        finalRunnerHead: loadedHead,
+        specialistPassed: true,
+        specialistRunnerHead: loadedHead,
+      });
+      const specialistOnly = bodyWithParentMetadata(
+        renderRecoveredPullRequestBody(42),
+        {
+          firstHead: loadedHead,
+          specialistHead: loadedHead,
+          specialistRunnerHead: loadedHead,
+        },
+      );
+      expect(recoveredReviewPassState(root, specialistOnly, loadedHead)).toEqual({
+        authorityDrift: false,
+        finalPassed: false,
+        finalRunnerHead: null,
+        specialistPassed: true,
+        specialistRunnerHead: loadedHead,
+      });
+      const legacyPass = persistedPass.replace(
+        `Frog autofix final review runner: ${loadedHead}`,
+        "",
+      );
+      expect(bodyHasCurrentReviewPass(
+        root,
+        legacyPass,
+        "final",
+        loadedHead,
+      )).toBe(false);
+      expect(recoveredReviewPassState(root, legacyPass, loadedHead).authorityDrift)
+        .toBe(true);
 
       writeFileSync(path.join(root, "apps", "web", "page.tsx"), "advanced\n");
       git("add", ".");
@@ -2563,12 +2714,40 @@ describe("Frog autofix guards", () => {
       const unrelatedMain = git("rev-parse", "HEAD");
       git("update-ref", "refs/remotes/origin/main", unrelatedMain);
       expect(loadedRunnerControlsMatch(root, loadedHead)).toBe(true);
+      expect(bodyHasCurrentReviewPass(
+        root,
+        persistedPass,
+        "final",
+        loadedHead,
+      )).toBe(true);
+      expect(recoveredReviewPassState(root, persistedPass, loadedHead).authorityDrift)
+        .toBe(false);
 
       writeFileSync(path.join(root, "scripts", "frog-autofix-finalize.ts"), "replaced\n");
       git("add", ".");
       git("commit", "--quiet", "-m", "replace loaded authority");
       git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
       expect(loadedRunnerControlsMatch(root, loadedHead)).toBe(false);
+      expect(bodyHasCurrentReviewPass(
+        root,
+        persistedPass,
+        "final",
+        loadedHead,
+      )).toBe(false);
+      expect(recoveredReviewPassState(root, persistedPass, loadedHead)).toEqual({
+        authorityDrift: true,
+        finalPassed: false,
+        finalRunnerHead: loadedHead,
+        specialistPassed: false,
+        specialistRunnerHead: loadedHead,
+      });
+      expect(recoveredReviewPassState(root, specialistOnly, loadedHead)).toEqual({
+        authorityDrift: true,
+        finalPassed: false,
+        finalRunnerHead: null,
+        specialistPassed: false,
+        specialistRunnerHead: loadedHead,
+      });
       expect(loadedRunnerControlsMatch(root, "not-a-commit")).toBe(false);
     } finally {
       rmSync(root, { force: true, recursive: true });

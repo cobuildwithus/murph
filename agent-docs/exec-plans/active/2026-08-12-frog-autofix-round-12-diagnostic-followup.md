@@ -15,6 +15,10 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
   the previously produced PASS still retained unattended merge authority.
 - Loaded Frog authority modules could change on `main` after invocation start
   while the old in-memory parent still retained response and merge authority.
+- Persisted PASS metadata did not retain its producing runner version, so a
+  restart under newer authority could reuse review evidence from the old one.
+- Automatic primary source advancement could leave parent ReviewGPT and helper
+  binaries installed from an older manifest or lockfile.
 
 ## Design
 
@@ -35,6 +39,12 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
   loaded-runner inventory to freshly fetched `origin/main` at the same fences.
   Unrelated default-branch movement remains allowed; loaded authority drift
   uses the same exact-head handoff.
+- Bind specialist and final PASS metadata to the producing runner head. Reuse
+  requires that exact candidate/runner pair and fresh loaded-path equivalence;
+  legacy, malformed, or drifted evidence uses the existing handoff.
+- Reconcile the clean primary dependency tree with frozen lockfile and disabled
+  lifecycle scripts before loading the mutating parent, include the lockfile in
+  trusted review controls, and restart once after dependency-control advances.
 
 ## Verification
 
@@ -43,6 +53,9 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
 - Existing-PR projection, no-push, exact-body, and queue-handoff guards.
 - Post-review and pre-merge trusted-control and loaded-runner drift handoff
   guards, with unrelated default-branch movement preserved.
+- Real-Git cross-invocation PASS reuse for unchanged, unrelated-main, legacy,
+  and loaded-authority-drift cases; shell-order proof that frozen primary
+  dependency reconciliation precedes the TypeScript parent.
 - Focused Frog suite, repo tooling, workspace typecheck, docs/shell/permission
   guards, privacy checks, current-base merge tree, and a fresh valid exact-head
   ReviewGPT round.
@@ -55,4 +68,6 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
 - [x] Add production-shaped proof and update owner documentation.
 - [x] Fence accepted review evidence and final merge on current trusted controls.
 - [x] Fence accepted review evidence and final merge on the loaded runner version.
+- [x] Bind persisted PASS evidence to its producing runner version.
+- [x] Reconcile primary executable dependencies before mutating parent startup.
 - [ ] Verify, commit, push, and continue exact-head review and CI.

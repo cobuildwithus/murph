@@ -1196,9 +1196,19 @@ Last verified: 2026-08-13
   guard, parent, or recovery module produces that same handoff before response
   acceptance or merge, preventing old in-memory authority from closing the
   issue under a newer trusted policy.
+  Specialist and final PASS metadata binds the exact candidate head to the
+  runner head that produced it. Cross-invocation recovery accepts that evidence
+  only while the recorded runner's loaded paths still match fresh `main`;
+  missing, malformed, legacy, or drifted evidence produces the same handoff.
   Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
   controls produce the same exact-head human handoff; review prose is never
   delegated to another autonomous editing turn.
+- Mutating entry (`install` and `run`) performs a frozen, scriptless primary
+  dependency reconciliation before loading the TypeScript parent. Dependency-
+  control movement, including `pnpm-lock.yaml`, triggers the existing one-run
+  restart, and the lockfile is in the trusted ReviewGPT control inventory.
+  Canonical review and parent helpers therefore cannot retain an older installed
+  runtime after trusted source advances.
 - Missing or rejected implementation output/patches and edit-only child
   timeout, nonzero exit, or invalid output are graceful terminal pre-PR
   dispositions, not authorization for another implementation. The parent

@@ -617,8 +617,19 @@ const loadedRunnerPaths = [
   "scripts/frog-autofix-recovery.ts",
 ];
 
+const primaryDependencyControlPaths = [
+  ".npmrc",
+  ".pnpmfile.cjs",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+];
+
 export function primaryAdvanceRequiresRestart(paths: string[]): boolean {
-  return paths.some((filePath) => loadedRunnerPaths.includes(filePath));
+  return paths.some((filePath) => (
+    loadedRunnerPaths.includes(filePath)
+    || primaryDependencyControlPaths.includes(filePath)
+  ));
 }
 
 export function loadedRunnerControlsMatch(
@@ -1620,6 +1631,7 @@ export const trustedReviewControlPaths = [
   ".npmrc",
   ".pnpmfile.cjs",
   "package.json",
+  "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
   "scripts/chatgpt-review-presets",
   "scripts/check-no-js.ts",
@@ -2819,10 +2831,12 @@ export function bodyWithParentMetadata(
   body: string,
   metadata: {
     finalHead?: string;
+    finalRunnerHead?: string;
     firstHead?: string;
     handoff?: "product-runtime" | "review-findings";
     handoffHead?: string;
     specialistHead?: string;
+    specialistRunnerHead?: string;
     task?: FrogTaskIdentity;
     terminalFailure?: TerminalPrePullRequestFailureClass;
   },
@@ -2834,7 +2848,9 @@ export function bodyWithParentMetadata(
   const prefixes = [
     "ReviewGPT first-reviewed head:",
     "Frog autofix specialist review:",
+    "Frog autofix specialist review runner:",
     "Frog autofix final review:",
+    "Frog autofix final review runner:",
     "Frog autofix handoff:",
     "Frog autofix task path:",
     "Frog autofix task sha256:",
@@ -2849,11 +2865,25 @@ export function bodyWithParentMetadata(
   if (metadata.firstHead) {
     additions.push(`ReviewGPT first-reviewed head: ${metadata.firstHead}`);
   }
-  if (metadata.specialistHead) {
-    additions.push(`Frog autofix specialist review: PASS at ${metadata.specialistHead}`);
+  if (Boolean(metadata.specialistHead) !== Boolean(metadata.specialistRunnerHead)) {
+    throw new Error("specialist review metadata requires its runner head");
   }
-  if (metadata.finalHead) {
+  if (metadata.specialistHead && metadata.specialistRunnerHead) {
+    if (!/^[0-9a-f]{40}$/u.test(metadata.specialistRunnerHead)) {
+      throw new Error("specialist review runner metadata is invalid");
+    }
+    additions.push(`Frog autofix specialist review: PASS at ${metadata.specialistHead}`);
+    additions.push(`Frog autofix specialist review runner: ${metadata.specialistRunnerHead}`);
+  }
+  if (Boolean(metadata.finalHead) !== Boolean(metadata.finalRunnerHead)) {
+    throw new Error("final review metadata requires its runner head");
+  }
+  if (metadata.finalHead && metadata.finalRunnerHead) {
+    if (!/^[0-9a-f]{40}$/u.test(metadata.finalRunnerHead)) {
+      throw new Error("final review runner metadata is invalid");
+    }
     additions.push(`Frog autofix final review: PASS at ${metadata.finalHead}`);
+    additions.push(`Frog autofix final review runner: ${metadata.finalRunnerHead}`);
   }
   if (metadata.handoff) {
     const head = metadata.handoffHead
@@ -2882,9 +2912,84 @@ export function bodyHasExactReviewPass(
   body: string,
   kind: "final" | "specialist",
   head: string,
+  runnerHead: string,
 ): boolean {
   const expected = `Frog autofix ${kind} review: PASS at ${head}`;
-  return body.split(/\r?\n/u).filter((line) => line === expected).length === 1;
+  const expectedRunner = `Frog autofix ${kind} review runner: ${runnerHead}`;
+  const lines = body.split(/\r?\n/u);
+  return /^[0-9a-f]{40}$/u.test(runnerHead)
+    && lines.filter((line) => line === expected).length === 1
+    && lines.filter((line) => line === expectedRunner).length === 1;
+}
+
+export function exactReviewPassRunnerHead(
+  body: string,
+  kind: "final" | "specialist",
+  head: string,
+): string | null {
+  const pass = `Frog autofix ${kind} review: PASS at ${head}`;
+  const runnerPrefix = `Frog autofix ${kind} review runner:`;
+  const lines = body.split(/\r?\n/u);
+  const passes = lines.filter((line) => line === pass);
+  const runners = lines.filter((line) => line.startsWith(runnerPrefix));
+  if (passes.length !== 1 || runners.length !== 1) return null;
+  const runnerHead = runners[0]?.slice(runnerPrefix.length).trim() ?? "";
+  return /^[0-9a-f]{40}$/u.test(runnerHead) ? runnerHead : null;
+}
+
+export function bodyHasCurrentReviewPass(
+  primary: string,
+  body: string,
+  kind: "final" | "specialist",
+  head: string,
+): boolean {
+  const runnerHead = exactReviewPassRunnerHead(body, kind, head);
+  return runnerHead !== null
+    && bodyHasExactReviewPass(body, kind, head, runnerHead)
+    && loadedRunnerControlsMatch(primary, runnerHead);
+}
+
+export function recoveredReviewPassState(
+  primary: string,
+  body: string,
+  head: string,
+): {
+  authorityDrift: boolean;
+  finalPassed: boolean;
+  finalRunnerHead: string | null;
+  specialistPassed: boolean;
+  specialistRunnerHead: string | null;
+} {
+  const exactPassLine = (kind: "final" | "specialist") => body
+    .split(/\r?\n/u)
+    .filter((line) => line === `Frog autofix ${kind} review: PASS at ${head}`)
+    .length === 1;
+  const specialistRunnerHead = exactReviewPassRunnerHead(
+    body,
+    "specialist",
+    head,
+  );
+  const finalRunnerHead = exactReviewPassRunnerHead(body, "final", head);
+  const specialistPassed = bodyHasCurrentReviewPass(
+    primary,
+    body,
+    "specialist",
+    head,
+  );
+  const finalPassed = bodyHasCurrentReviewPass(
+    primary,
+    body,
+    "final",
+    head,
+  );
+  return {
+    authorityDrift: (exactPassLine("specialist") && !specialistPassed)
+      || (exactPassLine("final") && !finalPassed),
+    finalPassed,
+    finalRunnerHead,
+    specialistPassed,
+    specialistRunnerHead,
+  };
 }
 
 export function bodyHandoff(
@@ -3360,6 +3465,7 @@ function finalizeReviewedRepair(
   primary: string,
   worktree: string,
   loadedRunnerHead: string,
+  reviewRunnerHeads: readonly string[],
   branch: string,
   issueNumber: number,
   pullRequest: number,
@@ -3455,10 +3561,8 @@ function finalizeReviewedRepair(
       primary,
       identity.pullRequest,
     ),
-    loadedRunnerMatches: () => loadedRunnerControlsMatch(
-      primary,
-      loadedRunnerHead,
-    ),
+    loadedRunnerMatches: () => [loadedRunnerHead, ...reviewRunnerHeads]
+      .every((runnerHead) => loadedRunnerControlsMatch(primary, runnerHead)),
     reviewControlsMatch: () => trustedReviewControlsMatch(primary, worktree),
     taskAuthorityMatches: (identity) => committedFrictionTaskMatches(
       primary,
@@ -3479,6 +3583,11 @@ async function reviewPublishAndFinalize(options: {
   worktree: string;
 }): Promise<"awaiting-human" | "merged"> {
   let body = validatedWorkerPrBody(options.worktree, options.issueNumber);
+  refreshAndRequireCommittedFrictionTask(
+    options.primary,
+    options.issueNumber,
+    options.task,
+  );
   const existingBeforePublish = branchOpenPullRequest(
     options.primary,
     options.branch,
@@ -3500,24 +3609,47 @@ async function reviewPublishAndFinalize(options: {
     options.recoveredExistingBody,
     head,
   );
-  let specialistPassed = Boolean(
-    existingBeforePublish && existingBodyIsParentOwned
-    && bodyHasExactReviewPass(existingBeforePublish.body, "specialist", head),
+  const recoveredPasses = existingBeforePublish && existingBodyIsParentOwned
+    ? recoveredReviewPassState(options.primary, existingBeforePublish.body, head)
+    : {
+      authorityDrift: false,
+      finalPassed: false,
+      finalRunnerHead: null,
+      specialistPassed: false,
+      specialistRunnerHead: null,
+    };
+  let specialistRunnerHead = recoveredPasses.specialistRunnerHead;
+  let finalRunnerHead = recoveredPasses.finalRunnerHead;
+  const currentRunnerMatches = loadedRunnerControlsMatch(
+    options.primary,
+    options.loadedRunnerHead,
   );
-  let finalPassed = Boolean(
-    existingBeforePublish && existingBodyIsParentOwned
-    && bodyHasExactReviewPass(existingBeforePublish.body, "final", head),
+  let specialistPassed = currentRunnerMatches && recoveredPasses.specialistPassed;
+  let finalPassed = currentRunnerMatches && recoveredPasses.finalPassed;
+  const reviewAuthorityDrift = Boolean(
+    existingBeforePublish
+    && existingBodyIsParentOwned
+    && (recoveredPasses.authorityDrift
+      || ((!currentRunnerMatches)
+        && (recoveredPasses.specialistPassed || recoveredPasses.finalPassed))),
   );
-  let handoff = baseline.handoff;
-  if (baseline.requiresHumanHandoff !== (handoff !== null)) {
+  const requiresHumanHandoff = baseline.requiresHumanHandoff
+    || reviewAuthorityDrift;
+  let handoff = baseline.handoff
+    ?? (reviewAuthorityDrift ? "review-findings" : null);
+  if (requiresHumanHandoff !== (handoff !== null)) {
     throw new Error("review recovery handoff state is inconsistent");
   }
   body = bodyWithParentMetadata(body, {
     finalHead: finalPassed ? head : undefined,
+    finalRunnerHead: finalPassed ? finalRunnerHead ?? undefined : undefined,
     firstHead: baseline.firstHead,
     handoff: handoff ?? undefined,
     handoffHead: handoff ? head : undefined,
     specialistHead: specialistPassed ? head : undefined,
+    specialistRunnerHead: specialistPassed
+      ? specialistRunnerHead ?? undefined
+      : undefined,
     task: options.task,
   });
   writePrivateFileAtomically(
@@ -3557,10 +3689,14 @@ async function reviewPublishAndFinalize(options: {
     if (disposition === "operator-handoff") return false;
     const nextBody = bodyWithParentMetadata(body, {
       finalHead: finalPassed ? head : undefined,
+      finalRunnerHead: finalPassed ? finalRunnerHead ?? undefined : undefined,
       firstHead: baseline.firstHead,
       handoff: handoff ?? undefined,
       handoffHead: handoff ? head : undefined,
       specialistHead: specialistPassed ? head : undefined,
+      specialistRunnerHead: specialistPassed
+        ? specialistRunnerHead ?? undefined
+        : undefined,
       task: options.task,
     });
     updateParentPullRequestBody(
@@ -3587,11 +3723,12 @@ async function reviewPublishAndFinalize(options: {
     return true;
   };
 
-  if (baseline.requiresHumanHandoff) return "awaiting-human";
-  if (!baseline.firstHead || !trustedReviewControlsMatch(
-    options.primary,
-    options.worktree,
-  )) {
+  if (requiresHumanHandoff) return "awaiting-human";
+  if (
+    !baseline.firstHead
+    || !currentRunnerMatches
+    || !trustedReviewControlsMatch(options.primary, options.worktree)
+  ) {
     handoff = "review-findings";
     if (!persistMetadata()) return "awaiting-human";
     return "awaiting-human";
@@ -3622,6 +3759,7 @@ async function reviewPublishAndFinalize(options: {
       return "awaiting-human";
     }
     specialistPassed = true;
+    specialistRunnerHead = options.loadedRunnerHead;
     if (!persistMetadata()) return "awaiting-human";
   }
 
@@ -3650,6 +3788,7 @@ async function reviewPublishAndFinalize(options: {
       return "awaiting-human";
     }
     finalPassed = true;
+    finalRunnerHead = options.loadedRunnerHead;
     if (!persistMetadata()) return "awaiting-human";
   }
 
@@ -3715,6 +3854,9 @@ async function reviewPublishAndFinalize(options: {
     options.primary,
     options.worktree,
     options.loadedRunnerHead,
+    [specialistRunnerHead, finalRunnerHead].filter(
+      (runnerHead): runnerHead is string => runnerHead !== null,
+    ),
     options.branch,
     options.issueNumber,
     pullRequest,

@@ -144,7 +144,11 @@ is also retained for the invocation. The existing loaded-runner path inventory
 is compared from that head to each freshly fetched `origin/main` at the same
 post-review and finalization fences. Unrelated main movement remains allowed;
 loaded authority drift uses the same handoff so an old in-memory parent cannot
-accept review evidence, merge, or close under superseded policy. Either review returning findings, a final
+accept review evidence, merge, or close under superseded policy. Each persisted
+specialist and final PASS also binds its candidate head to the exact producing
+runner head. Recovery reuses it only when that runner's loaded paths still match
+fresh `main`; legacy, malformed, or drifted PASS metadata becomes the existing
+exact-head handoff. Either review returning findings, a final
 review requiring a scope retrospective, or a candidate changing those controls creates the same
 durable human-review handoff; the automation does not ask another child to
 remediate review prose. After both reviews pass, it waits for required CI.
@@ -181,6 +185,14 @@ it cannot starve the queue. Only a newly verified parent merge may precede
 issue closure. The invocation has one eight-hour deadline; each model
 worker is bounded to two hours and every spawned command or worker has exact
 process-group ownership.
+
+The native mutating shell entry reconciles the clean primary dependency tree
+with `pnpm install --frozen-lockfile --ignore-scripts` before loading the
+TypeScript parent. Dependency-control changes, including lock-only resolution
+updates, make an automatic primary advance exit once so the next invocation
+reconciles and loads the new executable graph. The lockfile is part of the
+trusted ReviewGPT control inventory, so dependency drift during review or CI
+revokes older evidence through the same handoff.
 
 ## Accepted-Message Targeting
 

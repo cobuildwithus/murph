@@ -198,6 +198,12 @@ Last verified: 2026-08-13
   so a concurrent contender can never switch to a replacement inode. Install
   also acquires the JSON owner, so it cannot reconfigure launchd while an
   orphaned verified worker still owns the prior run.
+- Before `install` or `run` loads the TypeScript parent, the native entrypoint
+  reconciles the clean primary dependency tree with the committed lockfile and
+  disables lifecycle scripts. A manifest, workspace, pnpm hook, or lock-only
+  change during automatic primary advancement requires the existing one-run
+  restart; the next invocation reconciles before using ReviewGPT, `tsx`, or
+  parent helper binaries.
 - Each invocation fetches the default branch, advances only an exact clean
   primary checkout by fast-forward, revalidates repository and issue authority,
   and admits the oldest eligible issue. It processes one issue, uses a
@@ -324,7 +330,10 @@ Last verified: 2026-08-13
   the primary head that loaded the parent and compares the existing loaded-runner
   inventory from that head to the same fresh refs. Unrelated main changes remain
   admissible, while a loaded authority-module change uses the same handoff and
-  cannot be accepted, merged, or followed by issue closure. The last scope
+  cannot be accepted, merged, or followed by issue closure. Persisted
+  specialist/final PASS records include their producing runner head and are
+  reusable after restart only while that runner's loaded paths still match
+  fresh `main`; missing, malformed, or drifted binding uses the handoff. The last scope
   evaluation cannot fetch past that fence: it uses the caller-fetched ref, then
   the parent performs the final task comparison. A local terminal marker is
   recovered before remote synchronization. Remote replacement is authorized

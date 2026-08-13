@@ -60,6 +60,28 @@ unset \
   GH_TOKEN \
   GITHUB_TOKEN
 
+case "${1:-}" in
+  install|run)
+    worktree_list="$(git -C "$repo_root" worktree list --porcelain)"
+    primary_line="${worktree_list%%$'\n'*}"
+    if [[ "$primary_line" != "worktree "* ]]; then
+      echo "Primary worktree could not be resolved before dependency reconciliation." >&2
+      exit 2
+    fi
+    primary_root="${primary_line#worktree }"
+    primary_root="$(cd "$primary_root" && pwd -P)"
+    if [[ "$repo_root" != "$primary_root" ]]; then
+      echo "Mutating Frog autofix commands must run from the primary worktree." >&2
+      exit 2
+    fi
+    if [[ -n "$(git -C "$primary_root" status --porcelain)" ]]; then
+      echo "Primary worktree must be clean before dependency reconciliation." >&2
+      exit 2
+    fi
+    pnpm --dir "$repo_root" install --frozen-lockfile --ignore-scripts
+    ;;
+esac
+
 tsx_bin="$repo_root/node_modules/.bin/tsx"
 if [[ ! -x "$tsx_bin" ]]; then
   echo "Frog autofix tooling is not installed; run pnpm install --frozen-lockfile." >&2
