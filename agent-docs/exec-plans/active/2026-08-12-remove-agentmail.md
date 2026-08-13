@@ -90,6 +90,33 @@ Updated: 2026-08-12
   assistant-engine and CLI reruns, exact-head CI, and ReviewGPT audit rounds are
   still pending.
 
+## Change-shape retrospective
+
+- Trigger: final ReviewGPT round 1 independently counted 3,315 lines of
+  authored-source churn across 38 source files, above the 3,000-line
+  strong-red-flag threshold. The first-reviewed implementation head added no
+  review-driven source growth.
+- Decision: continue as one indivisible provider hard cut. Splitting runtime,
+  ingestion, setup, assistant routing, generated schema, deploy policy,
+  current docs, or legal disclosure would temporarily leave AgentMail
+  advertised, callable, or disclosed inconsistently across owners.
+- Concepts removed: AgentMail API/config, polling and provider normalization,
+  setup/provisioning/readiness/doctor flows, local assistant email delivery and
+  retry, provider credentials/schema/deploy policy, current provider claims,
+  and provider-specific tests.
+- Concepts retained: Cloudflare Email ingress, hosted mailbox staging,
+  provider-neutral parsed-email normalization, explicitly injected hosted
+  email delivery, verified and signed hosted email routes, Resend, connected
+  apps, and transactional or newsletter email. Those have separate owners and
+  remain required by supported hosted behavior.
+- Concepts added: no new owner, state, service, dependency, migration, or
+  compatibility layer; local validation rejects email and generic hosted
+  delivery fails closed without an injected transport.
+- Required continuation proof: zero active AgentMail code/config/current-doc
+  references, local rejection coverage, retained Telegram/Linq and hosted email
+  suites, generated-schema and deploy-policy checks, docs/legal/changelog
+  checks, privacy scans, exact-head CI, and a later ReviewGPT `PASS`.
+
 ## Verification
 
 - Commands to select after the returned patch establishes the exact touch set:
