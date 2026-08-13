@@ -3241,6 +3241,7 @@ Updated: 2026-04-24
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'")
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS')
     expect(repoToolsConfig).toContain('"apps/*/public/design-assets/**"')
+    expect(repoToolsConfig).toContain('"apps/*/public/audio/**"')
     expect(repoToolsConfig).toContain('"docs/assets/*.jpg"')
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS')
     expect(repoToolsConfig).toContain('"PRODUCT.md"')
@@ -3272,6 +3273,9 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('$review_gpt_pr_context_dir/pr-body.md')
     expect(fullPackageScript).toContain(
       'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
+    )
+    expect(fullPackageScript).toContain(
+      'packages/health-commons/content/sources/**',
     )
   })
 
@@ -3374,6 +3378,7 @@ while (( "$#" )); do
   esac
 done
 mkdir -p "$out_dir"
+printf '%s' "\${COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS:-}" > "$out_dir/exclude-globs.txt"
 entries=()
 while IFS= read -r entry; do
   [[ -z "$entry" ]] || entries+=("$entry")
@@ -3397,6 +3402,16 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       })
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 0\n')
       writeHarnessFile(harnessRoot, 'apps/demo/unrelated.ts', 'export const unrelated = true\n')
+      writeHarnessFile(
+        harnessRoot,
+        'packages/health-commons/content/sources/demo/moved.md',
+        'health source to move\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'packages/health-commons/content/sources/demo/sibling.md',
+        'unchanged health source\n',
+      )
       writeHarnessFile(
         harnessRoot,
         'packages/demo/test/unrelated.test.ts',
@@ -3459,6 +3474,43 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
         encoding: 'utf8',
       }).trim()
+
+      writeHarnessFile(
+        harnessRoot,
+        'packages/health-commons/content/sources/demo/source.md',
+        'health source\n',
+      )
+      execFileSync('git', ['add', '.'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'health commons review'], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
+
+      execFileSync(
+        'git',
+        [
+          'mv',
+          'packages/health-commons/content/sources/demo/moved.md',
+          'apps/demo/moved-health-source.md',
+        ],
+        { cwd: harnessRoot },
+      )
+      execFileSync('git', ['commit', '-q', '-m', 'move health source'], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsRenameOutHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
 
       execFileSync('git', ['checkout', '-q', '-b', 'non-ancestor', baseHead], {
         cwd: harnessRoot,
@@ -3523,6 +3575,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           ? readdirSync(outDir).find((entry) => entry.endsWith('.zip'))
           : undefined
         return {
+          excludeGlobs: existsSync(path.join(outDir, 'exclude-globs.txt'))
+            ? readFileSync(path.join(outDir, 'exclude-globs.txt'), 'utf8')
+            : '',
           outDir,
           result,
           zipPath: existsSync(exactZipPath)
@@ -3543,6 +3598,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         ].join('\n'),
       })
       expect(preliminary.result.status, preliminary.result.stderr).toBe(0)
+      expect(preliminary.excludeGlobs).toContain(
+        'packages/health-commons/content/sources/**',
+      )
       const preliminaryMetadata = JSON.parse(
         execFileSync(
           'unzip',
@@ -3625,6 +3683,76 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(preliminaryEntries).not.toContain(
         'review-gpt-pr-context/review-round.json',
       )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      execFileSync('git', ['checkout', '-q', '--detach', healthCommonsHead], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsPreliminary = invokePackager(
+        'health-commons-preliminary',
+        healthCommonsHead,
+        {
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+        },
+      )
+      expect(
+        healthCommonsPreliminary.result.status,
+        healthCommonsPreliminary.result.stderr,
+      ).toBe(0)
+      expect(healthCommonsPreliminary.excludeGlobs).not.toContain(
+        'packages/health-commons/content/sources/**',
+      )
+
+      execFileSync('git', ['checkout', '-q', '--detach', healthCommonsRenameOutHead], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsRenameOutPreliminary = invokePackager(
+        'health-commons-rename-out-preliminary',
+        healthCommonsRenameOutHead,
+        {
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+        },
+      )
+      expect(
+        healthCommonsRenameOutPreliminary.result.status,
+        healthCommonsRenameOutPreliminary.result.stderr,
+      ).toBe(0)
+      expect(healthCommonsRenameOutPreliminary.excludeGlobs).not.toContain(
+        'packages/health-commons/content/sources/**',
+      )
+      const healthCommonsRenameOutReal = invokePackager(
+        'health-commons-rename-out-real',
+        healthCommonsRenameOutHead,
+        {
+          COBUILD_AUDIT_CONTEXT_SCAN_SPECS: 'packages',
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+          TEST_REAL_PACKAGER_BIN: path.join(
+            repoRoot,
+            'node_modules',
+            '.bin',
+            'cobuild-package-audit-context',
+          ),
+        },
+      )
+      expect(
+        healthCommonsRenameOutReal.result.status,
+        healthCommonsRenameOutReal.result.stderr,
+      ).toBe(0)
+      expect(listZipEntries(healthCommonsRenameOutReal.zipPath)).toContain(
+        'packages/health-commons/content/sources/demo/sibling.md',
+      )
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const finalWithSupplementalEvidence = invokePackager(
@@ -4198,9 +4326,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
-  }, 30_000)
+  }, 45_000)
 
-  it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {
+  it('keeps audit bundles scoped while preserving durable agent docs', () => {
     const leanBundle = createAuditZip('package-audit-context.sh', 'murph-lean-audit')
     const fullBundle = createAuditZip('package-audit-context-full.sh', 'murph-full-audit')
 
@@ -4253,10 +4381,15 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(fullEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(fullEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
+      expect(fullEntries).not.toContain('apps/web/public/audio/challenge-roast.mp3')
       expect(fullEntries).not.toContain('apps/web/public/hero.jpg')
       expect(fullEntries).not.toContain('apps/web/public/legal/privacy.pdf')
       expect(fullEntries).not.toContain('docs/assets/readme-hero.jpg')
-      expect(leanEntries.length).toBeLessThan(fullEntries.length)
+      expect(fullEntries).not.toContain(
+        'packages/health-commons/content/sources/cognitive-offload-before-bed/pmid-29058942.md',
+      )
+      expect(fullEntries).toContain('packages/health-commons/src/runtime.ts')
+      expect(fullEntries).toContain('packages/health-commons/test/runtime.test.ts')
     } finally {
       rmSync(leanBundle.outDir, { force: true, recursive: true })
       rmSync(fullBundle.outDir, { force: true, recursive: true })
