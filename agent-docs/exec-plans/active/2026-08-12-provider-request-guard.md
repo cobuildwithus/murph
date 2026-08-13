@@ -61,12 +61,12 @@ Updated: 2026-08-12
 
 ## Tasks
 
-1. [ ] Inventory the current guard, tests, provider call sites, and exception
+1. [x] Inventory the current guard, tests, provider call sites, and exception
    classes.
-2. [ ] Ask ReviewGPT for a bounded implementation patch and inspect every hunk.
-3. [ ] Apply the accepted implementation, strengthen focused tests, and update
+2. [x] Ask ReviewGPT for a bounded implementation patch and inspect every hunk.
+3. [x] Apply the accepted implementation, strengthen focused tests, and update
    truthful documentation.
-4. [ ] Run focused verification and direct positive/negative guard scenarios.
+4. [x] Run focused verification and direct positive/negative guard scenarios.
 5. [ ] Push the exact candidate, run preliminary and final ReviewGPT audits
    with CI, remediate accepted findings, and close this plan.
 
@@ -76,6 +76,20 @@ Updated: 2026-08-12
 - The final guard is expected to fail against unmigrated production bypasses;
   merge readiness requires the sibling SDK migrations to remove those failures
   or a narrowly justified registered exception.
+- Accepted the preliminary coverage specialist's three findings: presigned
+  transfers now require static credential/header safety plus byte/stream proof,
+  fetch aliases resolve at the nearest lexical binding, and SMART/FHIR does not
+  exempt explicit registered-provider identifiers or hosts.
+- Direct-entry detection compares normalized filesystem paths so the `tsx`
+  package script cannot silently skip the guard when its module URL carries
+  loader metadata.
+- Accepted the first full-patch audit's transport and evidence findings:
+  canonical Retell/Composio hosts and imported Node/Undici calls are registered,
+  provider evidence accumulates instead of returning on the first label, and
+  protocol-relative or backslash network paths are never treated as internal.
+- Rejected a temporary baseline or warning mode for the intentionally red draft.
+  The branch stays non-mergeable until the sibling provider migrations remove
+  every current finding, matching the user-requested sequencing gate.
 
 ## Verification
 
@@ -85,3 +99,14 @@ Updated: 2026-08-12
 - `pnpm test:diff scripts/check-provider-request-boundaries.ts scripts/check-provider-request-boundaries.test.ts agent-docs/SECURITY.md agent-docs/references/testing-ci-map.md`
 - `git diff --check`
 - Exact-head CI and routed ReviewGPT passes.
+
+Current evidence:
+
+- Focused guard suite: 51 tests passed.
+- Repository-tool suite: 34 files and 556 tests passed.
+- Tools TypeScript no-emit check and `git diff --check`: passed.
+- `pnpm provider-requests:guard`: intentionally exits 1 with 43 current
+  low-level provider transports/contracts; sibling migrations own those call
+  sites.
+- Diff verification reaches the provider guard and stops on the same expected
+  findings.

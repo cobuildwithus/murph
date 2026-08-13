@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { parse, type ParserPlugin } from "@babel/parser";
 import {
@@ -86,7 +86,7 @@ interface RegisteredProviderBoundary {
 
 export const providerBoundaryRegistry = Object.freeze([
   {
-    hosts: [],
+    hosts: ["backend.composio.dev"],
     id: "composio",
     identifiers: ["composio"],
     label: "Composio",
@@ -115,7 +115,7 @@ export const providerBoundaryRegistry = Object.freeze([
     sdkModules: ["@linqapp/sdk"],
   },
   {
-    hosts: [],
+    hosts: ["api.retellai.com"],
     id: "kernel",
     identifiers: ["kernel"],
     label: "Kernel",
@@ -308,8 +308,9 @@ interface VariableBinding {
 }
 
 interface MemberBinding {
-  readonly initializer: Expression;
+  readonly initializer: Expression | null;
   readonly start: number;
+  readonly typeAnnotation: string | null;
 }
 
 interface ParameterBinding {
@@ -321,11 +322,21 @@ interface ParameterBinding {
 }
 
 interface ProviderHttpSourceAnalysis {
-  readonly fetchLikeNames: ReadonlySet<string>;
+  readonly fetchTypeNames: ReadonlySet<string>;
   readonly fileProviderIds: ReadonlySet<string>;
+  readonly functionBindings: ReadonlyMap<string, readonly FunctionBinding[]>;
+  readonly httpCallImportNames: ReadonlySet<string>;
+  readonly httpNamespaceImportNames: ReadonlySet<string>;
   readonly memberBindings: ReadonlyMap<string, readonly MemberBinding[]>;
   readonly parameterBindings: ReadonlyMap<string, readonly ParameterBinding[]>;
   readonly transportEvidenceProviderIds: ReadonlySet<string>;
+}
+
+interface FunctionBinding {
+  readonly node: Node;
+  readonly scopeEnd: number;
+  readonly scopeStart: number;
+  readonly start: number;
 }
 
 interface LexicalScope {
@@ -526,6 +537,20 @@ export async function main(): Promise<void> {
   ].join("\n"));
 }
 
+export function isProviderRequestGuardEntrypoint(
+  entryPath: string | undefined,
+  moduleUrl: string,
+): boolean {
+  if (!entryPath) {
+    return false;
+  }
+  try {
+    return path.resolve(entryPath) === path.resolve(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
 function analyzeProviderSource(sourceFile: Node, contents: string): ProviderSourceAnalysis {
   const clientNames = new Set<string>();
   const requestTypeNames = new Set<string>();
@@ -672,10 +697,14 @@ function analyzeProviderHttpSource(
   relativePath: string,
   contents: string,
 ): ProviderHttpSourceAnalysis {
+  const httpImports = collectHttpImportNames(sourceFile);
   return {
-    fetchLikeNames: collectFetchLikeNames(sourceFile, contents),
+    fetchTypeNames: collectFetchTypeNames(sourceFile, contents),
     fileProviderIds: collectFileProviderIds(sourceFile, relativePath),
-    memberBindings: collectMemberBindings(sourceFile),
+    functionBindings: collectFunctionBindings(sourceFile),
+    httpCallImportNames: httpImports.calls,
+    httpNamespaceImportNames: httpImports.namespaces,
+    memberBindings: collectMemberBindings(sourceFile, contents),
     parameterBindings: collectParameterBindings(sourceFile, contents),
     transportEvidenceProviderIds: collectTransportEvidenceProviderIds(
       sourceFile,
@@ -684,13 +713,15 @@ function analyzeProviderHttpSource(
   };
 }
 
-function collectFetchLikeNames(sourceFile: Node, contents: string): Set<string> {
+function collectFetchTypeNames(
+  sourceFile: Node,
+  contents: string,
+): Set<string> {
   const fetchTypeAliases: Array<{
     readonly name: string;
     readonly typeText: string;
   }> = [];
   const fetchTypeNames = new Set<string>();
-  const fetchLikeNames = new Set<string>();
 
   traverseFast(sourceFile, (node) => {
     if (isTSTypeAliasDeclaration(node)) {
@@ -718,148 +749,79 @@ function collectFetchLikeNames(sourceFile: Node, contents: string): Set<string> 
     }
   }
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    traverseFast(sourceFile, (node) => {
-      if (isVariableDeclarator(node) && isIdentifier(node.id)) {
-        const typeText = node.id.typeAnnotation
-          ? readNodeText(node.id.typeAnnotation, contents)
-          : "";
-        if (
-          typeTextIsFetchCallable(typeText, fetchTypeNames) ||
-          looksLikeFetchFunctionType(typeText) ||
-          (
-            node.init &&
-            (
-              isFetchLikeExpression(node.init, fetchLikeNames) ||
-              functionHasFetchCallSignature(node.init, contents) ||
-              functionDirectlyForwardsToFetch(node.init, fetchLikeNames)
-            )
-          )
-        ) {
-          if (!fetchLikeNames.has(node.id.name)) {
-            fetchLikeNames.add(node.id.name);
-            changed = true;
-          }
-        }
-        return;
-      }
+  return fetchTypeNames;
+}
 
+function collectHttpImportNames(sourceFile: Node): {
+  readonly calls: ReadonlySet<string>;
+  readonly namespaces: ReadonlySet<string>;
+} {
+  const calls = new Set<string>();
+  const namespaces = new Set<string>();
+  traverseFast(sourceFile, (node) => {
+    if (!isImportDeclaration(node)) {
+      return;
+    }
+    const moduleName = node.source.value;
+    const isNodeHttp = /^(?:node:)?https?$/u.test(moduleName);
+    const isUndici = /^(?:undici)(?:\/|$)/u.test(moduleName);
+    const isFetchPackage = /^(?:cross-fetch|node-fetch)(?:\/|$)/u.test(
+      moduleName,
+    );
+    if (!isNodeHttp && !isUndici && !isFetchPackage) {
+      return;
+    }
+    for (const specifier of node.specifiers) {
+      if (isImportNamespaceSpecifier(specifier)) {
+        namespaces.add(specifier.local.name);
+        continue;
+      }
+      if (isImportDefaultSpecifier(specifier)) {
+        if (isNodeHttp) {
+          namespaces.add(specifier.local.name);
+        } else if (isFetchPackage) {
+          calls.add(specifier.local.name);
+        }
+        continue;
+      }
+      if (!isImportSpecifier(specifier)) {
+        continue;
+      }
+      const importedName = readImportedName(specifier);
       if (
-        isAssignmentExpression(node) &&
-        node.operator === "=" &&
-        isFetchLikeExpression(node.right, fetchLikeNames)
+        (isNodeHttp && /^(?:get|request)$/u.test(importedName)) ||
+        (isUndici && /^(?:fetch|request)$/u.test(importedName)) ||
+        (isFetchPackage && importedName === "fetch")
       ) {
-        const assignedName = isIdentifier(node.left)
-          ? node.left.name
-          : readMemberPath(node.left)?.at(-1) ?? null;
-        if (assignedName && !fetchLikeNames.has(assignedName)) {
-          fetchLikeNames.add(assignedName);
-          changed = true;
-        }
-        return;
+        calls.add(specifier.local.name);
       }
+    }
+  });
+  return { calls, namespaces };
+}
 
-      if (isClassProperty(node) && isIdentifier(node.key)) {
-        const typeText = node.typeAnnotation
-          ? readNodeText(node.typeAnnotation, contents)
-          : "";
-        if (
-          typeTextIsFetchCallable(typeText, fetchTypeNames) ||
-          looksLikeFetchFunctionType(typeText) ||
-          (
-            node.value &&
-            (
-              isFetchLikeExpression(node.value, fetchLikeNames) ||
-              functionHasFetchCallSignature(node.value, contents) ||
-              functionDirectlyForwardsToFetch(node.value, fetchLikeNames)
-            )
-          )
-        ) {
-          if (!fetchLikeNames.has(node.key.name)) {
-            fetchLikeNames.add(node.key.name);
-            changed = true;
-          }
-        }
-        return;
-      }
-
-      if (
-        node.type === "TSPropertySignature" &&
-        isIdentifier(node.key) &&
-        node.typeAnnotation
-      ) {
-        const typeText = readNodeText(node.typeAnnotation, contents);
-        if (
-          (
-            typeTextIsFetchCallable(typeText, fetchTypeNames) ||
-            looksLikeFetchFunctionType(typeText)
-          ) &&
-          !fetchLikeNames.has(node.key.name)
-        ) {
-          fetchLikeNames.add(node.key.name);
-          changed = true;
-        }
-        return;
-      }
-
-      if (node.type === "TSMethodSignature") {
-        const methodName = readPropertyName(node.key);
-        if (
-          methodName &&
-          looksLikeFetchCallableSignature(readNodeText(node, contents)) &&
-          !fetchLikeNames.has(methodName)
-        ) {
-          fetchLikeNames.add(methodName);
-          changed = true;
-        }
-        return;
-      }
-
-      if (!isFunction(node)) {
-        return;
-      }
-      const callableName = readCallableName(node);
-      if (
-        callableName &&
-        (
-          functionHasFetchCallSignature(node, contents) ||
-          functionDirectlyForwardsToFetch(node, fetchLikeNames)
-        ) &&
-        !fetchLikeNames.has(callableName)
-      ) {
-        fetchLikeNames.add(callableName);
-        changed = true;
-      }
-      for (const parameter of node.params) {
-        const identifier = readParameterIdentifier(parameter);
-        if (!identifier) {
-          continue;
-        }
-        const typeText = identifier.typeAnnotation
-          ? readNodeText(identifier.typeAnnotation, contents)
-          : "";
-        const defaultExpression = readParameterDefaultExpression(parameter);
-        if (
-          (
-            typeTextIsFetchCallable(typeText, fetchTypeNames) ||
-            looksLikeFetchFunctionType(typeText) ||
-            (
-              defaultExpression &&
-              isFetchLikeExpression(defaultExpression, fetchLikeNames)
-            )
-          ) &&
-          !fetchLikeNames.has(identifier.name)
-        ) {
-          fetchLikeNames.add(identifier.name);
-          changed = true;
-        }
-      }
+function collectFunctionBindings(sourceFile: Node): Map<string, FunctionBinding[]> {
+  const scopes = collectLexicalScopes(sourceFile);
+  const bindings = new Map<string, FunctionBinding[]>();
+  traverseFast(sourceFile, (node) => {
+    if (node.type !== "FunctionDeclaration") {
+      return;
+    }
+    const name = readCallableName(node);
+    if (!name) {
+      return;
+    }
+    const scope = findInnermostLexicalScope(scopes, node.start ?? 0);
+    const current = bindings.get(name) ?? [];
+    current.push({
+      node,
+      scopeEnd: scope.end,
+      scopeStart: scope.start,
+      start: node.start ?? 0,
     });
-  }
-
-  return fetchLikeNames;
+    bindings.set(name, current);
+  });
+  return bindings;
 }
 
 function collectFileProviderIds(
@@ -937,7 +899,10 @@ function isTransportEndpointBindingName(name: string): boolean {
     .test(normalized);
 }
 
-function collectMemberBindings(sourceFile: Node): Map<string, MemberBinding[]> {
+function collectMemberBindings(
+  sourceFile: Node,
+  contents: string,
+): Map<string, MemberBinding[]> {
   const bindings = new Map<string, MemberBinding[]>();
   traverseFast(sourceFile, (node) => {
     if (
@@ -954,6 +919,7 @@ function collectMemberBindings(sourceFile: Node): Map<string, MemberBinding[]> {
       current.push({
         initializer: node.right,
         start: node.start ?? 0,
+        typeAnnotation: null,
       });
       bindings.set(key, current);
       return;
@@ -961,15 +927,37 @@ function collectMemberBindings(sourceFile: Node): Map<string, MemberBinding[]> {
 
     if (
       isClassProperty(node) &&
-      isIdentifier(node.key) &&
-      node.value &&
-      isExpression(node.value)
+      isIdentifier(node.key)
     ) {
       const key = `this.${node.key.name}`;
       const current = bindings.get(key) ?? [];
       current.push({
-        initializer: node.value,
+        initializer: node.value && isExpression(node.value) ? node.value : null,
         start: node.start ?? 0,
+        typeAnnotation: node.typeAnnotation
+          ? readNodeText(node.typeAnnotation, contents)
+          : null,
+      });
+      bindings.set(key, current);
+      return;
+    }
+
+    if (node.type === "TSParameterProperty") {
+      const identifier = readParameterIdentifier(node);
+      if (!identifier) {
+        return;
+      }
+      const key = `this.${identifier.name}`;
+      const current = bindings.get(key) ?? [];
+      const defaultExpression = readParameterDefaultExpression(node);
+      current.push({
+        initializer: defaultExpression && isExpression(defaultExpression)
+          ? defaultExpression
+          : null,
+        start: node.start ?? 0,
+        typeAnnotation: identifier.typeAnnotation
+          ? readNodeText(identifier.typeAnnotation, contents)
+          : null,
       });
       bindings.set(key, current);
     }
@@ -1030,7 +1018,14 @@ function collectRawProviderHttpViolations(input: {
   traverseFast(input.sourceFile, (node) => {
     if (
       (!isCallExpression(node) && !isOptionalCallExpression(node)) ||
-      !isFetchLikeExpression(node.callee, input.analysis.fetchLikeNames)
+      !isFetchLikeCallTarget({
+        analysis: input.analysis,
+        before: node.start ?? Number.MAX_SAFE_INTEGER,
+        bindings: input.bindings,
+        contents: input.contents,
+        node: node.callee,
+        resolving: new Set(),
+      })
     ) {
       return;
     }
@@ -1236,9 +1231,6 @@ function inferProviderIdsFromExpression(input: {
         providerIdsFromStaticText(quasi.value.cooked ?? quasi.value.raw),
       );
     }
-    if (providerIds.size > 0) {
-      return providerIds;
-    }
     for (const expression of node.expressions) {
       addProviderIds(
         providerIds,
@@ -1249,9 +1241,6 @@ function inferProviderIdsFromExpression(input: {
   }
   if (isIdentifier(node)) {
     addProviderIds(providerIds, providerIdsFromIdentifier(node.name));
-    if (providerIds.size > 0) {
-      return providerIds;
-    }
     const bindingKey = `variable:${node.name}`;
     if (!input.resolving.has(bindingKey)) {
       const binding = resolveBinding(input.bindings, node.name, input.before);
@@ -1281,9 +1270,6 @@ function inferProviderIdsFromExpression(input: {
     if (pathParts) {
       const key = pathParts.join(".");
       addProviderIds(providerIds, providerIdsFromIdentifier(key));
-      if (providerIds.size > 0) {
-        return providerIds;
-      }
       const bindingKey = `member:${key}`;
       if (!input.resolving.has(bindingKey)) {
         const binding = resolveMemberBinding(
@@ -1291,7 +1277,7 @@ function inferProviderIdsFromExpression(input: {
           key,
           input.before,
         );
-        if (binding) {
+        if (binding?.initializer) {
           const resolving = new Set(input.resolving);
           resolving.add(bindingKey);
           addProviderIds(
@@ -1313,14 +1299,34 @@ function inferProviderIdsFromExpression(input: {
     }
     return providerIds;
   }
+  if (isObjectExpression(node)) {
+    for (const property of node.properties) {
+      if (isSpreadElement(property)) {
+        addProviderIds(
+          providerIds,
+          inferProviderIdsFromExpression({ ...input, node: property.argument }),
+        );
+        continue;
+      }
+      if (!isObjectProperty(property)) {
+        continue;
+      }
+      const propertyName = readPropertyName(property.key);
+      if (propertyName) {
+        addProviderIds(providerIds, providerIdsFromIdentifier(propertyName));
+      }
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: property.value }),
+      );
+    }
+    return providerIds;
+  }
   if (isNewExpression(node)) {
     addProviderIds(
       providerIds,
       providerIdsFromIdentifier(readNodeText(node.callee, input.contents)),
     );
-    if (providerIds.size > 0) {
-      return providerIds;
-    }
     for (const argument of node.arguments) {
       if (argument && argument.type !== "ArgumentPlaceholder" && argument.type !== "SpreadElement") {
         addProviderIds(
@@ -1336,9 +1342,6 @@ function inferProviderIdsFromExpression(input: {
       providerIds,
       providerIdsFromIdentifier(readNodeText(node.callee, input.contents)),
     );
-    if (providerIds.size > 0) {
-      return providerIds;
-    }
     if (isMemberExpression(node.callee) || isOptionalMemberExpression(node.callee)) {
       addProviderIds(
         providerIds,
@@ -1497,7 +1500,7 @@ function isInternalSameOriginRequest(input: {
 }
 
 function isInternalUrlText(value: string): boolean {
-  return value.startsWith("/") ||
+  return /^\/(?![\\/])/u.test(value) ||
     /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::[0-9]+)?(?:\/|$)/u.test(
       value,
     );
@@ -1596,7 +1599,7 @@ function isDynamicSmartFhirRequest(input: {
   if (!/(?:smart|fhir)/iu.test(context)) {
     return false;
   }
-  return !expressionHasRegisteredProviderHost({
+  return !expressionHasExplicitProviderSignal({
     analysis: input.analysis,
     before: input.call.start ?? Number.MAX_SAFE_INTEGER,
     bindings: input.bindings,
@@ -1606,7 +1609,7 @@ function isDynamicSmartFhirRequest(input: {
   });
 }
 
-function expressionHasRegisteredProviderHost(input: {
+function expressionHasExplicitProviderSignal(input: {
   readonly analysis: ProviderHttpSourceAnalysis;
   readonly before: number;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
@@ -1615,7 +1618,15 @@ function expressionHasRegisteredProviderHost(input: {
   readonly resolving: ReadonlySet<string>;
 }): boolean {
   const node = unwrapExpression(input.node);
-  if (providerIdsFromStaticText(readNodeText(node, input.contents)).size > 0) {
+  const nodeText = readNodeText(node, input.contents);
+  if (
+    providerIdsFromStaticText(nodeText).size > 0 ||
+    (
+      (isIdentifier(node) || isMemberExpression(node) ||
+        isOptionalMemberExpression(node)) &&
+      providerIdsFromIdentifier(nodeText).size > 0
+    )
+  ) {
     return true;
   }
   if (isIdentifier(node)) {
@@ -1629,7 +1640,7 @@ function expressionHasRegisteredProviderHost(input: {
     }
     const resolving = new Set(input.resolving);
     resolving.add(key);
-    return expressionHasRegisteredProviderHost({
+    return expressionHasExplicitProviderSignal({
       ...input,
       before: node.start ?? input.before,
       node: binding.initializer,
@@ -1651,12 +1662,12 @@ function expressionHasRegisteredProviderHost(input: {
       key,
       input.before,
     );
-    if (!binding) {
+    if (!binding?.initializer) {
       return false;
     }
     const resolving = new Set(input.resolving);
     resolving.add(resolvingKey);
-    return expressionHasRegisteredProviderHost({
+    return expressionHasExplicitProviderSignal({
       ...input,
       before: node.start ?? input.before,
       node: binding.initializer,
@@ -1664,23 +1675,28 @@ function expressionHasRegisteredProviderHost(input: {
     });
   }
   if (isNewExpression(node) || isCallExpression(node) || isOptionalCallExpression(node)) {
+    if (
+      providerIdsFromIdentifier(readNodeText(node.callee, input.contents)).size > 0
+    ) {
+      return true;
+    }
     return node.arguments.some((argument) =>
       argument.type !== "ArgumentPlaceholder" &&
       argument.type !== "SpreadElement" &&
-      expressionHasRegisteredProviderHost({ ...input, node: argument })
+      expressionHasExplicitProviderSignal({ ...input, node: argument })
     );
   }
   switch (node.type) {
     case "BinaryExpression":
     case "LogicalExpression":
-      return expressionHasRegisteredProviderHost({ ...input, node: node.left }) ||
-        expressionHasRegisteredProviderHost({ ...input, node: node.right });
+      return expressionHasExplicitProviderSignal({ ...input, node: node.left }) ||
+        expressionHasExplicitProviderSignal({ ...input, node: node.right });
     case "ConditionalExpression":
-      return expressionHasRegisteredProviderHost({ ...input, node: node.consequent }) ||
-        expressionHasRegisteredProviderHost({ ...input, node: node.alternate });
+      return expressionHasExplicitProviderSignal({ ...input, node: node.consequent }) ||
+        expressionHasExplicitProviderSignal({ ...input, node: node.alternate });
     case "SequenceExpression":
       return node.expressions.some((expression) =>
-        expressionHasRegisteredProviderHost({ ...input, node: expression })
+        expressionHasExplicitProviderSignal({ ...input, node: expression })
       );
     default:
       return false;
@@ -1714,13 +1730,28 @@ function isPresignedByteTransfer(input: {
   const init = resolveExpressionBinding(initArgument, input.bindings, before);
   if (
     !isObjectExpression(init) ||
-    init.properties.some((property) => isSpreadElement(property)) ||
+    init.properties.some(
+      (property) =>
+        isSpreadElement(property)
+          ? !isProvablySafeTransferInitSpread(property.argument)
+          : !isObjectProperty(property) || property.computed,
+    ) ||
     !hasProvablyCredentialFreeHeaders({
       before,
       bindings: input.bindings,
       contents: input.contents,
       init,
     })
+  ) {
+    return false;
+  }
+  const credentialsProperty = readObjectProperty(init, "credentials");
+  if (
+    credentialsProperty &&
+    (
+      !isStringLiteral(credentialsProperty.value) ||
+      credentialsProperty.value.value !== "omit"
+    )
   ) {
     return false;
   }
@@ -1732,8 +1763,192 @@ function isPresignedByteTransfer(input: {
   ) {
     return false;
   }
-  const method = readStaticObjectStringProperty(init, "method") ?? "GET";
-  return method === "GET" || method === "HEAD" || method === "PUT";
+  const methodProperty = readObjectProperty(init, "method");
+  const method = methodProperty
+    ? isStringLiteral(methodProperty.value)
+      ? methodProperty.value.value.toUpperCase()
+      : null
+    : "GET";
+  if (method === "GET" || method === "HEAD") {
+    return readObjectProperty(init, "body") === null;
+  }
+  if (method !== "PUT") {
+    return false;
+  }
+  const body = readObjectProperty(init, "body");
+  if (!body) {
+    return isProvablyStreamedTransferBody({
+      analysis: input.analysis,
+      before,
+      bindings: input.bindings,
+      call: input.call,
+      contents: input.contents,
+      urlArgument: input.urlArgument,
+    });
+  }
+  return Boolean(
+    isProvablyBinaryTransferBody({
+      analysis: input.analysis,
+      before,
+      bindings: input.bindings,
+      contents: input.contents,
+      node: body.value,
+      resolving: new Set(),
+    }),
+  );
+}
+
+function isProvablySafeTransferInitSpread(node: Node): boolean {
+  const expression = unwrapExpression(node);
+  if (isObjectExpression(expression)) {
+    return expression.properties.every((property) => {
+      if (!isObjectProperty(property) || property.computed) {
+        return false;
+      }
+      const key = isIdentifier(property.key)
+        ? property.key.name
+        : isStringLiteral(property.key)
+          ? property.key.value
+          : null;
+      return key === "ca";
+    });
+  }
+  if (expression.type === "ConditionalExpression") {
+    return isProvablySafeTransferInitSpread(expression.consequent) &&
+      isProvablySafeTransferInitSpread(expression.alternate);
+  }
+  if (expression.type === "LogicalExpression") {
+    return expression.operator === "&&" &&
+      isProvablySafeTransferInitSpread(expression.right);
+  }
+  return false;
+}
+
+function isProvablyStreamedTransferBody(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly contents: string;
+  readonly urlArgument: Node;
+}): boolean {
+  const responseHandler = input.call.arguments.at(-1);
+  if (!responseHandler || !isFunction(responseHandler)) {
+    return false;
+  }
+  const root = findParameterRoot({
+    analysis: input.analysis,
+    before: input.before,
+    bindings: input.bindings,
+    node: input.urlArgument,
+    resolving: new Set(),
+  });
+  if (!root) {
+    return false;
+  }
+  const parameter = resolveParameterBinding(
+    input.analysis.parameterBindings,
+    root,
+    input.before,
+  );
+  if (
+    !parameter?.typeAnnotation ||
+    !/(?:presigned|put|upload)/iu.test(parameter.ownerName ?? "")
+  ) {
+    return false;
+  }
+  let requestName: string | null = null;
+  for (const [name, candidates] of input.bindings) {
+    if (
+      candidates.some(
+        (candidate) =>
+          candidate.initializer.start === input.call.start &&
+          candidate.scopeStart <= input.before &&
+          input.before <= candidate.scopeEnd,
+      )
+    ) {
+      requestName = name;
+      break;
+    }
+  }
+  if (!requestName) {
+    return false;
+  }
+  const ownerText = input.contents.slice(parameter.scopeStart, parameter.scopeEnd);
+  const binaryPropertyPattern = /\b([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:\s*[^;,}]*(?:ArrayBuffer|ArrayBufferView|Blob|Buffer|DataView|Readable|ReadableStream|Uint8Array)\b/gu;
+  for (const match of parameter.typeAnnotation.matchAll(binaryPropertyPattern)) {
+    const property = match[1];
+    if (
+      property &&
+      new RegExp(
+        `\\b${escapeRegExp(root)}\\.${escapeRegExp(property)}\\.pipe\\s*\\(\\s*${escapeRegExp(requestName)}\\s*\\)`,
+        "u",
+      ).test(ownerText)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findParameterRoot(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): string | null {
+  const node = unwrapExpression(input.node);
+  if (isIdentifier(node)) {
+    if (
+      resolveParameterBinding(
+        input.analysis.parameterBindings,
+        node.name,
+        input.before,
+      )
+    ) {
+      return node.name;
+    }
+    const key = `parameter-root:${node.name}`;
+    if (input.resolving.has(key)) {
+      return null;
+    }
+    const binding = resolveBinding(input.bindings, node.name, input.before);
+    if (!binding) {
+      return null;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return findParameterRoot({
+      ...input,
+      before: node.start ?? input.before,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
+    const root = readMemberPath(node)?.[0];
+    return root &&
+        resolveParameterBinding(
+          input.analysis.parameterBindings,
+          root,
+          input.before,
+        )
+      ? root
+      : null;
+  }
+  if (isNewExpression(node) || isCallExpression(node) || isOptionalCallExpression(node)) {
+    for (const argument of node.arguments) {
+      if (argument.type === "ArgumentPlaceholder" || argument.type === "SpreadElement") {
+        continue;
+      }
+      const root = findParameterRoot({ ...input, node: argument });
+      if (root) {
+        return root;
+      }
+    }
+  }
+  return null;
 }
 
 function hasProvablyCredentialFreeHeaders(input: {
@@ -1764,7 +1979,7 @@ function hasProvablyCredentialFreeHeaders(input: {
     );
     if (isObjectExpression(headers)) {
       for (const header of headers.properties) {
-        if (!isObjectProperty(header)) {
+        if (!isObjectProperty(header) || header.computed) {
           return false;
         }
         const headerName = isIdentifier(header.key)
@@ -1784,7 +1999,7 @@ function hasProvablyCredentialFreeHeaders(input: {
     }
     const headerText = readNodeText(headers, input.contents);
     if (
-      !/(?:attachment|presigned|required|signed|upload).*headers/iu.test(
+      !/(?:presigned|required|signed|upload).*headers/iu.test(
         headerText,
       ) ||
       /(?:authorization|api[-_]?key|bearer|cookie|proxy-authorization|xi-api-key)/iu
@@ -1805,8 +2020,22 @@ function isOpaqueTransferUrl(input: {
   readonly resolving: ReadonlySet<string>;
 }): boolean {
   const node = unwrapExpression(input.node);
-  if (isStringLiteral(node) || isTemplateLiteral(node) || isNewExpression(node)) {
+  if (expressionHasExplicitProviderSignal({ ...input, node })) {
     return false;
+  }
+  if (isStringLiteral(node) || isTemplateLiteral(node)) {
+    return false;
+  }
+  if (isNewExpression(node)) {
+    const firstArgument = node.arguments[0];
+    return readNodeText(node.callee, input.contents) === "URL" &&
+      Boolean(
+        firstArgument &&
+        firstArgument.type !== "ArgumentPlaceholder" &&
+        firstArgument.type !== "SpreadElement" &&
+        node.arguments.length === 1 &&
+        isOpaqueTransferUrl({ ...input, node: firstArgument }),
+      );
   }
   if (isIdentifier(node)) {
     const key = `transfer:${node.name}`;
@@ -1816,16 +2045,6 @@ function isOpaqueTransferUrl(input: {
     const binding = resolveBinding(input.bindings, node.name, input.before);
     if (binding) {
       const initializerText = readNodeText(binding.initializer, input.contents);
-      if (expressionHasRegisteredProviderHost({
-        analysis: input.analysis,
-        before: node.start ?? input.before,
-        bindings: input.bindings,
-        contents: input.contents,
-        node: binding.initializer,
-        resolving: new Set(),
-      })) {
-        return false;
-      }
       const resolving = new Set(input.resolving);
       resolving.add(key);
       if (
@@ -1870,15 +2089,15 @@ function isOpaqueTransferUrl(input: {
   return false;
 }
 
-function readStaticObjectStringProperty(
+function readObjectProperty(
   object: Node,
   propertyName: string,
-): string | null {
+): (Node & { readonly value: Node }) | null {
   if (!isObjectExpression(object)) {
     return null;
   }
   for (const property of object.properties) {
-    if (!isObjectProperty(property)) {
+    if (!isObjectProperty(property) || property.computed) {
       continue;
     }
     const key = isIdentifier(property.key)
@@ -1886,12 +2105,91 @@ function readStaticObjectStringProperty(
       : isStringLiteral(property.key)
         ? property.key.value
         : null;
-    if (key !== propertyName || !isStringLiteral(property.value)) {
-      continue;
+    if (key === propertyName) {
+      return property;
     }
-    return property.value.value.toUpperCase();
   }
   return null;
+}
+
+function isProvablyBinaryTransferBody(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  const node = unwrapExpression(input.node);
+  const text = readNodeText(node, input.contents);
+  if (
+    /^(?:Buffer|Readable)\.from\s*\(/u.test(text) ||
+    /(?:^|\W)new\s+(?:ArrayBuffer|Blob|DataView|ReadableStream|Uint8Array)\b/u
+      .test(text) ||
+    /\.arrayBuffer\s*\(\s*\)$/u.test(text) ||
+    /new\s+Uint8Array\s*\([\s\S]*\)\.buffer$/u.test(text)
+  ) {
+    return true;
+  }
+  if (isIdentifier(node)) {
+    const parameter = resolveParameterBinding(
+      input.analysis.parameterBindings,
+      node.name,
+      input.before,
+    );
+    if (
+      parameter?.typeAnnotation &&
+      typeTextIsBinaryTransferBody(parameter.typeAnnotation)
+    ) {
+      return true;
+    }
+    const key = `binary-body:${node.name}`;
+    if (input.resolving.has(key)) {
+      return false;
+    }
+    const binding = resolveBinding(input.bindings, node.name, input.before);
+    if (!binding) {
+      return false;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return isProvablyBinaryTransferBody({
+      ...input,
+      before: node.start ?? input.before,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
+    const pathParts = readMemberPath(node);
+    const root = pathParts?.[0];
+    const property = pathParts?.at(-1);
+    const parameter = root
+      ? resolveParameterBinding(
+          input.analysis.parameterBindings,
+          root,
+          input.before,
+        )
+      : null;
+    return Boolean(
+      property &&
+      parameter?.typeAnnotation &&
+      typeTextHasBinaryProperty(parameter.typeAnnotation, property),
+    );
+  }
+  return false;
+}
+
+function typeTextIsBinaryTransferBody(typeText: string): boolean {
+  return /\b(?:ArrayBuffer|ArrayBufferView|Blob|Buffer|DataView|Readable|ReadableStream|Uint8Array)\b/u
+    .test(typeText);
+}
+
+function typeTextHasBinaryProperty(typeText: string, propertyName: string): boolean {
+  return new RegExp(
+    `\\b${escapeRegExp(propertyName)}\\??\\s*:\\s*[^;,}]*(?:ArrayBuffer|ArrayBufferView|Blob|Buffer|DataView|Readable|ReadableStream|Uint8Array)\\b`,
+    "u",
+  ).test(typeText);
 }
 
 function resolveExpressionBinding(
@@ -2132,6 +2430,35 @@ function resolveParameterBinding(
   return resolved;
 }
 
+function resolveFunctionBinding(
+  bindings: ReadonlyMap<string, readonly FunctionBinding[]>,
+  name: string,
+  position: number,
+): FunctionBinding | null {
+  const candidates = bindings.get(name);
+  if (!candidates) {
+    return null;
+  }
+  let resolved: FunctionBinding | null = null;
+  for (const candidate of candidates) {
+    if (
+      candidate.scopeStart <= position &&
+      position <= candidate.scopeEnd &&
+      (
+        !resolved ||
+        candidate.scopeStart > resolved.scopeStart ||
+        (
+          candidate.scopeStart === resolved.scopeStart &&
+          candidate.start > resolved.start
+        )
+      )
+    ) {
+      resolved = candidate;
+    }
+  }
+  return resolved;
+}
+
 function readParameterIdentifier(node: Node): (Node & {
   readonly name: string;
   readonly typeAnnotation?: Node | null;
@@ -2229,56 +2556,6 @@ function functionHasFetchCallSignature(
   );
 }
 
-function functionDirectlyForwardsToFetch(
-  node: Node,
-  fetchLikeNames: ReadonlySet<string>,
-): boolean {
-  if (!isFunction(node)) {
-    return false;
-  }
-  const parameters = node.params.map(readParameterIdentifier);
-  if (parameters.length === 0 || parameters.some((parameter) => !parameter)) {
-    return false;
-  }
-  let returned: Node | null = null;
-  if (node.body.type === "BlockStatement") {
-    const statement = node.body.body[0];
-    if (node.body.body.length !== 1 || !statement || !isReturnStatement(statement)) {
-      return false;
-    }
-    returned = statement.argument ?? null;
-  } else {
-    returned = node.body;
-  }
-  if (!returned) {
-    return false;
-  }
-  const expression = unwrapExpression(returned);
-  const call = expression.type === "AwaitExpression"
-    ? unwrapExpression(expression.argument)
-    : expression;
-  if (
-    (!isCallExpression(call) && !isOptionalCallExpression(call)) ||
-    !isFetchLikeExpression(call.callee, fetchLikeNames)
-  ) {
-    return false;
-  }
-  const callArguments = call.arguments.filter(
-    (argument) => argument.type !== "ArgumentPlaceholder",
-  );
-  if (callArguments.length === 0 || callArguments.length > parameters.length) {
-    return false;
-  }
-  return callArguments.every((argument, index) => {
-    if (argument.type === "SpreadElement") {
-      return false;
-    }
-    const forwarded = unwrapExpression(argument);
-    return isIdentifier(forwarded) &&
-      forwarded.name === parameters[index]?.name;
-  });
-}
-
 function readCallableName(node: Node): string | null {
   if ("id" in node && node.id && isIdentifier(node.id)) {
     return node.id.name;
@@ -2326,47 +2603,206 @@ function typeTextIsFetchCallable(
   return includesFetchType;
 }
 
-function stripLeadingTypeAnnotation(typeText: string): string {
-  return typeText.trim().replace(/^:\s*/u, "");
-}
-
-function isFetchLikeExpression(
-  node: Node,
-  fetchLikeNames: ReadonlySet<string>,
-): boolean {
-  const expression = unwrapExpression(node);
+function isFetchLikeCallTarget(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  const expression = unwrapExpression(input.node);
   if (isIdentifier(expression)) {
-    return expression.name === "fetch" || fetchLikeNames.has(expression.name);
+    const parameter = resolveParameterBinding(
+      input.analysis.parameterBindings,
+      expression.name,
+      input.before,
+    );
+    if (parameter) {
+      return Boolean(
+        parameter.typeAnnotation &&
+        (
+          typeTextIsFetchCallable(
+            parameter.typeAnnotation,
+            input.analysis.fetchTypeNames,
+          ) ||
+          looksLikeFetchFunctionType(parameter.typeAnnotation)
+        ),
+      );
+    }
+
+    const variable = resolveBinding(
+      input.bindings,
+      expression.name,
+      input.before,
+    );
+    if (variable) {
+      if (
+        variable.typeAnnotation &&
+        (
+          typeTextIsFetchCallable(
+            variable.typeAnnotation,
+            input.analysis.fetchTypeNames,
+          ) ||
+          looksLikeFetchFunctionType(variable.typeAnnotation)
+        )
+      ) {
+        return true;
+      }
+      const key = `fetch-variable:${expression.name}:${variable.start}`;
+      if (input.resolving.has(key)) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      return isFetchLikeCallTarget({
+        ...input,
+        before: variable.start,
+        node: variable.initializer,
+        resolving,
+      }) ||
+        functionHasFetchCallSignature(variable.initializer, input.contents);
+    }
+
+    const callable = resolveFunctionBinding(
+      input.analysis.functionBindings,
+      expression.name,
+      input.before,
+    );
+    if (callable) {
+      return functionHasFetchCallSignature(callable.node, input.contents);
+    }
+
+    return expression.name === "fetch" ||
+      input.analysis.httpCallImportNames.has(expression.name);
   }
+
   if (isMemberExpression(expression) || isOptionalMemberExpression(expression)) {
     const pathParts = readMemberPath(expression);
     if (!pathParts) {
       return false;
     }
     const pathText = pathParts.join(".");
-    return /^(?:globalThis|self|window)\.fetch$/u.test(pathText) ||
-      fetchLikeNames.has(pathParts.at(-1) ?? "");
+    if (/^(?:globalThis|self|window)\.fetch$/u.test(pathText)) {
+      return true;
+    }
+    const terminal = pathParts.at(-1) ?? "";
+    const root = pathParts[0];
+    if (
+      root &&
+      input.analysis.httpNamespaceImportNames.has(root) &&
+      /^(?:fetch|get|request)$/u.test(terminal) &&
+      !resolveParameterBinding(
+        input.analysis.parameterBindings,
+        root,
+        input.before,
+      ) &&
+      !resolveBinding(input.bindings, root, input.before)
+    ) {
+      return true;
+    }
+    if (/^fetch(?:er|Impl|Implementation)?$/u.test(terminal)) {
+      return true;
+    }
+    if (pathParts[0] === "this") {
+      const binding = resolveMemberBinding(
+        input.analysis.memberBindings,
+        pathText,
+        input.before,
+      );
+      if (!binding) {
+        return false;
+      }
+      if (
+        binding.typeAnnotation &&
+        (
+          typeTextIsFetchCallable(
+            binding.typeAnnotation,
+            input.analysis.fetchTypeNames,
+          ) ||
+          looksLikeFetchFunctionType(binding.typeAnnotation)
+        )
+      ) {
+        return true;
+      }
+      if (!binding.initializer) {
+        return false;
+      }
+      const key = `fetch-member:${pathText}:${binding.start}`;
+      if (input.resolving.has(key)) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      return isFetchLikeCallTarget({
+        ...input,
+        before: binding.start,
+        node: binding.initializer,
+        resolving,
+      });
+    }
+    const parameter = root
+      ? resolveParameterBinding(
+          input.analysis.parameterBindings,
+          root,
+          input.before,
+        )
+      : null;
+    return Boolean(
+      parameter?.typeAnnotation &&
+      typeTextHasFetchProperty(
+        parameter.typeAnnotation,
+        terminal,
+        input.analysis.fetchTypeNames,
+      ),
+    );
   }
+
   if (expression.type === "LogicalExpression") {
-    return isFetchLikeExpression(expression.left, fetchLikeNames) ||
-      isFetchLikeExpression(expression.right, fetchLikeNames);
+    return isFetchLikeCallTarget({ ...input, node: expression.left }) ||
+      isFetchLikeCallTarget({ ...input, node: expression.right });
   }
   if (expression.type === "ConditionalExpression") {
-    return isFetchLikeExpression(expression.consequent, fetchLikeNames) ||
-      isFetchLikeExpression(expression.alternate, fetchLikeNames);
+    return isFetchLikeCallTarget({ ...input, node: expression.consequent }) ||
+      isFetchLikeCallTarget({ ...input, node: expression.alternate });
   }
   if (expression.type === "SequenceExpression") {
     return expression.expressions.some((child) =>
-      isFetchLikeExpression(child, fetchLikeNames)
+      isFetchLikeCallTarget({ ...input, node: child })
     );
   }
   if (isCallExpression(expression) || isOptionalCallExpression(expression)) {
     const pathParts = readMemberPath(expression.callee);
     return pathParts?.at(-1) === "bind" &&
-      (isMemberExpression(expression.callee) || isOptionalMemberExpression(expression.callee)) &&
-      isFetchLikeExpression(expression.callee.object, fetchLikeNames);
+      (isMemberExpression(expression.callee) ||
+        isOptionalMemberExpression(expression.callee)) &&
+      isFetchLikeCallTarget({ ...input, node: expression.callee.object });
   }
   return false;
+}
+
+function typeTextHasFetchProperty(
+  typeText: string,
+  propertyName: string,
+  fetchTypeNames: ReadonlySet<string>,
+): boolean {
+  const property = escapeRegExp(propertyName);
+  const declaration = new RegExp(
+    `\\b${property}\\??\\s*:\\s*([^;,}]+)`,
+    "u",
+  ).exec(typeText)?.[1];
+  if (declaration) {
+    return typeTextIsFetchCallable(declaration, fetchTypeNames) ||
+      looksLikeFetchFunctionType(declaration);
+  }
+  return new RegExp(`\\b${property}\\s*\\(`, "u").test(typeText) &&
+    looksLikeFetchCallableSignature(typeText.slice(typeText.search(
+      new RegExp(`\\b${property}\\s*\\(`, "u"),
+    )));
+}
+
+function stripLeadingTypeAnnotation(typeText: string): string {
+  return typeText.trim().replace(/^:\s*/u, "");
 }
 
 function isTransferOperationName(name: string | null): boolean {
@@ -2380,7 +2816,7 @@ function isTransferOperationName(name: string | null): boolean {
 
 function isTransferUrlName(name: string): boolean {
   const normalized = normalizeIdentifierForMatch(name);
-  return /(?:attachment|download|file|image|media|presigned|signed|upload)(?:url|uri)$/u
+  return /(?:attachment|download|file|image|media|presigned|signed|upload)[a-z0-9]*(?:url|uri)$/u
     .test(normalized);
 }
 
@@ -2940,7 +3376,7 @@ function lowercaseInitial(value: string): string {
   return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isProviderRequestGuardEntrypoint(process.argv[1], import.meta.url)) {
   await main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

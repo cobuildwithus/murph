@@ -298,19 +298,26 @@ Last verified: 2026-08-11
   `scripts`, including operational `.mjs` files, while excluding declarations,
   generated output, fixtures, and tests. For the explicit provider registry it
   preserves the SDK request-object checks, reports the global fetch primitive,
-  explicit aliases, injected fetch-call signatures, and strict fetch-shaped
-  wrappers when they resolve to provider literals or provider-configured URL
-  data, and reports only concrete low-level handwritten wire contracts that
+  imported Node HTTP/HTTPS and Undici transports, explicit aliases, injected
+  fetch-call signatures, and strict fetch-shaped wrappers at their nearest
+  lexical binding when they resolve to provider
+  literals or provider-configured URL data, and reports only concrete low-level
+  handwritten wire contracts that
   replace an SDK-owned request, response, fetch, transport, or client contract.
   Provider-domain helpers and SDK-backed business adapters are not transport
   boundaries; when a local wrapper owns a reported network boundary, its callers
-  are not duplicated. Direct provider symbols and hosts outrank fallback file
-  hints, and genuinely ambiguous dataflow names every matching provider. Findings are
+  are not duplicated. Provider symbols, resolved bindings, call arguments, and
+  hosts accumulate; a permissive provider label cannot erase simultaneous
+  required-provider evidence. File hints remain fallback-only, and genuinely
+  ambiguous dataflow names every matching provider. Findings are
   deterministic `raw-provider-http` or `handwritten-provider-transport` entries
   with file, line, column, and boundary. Raw HTTP remains allowed only through
-  the auditable provider/exception registry: credential-free opaque presigned
-  byte transfer, internal or same-origin application traffic, incoming
-  `Request` pass-through in hosted runner proxies, dynamic SMART/FHIR endpoints,
+  the auditable provider/exception registry: opaque presigned GET/HEAD transfer
+  or PUT of a provable byte/stream body with no credentials or only static
+  `credentials: "omit"` and no computed or credential-bearing headers; internal
+  or unambiguous single-slash same-origin application traffic; incoming
+  `Request` pass-through in hosted runner proxies; dynamic SMART/FHIR endpoints
+  with no explicit registered-provider identifier or host;
   registered providers without a verified provider-owned TypeScript SDK, and
   the named xAI OpenAI-compatible extension exception. These are structural,
   purpose-specific exceptions, not file-, line-, or provider-wide suppression.

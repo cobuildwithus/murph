@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findProviderRequestBoundaryViolations,
+  isProviderRequestGuardEntrypoint,
   providerBoundaryRegistry,
   providerHttpExceptionRegistry,
   providerRequestScanRoots,
@@ -30,6 +31,21 @@ function violationsOfKind(
 }
 
 describe("check-provider-request-boundaries", () => {
+  it("recognizes direct tsx execution even when the module URL has a query", () => {
+    expect(
+      isProviderRequestGuardEntrypoint(
+        "/workspace/repo/scripts/check-provider-request-boundaries.ts",
+        "file:///workspace/repo/scripts/check-provider-request-boundaries.ts?tsx=1",
+      ),
+    ).toBe(true);
+    expect(
+      isProviderRequestGuardEntrypoint(
+        "/workspace/repo/scripts/another-script.ts",
+        "file:///workspace/repo/scripts/check-provider-request-boundaries.ts",
+      ),
+    ).toBe(false);
+  });
+
   it("scans production provider request owners", () => {
     expect(providerRequestScanRoots).toContain("apps");
     expect(providerRequestScanRoots).toContain("packages");
@@ -370,7 +386,7 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
       .toEqual([
         { boundary: "Linq raw HTTP via fetchImpl", line: 10 },
-        { boundary: "OpenAI raw HTTP via fetchImpl", line: 13 },
+        { boundary: "Linq/OpenAI raw HTTP via fetchImpl", line: 13 },
         { boundary: "OpenAI raw HTTP via fetch", line: 18 },
         { boundary: "Junction raw HTTP via fetch", line: 21 },
       ]);
@@ -513,6 +529,68 @@ describe("check-provider-request-boundaries", () => {
       .toEqual([{ boundary: "Exa raw HTTP via fetch", line: 3 }]);
   });
 
+  it("resolves fetch aliases at the nearest binding", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "import { fetch as providerFetch } from 'undici';",
+        "interface Transport { request: typeof fetch; }",
+        "const openAiUrl = 'https://api.openai.com/v1/responses';",
+        "providerFetch(openAiUrl);",
+        "async function outer(request: typeof fetch) {",
+        "  await request(openAiUrl);",
+        "  async function nested(request: (input: string) => Promise<string>) {",
+        "    return await request(openAiUrl);",
+        "  }",
+        "  await nested(request);",
+        "}",
+        "const client = { request: async (_url: string) => 'ok' };",
+        "client.request(openAiUrl);",
+      ].join("\n"),
+      "packages/cli/src/openai-binding-resolution.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4, 6]);
+  });
+
+  it("reports imported Node and Undici transports plus canonical provider hosts", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "import { request as send } from 'node:https';",
+        "import { fetch as undiciFetch, request as undiciRequest } from 'undici';",
+        "import * as https from 'node:https';",
+        "send('https://api.openai.com/v1/responses');",
+        "undiciFetch('https://api.openai.com/v1/responses');",
+        "undiciRequest('https://api.openai.com/v1/responses');",
+        "https.get('https://api.openai.com/v1/models');",
+        "send({ hostname: 'api.openai.com', path: '/v1/responses' });",
+        "fetch('https://api.retellai.com/v2/create-phone-call');",
+        "fetch('https://backend.composio.dev/api/v1/connectedAccounts');",
+      ].join("\n"),
+      "scripts/provider-http-transports.mjs",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("allows a Node HTTP presigned PUT with a proven piped stream", () => {
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        [
+          "import { request as httpsRequest } from 'node:https';",
+          "function putPresignedPayload(input: { payload: Readable; presignedPutUrl: string; tlsCaCertificatePem?: string }) {",
+          "  const url = new URL(input.presignedPutUrl);",
+          "  const clientRequest = httpsRequest(url, { ...(input.tlsCaCertificatePem ? { ca: input.tlsCaCertificatePem } : {}), method: 'PUT' }, () => undefined);",
+          "  input.payload.pipe(clientRequest);",
+          "}",
+        ].join("\n"),
+        "apps/cloudflare/src/openai-presigned-upload.ts",
+      ),
+    ).toEqual([]);
+  });
+
   it("allows SDK-backed business adapters while retaining provider wire declarations", () => {
     expect(
       violationsOfKind(
@@ -585,6 +663,21 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([7]);
   });
 
+  it("allows an opaque presigned byte download", () => {
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        [
+          "async function downloadBytes(downloadUrl: string, fetchImpl: typeof fetch) {",
+          "  const response = await fetchImpl(downloadUrl);",
+          "  return new Uint8Array(await response.arrayBuffer());",
+          "}",
+        ].join("\n"),
+        "apps/web/src/lib/linq/attachment-download.ts",
+      ),
+    ).toEqual([]);
+  });
+
   it("does not exempt credential-bearing or provider-synthesized uploads", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
@@ -603,6 +696,26 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => match.line)).toEqual([2, 6, 8]);
+  });
+
+  it("requires static credentials, headers, and binary bodies for presigned transfers", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function upload(uploadUrl: string, openAiUploadUrl: string, bytes: Uint8Array, credentials: RequestCredentials, headerName: string) {",
+        "  await fetch(uploadUrl, { body: bytes, credentials, method: 'PUT' });",
+        "  await fetch(uploadUrl, { body: bytes, headers: { [headerName]: 'secret' }, method: 'PUT' });",
+        "  await fetch(uploadUrl, { body: JSON.stringify({ bytes }), method: 'PUT' });",
+        "  await fetch(openAiUploadUrl, { body: bytes, method: 'PUT' });",
+        "}",
+        "async function uploadBytes(uploadUrl: string, bytes: Uint8Array, requiredHeaders: Record<string, string>) {",
+        "  await fetch(uploadUrl, { body: new Blob([bytes]), credentials: 'omit', headers: requiredHeaders, method: 'PUT' });",
+        "}",
+      ].join("\n"),
+      "apps/web/src/lib/linq/attachment-upload.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 3, 4, 5]);
   });
 
   it("allows incoming Request pass-through but reports a direct provider call in the same proxy", () => {
@@ -633,6 +746,25 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("does not exempt provider-named parameters or config in SMART/FHIR code", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function readFhir(input: { fhirEndpoint: string; openAiApiRoot: string }, fetchImpl: typeof fetch) {",
+        "  await fetchImpl(input.fhirEndpoint);",
+        "  await fetchImpl(input.openAiApiRoot);",
+        "  await fetchImpl(process.env.OPENAI_API_ROOT!);",
+        "}",
+        "async function readProvider(openAiEndpoint: string, fetchImpl: typeof fetch) {",
+        "  await fetchImpl(openAiEndpoint);",
+        "}",
+      ].join("\n"),
+      "apps/web/src/lib/openai/smart-fhir-client.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 4, 7]);
   });
 
   it("keeps no-verified-SDK providers and xAI extensions as explicit registry exceptions", () => {
@@ -699,6 +831,26 @@ describe("check-provider-request-boundaries", () => {
         "apps/web/src/lib/openai/internal-status.ts",
       ).map((match) => match.line),
     ).toEqual([6]);
+  });
+
+  it("accumulates provider evidence and rejects network-path URLs", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const telegramUrl = 'https://api.openai.com/v1/responses';",
+        "fetch(telegramUrl);",
+        "async function replay(input: { request: Request }) {",
+        "  await fetch(new URL('//api.openai.com/v1/responses', input.request.url));",
+        "  const openAiNetworkPath = '\\\\api.openai.com/v1/responses';",
+        "  await fetch(new URL(openAiNetworkPath, input.request.url));",
+        "  const openAiInternalPath = '/api/responses';",
+        "  await fetch(new URL(openAiInternalPath, input.request.url));",
+        "}",
+      ].join("\n"),
+      "apps/cloudflare/src/provider-url-resolution.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 4, 6]);
   });
 
 });
