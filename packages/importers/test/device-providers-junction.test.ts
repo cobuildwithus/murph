@@ -286,6 +286,26 @@ function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, u
     };
   }
 
+  if (resource === "steps") {
+    return { ...base, unit: "count", value: 1_000 };
+  }
+
+  if (resource === "distance") {
+    return { ...base, unit: "m", value: 1_000 };
+  }
+
+  if (resource === "calories_active") {
+    return { ...base, unit: "kcal", value: 100 };
+  }
+
+  if (resource === "heartrate") {
+    return { ...base, unit: "bpm", value: 72 };
+  }
+
+  if (resource === "weight") {
+    return { ...base, unit: "kg", value: 75 };
+  }
+
   const plausibleValues: Record<string, number> = {
     body_temperature: 36.6,
     basal_body_temperature: 36.6,
@@ -2538,7 +2558,7 @@ test("Junction summary resource id for explicit ids includes provider, source ty
   assert.notEqual(sourceInstanceVariantEvent?.externalRef?.resourceId, baseEvent?.externalRef?.resourceId);
 });
 
-test("Junction opt-in steps and distance stay provider-partitioned and summary-independent", () => {
+test("Junction steps and distance stay provider-partitioned and summary-independent", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-24T12:00:00.000Z",
     summaries: {
@@ -2674,7 +2694,7 @@ test("Junction opt-in steps and distance stay provider-partitioned and summary-i
   assertEventRawArtifactRolesExist(payload);
 });
 
-test("Junction opt-in heart rate and active calories emit only bounded UTC-hour features", async () => {
+test("Junction heart rate and active calories emit only bounded UTC-hour features", async () => {
   const snapshot = {
     importedAt: "2026-04-24T12:00:00.000Z",
     timeseries: {
@@ -2853,7 +2873,7 @@ test("Junction opt-in heart rate and active calories emit only bounded UTC-hour 
   ]);
 });
 
-test("Junction dense opt-ins keep adjacent UTC import buckets complete and replay-order stable", async () => {
+test("Junction dense timeseries keep adjacent UTC import buckets complete and replay-order stable", async () => {
   const normalizeWindow = async (input: {
     heartRate: number;
     steps: number;
@@ -2939,7 +2959,7 @@ test("Junction dense opt-ins keep adjacent UTC import buckets complete and repla
   );
 });
 
-test("Junction daily opt-ins preserve floating provider days at closed UTC boundaries", () => {
+test("Junction daily aggregates preserve floating provider days at closed UTC boundaries", () => {
   const firstSnapshot = {
     importedAt: "2026-04-23T00:00:00.000Z",
     windowEnd: "2026-04-23T00:00:00.000Z",
@@ -3043,7 +3063,7 @@ test("Junction daily opt-ins preserve floating provider days at closed UTC bound
   );
 });
 
-test("Junction opt-in weight readings are compact, replay-stable, distinct, and canonically queryable", async () => {
+test("Junction weight readings are compact, replay-stable, distinct, and canonically queryable", async () => {
   const garminReadings = [
     { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
   ];
@@ -3153,7 +3173,7 @@ test("Junction opt-in weight readings are compact, replay-stable, distinct, and 
   }
 });
 
-test("Junction opt-in timeseries reject malformed or implausible samples without retaining them", () => {
+test("Junction timeseries reject malformed or implausible samples without retaining them", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-24T12:00:00.000Z",
     timeseries: {
@@ -4919,9 +4939,6 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "glucose",
     "blood_pressure",
     "note",
-  ]);
-  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
-  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], [
     "steps",
     "distance",
     "calories_active",
@@ -4954,6 +4971,8 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "electrocardiogram_voltage",
     "workout_stream",
   ]);
+  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
+  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
   assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
     ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
@@ -4982,8 +5001,6 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.equal(payload.provider, "junction");
   assert.deepEqual(payload.provenance?.summaryResources, JUNCTION_DEFAULT_SUMMARY_RESOURCES);
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
-  assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("heartrate"), false);
-  assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("weight"), false);
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-profile"));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));
@@ -5008,12 +5025,19 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     assert.equal(findJunctionCompactTimeseriesArtifacts(payload, dailyResourceSlug).length, 1, dailyResourceSlug);
   }
   assert.equal(findJunctionBloodPressureReadingArtifacts(payload).length, 1);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "steps").length, 1);
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "distance").length, 1);
+  assert.equal(findJunctionFeatureTimeseriesArtifacts(payload, "calories-active").length, 1);
+  assert.equal(findJunctionFeatureTimeseriesArtifacts(payload, "heartrate").length, 1);
+  assert.equal(findJunctionWeightReadingArtifacts(payload).length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));
-  assert.equal(payload.events?.some((event) => event.fields?.metric === "weight"), false);
-  assert.equal(payload.events?.some((event) => event.fields?.metric === "active-calories"), false);
-  assert.equal(payload.events?.some((event) => event.fields?.metric === "distance"), false);
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "active-calories"));
+  assert.ok(payload.events?.some((event) => event.fields?.metric === "distance-km"));
+  assert.ok(payload.events?.some((event) => (
+    event.fields?.measurements as Array<{ metric?: string }> | undefined
+  )?.some((measurement) => measurement.metric === "weight")));
   assert.equal(payload.samples?.length ?? 0, 0);
 
   const sparseProfilePayload = normalizeJunctionSnapshot({

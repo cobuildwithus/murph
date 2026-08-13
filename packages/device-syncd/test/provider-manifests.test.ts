@@ -147,12 +147,19 @@ describe("deviceSyncProviderManifests", () => {
     }
     expect(junctionConfig.timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
+    expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-5)).toEqual([
+      "steps",
+      "distance",
+      "calories_active",
+      "heartrate",
+      "weight",
+    ]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
   });
 
-  it("admits exact Junction timeseries opt-ins without substituting defaults", () => {
+  it("keeps exact Junction timeseries overrides truthful", () => {
     const configs = readConfiguredDeviceSyncProviderConfigs({
       JUNCTION_API_KEY: "sk_us_test_manifest",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
@@ -165,11 +172,6 @@ describe("deviceSyncProviderManifests", () => {
     }
 
     expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([
-      "steps",
-      "distance",
-      "calories_active",
-      "heartrate",
-      "weight",
       "body_mass_index",
       "carbohydrates",
       "fat",
@@ -205,12 +207,12 @@ describe("deviceSyncProviderManifests", () => {
     }
     expect(normalizeJunctionDeviceSyncRuntimeConfig({
       ...junctionConfig,
-      timeseriesResources: [...JUNCTION_OPT_IN_TIMESERIES_RESOURCES],
-    }).timeseriesResources).toEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]);
+      timeseriesResources: ["steps", "heart_rate", "body_weight"],
+    }).timeseriesResources).toEqual(["steps", "heartrate", "weight"]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig({
       ...junctionConfig,
-      timeseriesResources: ["heart_rate", "body_weight"],
-    }).timeseriesResources).toEqual(["heartrate", "weight"]);
+      timeseriesResources: ["distance", "calories_active"],
+    }).timeseriesResources).toEqual(["distance", "calories_active"]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig({
       ...junctionConfig,
       timeseriesResources: [],

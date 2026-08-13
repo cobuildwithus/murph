@@ -2865,6 +2865,21 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             windowStart: "2026-04-01T00:00:00Z",
           },
         },
+        {
+          kind: "reconcile",
+          payload: {
+            timeseriesResourceCursor: "heartrate",
+            windowEnd: "2026-04-04T00:00:00Z",
+            windowStart: "2026-04-03T00:00:00Z",
+          },
+        },
+        {
+          kind: "backfill",
+          payload: {
+            windowEnd: "2026-04-05T00:00:00Z",
+            windowStart: "2026-04-04T00:00:00Z",
+          },
+        },
       ],
     });
 
@@ -2883,6 +2898,15 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       workoutStreamCursor,
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-01T00:00:00.000Z",
+    });
+    expect(hint?.jobs?.[1]?.payload).toEqual({
+      timeseriesResourceCursor: "heartrate",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowStart: "2026-04-03T00:00:00.000Z",
+    });
+    expect(hint?.jobs?.[2]?.payload).toEqual({
+      windowEnd: "2026-04-05T00:00:00.000Z",
+      windowStart: "2026-04-04T00:00:00.000Z",
     });
 
     expect(() =>

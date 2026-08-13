@@ -528,21 +528,21 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
       resource: "body_weight",
       canonicalResource: "weight",
       category: "timeseries",
-      configuredResource: false,
+      configuredResource: true,
       path: /\/v2\/timeseries\/junction-user-1\/body_weight\/grouped/u,
     },
     {
       resource: "calories_active",
       canonicalResource: "calories_active",
       category: "timeseries",
-      configuredResource: false,
+      configuredResource: true,
       path: /\/v2\/timeseries\/junction-user-1\/calories_active\/grouped/u,
     },
     {
       resource: "distance",
       canonicalResource: "distance",
       category: "timeseries",
-      configuredResource: false,
+      configuredResource: true,
       path: /\/v2\/timeseries\/junction-user-1\/distance\/grouped/u,
     },
     {
@@ -575,7 +575,7 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
   }
 });
 
-test("Junction resource jobs re-infer category for dropped canonicalized timeseries aliases", async () => {
+test("Junction resource jobs re-infer category for canonicalized timeseries aliases", async () => {
   const seenUrls: string[] = [];
   const provider = createProvider(async (input) => {
     const url = readUrl(input);
@@ -591,6 +591,22 @@ test("Junction resource jobs re-infer category for dropped canonicalized timeser
             body_weight: true,
           },
         }],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
+      return createJsonResponse({
+        groups: {
+          withings: [{
+            data: [{
+              id: "weight-1",
+              timestamp: "2026-04-02T08:00:00.000Z",
+              unit: "kg",
+              value: 80,
+            }],
+            source: { provider: "withings", type: "scale" },
+          }],
+        },
       });
     }
 
@@ -615,6 +631,14 @@ test("Junction resource jobs re-infer category for dropped canonicalized timeser
   );
 
   assert.equal(seenUrls.some((url) => url.includes("/v2/summary/weight/")), false);
-  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), false);
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.equal(snapshot.timeseries?.weight?.length, 1);
+  assert.equal(snapshot.timeseries?.weight?.[0]?.id, "weight-1");
+  assert.equal(snapshot.timeseries?.weight?.[0]?.timestamp, "2026-04-02T08:00:00.000Z");
+  assert.equal(snapshot.timeseries?.weight?.[0]?.unit, "kg");
+  assert.equal(snapshot.timeseries?.weight?.[0]?.value, 80);
 });

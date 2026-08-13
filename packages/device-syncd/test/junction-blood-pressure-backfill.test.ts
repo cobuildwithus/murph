@@ -900,7 +900,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
   );
 });
 
-test("weight receives summary-history backfill while dense opt-ins stay bounded", async () => {
+test("weight receives summary-history backfill while dense timeseries stay bounded", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     additionalProviders: [{

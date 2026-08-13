@@ -2198,7 +2198,7 @@ test.each(["backfill", "reconcile"] as const)(
       (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) === 1,
     );
     assert.equal(productionWideResources.length, 13);
-    assert.equal(productionDenseResources.length, 30);
+    assert.equal(productionDenseResources.length, 35);
     const fixtureWideResources = [
       "body_mass_index",
       "carbohydrates",

@@ -1,8 +1,8 @@
 # Model bounded Junction missing resources
 
-Status: active
+Status: completed
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -162,3 +162,4 @@ Updated: 2026-08-11
 - PR completion requires green exact-head required GitHub checks and zero
   unresolved findings from the applicable preliminary and final ReviewGPT
   passes.
+Completed: 2026-08-12

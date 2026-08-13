@@ -348,6 +348,12 @@ const JUNCTION_WEBHOOK_NESTED_RECORD_KEYS = Object.freeze([
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
 ]);
+const JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES = new Set<string>([
+  "steps",
+  "distance",
+  "calories_active",
+  "heartrate",
+]);
 const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
@@ -2124,8 +2130,11 @@ export function createJunctionDeviceSyncProvider(
         }
         const timeseriesPolicy = resolveJunctionTimeseriesResourcePolicy(effectiveResource);
         if (
-          timeseriesPolicy?.enabledByDefault === false
-          && timeseriesPolicy.historyWindow === "dense_timeseries"
+          timeseriesPolicy?.historyWindow === "dense_timeseries"
+          && (
+            timeseriesPolicy.enabledByDefault === false
+            || JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES.has(effectiveResource)
+          )
         ) {
           const dailyImport = await importTimeseriesDailySnapshots(
             context,
@@ -3678,6 +3687,9 @@ export function createJunctionDeviceSyncProvider(
         ? {
             scheduledJobs: [{
               ...followUp,
+              ...(input.job.kind === "resource"
+                ? {}
+                : { availableAt: input.context.now }),
               ...(input.timeseriesPhase !== undefined
                 || input.timeseriesResourceCursor !== undefined
                 || input.workoutStreamCursor !== undefined
@@ -3712,6 +3724,8 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
+    const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
+
     if (input.job.kind === "backfill") {
       const cursor = toIsoTimestampIfValid(input.timeseriesCursor);
       if (!cursor || !isTimestampInHalfOpenWindow(cursor, input)) {
@@ -3720,6 +3734,7 @@ export function createJunctionDeviceSyncProvider(
       const emptyBackfillAttempts = readHistoricalBackfillJobEmptyAttempts(input.job);
       const followUp = buildExactWindowJob({
         kind: "backfill",
+        payload: sourceProviderSlug ? { sourceProviderSlug } : undefined,
         priority: input.job.priority,
         windowEnd: input.windowEnd,
         windowStart: input.windowStart,
@@ -3744,6 +3759,9 @@ export function createJunctionDeviceSyncProvider(
     if (input.job.kind === "reconcile") {
       const followUp = buildExactWindowJob({
         kind: input.job.kind,
+        payload: {
+          ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+        },
         priority: input.job.priority,
         windowEnd: input.windowEnd,
         windowStart: input.windowStart,

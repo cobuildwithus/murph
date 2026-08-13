@@ -45,10 +45,10 @@ Current providers:
   freezes that generation across durable continuations and retries. Persisted
   unversioned work remains v1 after an upgrade and cannot certify or downgrade
   v2 coverage.
-- Junction's established default summary and timeseries lists are unchanged. The
-  code-owned `timeseriesResources` policy additionally admits five off-by-default
-  opt-ins: `steps`, `distance`, `calories_active`, `heartrate`, and `weight`.
-  Omitting the list uses the existing defaults; an explicit empty list disables all
+- Junction's default timeseries list includes `steps`, `distance`,
+  `calories_active`, `heartrate`, and `weight`. The code-owned
+  `timeseriesResources` policy also admits the later off-by-default resources.
+  Omitting the list uses those defaults; an explicit empty list disables all
   timeseries; an explicit non-empty list resolves exactly to supported canonical
   names and rejects unknown names instead of substituting defaults.
 - Opted-in `steps` and `distance` use provider/source-partitioned UTC-day aggregates.
@@ -74,13 +74,13 @@ Current providers:
   uses the ordinary workout index only to admit at most 32 stable workouts per
   one-day window, then reads Junction's dedicated per-workout stream endpoint
   serially and caps each stream at 100,000 points. The exact production assembly has
-  43 production timeseries resources: 13 wide and 30 dense, including 29 ordinary
+  48 production timeseries resources: 13 wide and 35 dense, including 34 ordinary
   dense resources plus `workout_stream`. At the current 100-page collection ceiling
-  and three-attempt GET policy, one closed dense day is bounded to 3,032 / 9,096
-  logical GETs / network attempts. The full timeseries ceilings are 50,248 / 150,744
-  per attempt and 251,240 / 753,720 across five attempts for the 14-day backfill
-  plus six 30-day wide windows, and 22,524 / 67,572 per attempt and 112,620 /
-  337,860 across five attempts for the seven-day reconcile plus one wide window.
+  and three-attempt GET policy, one closed dense day is bounded to 3,532 / 10,596
+  logical GETs / network attempts. The full timeseries ceilings are 57,248 / 171,744
+  per attempt and 286,240 / 858,720 across five attempts for the 14-day backfill
+  plus six 30-day wide windows, and 26,024 / 78,072 per attempt and 130,120 /
+  390,360 across five attempts for the seven-day reconcile plus one wide window.
   Each reduced resource is imported before the existing job payload marks its exact
   resource name complete. Retryable failures replace only that bounded payload on
   the same leased row; cooperative preemption creates the existing immediate

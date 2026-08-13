@@ -21,6 +21,7 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  normalizeJunctionResourceName,
   resolveJunctionTimeseriesResourcePolicy,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
@@ -600,7 +601,7 @@ test("Junction provider defaults fetch every default summary resource", async ()
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction omitted timeseries config defaults to compact resources only", async () => {
+test("Junction omitted timeseries config uses the code-owned defaults", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -639,7 +640,9 @@ test("Junction omitted timeseries config defaults to compact resources only", as
         return createJsonResponse({ data: [] });
       }
 
-      const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
+      const timeseriesResource = normalizeJunctionResourceName(
+        new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
+      );
       if (timeseriesResource) {
         assert.ok(
           (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
@@ -681,22 +684,14 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   );
 
   const requestedTimeseriesResources = requests
-    .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
+    .map((url) => normalizeJunctionResourceName(
+      new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
+    ))
     .filter((resource): resource is string => Boolean(resource));
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
     [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
-  );
-  assert.equal(
-    requests.every((url) =>
-      !url.includes("heartrate") &&
-      !url.includes("steps") &&
-      !url.includes("distance") &&
-      !url.includes("calories_active") &&
-      !url.includes("weight")
-    ),
-    true,
   );
   const importedTimeseriesResources = importedSnapshots.flatMap((snapshot) =>
     Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
@@ -713,7 +708,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   );
 });
 
-test("Junction programmatic timeseries opt-ins fetch exactly the requested resources", async () => {
+test("Junction programmatic timeseries overrides fetch exactly the requested resources", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -793,12 +788,6 @@ test("Junction programmatic timeseries opt-ins fetch exactly the requested resou
     .filter((resource): resource is string => Boolean(resource));
 
   assert.deepEqual([...new Set(requestedTimeseriesResources)].sort(), ["heartrate", "steps"]);
-  assert.equal(
-    requestedTimeseriesResources.some((resource) =>
-      (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(resource)
-    ),
-    false,
-  );
   const importedTimeseriesResources = importedSnapshots.flatMap((snapshot) =>
     Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
   );
@@ -811,7 +800,7 @@ test("Junction programmatic timeseries opt-ins fetch exactly the requested resou
   assert.deepEqual([...importedTimeseriesResources].sort(), ["heartrate", "steps"]);
 });
 
-test("Junction dense opt-in resource jobs import only complete closed UTC days", async () => {
+test("Junction dense resource jobs import only complete closed UTC days", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -15425,7 +15414,7 @@ test("Junction production timeseries composed provider-call bounds match the doc
   );
   assert.deepEqual(
     [productionResources.length, wideResources.length, denseResources.length, ordinaryDenseResources.length],
-    [43, 13, 30, 29],
+    [48, 13, 35, 34],
   );
 
   const maxPagesPerGroupedResourceWindow = 100;
@@ -15465,22 +15454,22 @@ test("Junction production timeseries composed provider-call bounds match the doc
 
   assert.deepEqual(bounds, {
     backfill: {
-      logicalPerAttempt: 50_248,
-      networkPerAttempt: 150_744,
-      logicalAcrossJobAttempts: 251_240,
-      networkAcrossJobAttempts: 753_720,
+      logicalPerAttempt: 57_248,
+      networkPerAttempt: 171_744,
+      logicalAcrossJobAttempts: 286_240,
+      networkAcrossJobAttempts: 858_720,
     },
     reconcile: {
-      logicalPerAttempt: 22_524,
-      networkPerAttempt: 67_572,
-      logicalAcrossJobAttempts: 112_620,
-      networkAcrossJobAttempts: 337_860,
+      logicalPerAttempt: 26_024,
+      networkPerAttempt: 78_072,
+      logicalAcrossJobAttempts: 130_120,
+      networkAcrossJobAttempts: 390_360,
     },
     denseDay: {
-      logicalPerAttempt: 3_032,
-      networkPerAttempt: 9_096,
-      logicalAcrossJobAttempts: 3_032,
-      networkAcrossJobAttempts: 9_096,
+      logicalPerAttempt: 3_532,
+      networkPerAttempt: 10_596,
+      logicalAcrossJobAttempts: 3_532,
+      networkAcrossJobAttempts: 10_596,
     },
   });
 
@@ -15490,13 +15479,13 @@ test("Junction production timeseries composed provider-call bounds match the doc
     "utf8",
   );
   for (const documentation of [readme, compatibilityMatrix]) {
-    assert.match(documentation, /43 production timeseries resources/u);
-    assert.match(documentation, /13 wide and 30 dense/u);
-    assert.match(documentation, /3,032 \/ 9,096/u);
-    assert.match(documentation, /50,248 \/ 150,744/u);
-    assert.match(documentation, /251,240 \/ 753,720/u);
-    assert.match(documentation, /22,524 \/ 67,572/u);
-    assert.match(documentation, /112,620\s*\/\s*337,860/u);
+    assert.match(documentation, /48 production timeseries resources/u);
+    assert.match(documentation, /13 wide and 35 dense/u);
+    assert.match(documentation, /3,532 \/ 10,596/u);
+    assert.match(documentation, /57,248 \/ 171,744/u);
+    assert.match(documentation, /286,240 \/ 858,720/u);
+    assert.match(documentation, /26,024 \/ 78,072/u);
+    assert.match(documentation, /130,120\s*\/\s*390,360/u);
     assert.match(documentation, /single unfinished resource/u);
   }
 });

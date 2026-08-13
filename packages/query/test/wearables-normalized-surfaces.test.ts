@@ -607,7 +607,7 @@ test("unadmitted Junction timeseries stay out of default query/search and wearab
   assert.equal(latest?.activity?.steps.selection.value, 7200);
 });
 
-test("Junction opt-in features remain independently queryable without becoming day summaries", () => {
+test("Junction hourly features remain independently queryable without becoming day summaries", () => {
   const snapshot = {
     importedAt: "2026-05-20T12:00:00.000Z",
     timeseries: {
