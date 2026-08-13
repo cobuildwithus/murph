@@ -599,9 +599,14 @@ describe("check-provider-request-boundaries", () => {
         "const directSend = require('node:https').request;",
         "const { fetch: undiciFetch } = require('undici');",
         "send('https://api.openai.com/v1/responses');",
+        "https.request('https://api.openai.com/v1/responses');",
         "sendFromNamespace('https://api.openai.com/v1/responses');",
         "directSend('https://api.openai.com/v1/responses');",
         "undiciFetch('https://api.openai.com/v1/responses');",
+        "let undici = require('undici');",
+        "undici.request('https://api.openai.com/v1/responses');",
+        "undici = { request: (_url: string) => undefined };",
+        "undici.request('https://api.openai.com/v1/responses');",
         "function shadow(send: (url: string) => string) {",
         "  return send('https://api.openai.com/v1/responses');",
         "}",
@@ -622,8 +627,34 @@ describe("check-provider-request-boundaries", () => {
       "scripts/provider-http-transports.mjs",
     );
 
-    expect(commonJsMatches.map((match) => match.line)).toEqual([6, 7, 8, 9]);
+    expect(commonJsMatches.map((match) => match.line)).toEqual([6, 7, 8, 9, 10, 12]);
     expect(namespaceMatches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("preserves exact fetch types on destructured provider transports", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function direct({ fetch }: { fetch: typeof globalThis.fetch }) {",
+        "  await fetch('https://api.openai.com/v1/responses');",
+        "}",
+        "async function aliased({ fetch: openAiSend }: { fetch: typeof globalThis.fetch }) {",
+        "  await openAiSend('/v1/responses', { method: 'POST' });",
+        "}",
+        "async function loose(openAiHandler: (request: Request) => Promise<Response>, request: Request) {",
+        "  await openAiHandler(request);",
+        "}",
+        "async function looseMember(runtime: { openAiHandler: (request: Request) => Promise<Response> }, request: Request) {",
+        "  await runtime.openAiHandler(request);",
+        "}",
+        "async function exactMethod(runtime: { openAiSend(input: RequestInfo, init?: RequestInit): Promise<Response> }) {",
+        "  await runtime.openAiSend('/v1/responses');",
+        "}",
+      ].join("\n"),
+      "apps/cloudflare/src/provider-request-proxy.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 5, 14]);
   });
 
   it("reports direct CommonJS transports without treating unrelated require calls as HTTP", () => {
@@ -662,6 +693,24 @@ describe("check-provider-request-boundaries", () => {
 
     expect(commonJsMatches.map((match) => match.line)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(typedCommonJsMatches.map((match) => match.line)).toEqual([1, 2]);
+  });
+
+  it("reports assigned CommonJS namespaces in TypeScript modules", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const https = require('node:https');",
+        "const undici = require('undici');",
+        "https.request('https://api.openai.com/v1/responses');",
+        "undici.fetch('https://api.openai.com/v1/responses');",
+        "function shadow(https: { request(url: string): void }) {",
+        "  https.request('https://api.openai.com/v1/responses');",
+        "}",
+      ].join("\n"),
+      "scripts/assigned-provider-transports.cts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 4]);
   });
 
   it("reports TypeScript import-equals transports and preserves unrelated shadows", () => {
@@ -858,6 +907,31 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([2, 3, 4, 5, 8]);
   });
 
+  it("rejects spread transfer init and spelling-only binary bodies", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function upload(uploadUrl: string, options: RequestInit, payload: { arrayBuffer(): ArrayBuffer }) {",
+        "  await fetch(uploadUrl, ...[options]);",
+        "  await fetch(uploadUrl, { body: payload.arrayBuffer(), method: 'PUT' });",
+        "}",
+        "async function shadowed(uploadUrl: string, Blob: new (parts: unknown[]) => object, Uint8Array: new (bytes: number[]) => { buffer: ArrayBuffer }, Buffer: { from(value: unknown): object }, Readable: { from(value: unknown): object }) {",
+        "  await fetch(uploadUrl, { body: new Blob([]), method: 'PUT' });",
+        "  await fetch(uploadUrl, { body: new Uint8Array([]).buffer, method: 'PUT' });",
+        "  await fetch(uploadUrl, { body: Buffer.from('json'), method: 'PUT' });",
+        "  await fetch(uploadUrl, { body: Readable.from('json'), method: 'PUT' });",
+        "}",
+        "async function proven(uploadUrl: string, bytes: Uint8Array) {",
+        "  await fetch(uploadUrl, { body: new Blob([bytes]), method: 'PUT' });",
+        "  await fetch(uploadUrl, { body: new Uint8Array(bytes).buffer, method: 'PUT' });",
+        "}",
+      ].join("\n"),
+      "apps/web/src/lib/linq/attachment-upload.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 3, 6, 7, 8, 9]);
+  });
+
   it("admits only registered presigned transfer-header factories", () => {
     expect(
       violationsOfKind(
@@ -915,6 +989,23 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("rejects a second init on incoming Request forwarding", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function proxy(input: { openaiRequest: Request }, init: RequestInit) {",
+        "  await fetch(input.openaiRequest);",
+        "  await fetch(input.openaiRequest, init);",
+        "  await fetch(input.openaiRequest, { signal: AbortSignal.timeout(1000) });",
+        "  await fetch(input.openaiRequest, ...[init]);",
+        "}",
+      ].join("\n"),
+      "apps/cloudflare/src/hosted-runner-egress-proxy.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 4, 5]);
   });
 
   it("allows dynamic SMART/FHIR traffic but reports a registered provider endpoint beside it", () => {
@@ -1204,11 +1295,13 @@ describe("check-provider-request-boundaries", () => {
         "  await openAiFetch('/v1/responses', { method: 'POST' });",
         "}",
         "fetch('/api/openai/status');",
+        "const origins = ['https://api.openai.com', 'https://api.linqapp.com'] as const;",
+        "fetch(new URL('/v1/responses', origins[Math.random() > 0.5 ? 0 : 1]));",
       ].join("\n"),
       "apps/web/src/lib/provider-dispatch.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([3, 6, 8]);
+    expect(matches.map((match) => match.line)).toEqual([3, 6, 8, 12]);
   });
 
   it("does not inherit provider facts through static response members or internal handlers", () => {

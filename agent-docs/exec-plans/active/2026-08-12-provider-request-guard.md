@@ -162,11 +162,22 @@ Updated: 2026-08-13
   evidence. Parent review kept static response-member reads and project-owned
   provider handlers outside that target rule, preserving presigned byte
   transfers and internal handler composition without adding an exception.
+- The first round-5 attempt was diagnostic because its required model
+  self-attestation was `UNKNOWN`; it did not advance the substantive-round
+  counter. Its three reachable findings were accepted within the existing
+  retrospective design. Assigned CommonJS namespaces now compare the nearest
+  declaration identity and fail after reassignment; destructured property types,
+  exact fetch-compatible provider targets, and array-backed origins stay in the
+  shared binding/fact pipeline. Presigned admission rejects spread call init and
+  uses only AST/global-binding or exact type proof for byte bodies. Incoming
+  runner pass-through requires exactly one non-spread `Request` argument. Loose
+  `Request` handlers remain outside provider-target evidence, so no exception or
+  second resolver was added.
 
 ## Verification
 
 - `pnpm provider-requests:guard`
-- `pnpm exec vitest run --config vitest.config.ts --no-coverage scripts/check-provider-request-boundaries.test.ts`
+- `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/check-provider-request-boundaries.test.ts`
 - `pnpm test:repo-tools`
 - `pnpm test:diff scripts/check-provider-request-boundaries.ts scripts/check-provider-request-boundaries.test.ts agent-docs/SECURITY.md agent-docs/references/testing-ci-map.md`
 - `git diff --check`
@@ -174,10 +185,11 @@ Updated: 2026-08-13
 
 Current evidence:
 
-- Focused guard suite: 67 tests passed after the round-4 correction.
-- Repository-tool suite: 34 files and 573 tests passed after the round-4
-  correction. An earlier contended run timed out two Crabbox repeated-signal
-  cases; that file passed alone and the quiet full rerun passed.
+- Focused guard suite: 71 tests passed after the round-5 diagnostic correction.
+- Repository-tool suite: 34 files and 577 tests passed after the round-5
+  diagnostic correction. The earlier round-4 contended run timed out two
+  Crabbox repeated-signal cases; that file passed alone and each quiet full
+  rerun passed.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
 - `pnpm provider-requests:guard`: intentionally exits 1 with 44 current
   low-level provider transports/contracts; sibling migrations own those call

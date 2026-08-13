@@ -303,9 +303,11 @@ Last verified: 2026-08-11
   invocation, and destructured transport forms, and strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. The lexical census includes
-  destructured parameter shadows, and provider facts follow computed origin
-  maps and explicitly provider-bound HTTP transport targets. The guard reports
-  only concrete low-level
+  destructured parameter shadows and property types. Assigned CommonJS
+  namespaces remain transports only while the nearest declaration identity is
+  unchanged. Provider facts follow object/array origin maps and exact
+  fetch-compatible provider-bound call targets without treating loose
+  `Request` handlers as HTTP transports. The guard reports only concrete low-level
   handwritten wire contracts that
   replace an SDK-owned request, response, fetch, transport, or client contract.
   Provider-domain helpers and SDK-backed business adapters are not transport
@@ -317,12 +319,13 @@ Last verified: 2026-08-11
   deterministic `raw-provider-http` or `handwritten-provider-transport` entries
   with file, line, column, and boundary. Raw HTTP remains allowed only through
   the auditable provider/exception registry: opaque presigned GET/HEAD transfer
-  or PUT of a provable byte/stream body with no credentials or only static
+  or PUT of an AST- or type-proven byte/stream body with no spread call init,
+  no credentials or only static
   `credentials: "omit"` and either an allowlisted literal header set or a
   path-scoped audited transfer-header factory resolved to its unique top-level
   declaration; statically known internal or
   unambiguous single-slash application traffic, plus `new URL` composition only
-  against the exact static `location.origin` owner; incoming
+  against the exact static `location.origin` owner; exact one-argument incoming
   `Request` pass-through in hosted runner proxies; dynamic SMART/FHIR endpoints
   with no explicit registered-provider identifier or host;
   registered providers without a verified provider-owned TypeScript SDK, and
