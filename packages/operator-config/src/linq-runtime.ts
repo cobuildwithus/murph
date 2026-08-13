@@ -1768,7 +1768,7 @@ async function bufferLinqSdkResponse(
     throw new LinqSdkResponseTooLargeError(response.status, headers)
   }
 
-  let bytes = response.body
+  const bytes = response.body
     ? await readBoundedLinqSdkStream(
         response.body,
         maxResponseBytes,
@@ -1777,9 +1777,6 @@ async function bufferLinqSdkResponse(
         state,
       )
     : new Uint8Array(await response.arrayBuffer())
-  if (!response.body && !response.ok && bytes.byteLength === 0) {
-    bytes = await readBodylessLinqSdkErrorBytes(response)
-  }
   if (bytes.byteLength > maxResponseBytes) {
     state.errorResponse = {
       bodyKind: 'oversize',
@@ -1814,16 +1811,6 @@ async function bufferLinqSdkResponse(
     status: response.status,
     ...(response.statusText ? { statusText: response.statusText } : {}),
   })
-}
-
-async function readBodylessLinqSdkErrorBytes(
-  response: LinqFetchResponse,
-): Promise<Uint8Array> {
-  try {
-    return new TextEncoder().encode(await response.text())
-  } catch {
-    return new Uint8Array()
-  }
 }
 
 function copyLinqSdkResponseBytes(bytes: Uint8Array): ArrayBuffer {

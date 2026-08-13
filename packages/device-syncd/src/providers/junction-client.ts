@@ -1,7 +1,3 @@
-import {
-  type BaseClientOptions,
-  type BaseRequestOptions,
-} from "@junction-api/sdk";
 import { ActivityClient, type GetActivityRequest } from "@junction-api/sdk/activity";
 import { BodyClient } from "@junction-api/sdk/body";
 import { ElectrocardiogramClient } from "@junction-api/sdk/electrocardiogram";
@@ -50,6 +46,9 @@ import {
   resolveJunctionBaseUrl,
 } from "../config/junction-client-config.ts";
 import type { JunctionEnvironment, JunctionRegion } from "../config/provider-types.ts";
+
+type JunctionSdkClientOptions = VitalsClient.Options;
+type JunctionSdkRequestOptions = VitalsClient.RequestOptions;
 
 export {
   assertValidJunctionClientConfig,
@@ -722,8 +721,8 @@ export class JunctionClient {
       signal?: AbortSignal | null;
     },
     invoke: (
-      clientOptions: BaseClientOptions,
-      requestOptions: BaseRequestOptions,
+      clientOptions: JunctionSdkClientOptions,
+      requestOptions: JunctionSdkRequestOptions,
     ) => PromiseLike<unknown>,
   ): Promise<T> {
     const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
@@ -781,7 +780,7 @@ export class JunctionClient {
         );
       };
       const timeoutInSeconds = this.requestTimeoutMs / 1_000;
-      const clientOptions: BaseClientOptions = {
+      const clientOptions: JunctionSdkClientOptions = {
         apiKey: this.apiKey,
         baseUrl: this.baseUrl,
         fetch: sdkFetch,

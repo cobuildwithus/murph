@@ -3024,7 +3024,7 @@ test('linq runtime records safe request and response diagnostics for provider ht
   )
 })
 
-test('linq runtime retains hashed text diagnostics from bodyless fetch adapters', async () => {
+test('linq runtime retains hashed text diagnostics from bounded response streams', async () => {
   const providerText = 'Plain Linq failure'
 
   await assert.rejects(
@@ -3035,14 +3035,9 @@ test('linq runtime retains hashed text diagnostics from bodyless fetch adapters'
       },
       {
         env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
-        fetchImplementation: async () => ({
-          arrayBuffer: async () => new ArrayBuffer(0),
-          json: async () => {
-            throw new Error('invalid json')
-          },
-          ok: false,
+        fetchImplementation: async () => new Response(providerText, {
+          headers: { 'content-type': 'text/plain' },
           status: 400,
-          text: async () => providerText,
         }),
       },
     ),
