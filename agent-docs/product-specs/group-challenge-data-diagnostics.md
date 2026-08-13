@@ -136,12 +136,14 @@ grant generation.
 Deep sleep and REM sleep remain one user-facing permission each. New access
 offers continue to use `deep-sleep-sources-days.v1` and
 `rem-sleep-sources-days.v1`; legacy v0 grants and every existing permission,
-grant, revoke, and settings flow remain unchanged. The projection shape is now
-uniform with every other shared health scope: each date can carry one complete
-record per available public source, and each record carries a canonical
-`{ source, label }` tag plus a `date.source` record key. A canonical manually
-entered observation is the explicit `manual` / `Manual` source and is never
-attributed to a wearable or aggregator. Murph-derived meal totals use
+grant, revoke, and settings control remain valid. Every health scope now
+authorizes its public source identity together with the value, including
+existing active grants, and each permission description discloses that rule in
+one short sentence. The projection shape is uniform: each date can carry one
+complete record per available public source, and each record carries a
+canonical `{ source, label }` tag plus a `date.source` record key. A canonical
+manually entered observation is the explicit `manual` / `Manual` source and is
+never attributed to a wearable or aggregator. Murph-derived meal totals use
 `murph` / `Murph`. The producer admits at most eight public sources and seven
 member-local civil dates, fails closed above the complete 56-record bound, and
 never truncates or chooses one source to represent another.
@@ -159,27 +161,19 @@ Persisted unsourced records and the earlier nested source-aware sleep snapshots
 remain parseable during convergence. A new join view or access offer still
 derives the matching legacy sleep policy request as v1, so existing groups keep
 one complete permission without owner reconfiguration. The durable v0 policy
-entry remains exact. When Web acceptance explicitly approves v1, that scope is
-added alongside v0 in the same locked transaction as the grant change, so the
-previous Web can still show and revoke every active authority after rollback.
-This never upgrades or broadens an existing grant in place; each member's v1
-grant still requires its own server-owned access approval.
-
-The authenticated sharing controls keep a legacy-active sleep grant visible
-under that same single Deep sleep or REM sleep row. Saving without changing it
-preserves the narrower v0 grant. The member can explicitly include source
-details, which grants v1 and revokes the matching v0 row in the same
-transaction, or turn the row off, which revokes both versions. A native reaction
-to a new v1 offer uses the same replacement semantics. No legacy grant is hidden
-or broadened by policy normalization.
+entry remains exact, and saving an existing v0 grant preserves that scope key.
+The authenticated sharing controls show v0 and v1 under the same row; turning
+that permission off revokes both versions through the existing flow. There is
+no separate source-details grant or upgrade control because source identity is
+part of every health scope's contract.
 
 A persisted reader that still requests a legacy v0 sleep scope may use records
 from the matching v1 grant when no exact v0 grant is active. New source-tagged
 records retain every source under the requested v0 scope identity. An earlier
 nested v1 snapshot still projects only its historical top-level scalar because
 that snapshot did not contain independent record envelopes. When both grants
-exist, the exact v0 grant wins. This lets a frozen workflow converge after an
-explicit v1 approval without changing its authority.
+exist, the exact v0 grant wins, preserving stable authority lookup while both
+scope versions share the same source-aware meaning.
 
 Snapshot generation and record times are not proof of a live provider fetch. A
 group response may describe the stored source-tagged values and their

@@ -638,7 +638,10 @@ civil dates. Each available public source receives its own tagged record and
 records without cross-source ranking or truncation. `workouts.v0` instead keeps
 seven day records, tags each workout item, and retains its separate global
 calendar-close semantics. A missing or invalid vault timezone fails the other
-civil-date scopes closed.
+civil-date scopes closed. Public source identity is part of every existing
+health scope, including active v0 grants; scope keys and grant/revoke controls
+do not change, and each member-facing permission describes the source-aware
+share in one short sentence.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
 `pending` parser/model status before Web emits `pending`, exact seven-day consent
 copy, or fresh projection work. Deploy Web before any backfill clears a legacy
