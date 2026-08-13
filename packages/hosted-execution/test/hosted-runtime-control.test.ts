@@ -242,6 +242,7 @@ describe("hosted runtime control contracts", () => {
       "environment-voice.captured",
       "meal-photo.captured",
       "member.action.requested",
+      "member.action.completed",
       "vault-share.delivery",
       "vault-share.revoke",
       "group-newsletter.email-needed",
