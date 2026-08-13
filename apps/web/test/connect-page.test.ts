@@ -497,7 +497,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.equal(
     markup.match(/>Not available<\/button>/gu)?.length,
-    sources.length - 8,
+    sources.length - 9,
   );
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);

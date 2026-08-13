@@ -13,7 +13,7 @@ import {
 import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
-import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/registry";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/presentation";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
 
 type ConnectSourceCardStudyCase = {

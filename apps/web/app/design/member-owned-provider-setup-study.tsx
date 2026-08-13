@@ -1,7 +1,7 @@
 "use client";
 
 import { MemberOwnedProviderSetup } from "@/src/components/device-sync/member-owned-provider-setup";
-import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/registry";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/presentation";
 import type {
   MemberOwnedProviderSetupStatus,
   MemberOwnedProviderSetupView,
