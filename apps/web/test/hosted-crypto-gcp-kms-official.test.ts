@@ -14,6 +14,11 @@ interface CapturedKmsCall {
   request: Record<PropertyKey, unknown>;
 }
 
+type FakeKmsApiCall = (
+  request: Record<PropertyKey, unknown>,
+  options: Record<PropertyKey, unknown>,
+) => Promise<[unknown, null, null]> & { cancel(): void };
+
 const googleSdkMocks = vi.hoisted(() => ({
   authClients: [] as object[],
   authRequest: null as null | ((input: CapturedAuthRequest) => Promise<unknown>),
@@ -25,7 +30,7 @@ const googleSdkMocks = vi.hoisted(() => ({
 
 vi.mock("@google-cloud/kms", () => {
   class KeyManagementServiceClient {
-    readonly innerApiCalls: Record<string, Function>;
+    readonly innerApiCalls: Record<string, FakeKmsApiCall>;
 
     constructor(readonly options: Record<PropertyKey, unknown>) {
       googleSdkMocks.kmsClients.push(this);
@@ -80,7 +85,7 @@ vi.mock("@google-cloud/kms", () => {
       );
     }
 
-    async initialize(): Promise<Record<string, Function>> {
+    async initialize(): Promise<Record<string, FakeKmsApiCall>> {
       return this.innerApiCalls;
     }
   }

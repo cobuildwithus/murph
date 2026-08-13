@@ -52,6 +52,7 @@ const skippedDirectoryNames = new Set([
   ".next",
   ".next-dev",
   ".next-smoke",
+  ".deploy",
   "__tests__",
   "coverage",
   "dist",
@@ -1253,7 +1254,7 @@ async function scanDirectory(
   for (const entry of entries) {
     const entryRelativePath = path.posix.join(relativePath, entry.name);
     if (entry.isDirectory()) {
-      if (!shouldSkipDirectory(entry.name)) {
+      if (!shouldSkipProviderRequestDirectory(entry.name)) {
         await scanDirectory(entryRelativePath, violations);
       }
       continue;
@@ -1282,7 +1283,7 @@ export function shouldScanProviderRequestSourceFile(relativePath: string): boole
     sourceExtensions.has(path.posix.extname(relativePath));
 }
 
-function shouldSkipDirectory(name: string): boolean {
+export function shouldSkipProviderRequestDirectory(name: string): boolean {
   return skippedDirectoryNames.has(name) || name.startsWith(".next");
 }
 

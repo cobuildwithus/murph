@@ -4,6 +4,7 @@ import {
   findProviderRequestBoundaryViolations,
   providerRequestScanRoots,
   providerRequestSourceExtensions,
+  shouldSkipProviderRequestDirectory,
   shouldScanProviderRequestSourceFile,
 } from "./check-provider-request-boundaries.ts";
 
@@ -43,6 +44,10 @@ describe("check-provider-request-boundaries", () => {
     expect(providerRequestSourceExtensions).toContain(".cjs");
     expect(providerRequestSourceExtensions).toContain(".js");
     expect(providerRequestSourceExtensions).toContain(".mjs");
+  });
+
+  it("does not treat assembled deployment output as authored provider source", () => {
+    expect(shouldSkipProviderRequestDirectory(".deploy")).toBe(true);
   });
 
   it("excludes JavaScript tests and TypeScript declaration variants", () => {

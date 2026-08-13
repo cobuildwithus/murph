@@ -3024,6 +3024,48 @@ test('linq runtime records safe request and response diagnostics for provider ht
   )
 })
 
+test('linq runtime retains hashed text diagnostics from bodyless fetch adapters', async () => {
+  const providerText = 'Plain Linq failure'
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'private-chat-route',
+        message: 'private message body',
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => ({
+          arrayBuffer: async () => new ArrayBuffer(0),
+          json: async () => {
+            throw new Error('invalid json')
+          },
+          ok: false,
+          status: 400,
+          text: async () => providerText,
+        }),
+      },
+    ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+      const serialized = JSON.stringify({
+        context: error.context,
+        message: error.message,
+      })
+      return error.code === 'LINQ_API_REQUEST_FAILED'
+        && error.context?.responseBodyKind === 'text'
+        && error.context?.responseBodySha256 ===
+          'da7d00e0c46925b2155166ece27e101541b4a22b97ac223cd4749b880e59a0da'
+        && error.context?.responseBodyTextLength === providerText.length
+        && !serialized.includes(providerText)
+        && !serialized.includes('private-chat-route')
+        && !serialized.includes('private message body')
+    },
+  )
+})
+
 test('linq runtime rejects oversized rendered text before provider entry', async () => {
   const fetchImplementation = vi.fn(async () => createJsonResponse({}))
 

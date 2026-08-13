@@ -1,10 +1,32 @@
 import {
-  Junction,
-  JunctionClient as JunctionSdkClient,
-  JunctionError,
-  JunctionTimeoutError,
+  type BaseClientOptions,
   type BaseRequestOptions,
 } from "@junction-api/sdk";
+import { ActivityClient, type GetActivityRequest } from "@junction-api/sdk/activity";
+import { BodyClient } from "@junction-api/sdk/body";
+import { ElectrocardiogramClient } from "@junction-api/sdk/electrocardiogram";
+import {
+  type GetUserHistoricalPullsIntrospectRequest,
+  type GetUserResourcesIntrospectRequest,
+  IntrospectClient,
+} from "@junction-api/sdk/introspect";
+import {
+  type BulkTriggerHistoricalPullBody,
+  LinkClient,
+  type LinkTokenExchange,
+} from "@junction-api/sdk/link";
+import { MealClient } from "@junction-api/sdk/meal";
+import { MenstrualCycleClient } from "@junction-api/sdk/menstrualCycle";
+import { ProfileClient, type GetProfileRequest } from "@junction-api/sdk/profile";
+import { SleepClient } from "@junction-api/sdk/sleep";
+import { SleepCycleClient } from "@junction-api/sdk/sleepCycle";
+import {
+  type DeregisterProviderUserRequest,
+  type RefreshUserRequest,
+  UserClient,
+} from "@junction-api/sdk/user";
+import { VitalsClient, type StepsGroupedVitalsRequest } from "@junction-api/sdk/vitals";
+import { WorkoutsClient } from "@junction-api/sdk/workouts";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 
 import {
@@ -154,6 +176,24 @@ export interface JunctionRefreshUserDataInput {
   userId: string;
 }
 
+type JunctionSdkProvider = DeregisterProviderUserRequest["provider"];
+type JunctionSdkOAuthProvider = BulkTriggerHistoricalPullBody["provider"];
+
+const JUNCTION_SDK_PROVIDERS = Object.freeze([
+  "oura", "fitbit", "garmin", "whoop", "strava", "renpho", "peloton", "wahoo",
+  "zwift", "freestyle_libre", "abbott_libreview", "tandem_source", "freestyle_libre_ble",
+  "eight_sleep", "withings", "apple_health_kit", "manual", "ihealth", "google_fit",
+  "beurer_api", "beurer_ble", "omron", "omron_ble", "onetouch_ble", "accuchek_ble",
+  "contour_ble", "dexcom", "dexcom_v3", "hammerhead", "my_fitness_pal", "health_connect",
+  "samsung_health", "polar", "cronometer", "kardia", "whoop_v2", "ultrahuman",
+  "my_fitness_pal_v2", "map_my_fitness", "runkeeper",
+] as const satisfies readonly JunctionSdkProvider[]);
+const JUNCTION_SDK_OAUTH_PROVIDERS = Object.freeze([
+  "oura", "fitbit", "garmin", "strava", "wahoo", "ihealth", "withings", "google_fit",
+  "dexcom_v3", "polar", "cronometer", "omron", "whoop_v2", "my_fitness_pal_v2",
+  "ultrahuman", "runkeeper",
+] as const satisfies readonly JunctionSdkOAuthProvider[]);
+
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_GET_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 500;
@@ -197,7 +237,8 @@ export class JunctionClient {
         optional404: true,
         signal: options.signal ?? null,
       },
-      (client, requestOptions) => client.user.getByClientUserId({ clientUserId }, requestOptions),
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .getByClientUserId({ clientUserId }, requestOptions),
     );
     return payload ? parseJunctionUser(payload, "Junction resolve user response") : null;
   }
@@ -213,7 +254,8 @@ export class JunctionClient {
         endpointKind: "junction_user_create",
         signal: options.signal ?? null,
       },
-      (client, requestOptions) => client.user.create({ clientUserId }, requestOptions),
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .create({ clientUserId }, requestOptions),
     );
     return parseJunctionUser(payload, "Junction create user response");
   }
@@ -264,8 +306,8 @@ export class JunctionClient {
         endpointKind: "junction_link_token_create",
         signal: input.signal ?? null,
       },
-      (client, requestOptions) => {
-        const request: Junction.LinkTokenExchange = {
+      (clientOptions, requestOptions) => {
+        const request: LinkTokenExchange = {
           userId: input.userId,
           redirectUrl: input.callbackUrl,
         };
@@ -274,7 +316,7 @@ export class JunctionClient {
         } else if (providerFilter && providerFilter.length > 0) {
           request.filterOnProviders = providerFilter;
         }
-        return client.link.token(request, requestOptions);
+        return new LinkClient(clientOptions).token(request, requestOptions);
       },
     );
     const linkWebUrl = normalizeString(payload.link_web_url) ?? normalizeString(payload.linkWebUrl);
@@ -312,7 +354,7 @@ export class JunctionClient {
         endpointKind: "junction_user_sign_in_token",
         signal: options.signal ?? null,
       },
-      (client, requestOptions) => client.user.getUserSignInToken(
+      (clientOptions, requestOptions) => new UserClient(clientOptions).getUserSignInToken(
         { userId: normalizedUserId },
         requestOptions,
       ),
@@ -336,7 +378,8 @@ export class JunctionClient {
     const payload = await this.requestSdkResource<unknown>(
       "GET",
       { endpointKind: "junction_user_providers", signal: options.signal ?? null },
-      (client, requestOptions) => client.user.getConnectedProviders({ userId }, requestOptions),
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .getConnectedProviders({ userId }, requestOptions),
     );
     return parseJunctionProviders(payload);
   }
@@ -358,7 +401,7 @@ export class JunctionClient {
     await this.requestSdkResource<unknown>(
       "DELETE",
       { endpointKind: "junction_user_provider_deregister", signal: input.signal ?? null },
-      (client, requestOptions) => client.user.deregisterProvider({
+      (clientOptions, requestOptions) => new UserClient(clientOptions).deregisterProvider({
         provider: requireJunctionSdkProvider(providerSlug),
         userId,
       }, requestOptions),
@@ -372,7 +415,8 @@ export class JunctionClient {
     const payload = await this.requestSdkResource<unknown>(
       "GET",
       { endpointKind: "junction_user_devices", signal: options.signal ?? null },
-      (client, requestOptions) => client.user.getDevices({ userId }, requestOptions),
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .getDevices({ userId }, requestOptions),
     );
     return extractCollectionRecords(payload);
   }
@@ -397,12 +441,12 @@ export class JunctionClient {
         queryParameterNames: provider ? ["provider"] : [],
         signal: input.signal ?? null,
       },
-      (client, requestOptions) => {
-        const request: Junction.GetProfileRequest = { userId: input.userId };
+      (clientOptions, requestOptions) => {
+        const request: GetProfileRequest = { userId: input.userId };
         if (provider) {
           request.provider = provider;
         }
-        return client.profile.get(request, requestOptions);
+        return new ProfileClient(clientOptions).get(request, requestOptions);
       },
     );
     return extractCollectionRecords(payload, "profile");
@@ -425,15 +469,15 @@ export class JunctionClient {
         queryParameterNames: ["user_id", "user_limit", ...(provider ? ["provider"] : [])],
         signal: input.signal ?? null,
       },
-      (client, requestOptions) => {
-        const request: Junction.GetUserResourcesIntrospectRequest = {
+      (clientOptions, requestOptions) => {
+        const request: GetUserResourcesIntrospectRequest = {
           userId: input.userId,
           userLimit: input.userLimit ?? 1,
         };
         if (provider) {
           request.provider = provider;
         }
-        return client.introspect.getUserResources(request, requestOptions);
+        return new IntrospectClient(clientOptions).getUserResources(request, requestOptions);
       },
     );
   }
@@ -449,15 +493,15 @@ export class JunctionClient {
         queryParameterNames: ["user_id", "user_limit", ...(provider ? ["provider"] : [])],
         signal: input.signal ?? null,
       },
-      (client, requestOptions) => {
-        const request: Junction.GetUserHistoricalPullsIntrospectRequest = {
+      (clientOptions, requestOptions) => {
+        const request: GetUserHistoricalPullsIntrospectRequest = {
           userId: input.userId,
           userLimit: input.userLimit ?? 1,
         };
         if (provider) {
           request.provider = provider;
         }
-        return client.introspect.getUserHistoricalPulls(request, requestOptions);
+        return new IntrospectClient(clientOptions).getUserHistoricalPulls(request, requestOptions);
       },
     );
     return parseJunctionHistoricalPullSnapshot(
@@ -500,7 +544,7 @@ export class JunctionClient {
           endpointKind: "junction_bulk_trigger_historical_pull",
           signal: input.signal ?? null,
         },
-        (client, requestOptions) => client.link.bulkTriggerHistoricalPull({
+        (clientOptions, requestOptions) => new LinkClient(clientOptions).bulkTriggerHistoricalPull({
           provider: requireJunctionSdkOAuthProvider(sourceProviderSlug),
           userIds,
         }, requestOptions),
@@ -523,12 +567,12 @@ export class JunctionClient {
         queryParameterNames: timeout === null ? [] : ["timeout"],
         signal: input.signal ?? null,
       },
-      (client, requestOptions) => {
-        const request: Junction.RefreshUserRequest = { userId: input.userId };
+      (clientOptions, requestOptions) => {
+        const request: RefreshUserRequest = { userId: input.userId };
         if (timeout !== null) {
           request.timeout = timeout;
         }
-        return client.user.refresh(request, requestOptions);
+        return new UserClient(clientOptions).refresh(request, requestOptions);
       },
     );
   }
@@ -571,7 +615,7 @@ export class JunctionClient {
   private requestSummaryPage(input: JunctionWindowInput, cursor: string | null): Promise<unknown> {
     const format = resolveJunctionSummaryDateQueryFormat(input);
     const provider = optionalJunctionSdkProvider(input.sourceProviderSlug);
-    const request: Junction.GetActivityRequest = {
+    const request: GetActivityRequest = {
       userId: input.userId,
       startDate: toDateParameter(input.windowStart, format, "start"),
       endDate: toDateParameter(input.windowEnd, format, "end"),
@@ -592,19 +636,19 @@ export class JunctionClient {
         queryParameterNames,
         signal: input.signal ?? null,
       },
-      (client, requestOptions) => {
+      (clientOptions, requestOptions) => {
         if (cursor) {
           requestOptions.queryParams = { next_cursor: cursor };
         }
         switch (input.resource) {
-          case "activity": return client.activity.get(request, requestOptions);
-          case "sleep": return client.sleep.get(request, requestOptions);
-          case "sleep_cycle": return client.sleepCycle.get(request, requestOptions);
-          case "workouts": return client.workouts.get(request, requestOptions);
-          case "body": return client.body.get(request, requestOptions);
-          case "meal": return client.meal.get(request, requestOptions);
-          case "menstrual_cycle": return client.menstrualCycle.get(request, requestOptions);
-          case "electrocardiogram": return client.electrocardiogram.get(request, requestOptions);
+          case "activity": return new ActivityClient(clientOptions).get(request, requestOptions);
+          case "sleep": return new SleepClient(clientOptions).get(request, requestOptions);
+          case "sleep_cycle": return new SleepCycleClient(clientOptions).get(request, requestOptions);
+          case "workouts": return new WorkoutsClient(clientOptions).get(request, requestOptions);
+          case "body": return new BodyClient(clientOptions).get(request, requestOptions);
+          case "meal": return new MealClient(clientOptions).get(request, requestOptions);
+          case "menstrual_cycle": return new MenstrualCycleClient(clientOptions).get(request, requestOptions);
+          case "electrocardiogram": return new ElectrocardiogramClient(clientOptions).get(request, requestOptions);
           default: throw new TypeError(`Unsupported Junction summary resource: ${input.resource}`);
         }
       },
@@ -613,7 +657,7 @@ export class JunctionClient {
 
   private requestTimeseriesPage(input: JunctionWindowInput, cursor: string | null): Promise<unknown> {
     const provider = optionalJunctionSdkProvider(input.sourceProviderSlug);
-    const request: Junction.StepsGroupedVitalsRequest = {
+    const request: StepsGroupedVitalsRequest = {
       userId: input.userId,
       startDate: toDateParameter(input.windowStart, input.dateQueryFormat ?? "datetime", "start"),
       endDate: toDateParameter(input.windowEnd, input.dateQueryFormat ?? "datetime", "end"),
@@ -637,30 +681,31 @@ export class JunctionClient {
         queryParameterNames,
         signal: input.signal ?? null,
       },
-      (client, requestOptions) => {
+      (clientOptions, requestOptions) => {
+        const client = new VitalsClient(clientOptions);
         switch (input.resource) {
-          case "steps": return client.vitals.stepsGrouped(request, requestOptions);
-          case "distance": return client.vitals.distanceGrouped(request, requestOptions);
-          case "calories_active": return client.vitals.caloriesActiveGrouped(request, requestOptions);
-          case "heartrate": return client.vitals.heartrateGrouped(request, requestOptions);
-          case "hrv": return client.vitals.hrvGrouped(request, requestOptions);
-          case "respiratory_rate": return client.vitals.respiratoryRateGrouped(request, requestOptions);
-          case "blood_oxygen": return client.vitals.bloodOxygenGrouped(request, requestOptions);
-          case "stress_level": return client.vitals.stressLevelGrouped(request, requestOptions);
-          case "vo2_max": return client.vitals.vo2MaxGrouped(request, requestOptions);
-          case "weight": return client.vitals.bodyWeightGrouped(request, requestOptions);
-          case "body_temperature_delta": return client.vitals.bodyTemperatureDeltaGrouped(request, requestOptions);
-          case "body_temperature": return client.vitals.bodyTemperatureGrouped(request, requestOptions);
-          case "basal_body_temperature": return client.vitals.basalBodyTemperatureGrouped(request, requestOptions);
-          case "caffeine": return client.vitals.caffeineGrouped(request, requestOptions);
-          case "water": return client.vitals.waterGrouped(request, requestOptions);
-          case "mindfulness_minutes": return client.vitals.mindfulnessMinutesGrouped(request, requestOptions);
-          case "heart_rate_recovery_one_minute": return client.vitals.heartRateRecoveryOneMinuteGrouped(request, requestOptions);
-          case "sleep_breathing_disturbance": return client.vitals.sleepBreathingDisturbanceGrouped(request, requestOptions);
-          case "afib_burden": return client.vitals.afibBurdenGrouped(request, requestOptions);
-          case "glucose": return client.vitals.glucoseGrouped(request, requestOptions);
-          case "blood_pressure": return client.vitals.bloodPressureGrouped(request, requestOptions);
-          case "note": return client.vitals.noteGrouped(request, requestOptions);
+          case "steps": return client.stepsGrouped(request, requestOptions);
+          case "distance": return client.distanceGrouped(request, requestOptions);
+          case "calories_active": return client.caloriesActiveGrouped(request, requestOptions);
+          case "heartrate": return client.heartrateGrouped(request, requestOptions);
+          case "hrv": return client.hrvGrouped(request, requestOptions);
+          case "respiratory_rate": return client.respiratoryRateGrouped(request, requestOptions);
+          case "blood_oxygen": return client.bloodOxygenGrouped(request, requestOptions);
+          case "stress_level": return client.stressLevelGrouped(request, requestOptions);
+          case "vo2_max": return client.vo2MaxGrouped(request, requestOptions);
+          case "weight": return client.bodyWeightGrouped(request, requestOptions);
+          case "body_temperature_delta": return client.bodyTemperatureDeltaGrouped(request, requestOptions);
+          case "body_temperature": return client.bodyTemperatureGrouped(request, requestOptions);
+          case "basal_body_temperature": return client.basalBodyTemperatureGrouped(request, requestOptions);
+          case "caffeine": return client.caffeineGrouped(request, requestOptions);
+          case "water": return client.waterGrouped(request, requestOptions);
+          case "mindfulness_minutes": return client.mindfulnessMinutesGrouped(request, requestOptions);
+          case "heart_rate_recovery_one_minute": return client.heartRateRecoveryOneMinuteGrouped(request, requestOptions);
+          case "sleep_breathing_disturbance": return client.sleepBreathingDisturbanceGrouped(request, requestOptions);
+          case "afib_burden": return client.afibBurdenGrouped(request, requestOptions);
+          case "glucose": return client.glucoseGrouped(request, requestOptions);
+          case "blood_pressure": return client.bloodPressureGrouped(request, requestOptions);
+          case "note": return client.noteGrouped(request, requestOptions);
           default: throw new TypeError(`Unsupported Junction timeseries resource: ${input.resource}`);
         }
       },
@@ -677,7 +722,7 @@ export class JunctionClient {
       signal?: AbortSignal | null;
     },
     invoke: (
-      client: JunctionSdkClient,
+      clientOptions: BaseClientOptions,
       requestOptions: BaseRequestOptions,
     ) => PromiseLike<unknown>,
   ): Promise<T> {
@@ -736,17 +781,17 @@ export class JunctionClient {
         );
       };
       const timeoutInSeconds = this.requestTimeoutMs / 1_000;
-      const client = new JunctionSdkClient({
+      const clientOptions: BaseClientOptions = {
         apiKey: this.apiKey,
         baseUrl: this.baseUrl,
         fetch: sdkFetch,
         headers: { "Content-Type": "application/json" },
         maxRetries: 0,
         timeoutInSeconds,
-      });
+      };
 
       try {
-        const payload = await invoke(client, {
+        const payload = await invoke(clientOptions, {
           abortSignal: requestAbort.signal,
           maxRetries: 0,
           timeoutInSeconds,
@@ -836,7 +881,7 @@ export class JunctionClient {
           }
         } else if (
           attempt >= attempts
-          || error instanceof JunctionTimeoutError
+          || isJunctionSdkTimeoutError(error)
           || isProviderTimeoutError(providerError, requestAbort.signal)
         ) {
           break;
@@ -885,8 +930,7 @@ function unwrapJunctionSdkErrorCause(error: unknown): unknown {
   let current = error;
   const visited = new Set<unknown>();
   while (
-    (current instanceof JunctionError || current instanceof JunctionTimeoutError)
-    && current.cause !== undefined
+    isJunctionSdkErrorWithCause(current)
     && !visited.has(current)
   ) {
     visited.add(current);
@@ -989,21 +1033,14 @@ function readCapturedJunctionSdkHttpFailure(
   if (body === null) {
     return null;
   }
-  let payload: unknown = body;
-  if (body.trim()) {
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      // Preserve a non-JSON error body through JunctionError's official body
-      // field so the existing bounded provider-error diagnostics can classify it.
-    }
-  }
-  const sdkError = new JunctionError({
-    body: payload,
-    rawResponse: capture.rawResponse,
-    statusCode: capture.rawResponse.status,
-  });
-  return readJunctionSdkHttpFailure(sdkError);
+  return {
+    body,
+    response: new Response(null, {
+      headers: capture.rawResponse.headers,
+      status: capture.rawResponse.status,
+      statusText: capture.rawResponse.statusText,
+    }),
+  };
 }
 
 function readCapturedJunctionSdkBody(
@@ -1040,23 +1077,47 @@ function readCapturedJunctionSdkText(capture: JunctionSdkResponseCapture): strin
 function readJunctionSdkHttpFailure(
   error: unknown,
 ): { body: string; response: Response } | null {
-  if (!(error instanceof JunctionError)) {
+  const sdkError = readPlainObject(error);
+  if (!sdkError || !isJunctionSdkErrorName(error)) {
     return null;
   }
 
-  const status = error.statusCode ?? error.rawResponse?.status;
+  const rawResponse = readPlainObject(sdkError.rawResponse);
+  const status = sdkError.statusCode ?? rawResponse?.status;
   if (typeof status !== "number" || !Number.isInteger(status) || status < 200 || status > 599) {
     return null;
   }
 
   return {
-    body: serializeJunctionSdkErrorBody(error.body),
+    body: serializeJunctionSdkErrorBody(sdkError.body),
     response: new Response(null, {
-      headers: error.rawResponse?.headers,
+      headers: readHeaders(rawResponse?.headers),
       status,
-      statusText: error.rawResponse?.statusText,
+      statusText: normalizeString(rawResponse?.statusText) ?? undefined,
     }),
   };
+}
+
+function isJunctionSdkErrorWithCause(error: unknown): error is Error & { cause: unknown } {
+  return (isJunctionSdkErrorName(error) || isJunctionSdkTimeoutError(error))
+    && error.cause !== undefined;
+}
+
+function isJunctionSdkErrorName(error: unknown): error is Error {
+  return error instanceof Error && (
+    error.name === "JunctionError"
+    || error.name === "BadRequestError"
+    || error.name === "NotFoundError"
+    || error.name === "UnprocessableEntityError"
+  );
+}
+
+function isJunctionSdkTimeoutError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "JunctionTimeoutError";
+}
+
+function readHeaders(value: unknown): HeadersInit | undefined {
+  return value instanceof Headers ? value : undefined;
 }
 
 function serializeJunctionSdkErrorBody(body: unknown): string {
@@ -1132,31 +1193,29 @@ function normalizeRequiredProviderSlug(value: unknown): string {
   return provider;
 }
 
-function optionalJunctionSdkProvider(value: unknown): Junction.Providers | undefined {
+function optionalJunctionSdkProvider(value: unknown): JunctionSdkProvider | undefined {
   const normalized = normalizeJunctionProviderSlug(value);
   return normalized ? requireJunctionSdkProvider(normalized) : undefined;
 }
 
-function requireJunctionSdkProvider(value: string): Junction.Providers {
+function requireJunctionSdkProvider(value: string): JunctionSdkProvider {
   const route = resolveJunctionDeviceConnectRouteByProviderSlug(value);
   const canonicalValue = route?.route.sourceProviderSlug ?? value;
 
-  for (const provider of Object.values(Junction.Providers)) {
-    if (provider === canonicalValue) {
-      return provider;
-    }
+  const provider = JUNCTION_SDK_PROVIDERS.find((candidate) => candidate === canonicalValue);
+  if (provider) {
+    return provider;
   }
   throw new TypeError(`Unsupported Junction provider slug: ${value}`);
 }
 
-function requireJunctionSdkOAuthProvider(value: string): Junction.OAuthProviders {
+function requireJunctionSdkOAuthProvider(value: string): JunctionSdkOAuthProvider {
   const route = resolveJunctionDeviceConnectRouteByProviderSlug(value);
   const canonicalValue = route?.route.sourceProviderSlug ?? value;
 
-  for (const provider of Object.values(Junction.OAuthProviders)) {
-    if (provider === canonicalValue) {
-      return provider;
-    }
+  const provider = JUNCTION_SDK_OAUTH_PROVIDERS.find((candidate) => candidate === canonicalValue);
+  if (provider) {
+    return provider;
   }
   throw new TypeError(`Unsupported Junction OAuth provider slug: ${value}`);
 }
