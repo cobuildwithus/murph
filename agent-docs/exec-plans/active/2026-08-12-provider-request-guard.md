@@ -206,6 +206,20 @@ Updated: 2026-08-13
   the same transport and provider-fact pipeline, so adapters retained by the
   migration remain findings until their operation can use the official client
   directly or a separately proven unavoidable transport class is approved.
+- ReviewGPT round 7 accepted three remaining effective-value and provenance
+  gaps without changing the round-2 architecture. Opaque exact fetch calls now
+  inherit provider evidence only from their enclosing provider-specific SDK
+  fetch adapter or unambiguous provider file, so the actual Junction and OpenAI
+  adapter effects are findings while provider-neutral callbacks remain clean.
+  The AgentMail transport was moved from its single generic cross-file retry
+  helper into the AgentMail owner instead of adding interprocedural analysis.
+  Identifier reads now resolve the nearest chronological declaration or simple
+  assignment, presigned init and header proof requires direct immutable syntax,
+  and the retained Linq upload invokes its audited frozen header factory at the
+  fetch call. `.call` facts come from the underlying transport target; `.apply`
+  admits exceptions only for direct closed array literals, while identifier,
+  spread, and sparse tuples fail closed. No baseline, warning mode, comment
+  suppression, SDK-import exemption, or new provider exception was added.
 
 ## Verification
 
@@ -218,16 +232,15 @@ Updated: 2026-08-13
 
 Current evidence:
 
-- Focused guard suite: 87 tests passed after the current-base integration.
-- Repository-tool suite: 34 files and 586 tests passed after the round-6
-  correction. The earlier round-4 contended run timed out two
-  Crabbox repeated-signal cases; that file passed alone and each quiet full
-  rerun passed.
-- Tools TypeScript no-emit check and `git diff --check`: passed.
-- `pnpm provider-requests:guard`: intentionally exits 1 with 31 findings after
+- Focused guard suite: 92 tests passed after the round-7 correction.
+- Repository-tool suite: 35 files and 602 tests passed after refreshing the
+  already-declared, lockfile-frozen ElevenLabs dependency.
+- Tools and operator-config TypeScript no-emit checks: passed.
+- `pnpm provider-requests:guard`: intentionally exits 1 with 39 findings after
   integrating the sibling SDK migrations. It continues to report the retained SDK fetch
-  adapters and handwritten response/fetch contracts, plus the unchanged
-  AgentMail clients and remaining Linq operation-level calls. The actual Linq
+  adapters at their executable transport lines and handwritten response/fetch
+  contracts, plus the unchanged AgentMail clients and remaining Linq
+  operation-level calls. The actual Linq
   and AgentMail presigned byte transfers remain outside the inventory as the
   already-proven narrow byte-transfer exception.
 - Diff verification reaches the provider guard and stops on the same expected

@@ -876,7 +876,7 @@ async function uploadLinqAttachmentBytes(
         try {
           return await fetchImplementation(uploadUrl, {
             body,
-            headers,
+            headers: normalizeLinqRequiredHeaders(input.requiredHeaders),
             method: 'PUT',
             redirect: 'error',
             signal: timeout.signal,
@@ -2652,7 +2652,7 @@ function normalizeLinqRequiredHeaders(
     )
   }
 
-  return normalized
+  return Object.freeze(normalized)
 }
 
 function shouldRetryLinqTransportFailure(

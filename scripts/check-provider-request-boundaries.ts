@@ -362,6 +362,7 @@ type ProviderRequestBoundaryViolationKind =
   | "untyped-request-object";
 
 interface VariableBinding {
+  readonly definitive: boolean;
   readonly identifierStart: number;
   readonly initializer: Expression;
   readonly scopeEnd: number;
@@ -1476,9 +1477,15 @@ function readParameterTypeAnnotation(
 interface ProviderHttpCandidate {
   readonly call: CallExpression | OptionalCallExpression;
   readonly providers: readonly RegisteredProviderBoundary[];
+  readonly unresolvedProviderBoundary: boolean;
 }
 
 interface ProviderHttpCallShape {
+  readonly evidenceNode: Node;
+  readonly initArgument: Node | null;
+  readonly supportsRegisteredExceptions: boolean;
+  readonly transportTarget: Node;
+  readonly unresolvedProviderBoundary: boolean;
   readonly urlArgument: Node;
 }
 
@@ -1521,20 +1528,19 @@ function collectRawProviderHttpViolations(input: {
       before: node.start ?? Number.MAX_SAFE_INTEGER,
       bindings: input.bindings,
       contents: input.contents,
-      node: callShape.urlArgument,
+      node: callShape.evidenceNode,
       resolving: new Set(),
     });
-    if (
-      isFetchLikeCallTarget({
-        analysis: input.analysis,
-        before: node.start ?? Number.MAX_SAFE_INTEGER,
-        bindings: input.bindings,
-        contents: input.contents,
-        exact: true,
-        node: node.callee,
-        resolving: new Set(),
-      })
-    ) {
+    const exactTransportTarget = isFetchLikeCallTarget({
+      analysis: input.analysis,
+      before: node.start ?? Number.MAX_SAFE_INTEGER,
+      bindings: input.bindings,
+      contents: input.contents,
+      exact: true,
+      node: callShape.transportTarget,
+      resolving: new Set(),
+    });
+    if (exactTransportTarget) {
       mergeProviderExpressionFacts(
         requestFacts,
         inferProviderExpressionFacts({
@@ -1542,20 +1548,36 @@ function collectRawProviderHttpViolations(input: {
           before: node.start ?? Number.MAX_SAFE_INTEGER,
           bindings: input.bindings,
           contents: input.contents,
-          node: node.callee,
+          node: callShape.transportTarget,
           resolving: new Set(),
         }),
       );
+    }
+    if (
+      requestFacts.providerIds.size === 0 &&
+      (
+        exactTransportTarget ||
+        isInsideSdkFetchAdapter(input.sourceFile, node.start ?? 0)
+      )
+    ) {
+      addEnclosingProviderContextFacts({
+        analysis: input.analysis,
+        facts: requestFacts,
+        position: node.start ?? 0,
+        sourceFile: input.sourceFile,
+      });
     }
     const providers = providerBoundaryRegistry.filter(
       (provider) =>
         requestFacts.providerIds.has(provider.id) &&
         provider.rawHttpPolicy === "require-official-sdk",
     );
-    if (providers.length === 0) {
+    if (providers.length === 0 && !callShape.unresolvedProviderBoundary) {
       return;
     }
     if (
+      !callShape.unresolvedProviderBoundary &&
+      callShape.supportsRegisteredExceptions &&
       providers.every((provider) =>
         matchesRegisteredProviderHttpException({
           analysis: input.analysis,
@@ -1564,6 +1586,7 @@ function collectRawProviderHttpViolations(input: {
           contents: input.contents,
           provider,
           relativePath: input.relativePath,
+          initArgument: callShape.initArgument,
           urlArgument: callShape.urlArgument,
           urlFacts: requestFacts,
         })
@@ -1571,7 +1594,12 @@ function collectRawProviderHttpViolations(input: {
     ) {
       return;
     }
-    candidates.push({ call: node, providers });
+    candidates.push({
+      call: node,
+      providers,
+      unresolvedProviderBoundary:
+        callShape.unresolvedProviderBoundary && providers.length === 0,
+    });
   });
 
   const localFunctions = collectLocalFunctionRanges(input.sourceFile);
@@ -1604,8 +1632,9 @@ function collectRawProviderHttpViolations(input: {
     }
     recordViolation(
       {
-        boundary:
-          `${candidate.providers.map((provider) => provider.label).join("/")} raw HTTP via ${readNodeText(candidate.call.callee, input.contents)}`,
+        boundary: candidate.unresolvedProviderBoundary
+          ? `Unresolved external-provider raw HTTP via ${readNodeText(candidate.call.callee, input.contents)}`
+          : `${candidate.providers.map((provider) => provider.label).join("/")} raw HTTP via ${readNodeText(candidate.call.callee, input.contents)}`,
         contents: input.contents,
         relativePath: input.relativePath,
         violationsByKey: input.violationsByKey,
@@ -1626,6 +1655,13 @@ function readProviderHttpCallShape(
       const urlArgument = call.arguments[1];
       return urlArgument && urlArgument.type !== "ArgumentPlaceholder"
         ? {
+            evidenceNode: urlArgument.type === "SpreadElement"
+              ? urlArgument.argument
+              : urlArgument,
+            initArgument: call.arguments[2] ?? null,
+            supportsRegisteredExceptions: true,
+            transportTarget: callee.object,
+            unresolvedProviderBoundary: false,
             urlArgument: urlArgument.type === "SpreadElement"
               ? urlArgument.argument
               : urlArgument,
@@ -1634,13 +1670,40 @@ function readProviderHttpCallShape(
     }
     if (method === "apply") {
       const tuple = call.arguments[1];
-      return tuple && tuple.type !== "ArgumentPlaceholder"
-        ? {
-            urlArgument: tuple.type === "SpreadElement"
-              ? tuple.argument
-              : tuple,
-          }
-        : null;
+      if (!tuple || tuple.type === "ArgumentPlaceholder") {
+        return null;
+      }
+      const tupleExpression = unwrapExpression(
+        tuple.type === "SpreadElement" ? tuple.argument : tuple,
+      );
+      if (
+        tuple.type !== "SpreadElement" &&
+        tupleExpression.type === "ArrayExpression" &&
+        tupleExpression.elements.length > 0 &&
+        tupleExpression.elements.every(
+          (element) => element !== null && element.type !== "SpreadElement",
+        )
+      ) {
+        const urlArgument = tupleExpression.elements[0];
+        if (urlArgument) {
+          return {
+            evidenceNode: tupleExpression,
+            initArgument: tupleExpression.elements[1] ?? null,
+            supportsRegisteredExceptions: true,
+            transportTarget: callee.object,
+            unresolvedProviderBoundary: false,
+            urlArgument,
+          };
+        }
+      }
+      return {
+        evidenceNode: tupleExpression,
+        initArgument: null,
+        supportsRegisteredExceptions: false,
+        transportTarget: callee.object,
+        unresolvedProviderBoundary: true,
+        urlArgument: tupleExpression,
+      };
     }
   }
   const [urlArgument] = call.arguments.filter(
@@ -1648,11 +1711,49 @@ function readProviderHttpCallShape(
   );
   return urlArgument
     ? {
+        evidenceNode: urlArgument.type === "SpreadElement"
+          ? urlArgument.argument
+          : urlArgument,
+        initArgument: call.arguments[1] ?? null,
+        supportsRegisteredExceptions: true,
+        transportTarget: call.callee,
+        unresolvedProviderBoundary: false,
         urlArgument: urlArgument.type === "SpreadElement"
           ? urlArgument.argument
           : urlArgument,
       }
     : null;
+}
+
+function isInsideSdkFetchAdapter(sourceFile: Node, position: number): boolean {
+  return collectLocalFunctionRanges(sourceFile).some(
+    (callable) =>
+      callable.start <= position &&
+      position <= callable.end &&
+      /sdkfetch/iu.test(callable.name),
+  );
+}
+
+function addEnclosingProviderContextFacts(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly facts: ProviderExpressionFacts;
+  readonly position: number;
+  readonly sourceFile: Node;
+}): void {
+  for (const callable of collectLocalFunctionRanges(input.sourceFile)) {
+    if (callable.start <= input.position && input.position <= callable.end) {
+      addProviderIds(
+        input.facts.providerIds,
+        providerIdsFromIdentifier(callable.name),
+      );
+    }
+  }
+  if (
+    input.facts.providerIds.size === 0 &&
+    input.analysis.fileProviderIds.size === 1
+  ) {
+    addProviderIds(input.facts.providerIds, input.analysis.fileProviderIds);
+  }
 }
 
 function collectLocalFunctionRanges(sourceFile: Node): LocalFunctionRange[] {
@@ -1797,22 +1898,27 @@ function inferProviderExpressionFacts(input: {
         providerIdsFromIdentifier(parameter.propertyPath.join(".")),
       );
     }
-    const bindingKey = `variable:${node.name}`;
-    if (!input.resolving.has(bindingKey)) {
-      const binding = resolveBinding(input.bindings, node.name, input.before);
-      if (binding) {
-        const resolving = new Set(input.resolving);
-        resolving.add(bindingKey);
-        mergeProviderExpressionFacts(
-          facts,
-          inferProviderExpressionFacts({
-            ...input,
-            before: node.start ?? input.before,
-            node: binding.initializer,
-            resolving,
-          }),
-        );
+    const bindings = resolvePossibleBindings(
+      input.bindings,
+      node.name,
+      input.before,
+    );
+    for (const binding of bindings) {
+      const bindingKey = `variable:${node.name}:${binding.start}`;
+      if (input.resolving.has(bindingKey)) {
+        continue;
       }
+      const resolving = new Set(input.resolving);
+      resolving.add(bindingKey);
+      mergeProviderExpressionFacts(
+        facts,
+        inferProviderExpressionFacts({
+          ...input,
+          before: binding.start - 1,
+          node: binding.initializer,
+          resolving,
+        }),
+      );
     }
     addSingleProviderFileHint(
       facts.providerIds,
@@ -1979,6 +2085,8 @@ function inferProviderExpressionFacts(input: {
   }
 
   switch (node.type) {
+    case "AssignmentExpression":
+      return inferProviderExpressionFacts({ ...input, node: node.right });
     case "AwaitExpression":
       return inferProviderExpressionFacts({ ...input, node: node.argument });
     case "BinaryExpression":
@@ -2053,6 +2161,7 @@ function matchesRegisteredProviderHttpException(input: {
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly call: CallExpression | OptionalCallExpression;
   readonly contents: string;
+  readonly initArgument: Node | null;
   readonly provider: RegisteredProviderBoundary;
   readonly relativePath: string;
   readonly urlArgument: Node;
@@ -2087,6 +2196,9 @@ function isInternalSameOriginRequest(input: {
   readonly resolving: ReadonlySet<string>;
 }): boolean {
   const expression = unwrapExpression(input.node);
+  if (isAssignmentExpression(expression) && expression.operator === "=") {
+    return isInternalSameOriginRequest({ ...input, node: expression.right });
+  }
   if (isStringLiteral(expression)) {
     return isInternalUrlText(expression.value);
   }
@@ -2100,7 +2212,7 @@ function isInternalSameOriginRequest(input: {
       return false;
     }
     const binding = resolveBinding(input.bindings, expression.name, input.before);
-    if (!binding) {
+    if (!binding?.definitive) {
       return false;
     }
     const resolving = new Set(input.resolving);
@@ -2200,6 +2312,7 @@ function isXaiXSearchResponsesRequest(input: {
   readonly analysis: ProviderHttpSourceAnalysis;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly call: CallExpression | OptionalCallExpression;
+  readonly initArgument: Node | null;
   readonly provider: RegisteredProviderBoundary;
   readonly relativePath: string;
   readonly urlArgument: Node;
@@ -2225,7 +2338,7 @@ function isXaiXSearchResponsesRequest(input: {
     return false;
   }
 
-  const initArgument = input.call.arguments[1];
+  const initArgument = input.initArgument;
   if (!initArgument || initArgument.type === "SpreadElement") {
     return false;
   }
@@ -2302,6 +2415,7 @@ function isPresignedByteTransfer(input: {
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly call: CallExpression | OptionalCallExpression;
   readonly contents: string;
+  readonly initArgument: Node | null;
   readonly relativePath: string;
   readonly urlArgument: Node;
   readonly urlFacts: ProviderExpressionFacts;
@@ -2329,16 +2443,14 @@ function isPresignedByteTransfer(input: {
   ) {
     return false;
   }
-  const initArgument = input.call.arguments.find(
-    (argument, index) => index > 0 && argument.type !== "ArgumentPlaceholder",
-  );
+  const initArgument = input.initArgument;
   if (!initArgument) {
     return true;
   }
   if (initArgument.type === "SpreadElement") {
     return false;
   }
-  const init = resolveExpressionBinding(initArgument, input.bindings, before);
+  const init = unwrapExpression(initArgument);
   if (
     !isObjectExpression(init) ||
     init.properties.some(
@@ -2528,11 +2640,7 @@ function hasApprovedTransferHeaders(input: {
     if (key?.toLowerCase() !== "headers") {
       continue;
     }
-    const headers = resolveExpressionBinding(
-      property.value,
-      input.bindings,
-      input.before,
-    );
+    const headers = unwrapExpression(property.value);
     if (isObjectExpression(headers)) {
       for (const header of headers.properties) {
         if (!isObjectProperty(header) || header.computed) {
@@ -2621,7 +2729,7 @@ function isApprovedPresignedTransferUrlExpression(input: {
       return false;
     }
     const binding = resolveBinding(input.bindings, expression.name, input.before);
-    if (!binding) {
+    if (!binding?.definitive) {
       return false;
     }
     const resolving = new Set(input.resolving);
@@ -2692,7 +2800,7 @@ function isOpaqueTransferUrlShape(input: {
       return false;
     }
     const binding = resolveBinding(input.bindings, node.name, input.before);
-    if (binding) {
+    if (binding?.definitive) {
       const resolving = new Set(input.resolving);
       resolving.add(key);
       if (
@@ -2951,18 +3059,6 @@ function typeTextHasBinaryProperty(typeText: string, propertyName: string): bool
     `\\b${escapeRegExp(propertyName)}\\??\\s*:\\s*[^;,}]*(?:ArrayBuffer|ArrayBufferView|Blob|Buffer|DataView|Readable|ReadableStream|Uint8Array)\\b`,
     "u",
   ).test(typeText);
-}
-
-function resolveExpressionBinding(
-  node: Node,
-  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
-  before: number,
-): Node {
-  const expression = unwrapExpression(node);
-  if (!isIdentifier(expression)) {
-    return expression;
-  }
-  return resolveBinding(bindings, expression.name, before)?.initializer ?? expression;
 }
 
 function readNamedTransportDeclaration(
@@ -3832,12 +3928,39 @@ function collectVariableBindings(
   const scopes = collectLexicalScopes(sourceFile);
   const bindings = new Map<string, VariableBinding[]>();
   traverseFast(sourceFile, (node) => {
+    if (
+      isAssignmentExpression(node) &&
+      node.operator === "=" &&
+      isIdentifier(node.left) &&
+      isExpression(node.right)
+    ) {
+      const current = bindings.get(node.left.name) ?? [];
+      const previous = resolveBinding(
+        bindings,
+        node.left.name,
+        node.start ?? 0,
+      );
+      const lexicalScope = findInnermostLexicalScope(scopes, node.start ?? 0);
+      current.push({
+        definitive:
+          previous === null || previous.scopeStart === lexicalScope.start,
+        identifierStart: node.left.start ?? node.start ?? 0,
+        initializer: node.right,
+        scopeEnd: previous?.scopeEnd ?? lexicalScope.end,
+        scopeStart: previous?.scopeStart ?? lexicalScope.start,
+        start: node.start ?? 0,
+        typeAnnotation: previous?.typeAnnotation ?? null,
+      });
+      bindings.set(node.left.name, current);
+      return;
+    }
     if (!isVariableDeclarator(node) || !isIdentifier(node.id) || !node.init) {
       return;
     }
     const current = bindings.get(node.id.name) ?? [];
     const scope = findInnermostLexicalScope(scopes, node.start ?? 0);
     current.push({
+      definitive: true,
       identifierStart: node.id.start ?? node.start ?? 0,
       initializer: node.init,
       scopeEnd: scope.end,
@@ -4084,6 +4207,26 @@ function resolveBinding(
     }
   }
   return resolved;
+}
+
+function resolvePossibleBindings(
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  name: string,
+  before: number,
+): VariableBinding[] {
+  const possible: VariableBinding[] = [];
+  let position = before;
+  while (true) {
+    const binding = resolveBinding(bindings, name, position);
+    if (!binding || possible.some((candidate) => candidate.start === binding.start)) {
+      return possible;
+    }
+    possible.push(binding);
+    if (binding.definitive) {
+      return possible;
+    }
+    position = binding.start - 1;
+  }
 }
 
 function isProviderRequestCall(

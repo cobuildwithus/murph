@@ -303,11 +303,16 @@ Last verified: 2026-08-12
   invocation, and destructured transport forms, and strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. Untyped fetch parameters retain
-  their exact default expressions, simple identifier assignments retain their
-  chronological right-hand sides and lexical owner, and only exact one-hop
-  wrappers that forward each argument in place inherit transport identity. The
-  guard also resolves the standard fetch `.call` and statically closed `.apply`
-  invocation forms before classifying their provider-bound arguments. The
+  their exact default expressions, and identifier reads resolve the nearest
+  chronological declaration or simple assignment in the variable's lexical
+  owner. Only exact one-hop wrappers that forward each argument in place
+  inherit transport identity. The guard resolves standard fetch `.call`
+  through the underlying transport target. It admits `.apply` argument
+  semantics only for a direct, closed array expression without a spread or
+  hole; mutable tuple identifiers fail closed. Opaque exact fetch-compatible
+  calls inside provider-specific SDK fetch adapters inherit the enclosing
+  callable or unambiguous single-provider file evidence, while provider-neutral
+  callbacks do not. The
   lexical census includes destructured parameter shadows, property paths, and
   types. Assigned CommonJS namespaces remain transports only while the nearest
   declaration identity is unchanged. Provider facts follow exact properties in closed object/array
@@ -316,9 +321,11 @@ Last verified: 2026-08-12
   `Request` handlers as HTTP transports. The guard reports only concrete low-level
   handwritten wire contracts that
   replace an SDK-owned request, response, fetch, transport, or client contract.
-  Provider-domain helpers and SDK-backed business adapters are not transport
-  boundaries; when a local wrapper owns a reported network boundary, its callers
-  are not duplicated. Provider symbols, resolved bindings, call arguments, and
+  Provider-domain orchestration without a low-level effect is not a transport
+  boundary, but an SDK fetch adapter that executes an injected fetch remains a
+  reportable handwritten transport. When a local wrapper owns a reported
+  network boundary, its callers are not duplicated. Provider symbols, resolved
+  bindings, call arguments, and
   hosts accumulate; a permissive provider label cannot erase simultaneous
   required-provider evidence. File hints remain fallback-only, and genuinely
   ambiguous dataflow names every matching provider. Findings are
@@ -328,7 +335,8 @@ Last verified: 2026-08-12
   or PUT of an AST- or type-proven byte/stream body with no spread call init,
   no credentials or only static
   `credentials: "omit"` and either an allowlisted literal header set or a
-  path-scoped audited transfer-header factory resolved to its unique top-level
+  direct call to a path-scoped audited transfer-header factory resolved to its
+  unique top-level
   declaration; the URL expression must also belong to one unique registered
   transfer owner, and a provider-named URL must resolve through its registered
   owner-path URL normalizer; statically known internal or

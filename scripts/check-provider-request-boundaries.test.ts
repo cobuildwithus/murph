@@ -125,6 +125,82 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([2, 3, 5]);
   });
 
+  it("keeps provider provenance through call and rejects mutable apply tuples", () => {
+    const matches = rawHttpViolations(
+      [
+        "async function invoke(openAiFetch: typeof fetch) {",
+        "  const send = openAiFetch;",
+        "  await send.call(undefined, '/v1/responses', { method: 'POST' });",
+        "  await fetch.apply(undefined, ['https://api.openai.com/v1/responses', { method: 'POST' }]);",
+        "  await fetch.apply(undefined, ['/api/status']);",
+        "  const args: Parameters<typeof fetch> = ['/api/status'];",
+        "  args[0] = 'https://api.openai.com/v1/responses';",
+        "  await fetch.apply(undefined, args);",
+        "  await fetch.apply(undefined, ['https://api.openai.com/v1/responses', ...args]);",
+        "  await fetch.apply(undefined, [, { method: 'POST' }]);",
+        "}",
+        "const unrelated = { call() {}, apply() {} };",
+        "unrelated.call(undefined, 'https://api.openai.com/v1/responses');",
+        "unrelated.apply(undefined, ['https://api.openai.com/v1/responses']);",
+      ].join("\n"),
+      "packages/assistant-engine/src/openai-transport.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 4, 8, 9, 10]);
+  });
+
+  it("uses the nearest effective URL assignment at the request", () => {
+    const matches = rawHttpViolations(
+      [
+        "let endpoint = '/api/openai/status';",
+        "endpoint = 'https://api.openai.com/v1/responses';",
+        "fetch(endpoint, { method: 'POST' });",
+        "endpoint = '/api/openai/status';",
+        "fetch(endpoint);",
+        "endpoint = 'https://api.linqapp.com/v1/messages';",
+        "fetch(endpoint);",
+        "fetch(endpoint = 'https://api.openai.com/v1/images');",
+        "let nestedEndpoint = '/api/status';",
+        "if (process.env.OPENAI_API_BASE_URL) {",
+        "  nestedEndpoint = 'https://api.openai.com/v1/responses';",
+        "}",
+        "fetch(nestedEndpoint);",
+        "let maybeInternal = 'https://api.openai.com/v1/responses';",
+        "if (process.env.USE_INTERNAL) {",
+        "  maybeInternal = '/api/status';",
+        "}",
+        "fetch(maybeInternal);",
+        "let composed = 'https://api.openai.com/v1';",
+        "composed = `${composed}/responses`;",
+        "fetch(composed);",
+      ].join("\n"),
+      "apps/web/src/lib/openai/runtime.ts",
+    );
+
+    expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
+      .toEqual([
+        { boundary: "OpenAI raw HTTP via fetch", line: 3 },
+        { boundary: "Linq raw HTTP via fetch", line: 7 },
+        { boundary: "OpenAI raw HTTP via fetch", line: 8 },
+        { boundary: "OpenAI raw HTTP via fetch", line: 13 },
+        { boundary: "OpenAI raw HTTP via fetch", line: 18 },
+        { boundary: "OpenAI raw HTTP via fetch", line: 21 },
+      ]);
+  });
+
+  it("keeps provider-neutral exact callbacks outside provider fallback", () => {
+    const matches = rawHttpViolations(
+      [
+        "export function forwardUnknown(url: string, fetchImplementation: typeof fetch) {",
+        "  return fetchImplementation(url);",
+        "}",
+      ].join("\n"),
+      "packages/runner/src/provider-neutral-runner.ts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
   it("does not allow source comments to suppress provider HTTP", () => {
     const matches = rawHttpViolations([
       "// provider-request-boundary-allow-next-line: sdk-transport-adapter",
@@ -444,7 +520,7 @@ describe("check-provider-request-boundaries", () => {
       "packages/device-syncd/src/providers/junction-http.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([4, 5, 7, 12]);
+    expect(matches.map((match) => match.line)).toEqual([4, 5, 7, 10]);
   });
 
   it("recognizes a constructor-injected fetch member by its call signature", () => {
@@ -616,7 +692,10 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
-      .toEqual([{ boundary: "Exa raw HTTP via fetchImpl", line: 3 }]);
+      .toEqual([
+        { boundary: "Exa raw HTTP via fetchImpl", line: 3 },
+        { boundary: "Linq raw HTTP via fetchImplementation", line: 14 },
+      ]);
   });
 
   it("reports a fetch-shaped wrapper once rather than at every caller", () => {
@@ -1000,6 +1079,28 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([2, 3, 4, 5, 8]);
   });
 
+  it("does not trust mutable aliases for presigned URLs, init, or headers", () => {
+    const matches = rawHttpViolations(
+      [
+        "function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return headers; }",
+        "function normalizeLinqAttachmentUploadUrl(url: string) { return url; }",
+        "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
+        "  let uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
+        "  uploadUrl = 'https://api.linqapp.com/v1/messages';",
+        "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
+        "  headers.authorization = 'Bearer provider-token';",
+        "  await fetch(uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+        "  const safeUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
+        "  const init = { body: input.bytes, headers: normalizeLinqRequiredHeaders(input.requiredHeaders), method: 'PUT' };",
+        "  await fetch(safeUrl, init);",
+        "}",
+      ].join("\n"),
+      "packages/operator-config/src/linq-runtime.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([8, 11]);
+  });
+
   it("rejects spread transfer init and spelling-only binary bodies", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
@@ -1034,8 +1135,7 @@ describe("check-provider-request-boundaries", () => {
           "function normalizeLinqAttachmentUploadUrl(url: string) { return url; }",
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
           "  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
-          "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
-          "  await fetch(uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "  await fetch(uploadUrl, { body: input.bytes, headers: normalizeLinqRequiredHeaders(input.requiredHeaders), method: 'PUT' });",
           "}",
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
@@ -1049,13 +1149,12 @@ describe("check-provider-request-boundaries", () => {
           "function normalizeLinqAttachmentUploadUrl(url: string) { return url; }",
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
           "  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
-          "  const headers = normalizeOtherRequiredHeaders(input.requiredHeaders);",
-          "  await fetch(uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "  await fetch(uploadUrl, { body: input.bytes, headers: normalizeOtherRequiredHeaders(input.requiredHeaders), method: 'PUT' });",
           "}",
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
       ).map((match) => match.line),
-    ).toEqual([6]);
+    ).toEqual([5]);
 
     expect(
       violationsOfKind(
@@ -1066,13 +1165,12 @@ describe("check-provider-request-boundaries", () => {
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
           "  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
           "  function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return { authorization: headers.authorization }; }",
-          "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
-          "  await fetch(uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "  await fetch(uploadUrl, { body: input.bytes, headers: normalizeLinqRequiredHeaders(input.requiredHeaders), method: 'PUT' });",
           "}",
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
       ).map((match) => match.line),
-    ).toEqual([7]);
+    ).toEqual([6]);
   });
 
   it("keeps the actual Linq presigned byte upload outside migration findings", () => {
@@ -1083,6 +1181,25 @@ describe("check-provider-request-boundaries", () => {
         "packages/operator-config/src/linq-runtime.ts",
       ).map((match) => match.line),
     ).not.toContain(886);
+  });
+
+  it("reports executable SDK adapter and provider helper transports", () => {
+    const owners = [
+      ["packages/device-syncd/src/providers/junction-client.ts", 837],
+      ["apps/web/src/lib/labs/junction.ts", 264],
+      ["packages/assistant-engine/src/assistant-codex/openai-image-generation.ts", 275],
+      ["apps/web/src/lib/hosted-onboarding/linq-first-contact-admission.ts", 910],
+      ["packages/operator-config/src/agentmail-runtime.ts", 522],
+    ] as const;
+
+    for (const [relativePath, line] of owners) {
+      expect(
+        rawHttpViolations(
+          readFileSync(relativePath, "utf8"),
+          relativePath,
+        ).map((match) => match.line),
+      ).toContain(line);
+    }
   });
 
   it("keeps every registered production byte or stream transfer outside migration findings", () => {

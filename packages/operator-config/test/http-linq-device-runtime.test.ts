@@ -2004,8 +2004,8 @@ test('linq runtime retries only the presigned attachment PUT with stable reserva
   expect(uploadBodies).toHaveLength(3)
   expect(uploadBodies[1]).toBe(uploadBodies[0])
   expect(uploadBodies[2]).toBe(uploadBodies[0])
-  expect(uploadHeaders[1]).toBe(uploadHeaders[0])
-  expect(uploadHeaders[2]).toBe(uploadHeaders[0])
+  expect(uploadHeaders[1]).toStrictEqual(uploadHeaders[0])
+  expect(uploadHeaders[2]).toStrictEqual(uploadHeaders[0])
   expect(uploadUrls).toEqual([
     'https://uploads.example.test/upload/retry-report',
     'https://uploads.example.test/upload/retry-report',
