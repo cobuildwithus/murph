@@ -40,7 +40,7 @@ import {
 } from "@/src/lib/hosted-privacy/account-deletion-cleanup";
 
 const KMS_KEY_NAME =
-  "projects/test/locations/global/keyRings/test/cryptoKeys/account-cleanup";
+  "projects/murph-test/locations/global/keyRings/test/cryptoKeys/account-cleanup";
 const KMS_KEY_VERSION_NAME = `${KMS_KEY_NAME}/cryptoKeyVersions/7`;
 
 beforeEach(() => {
@@ -80,10 +80,14 @@ beforeEach(() => {
 describe("hosted account deletion cleanup", () => {
   it("encrypts only the identifiers needed for cleanup with receipt-bound AAD", async () => {
     const now = new Date("2026-07-26T18:00:00.000Z");
-    mocks.kmsEncrypt.mockImplementationOnce(async (input: { plaintext: Uint8Array }) => ({
-      ciphertext: Buffer.from(input.plaintext).toString("base64"),
-      keyName: KMS_KEY_VERSION_NAME,
-    }));
+    const captured: { plaintextSnapshot?: Uint8Array } = {};
+    mocks.kmsEncrypt.mockImplementationOnce(async (input: { plaintext: Uint8Array }) => {
+      captured.plaintextSnapshot = new Uint8Array(input.plaintext);
+      return {
+        ciphertext: Buffer.from(input.plaintext).toString("base64"),
+        keyName: KMS_KEY_VERSION_NAME,
+      };
+    });
     const cleanup = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: "privy_user_1",
@@ -100,12 +104,13 @@ describe("hosted account deletion cleanup", () => {
       id: cleanup.id,
       schema: "murph.hosted-account-deletion-cleanup.v1",
     });
-    expect(JSON.parse(new TextDecoder().decode(encryptInput?.plaintext))).toEqual({
+    expect(JSON.parse(new TextDecoder().decode(captured.plaintextSnapshot))).toEqual({
       privyUserId: "privy_user_1",
       runtimeMemberIds: ["member_1", "member_group_1"],
       schema: "murph.hosted-account-deletion-cleanup.v1",
       stripeCustomerIds: ["cus_1"],
     });
+    expect(encryptInput?.plaintext.every((byte: number) => byte === 0)).toBe(true);
     expect(cleanup.payloadCiphertext).not.toContain("privy_user_1");
     expect(cleanup.kmsKeyName).toBe(KMS_KEY_NAME);
   });
@@ -125,6 +130,11 @@ describe("hosted account deletion cleanup", () => {
       throw new Error("Expected a persisted cleanup receipt.");
     }
     store.row = { ...store.row, kmsKeyName: KMS_KEY_VERSION_NAME };
+    const captured: { plaintext?: Uint8Array } = {};
+    mocks.kmsDecrypt.mockImplementationOnce(async (decryptInput: { ciphertext: string }) => {
+      captured.plaintext = new Uint8Array(Buffer.from(decryptInput.ciphertext, "base64"));
+      return { plaintext: captured.plaintext };
+    });
 
     await expect(runHostedAccountDeletionCleanup({
       cleanupId: prepared.id,
@@ -139,6 +149,7 @@ describe("hosted account deletion cleanup", () => {
     expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
+    expect(captured.plaintext?.every((byte) => byte === 0)).toBe(true);
   });
 
   it("fails closed on malformed persisted KMS resource names", async () => {

@@ -155,6 +155,33 @@ describe("database health monitor", () => {
     expect(second.message.parts[0]?.value).toContain("Checked 01:05 UTC");
   });
 
+  it("preserves a custom Linq API root for generated health and alert resources", async () => {
+    const harness = createMonitorHarness({
+      linqApiBaseUrl: "https://linq.custom.test/private/partner/v3/",
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.primaryLinqHealthRequests.map((request) =>
+      new URL(request.url).pathname
+    )).toEqual([
+      "/private/partner/v3/chats/chat_test",
+      "/private/partner/v3/phone_numbers",
+    ]);
+    expect(harness.primaryLinqRequests.map((request) =>
+      new URL(request.url).pathname
+    )).toEqual(["/private/partner/v3/messages"]);
+    expect([
+      ...harness.primaryLinqHealthRequests,
+      ...harness.primaryLinqRequests,
+    ].every((request) => request.redirect === "manual")).toBe(true);
+  });
+
   it("uses all 100 reviewed pressure openings before repeating one", async () => {
     const harness = createMonitorHarness({
       metricsBody: buildMetricsBody({
@@ -3127,6 +3154,7 @@ describe("database health monitor", () => {
 });
 
 function createMonitorHarness(input: {
+  linqApiBaseUrl?: string;
   linqChatHealthStatus?: "AT_RISK" | "CRITICAL" | "HEALTHY" | "OPTED_OUT";
   linqHealthResponses?: Array<() => Response | Promise<Response>>;
   linqLineReputationStatus?: "AT_RISK" | "CRITICAL" | "HEALTHY";
@@ -3178,6 +3206,9 @@ function createMonitorHarness(input: {
   ];
   let secondaryLinqRecipient =
     input.secondaryLinqRecipient ?? "+12025550124";
+  const linqApiBaseUrl = input.linqApiBaseUrl
+    ?? "https://api.linqapp.com/api/partner/v3";
+  const linqApiHostname = new URL(linqApiBaseUrl).hostname;
   const fetchImplementation = vi.fn(async (
     requestInput: RequestInfo | URL,
     init?: RequestInit,
@@ -3201,7 +3232,7 @@ function createMonitorHarness(input: {
         { status: 200 },
       );
     }
-    if (url.hostname === "api.linqapp.com") {
+    if (url.hostname === linqApiHostname) {
       if (request.method === "GET") {
         const isPhoneNumbersRequest =
           url.pathname.endsWith("/phone_numbers");
@@ -3265,6 +3296,7 @@ function createMonitorHarness(input: {
     HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: ORGANIZATION,
     HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "service-token",
     HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: "service-token-id",
+    LINQ_API_BASE_URL: linqApiBaseUrl,
     LINQ_API_TOKEN: "linq-token",
   };
   const createMonitor = () =>

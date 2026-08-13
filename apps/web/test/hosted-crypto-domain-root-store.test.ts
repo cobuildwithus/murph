@@ -53,8 +53,9 @@ import {
 } from "../src/lib/device-sync/prisma-store/connection-secrets";
 
 const AUTHORITY_KEY_VERSION =
-  "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
-const WEB_WRAP_KEY_NAME = "projects/test/locations/global/keyRings/ring/cryptoKeys/wrap";
+  "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+const WEB_WRAP_KEY_NAME =
+  "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/wrap";
 const decodeText = TextDecoder.prototype.decode;
 
 const gcpKmsMock = vi.hoisted(() => ({
@@ -106,7 +107,7 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   });
   stubHostedCryptoEnv({
     authorityVerifyKeyringJson: JSON.stringify({
-      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
+      "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
         publicKeyPem: standbySigner.publicKeyPem,
         status: "verify_only",
       },
@@ -218,6 +219,7 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   assert.equal(encryptCalls[0]?.keyName, WEB_WRAP_KEY_NAME);
   assert.match(encryptCalls[0]?.additionalAuthenticatedData, /"domain":"ingress"/u);
   assert.equal(signCalls.length, 2);
+  assert.ok(signCalls.every((call) => call.message.every((byte) => byte === 0)));
 });
 
 test("detects whether all active hosted crypto domain roots exist for a user", async () => {

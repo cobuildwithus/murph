@@ -37,7 +37,17 @@ export const providerRequestScanRoots = [
   "scripts",
 ] as const;
 
-const sourceExtensions = new Set([".cts", ".mts", ".ts", ".tsx"]);
+export const providerRequestSourceExtensions = [
+  ".cjs",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".mts",
+  ".ts",
+  ".tsx",
+] as const;
+const sourceExtensions = new Set<string>(providerRequestSourceExtensions);
 const skippedDirectoryNames = new Set([
   ".next",
   ".next-dev",
@@ -54,33 +64,121 @@ const skippedDirectoryNames = new Set([
 ]);
 const providerModulePrefixes = [
   "@composio/client",
+  "@elevenlabs/elevenlabs-js",
+  "@google-cloud/kms",
   "@junction-api/sdk",
   "@linqapp/sdk",
+  "@lob/lob-typescript-sdk",
   "@onkernel/sdk",
   "@temporalio/client",
+  "exa-js",
+  "google-auth-library",
   "openai",
+  "resend",
   "retell-sdk",
   "stripe",
 ] as const;
 const providerSourceMarkers = [
   "@composio/client",
+  "@elevenlabs/elevenlabs-js",
+  "@google-cloud/kms",
   "@junction-api/sdk",
   "@linqapp/sdk",
+  "@lob/lob-typescript-sdk",
   "@onkernel/sdk",
   "@temporalio/client",
+  "exa-js",
+  "google-auth-library",
   "openai",
+  "resend",
   "retell-sdk",
   "stripe",
 ] as const;
+const knownProviderApiOrigins = [
+  {
+    originPattern: /https:\/\/api\.elevenlabs\.io(?=[:/?#]|$)/iu,
+    provider: "ElevenLabs",
+  },
+  {
+    originPattern: /https:\/\/api\.exa\.ai(?=[:/?#]|$)/iu,
+    provider: "Exa",
+  },
+  {
+    originPattern: /https:\/\/api(?:\.sandbox)?\.(?:eu|us)\.junction\.com(?=[:/?#]|$)/iu,
+    provider: "Junction",
+  },
+  {
+    originPattern: /https:\/\/api\.linqapp\.com(?=[:/?#]|$)/iu,
+    provider: "Linq",
+  },
+  {
+    originPattern: /https:\/\/api\.lob\.com(?=[:/?#]|$)/iu,
+    provider: "Lob",
+  },
+  {
+    originPattern: /https:\/\/api\.openai\.com(?=[:/?#]|$)/iu,
+    provider: "OpenAI",
+  },
+  {
+    originPattern: /https:\/\/api\.resend\.com(?=[:/?#]|$)/iu,
+    provider: "Resend",
+  },
+  {
+    originPattern: /https:\/\/cloudkms\.googleapis\.com(?=[:/?#]|$)/iu,
+    provider: "Google Cloud KMS",
+  },
+  {
+    originPattern: /https:\/\/iamcredentials\.googleapis\.com(?=[:/?#]|$)/iu,
+    provider: "Google Cloud IAM Credentials",
+  },
+  {
+    originPattern: /https:\/\/sts\.googleapis\.com(?=[:/?#]|$)/iu,
+    provider: "Google Cloud STS",
+  },
+] as const;
+const knownProviderApiHostMarkers = [
+  "api.elevenlabs.io",
+  "api.exa.ai",
+  "api.eu.junction.com",
+  "api.linqapp.com",
+  "api.lob.com",
+  "api.openai.com",
+  "api.resend.com",
+  "api.sandbox.eu.junction.com",
+  "api.sandbox.us.junction.com",
+  "api.us.junction.com",
+  "cloudkms.googleapis.com",
+  "iamcredentials.googleapis.com",
+  "sts.googleapis.com",
+] as const;
+const providerSdkModulePrefixesByProvider: Readonly<Record<string, readonly string[]>> = {
+  ElevenLabs: ["@elevenlabs/elevenlabs-js"],
+  Exa: ["exa-js"],
+  Junction: ["@junction-api/sdk"],
+  Linq: ["@linqapp/sdk"],
+  Lob: ["@lob/lob-typescript-sdk"],
+  OpenAI: ["openai"],
+  Resend: ["resend"],
+  "Google Cloud IAM Credentials": ["google-auth-library"],
+  "Google Cloud KMS": ["@google-cloud/kms", "google-auth-library"],
+  "Google Cloud STS": ["google-auth-library"],
+};
+const rawProviderHttpAllowlistReasons = new Set([
+  "linq-presigned-bytes",
+  "sdk-transport-adapter",
+]);
+const rawProviderHttpAllowlistPattern =
+  /^\s*\/\/\s*provider-request-boundary-allow-next-line:\s*([a-z0-9-]+)\s*$/u;
 const providerClientFactoryNames = new Set([
   "requireHostedStripeApi",
 ]);
 const providerRequestTypeNamePattern =
-  /(?:ConnectionOptions|MediaPart|MessageContent|Params?(?:NonStreaming|Streaming)?|RequestOptions|TextPart)$/u;
+  /(?:ConnectionOptions|Create(?:Batch|Email)(?:Request)?Options|MediaPart|MessageContent|Params?(?:NonStreaming|Streaming)?|RequestOptions|TextPart)$/u;
 
 type ProviderRequestBoundaryViolationKind =
   | "object-assign"
   | "object-spread"
+  | "raw-provider-http"
   | "untyped-request-object";
 
 interface VariableBinding {
@@ -100,6 +198,7 @@ interface LexicalScope {
 interface ProviderSourceAnalysis {
   readonly clientNames: ReadonlySet<string>;
   readonly methodAliases: ReadonlyMap<string, string>;
+  readonly providerModules: ReadonlySet<string>;
   readonly requestTypeNames: ReadonlySet<string>;
   readonly typeRoots: ReadonlySet<string>;
 }
@@ -126,7 +225,10 @@ export function findProviderRequestBoundaryViolations(
   relativePath: string,
   contents: string,
 ): ProviderRequestBoundaryViolation[] {
-  if (!containsProviderSourceMarker(contents)) {
+  if (
+    !containsProviderSourceMarker(contents) &&
+    !containsKnownProviderApiOrigin(contents)
+  ) {
     return [];
   }
 
@@ -150,6 +252,57 @@ export function findProviderRequestBoundaryViolations(
 
   const bindings = collectVariableBindings(sourceFile, contents);
   const violationsByKey = new Map<string, ProviderRequestBoundaryViolation>();
+
+  traverseFast(sourceFile, (node) => {
+    const target = readRawProviderHttpTarget(node);
+    if (!target) {
+      return;
+    }
+    const allowlistReason = readRawProviderHttpAllowlistReason(
+      contents,
+      node.start ?? 0,
+    );
+    const provider = resolveKnownProviderApiOrigin({
+      before: node.start ?? Number.MAX_SAFE_INTEGER,
+      bindings,
+      node: target,
+      resolvingBindings: new Set(),
+    });
+    if (allowlistReason) {
+      if (isAllowedRawProviderHttp({
+        analysis,
+        reason: allowlistReason,
+        provider,
+        target,
+      })) {
+        return;
+      }
+      recordViolation(
+        {
+          boundary: `Invalid provider HTTP exception ${allowlistReason}`,
+          contents,
+          relativePath,
+          violationsByKey,
+        },
+        node,
+        "raw-provider-http",
+      );
+      return;
+    }
+    if (!provider) {
+      return;
+    }
+    recordViolation(
+      {
+        boundary: `Direct ${provider} provider HTTP`,
+        contents,
+        relativePath,
+        violationsByKey,
+      },
+      node,
+      "raw-provider-http",
+    );
+  });
 
   traverseFast(sourceFile, (node) => {
     if (!isProviderRequestCall(node, analysis)) {
@@ -281,6 +434,7 @@ export async function main(): Promise<void> {
 
 function analyzeProviderSource(sourceFile: Node, contents: string): ProviderSourceAnalysis {
   const clientNames = new Set<string>();
+  const providerModules = new Set<string>();
   const requestTypeNames = new Set<string>();
   const typeRoots = new Set<string>();
 
@@ -288,6 +442,7 @@ function analyzeProviderSource(sourceFile: Node, contents: string): ProviderSour
     if (!isImportDeclaration(node) || !isProviderModule(node.source.value)) {
       return;
     }
+    providerModules.add(node.source.value);
     for (const specifier of node.specifiers) {
       const localName = specifier.local.name;
       typeRoots.add(localName);
@@ -405,6 +560,7 @@ function analyzeProviderSource(sourceFile: Node, contents: string): ProviderSour
   return {
     clientNames,
     methodAliases,
+    providerModules,
     requestTypeNames,
     typeRoots,
   };
@@ -766,9 +922,241 @@ function textReferencesProviderClient(
   return false;
 }
 
+function readRawProviderHttpTarget(node: Node): Node | null {
+  if (node.type === "NewExpression") {
+    const calleePath = readMemberPath(node.callee);
+    if (calleePath?.at(-1) !== "Request") {
+      return null;
+    }
+    const target = node.arguments[0];
+    return target && target.type !== "ArgumentPlaceholder" && target.type !== "SpreadElement"
+      ? target
+      : null;
+  }
+  if (!isCallExpression(node) && !isOptionalCallExpression(node)) {
+    return null;
+  }
+  const calleePath = readMemberPath(node.callee);
+  const calleeName = calleePath?.at(-1);
+  if (!calleeName || !/fetch(?:implementation|impl)?$/iu.test(calleeName)) {
+    return null;
+  }
+  const target = node.arguments[0];
+  return target && target.type !== "ArgumentPlaceholder" && target.type !== "SpreadElement"
+    ? target
+    : null;
+}
+
+function resolveKnownProviderApiOrigin(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly node: Node;
+  readonly resolvingBindings: ReadonlySet<string>;
+}): string | null {
+  for (const candidate of collectStaticUrlTexts(input)) {
+    for (const origin of knownProviderApiOrigins) {
+      if (origin.originPattern.test(candidate)) {
+        return origin.provider;
+      }
+    }
+  }
+  return null;
+}
+
+function collectStaticUrlTexts(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly node: Node;
+  readonly resolvingBindings: ReadonlySet<string>;
+}): string[] {
+  const node = unwrapExpression(input.node);
+  if (isStringLiteral(node)) {
+    return [node.value];
+  }
+  if (isIdentifier(node)) {
+    if (input.resolvingBindings.has(node.name)) {
+      return [];
+    }
+    const binding = resolveBinding(input.bindings, node.name, input.before);
+    if (!binding) {
+      return [];
+    }
+    const resolvingBindings = new Set(input.resolvingBindings);
+    resolvingBindings.add(node.name);
+    return collectStaticUrlTexts({
+      ...input,
+      before: binding.start,
+      node: binding.initializer,
+      resolvingBindings,
+    });
+  }
+  if (node.type === "TemplateLiteral") {
+    let candidates = [node.quasis[0]?.value.cooked ?? ""];
+    for (const [index, expression] of node.expressions.entries()) {
+      const expressionCandidates = collectStaticUrlTexts({
+        ...input,
+        node: expression,
+      });
+      candidates = combineStaticTextCandidates(
+        candidates,
+        expressionCandidates.length > 0 ? expressionCandidates : [""],
+        node.quasis[index + 1]?.value.cooked ?? "",
+      );
+    }
+    return candidates;
+  }
+  if (node.type === "BinaryExpression" && node.operator === "+") {
+    const left = collectStaticUrlTexts({ ...input, node: node.left });
+    const right = collectStaticUrlTexts({ ...input, node: node.right });
+    if (left.length === 0 && right.length === 0) {
+      return [];
+    }
+    return combineStaticTextCandidates(
+      left.length > 0 ? left : [""],
+      right.length > 0 ? right : [""],
+      "",
+    );
+  }
+  if (node.type === "ConditionalExpression") {
+    return [
+      ...collectStaticUrlTexts({ ...input, node: node.consequent }),
+      ...collectStaticUrlTexts({ ...input, node: node.alternate }),
+    ];
+  }
+  if (node.type === "LogicalExpression") {
+    return [
+      ...collectStaticUrlTexts({ ...input, node: node.left }),
+      ...collectStaticUrlTexts({ ...input, node: node.right }),
+    ];
+  }
+  if (node.type === "SequenceExpression") {
+    const last = node.expressions.at(-1);
+    return last ? collectStaticUrlTexts({ ...input, node: last }) : [];
+  }
+  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
+    const memberPath = readMemberPath(node);
+    if (["href", "origin"].includes(memberPath?.at(-1) ?? "")) {
+      return collectStaticUrlTexts({ ...input, node: node.object });
+    }
+    return [];
+  }
+  if (
+    node.type === "NewExpression" ||
+    isCallExpression(node) ||
+    isOptionalCallExpression(node)
+  ) {
+    const calleePath = readMemberPath(node.callee);
+    const calleeName = calleePath?.at(-1);
+    if (["toJSON", "toString"].includes(calleeName ?? "")) {
+      if (isMemberExpression(node.callee) || isOptionalMemberExpression(node.callee)) {
+        return collectStaticUrlTexts({ ...input, node: node.callee.object });
+      }
+      return [];
+    }
+    if (calleeName !== "Request" && calleeName !== "URL") {
+      return [];
+    }
+    const target = node.arguments[0];
+    if (!target || target.type === "ArgumentPlaceholder" || target.type === "SpreadElement") {
+      return [];
+    }
+    const targetCandidates = collectStaticUrlTexts({ ...input, node: target });
+    if (calleeName === "Request") {
+      return targetCandidates;
+    }
+    const base = node.arguments[1];
+    if (!base || base.type === "ArgumentPlaceholder" || base.type === "SpreadElement") {
+      return targetCandidates;
+    }
+    const baseCandidates = collectStaticUrlTexts({ ...input, node: base });
+    if (baseCandidates.length === 0) {
+      return targetCandidates;
+    }
+    const relativeCandidates = targetCandidates.length > 0 ? targetCandidates : [""];
+    return combineStaticTextCandidates(baseCandidates, relativeCandidates, "");
+  }
+  return [];
+}
+
+function combineStaticTextCandidates(
+  prefixes: readonly string[],
+  values: readonly string[],
+  suffix: string,
+): string[] {
+  const combined: string[] = [];
+  for (const prefix of prefixes) {
+    for (const value of values) {
+      combined.push(`${prefix}${value}${suffix}`);
+      if (combined.length >= 32) {
+        return combined;
+      }
+    }
+  }
+  return combined;
+}
+
+function isAllowedRawProviderHttp(input: {
+  readonly analysis: ProviderSourceAnalysis;
+  readonly reason: string;
+  readonly provider: string | null;
+  readonly target: Node;
+}): boolean {
+  if (!rawProviderHttpAllowlistReasons.has(input.reason)) {
+    return false;
+  }
+  if (input.reason === "sdk-transport-adapter") {
+    if (!input.provider) {
+      return false;
+    }
+    const modulePrefixes = providerSdkModulePrefixesByProvider[input.provider] ?? [];
+    return hasImportedProviderModule(input.analysis.providerModules, modulePrefixes);
+  }
+  if (input.reason !== "linq-presigned-bytes" || input.provider !== null) {
+    return false;
+  }
+  if (!hasImportedProviderModule(input.analysis.providerModules, ["@linqapp/sdk"])) {
+    return false;
+  }
+  const target = unwrapExpression(input.target);
+  return isIdentifier(target) && /^(?:download|upload)Url$/u.test(target.name);
+}
+
+function hasImportedProviderModule(
+  providerModules: ReadonlySet<string>,
+  prefixes: readonly string[],
+): boolean {
+  for (const moduleName of providerModules) {
+    if (prefixes.some(
+      (prefix) => moduleName === prefix || moduleName.startsWith(`${prefix}/`),
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function readRawProviderHttpAllowlistReason(
+  contents: string,
+  nodeStart: number,
+): string | null {
+  const currentLineStart = contents.lastIndexOf("\n", Math.max(0, nodeStart - 1));
+  if (currentLineStart < 0) {
+    return null;
+  }
+  const previousLineEnd = currentLineStart;
+  const previousLineStart = contents.lastIndexOf("\n", previousLineEnd - 1) + 1;
+  const previousLine = contents.slice(previousLineStart, previousLineEnd);
+  return rawProviderHttpAllowlistPattern.exec(previousLine)?.[1] ?? null;
+}
+
 function containsProviderSourceMarker(contents: string): boolean {
   const lowerContents = contents.toLowerCase();
   return providerSourceMarkers.some((marker) => lowerContents.includes(marker));
+}
+
+function containsKnownProviderApiOrigin(contents: string): boolean {
+  const lowerContents = contents.toLowerCase();
+  return knownProviderApiHostMarkers.some((hostname) => lowerContents.includes(hostname));
 }
 
 function isProviderModule(moduleName: string): boolean {
@@ -870,7 +1258,7 @@ async function scanDirectory(
       }
       continue;
     }
-    if (!entry.isFile() || !shouldScanSourceFile(entryRelativePath)) {
+    if (!entry.isFile() || !shouldScanProviderRequestSourceFile(entryRelativePath)) {
       continue;
     }
     const contents = await readFile(path.join(repoRoot, entryRelativePath), "utf8");
@@ -882,15 +1270,15 @@ async function scanDirectory(
 
 function parserPlugins(relativePath: string): ParserPlugin[] {
   const plugins: ParserPlugin[] = [["decorators", { decoratorsBeforeExport: true }], "typescript"];
-  if (/\.tsx$/u.test(relativePath)) {
+  if (/\.[jt]sx$/u.test(relativePath)) {
     plugins.push("jsx");
   }
   return plugins;
 }
 
-function shouldScanSourceFile(relativePath: string): boolean {
-  return !relativePath.endsWith(".d.ts") &&
-    !/\.(?:spec|test)\.[cm]?tsx?$/u.test(relativePath) &&
+export function shouldScanProviderRequestSourceFile(relativePath: string): boolean {
+  return !/\.d\.[cm]?ts$/u.test(relativePath) &&
+    !/\.(?:spec|test)\.[cm]?[jt]sx?$/u.test(relativePath) &&
     sourceExtensions.has(path.posix.extname(relativePath));
 }
 
@@ -904,6 +1292,8 @@ function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string
       return "uses Object.assign";
     case "object-spread":
       return "contains an object spread";
+    case "raw-provider-http":
+      return "constructs direct raw provider HTTP";
     case "untyped-request-object":
       return "passes an untyped object-literal variable";
   }

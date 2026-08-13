@@ -62,6 +62,7 @@
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.6",
+    "@linqapp/sdk": "0.34.0",
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/assistant-runtime": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",

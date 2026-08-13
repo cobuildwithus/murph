@@ -2086,9 +2086,12 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
       }]);
     }
 
+    const introspectionUrl = new URL(url);
     if (
-      url === "https://api.sandbox.us.junction.com/v2/introspect/resources?user_id=junction-user-1&user_limit=1"
-      || url === "https://api.sandbox.us.junction.com/v2/introspect/resources?user_id=junction-user-1&user_limit=1&provider=garmin"
+      introspectionUrl.pathname === "/v2/introspect/resources"
+      && introspectionUrl.searchParams.get("user_id") === "junction-user-1"
+      && introspectionUrl.searchParams.get("user_limit") === "1"
+      && [null, "garmin"].includes(introspectionUrl.searchParams.get("provider"))
     ) {
       return createJsonResponse({
         data: [{
@@ -2111,8 +2114,10 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
     }
 
     if (
-      url === "https://api.sandbox.us.junction.com/v2/introspect/historical_pull?user_id=junction-user-1&user_limit=1"
-      || url === "https://api.sandbox.us.junction.com/v2/introspect/historical_pull?user_id=junction-user-1&user_limit=1&provider=garmin"
+      introspectionUrl.pathname === "/v2/introspect/historical_pull"
+      && introspectionUrl.searchParams.get("user_id") === "junction-user-1"
+      && introspectionUrl.searchParams.get("user_limit") === "1"
+      && [null, "garmin"].includes(introspectionUrl.searchParams.get("provider"))
     ) {
       return createJsonResponse({
         data: [{
@@ -5823,10 +5828,14 @@ test("Junction historical-pull introspection applies the optional provider filte
     environment: "sandbox",
     region: "us",
     fetchImpl: async (input) => {
-      assert.equal(
-        readUrl(input),
-        "https://api.sandbox.us.junction.com/v2/introspect/historical_pull?user_id=junction-user-1&user_limit=2&provider=garmin",
-      );
+      const url = new URL(readUrl(input));
+      assert.equal(url.origin, "https://api.sandbox.us.junction.com");
+      assert.equal(url.pathname, "/v2/introspect/historical_pull");
+      assert.deepEqual(Object.fromEntries(url.searchParams), {
+        provider: "garmin",
+        user_id: "junction-user-1",
+        user_limit: "2",
+      });
       return createJsonResponse({
         data: [{
           user_id: "junction-user-1",
@@ -5933,7 +5942,10 @@ test("Junction client includes safe provider diagnostics for failed API requests
     region: "us",
     fetchImpl: async (input, init) => {
       assert.equal(readUrl(input), "https://api.sandbox.us.junction.com/v2/link/token");
-      assert.equal(new Headers(init?.headers).get("x-vital-api-key"), "sk_us_test_123");
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("x-vital-api-key"), "sk_us_test_123");
+      assert.equal(headers.get("x-fern-sdk-name"), "@junction-api/sdk");
+      assert.equal(headers.get("x-fern-sdk-version"), "1.2.0");
       return createJsonResponse({
         code: "invalid_request",
         message: "The link token request is missing a provider selection.",
@@ -6152,6 +6164,286 @@ test("Junction client does not misclassify request timeouts as late caller abort
   assert.equal(requests, 1);
 });
 
+test("Junction client keeps GET retries in Murph and never retries writes", async () => {
+  let getRequests = 0;
+  const getClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      getRequests += 1;
+      return new Response(JSON.stringify({ code: "unavailable" }), {
+        status: 503,
+        headers: {
+          "content-type": "application/json",
+          "retry-after": "0",
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => getClient.listUserProviders("junction-user-1"),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_REQUEST_FAILED"
+      && error.retryable,
+  );
+  assert.equal(getRequests, 3);
+
+  let postRequests = 0;
+  const postClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      postRequests += 1;
+      return new Response(JSON.stringify({ code: "unavailable" }), {
+        status: 503,
+        headers: {
+          "content-type": "application/json",
+          "retry-after": "0",
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => postClient.createLinkToken({
+      userId: "junction-user-1",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    }),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_REQUEST_FAILED"
+      && !error.retryable,
+  );
+  assert.equal(postRequests, 1);
+});
+
+test("Junction client uses the SDK typed result for an official connected-provider response", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => createJsonResponse({
+      garmin: [{
+        created_on: "2026-04-03T12:00:00+00:00",
+        error_details: {
+          error_message: "Provider token expired.",
+          error_type: "token_refresh_failed",
+          errored_at: "2026-04-03T12:00:00+00:00",
+        },
+        logo: "https://cdn.example.test/garmin.svg",
+        name: "Garmin",
+        resource_availability: {
+          activity: { status: "available" },
+        },
+        slug: "garmin",
+        status: "error",
+      }],
+    }),
+  });
+
+  const providers = await client.listUserProviders("junction-user-1");
+  assert.equal(providers.length, 1);
+  assert.deepEqual(providers[0]?.errorDetails, {
+    errorMessage: "Provider token expired.",
+    errorType: "token_refresh_failed",
+    erroredAt: "2026-04-03T12:00:00.000Z",
+  });
+  assert.deepEqual(providers[0]?.resourceAvailability, {
+    activity: { status: "available" },
+  });
+});
+
+test("Junction client falls back to a bounded raw success only for a legacy sparse response", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => createJsonResponse({
+      providers: [{
+        name: "Garmin",
+        resource_availability: { activity: true },
+        slug: "garmin",
+        status: "connected",
+      }],
+    }),
+  });
+
+  const providers = await client.listUserProviders("junction-user-1");
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0]?.slug, "garmin");
+  assert.deepEqual(providers[0]?.resourceAvailability, { activity: true });
+});
+
+test("Junction client retries generic GET fetch failures but never retries generic write failures", async () => {
+  let getRequests = 0;
+  const getClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      getRequests += 1;
+      throw new Error("temporary network failure");
+    },
+  });
+
+  await assert.rejects(
+    () => getClient.listUserProviders("junction-user-1"),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_REQUEST_FAILED"
+      && error.retryable,
+  );
+  assert.equal(getRequests, 3);
+
+  let postRequests = 0;
+  const postClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      postRequests += 1;
+      throw new Error("write network failure");
+    },
+  });
+
+  await assert.rejects(
+    () => postClient.createLinkToken({
+      userId: "junction-user-1",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    }),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_REQUEST_FAILED"
+      && !error.retryable,
+  );
+  assert.equal(postRequests, 1);
+});
+
+test("Junction client rejects malformed successful JSON without treating it as an empty response", async () => {
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response("{", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.createLinkToken({
+      userId: "junction-user-1",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    }),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_INVALID_JSON"
+      && !error.retryable,
+  );
+  assert.equal(requests, 1);
+});
+
+test("Junction client rejects a declared response above the transport byte limit before reading it", async () => {
+  let bodyCancelled = false;
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(new ReadableStream<Uint8Array>({
+        cancel() {
+          bodyCancelled = true;
+        },
+      }), {
+        status: 200,
+        headers: {
+          "content-length": String(32 * 1_024 * 1_024 + 1),
+          "content-type": "application/json",
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserProviders("junction-user-1"),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_RESPONSE_TOO_LARGE"
+      && !error.retryable,
+  );
+  assert.equal(requests, 1);
+  assert.equal(bodyCancelled, true);
+});
+
+test("Junction client errors and cancels a chunked response that crosses the transport byte limit", async () => {
+  let bodyCancelled = false;
+  let requests = 0;
+  let chunkIndex = 0;
+  const chunks = [
+    new Uint8Array(32 * 1_024 * 1_024),
+    new Uint8Array([0x20]),
+  ];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          const chunk = chunks[chunkIndex];
+          chunkIndex += 1;
+          if (chunk) {
+            controller.enqueue(chunk);
+          }
+        },
+        cancel() {
+          bodyCancelled = true;
+        },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.listUserProviders("junction-user-1"),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_RESPONSE_TOO_LARGE"
+      && !error.retryable,
+  );
+  assert.equal(requests, 1);
+  assert.equal(bodyCancelled, true);
+});
+
+test("Junction optional user lookup cancels unread 404 response bodies", async () => {
+  let bodyCancelled = false;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("provider detail that Murph must not read"));
+      },
+      cancel() {
+        bodyCancelled = true;
+      },
+    }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    }),
+  });
+
+  assert.equal(await client.resolveUser("missing-client-user"), null);
+  assert.equal(bodyCancelled, true);
+});
+
 test("Junction client deregisters provider connections by normalized provider slug", async () => {
   const requests: Array<{ method: string; url: string }> = [];
   const client = new JunctionClient({
@@ -6176,7 +6468,7 @@ test("Junction client deregisters provider connections by normalized provider sl
   assert.deepEqual(requests, [
     {
       method: "DELETE",
-      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/apple_health",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/apple_health_kit",
     },
   ]);
 });
@@ -6691,7 +6983,7 @@ test("Junction client derives the API host from environment and region", async (
   const user = await client.createUser("murph_test_client_user");
 
   assert.equal(user.userId, "junction-user-1");
-  assert.deepEqual(requests, ["https://api.eu.junction.com/v2/user/"]);
+  assert.deepEqual(requests, ["https://api.eu.junction.com/v2/user"]);
 });
 
 test("Junction createLinkToken rejects unexpected Link web URL hosts", async () => {
@@ -6768,7 +7060,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
       return createJsonResponse({ message: "missing" }, 404);
     }
 
-    if (url === "https://api.sandbox.us.junction.com/v2/user/") {
+    if (url === "https://api.sandbox.us.junction.com/v2/user") {
       return createJsonResponse({ user_id: "junction-user-1" });
     }
 
@@ -6802,7 +7094,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.deepEqual(started.connectionSeed?.metadata, undefined);
   assert.deepEqual(started.stateMetadata, undefined);
 
-  const createUserBody = requests.find((request) => request.url.endsWith("/v2/user/"))?.body;
+  const createUserBody = requests.find((request) => request.url.endsWith("/v2/user"))?.body;
   assert.equal(typeof createUserBody === "object" && createUserBody !== null && "client_user_id" in createUserBody, true);
   assert.doesNotMatch(JSON.stringify(createUserBody), /owner-internal-id-123/u);
 
