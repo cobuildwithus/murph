@@ -498,6 +498,25 @@ describe('real codex app-server with scripted provider', () => {
         skillSlug: 'cardiometabolic-health',
       },
       {
+        answer: 'Your connected device recorded 48 g of carbohydrates on July 12; that is partial intake evidence, not a complete meal or eaten-calorie total.',
+        command: 'measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_carbohydrates_summary',
+            metric: 'carbohydrates',
+            occurredAt: '2026-07-12T19:15:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'g',
+            value: 48,
+          }],
+        },
+        prompt: 'How many carbohydrates did my connected device record on July 12?',
+        skillHeading: '# Food journal',
+        skillSlug: 'food-journal',
+      },
+      {
         answer: 'Your connected-device body-fat estimate moved from 19.2% to 18.5%; keep the same source and conditions before treating that as a trend.',
         command: 'measurement entry list --metric fat --from 2026-07-01 --to 2026-07-12 --limit 50 --format json',
         evidence: {

@@ -104,6 +104,11 @@ Updated: 2026-08-13
   gap is execution of the opt-in real-provider evaluation because no provider
   API key is available locally; the compiled evaluation stubs only canonical
   CLI data and leaves skill choice, command choice, and wording to the model.
+- Parent final review closed the remaining coverage edge in ReviewGPT's
+  carbohydrate finding: `food-journal` now owns the exact bounded
+  `carbohydrates` read, and deterministic plus opt-in real-provider probes keep
+  recorded grams distinct from food identity, complete meals, and eaten
+  calories. This remains one existing skill and one existing CLI surface.
 
 ## Verification
 
@@ -113,7 +118,7 @@ Updated: 2026-08-13
 - Expected outcomes: Murph can discover and use the newly available normalized
   data without asking the member to restate device facts or implying access to
   raw ECG/workout samples.
-- Focused prompt, skill, and prompt-budget suite: 102 passed, 6 intentional
+- Focused prompt, skill, and prompt-budget suite: 103 passed, 6 intentional
   skips.
 - Production Codex App Server scenarios: basal-calorie and insulin queries plus
   raw-stream/intake boundaries passed through prompt, skill, exact CLI command,
@@ -130,7 +135,7 @@ Updated: 2026-08-13
   reasoning, streaming, storage, cache, and client metadata were excluded
   identically. An asserted replacement of the sole direct prompt block
   reconstructed base behavior: direct changed from 24,814 tokens / 112,214
-  bytes to 24,837 / 112,314 (+23, +0.0927%, +100 bytes); group remained 21,305
+  bytes to 24,844 / 112,335 (+30, +0.1209%, +121 bytes); group remained 21,305
   tokens / 96,701 bytes (zero delta). Temporary capture code and payloads were
   removed.
 - The generic skill validator could not run because its optional Python YAML

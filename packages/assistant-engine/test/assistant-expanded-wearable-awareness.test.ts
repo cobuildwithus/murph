@@ -50,6 +50,7 @@ describe('expanded wearable awareness', () => {
       'Burned calories are expenditure; carbs can be partial intake evidence',
     )
     expect(prompt).toContain('not proof of a complete meal or eaten-calorie total')
+    expect(prompt).toContain('read `food-journal`')
   })
 
   it('routes expanded activity signals through the lossless global metric surface', async () => {
@@ -96,6 +97,19 @@ describe('expanded wearable awareness', () => {
     expect(skill).toContain('records returned, not an exhaustive total')
     expect(skill).toContain('not proof that no insulin was recorded')
     expect(skill).toContain('Never turn a record read into')
+  })
+
+  it('routes connected carbohydrate records without inventing complete intake', async () => {
+    const skill = await readSkill('food-journal')
+
+    expect(skill).toContain(
+      'vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json',
+    )
+    expect(skill).toContain('Returned grams are partial intake evidence')
+    expect(skill).toContain('Do not infer food identity')
+    expect(skill).toContain('a complete meal')
+    expect(skill).toContain('eaten calories')
+    expect(skill).toContain('unavailable, not zero')
   })
 
   it('uses connected body metrics as source-aware trends rather than ground truth', async () => {

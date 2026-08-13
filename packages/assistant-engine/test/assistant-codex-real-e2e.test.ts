@@ -3068,7 +3068,7 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
 
 describeRealCodex('real Codex connected health record awareness e2e', () => {
   it(
-    'chooses one canonical read for basal calories and bounded insulin records',
+    'chooses one canonical read for expanded connected health records',
     async () => {
       const config = await resolveRealCodexE2eConfig()
 
@@ -3121,6 +3121,48 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
               }],
             },
             skillSlug: 'cardiometabolic-health',
+          },
+          {
+            commandPattern: /measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /unavailable|no carbohydrate|(?:ate|consumed).*48/iu,
+            finalIncludes: [/48\s*(?:g|grams?).*carb|carb.*48\s*(?:g|grams?)/iu],
+            id: 'carbohydrates',
+            prompt: 'How many carbohydrates did my connected device record on July 12?',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_carbohydrates_summary',
+                metric: 'carbohydrates',
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'g',
+                value: 48,
+              }],
+            },
+            skillSlug: 'food-journal',
+          },
+          {
+            commandPattern: /measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /you (?:ate|consumed) 48|(?:ate|consumed|total).{0,30}192/iu,
+            finalIncludes: [
+              /(?:complete|full).*(?:unavailable|cannot|not)|(?:meal|food) records?.*(?:needed|required)|does not (?:show|prove|establish)/iu,
+            ],
+            id: 'carbohydrates-not-complete-intake',
+            prompt: 'Use my connected-device carbohydrate data to tell me what I ate and how many calories I consumed on July 12.',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_carbohydrates_summary',
+                metric: 'carbohydrates',
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'g',
+                value: 48,
+              }],
+            },
+            skillSlug: 'food-journal',
           },
           {
             commandPattern: /event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json/u,

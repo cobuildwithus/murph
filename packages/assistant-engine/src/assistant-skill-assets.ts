@@ -161,7 +161,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
-      'Use when the user logs meals or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+      'Use when the user logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
   },
   {
     slug: 'nutrition-strategy',
