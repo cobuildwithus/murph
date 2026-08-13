@@ -103,6 +103,10 @@ const DEVICE_SYNC_CONNECTION_MUTATION_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS = 50;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
+const DEVICE_MEMBER_EDIT_CONFLICT_ERROR_CODE = "DEVICE_DATA_MEMBER_EDIT_CONFLICT";
+const DEVICE_MEMBER_EDIT_CONFLICT_OCCURRENCE_FIELD = "memberEditConflictOccurrence";
+const DEVICE_MEMBER_EDIT_CONFLICT_RESOLUTION_FIELD = "memberEditConflictResolution";
+const DEVICE_MEMBER_EDIT_CONFLICT_OCCURRENCE_PATTERN = /^[a-f0-9]{64}$/u;
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
 const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
@@ -133,6 +137,11 @@ class DeviceSyncJobExecutionYieldedError extends Error {
 type DeviceSyncJobFailureDiagnosticInput = {
   [Key in keyof DeviceSyncJobFailureDiagnostic["details"]]?: DeviceSyncJobFailureDiagnostic["details"][Key] | null;
 };
+
+interface DeviceMemberEditConflictWork {
+  occurrence: string;
+  resolution: DeviceMemberEditConflictResolution;
+}
 
 export interface CreateDeviceSyncServiceInput {
   secret: string;
@@ -573,30 +582,31 @@ class DeviceSyncServiceController {
     }
 
     const provider = this.requireProvider(account.provider);
+    const memberEditConflictWork = createDeviceMemberEditConflictWork(
+      account,
+      options.memberEditConflictResolution,
+    );
     const now = this.nowIso();
     const scheduledJobs = resolveProviderJobExecutor(provider)?.createScheduledJobs?.(account, now).jobs ?? [];
     const jobs = scheduledJobs.length > 0 ? scheduledJobs : [{ kind: "reconcile", priority: 80 }];
     const queuedJobs = this.enqueueJobs(
       account,
-      jobs.map((job) => ({
-        ...job,
-        payload: {
-          ...(job.payload ?? {}),
-          ...(options.memberEditConflictResolution
-            ? { memberEditConflictResolution: options.memberEditConflictResolution }
-            : {}),
-        },
-        priority: job.kind === "reconcile" ? Math.max(job.priority ?? 0, 80) : job.priority,
-        availableAt: job.kind === "reconcile" ? now : job.availableAt ?? now,
-        dedupeKey:
-          job.dedupeKey ??
-          `manual-reconcile:${job.kind}:${sha256Text(stringifyJson({
-            ...(job.payload ?? {}),
-            ...(options.memberEditConflictResolution
-              ? { memberEditConflictResolution: options.memberEditConflictResolution }
-              : {}),
-          }))}`,
-      })),
+      jobs.map((job) => {
+        const manualJob: DeviceSyncJobInput = {
+          ...job,
+          payload: job.payload ?? {},
+          priority: job.kind === "reconcile" ? Math.max(job.priority ?? 0, 80) : job.priority,
+          availableAt: job.kind === "reconcile" ? now : job.availableAt ?? now,
+          dedupeKey:
+            job.dedupeKey
+            ?? `manual-reconcile:${job.kind}:${sha256Text(stringifyJson(job.payload ?? {}))}`,
+        };
+        return inheritDeviceMemberEditConflictWorkJob(
+          manualJob,
+          memberEditConflictWork,
+          new Set<string>(),
+        );
+      }),
     );
     const primary = queuedJobs[0];
 
@@ -874,7 +884,7 @@ class DeviceSyncServiceController {
     }
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
-    const localConnectionRevision = storedAccount.localConnectionRevision;
+    let localConnectionRevision = storedAccount.localConnectionRevision;
     const jobExecutor = resolveProviderJobExecutor(provider);
 
     if (!jobExecutor) {
@@ -985,7 +995,12 @@ class DeviceSyncServiceController {
           ? normalizedJob
           : normalizeConfiguredDeviceSyncJobRecord(provider.provider, activeJob, "execution")
       );
-      const jobContext: ProviderJobContext = {
+      const memberEditConflictWork = resolveDeviceMemberEditConflictWork(normalizedJobs);
+      const activeParentDedupeKeys = new Set(
+        normalizedJobs.flatMap((activeJob) => activeJob.dedupeKey ? [activeJob.dedupeKey] : []),
+      );
+      let jobContext: ProviderJobContext;
+      jobContext = {
         account: currentAccount,
         now,
         signal: jobAbortController.signal,
@@ -996,14 +1011,65 @@ class DeviceSyncServiceController {
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
         throwIfAborted: assertJobExecutionNotYielded,
-        ...resolveDeviceMemberEditConflictResolution(normalizedJobs),
+        ...(memberEditConflictWork
+          ? { memberEditConflictResolution: memberEditConflictWork.resolution }
+          : {}),
+        checkpointJobContinuation: async (input) => {
+          if (activeJobs.length !== 1) {
+            throw deviceSyncError({
+              code: "DEVICE_SYNC_JOB_CONTINUATION_INVALID",
+              message: "An in-place job checkpoint must own exactly one claimed row.",
+              retryable: false,
+            });
+          }
+
+          // A completed provider/import unit may checkpoint even if foreground
+          // yield arrived immediately afterward. The transaction still fences
+          // the exact lease and account revision before advancing the cursor.
+          ensureJobLeasesOwned();
+          ensureAccountActive();
+          const checkpoint = normalizeConfiguredDeviceSyncJobInput(
+            provider.provider,
+            {
+              kind: normalizedJob.kind,
+              payload: inheritDeviceMemberEditConflictWorkPayload(
+                input.payload,
+                memberEditConflictWork,
+              ),
+            },
+            "checkpoint",
+          );
+          const checkpointNow = currentNow();
+          const updated = this.store.updateJobContinuationAndPatchSyncMetadataIfOwned({
+            accountId: storedAccount.id,
+            availableAt: checkpointNow,
+            disconnectGeneration,
+            jobId: normalizedJob.id,
+            localConnectionRevision,
+            ...(input.metadataPatch ? { metadataPatch: input.metadataPatch } : {}),
+            now: checkpointNow,
+            payload: checkpoint.payload ?? {},
+            releaseLease: false,
+            workerId: this.workerId,
+          });
+
+          if (!updated) {
+            throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, normalizedJob.id);
+          }
+
+          localConnectionRevision = updated.localConnectionRevision;
+          currentAccount = this.toDecryptedAccount(updated);
+          jobContext.account = currentAccount;
+        },
         importSnapshot: async (snapshot: unknown) => {
           ensureExecutionActive();
           const importResult = await this.importer.importDeviceProviderSnapshot({
             provider: provider.provider,
             snapshot,
             vaultRoot: this.vaultRoot,
-            ...resolveDeviceMemberEditConflictResolution(normalizedJobs),
+            ...(memberEditConflictWork
+              ? { memberEditConflictResolution: memberEditConflictWork.resolution }
+              : {}),
           });
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
@@ -1015,10 +1081,13 @@ class DeviceSyncServiceController {
         },
         upsertConnectionSource: (input) => {
           ensureExecutionActive();
-          return this.store.upsertConnectionSource({
+          const sourceInput = {
             ...input,
             connectionId: currentAccount.id,
-          });
+          };
+          return currentAccount.provider === "junction"
+            ? this.store.upsertJunctionConnectionSourceProjection(sourceInput)
+            : this.store.upsertConnectionSource(sourceInput);
         },
         listConnectionSources: async (input = {}) => {
           ensureExecutionActive();
@@ -1109,10 +1178,57 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
+      if (result.jobContinuation) {
+        if (
+          activeJobs.length !== 1
+          || (result.scheduledJobs?.length ?? 0) > 0
+          || Object.prototype.hasOwnProperty.call(result, "nextReconcileAt")
+        ) {
+          throw deviceSyncError({
+            code: "DEVICE_SYNC_JOB_CONTINUATION_INVALID",
+            message: "A same-job continuation must own one row and cannot schedule parallel progress.",
+            retryable: false,
+          });
+        }
+
+        const continuation = normalizeConfiguredDeviceSyncJobInput(
+          provider.provider,
+          {
+            kind: normalizedJob.kind,
+            payload: inheritDeviceMemberEditConflictWorkPayload(
+              result.jobContinuation.payload,
+              memberEditConflictWork,
+            ),
+            ...(result.jobContinuation.availableAt
+              ? { availableAt: result.jobContinuation.availableAt }
+              : {}),
+          },
+          "continuation",
+        );
+        const continued = this.store.updateJobContinuationAndPatchSyncMetadataIfOwned({
+          accountId: storedAccount.id,
+          availableAt: continuation.availableAt ?? currentNow(),
+          disconnectGeneration,
+          jobId: normalizedJob.id,
+          localConnectionRevision,
+          ...(result.metadataPatch ? { metadataPatch: result.metadataPatch } : {}),
+          now: currentNow(),
+          payload: continuation.payload ?? {},
+          releaseLease: true,
+          workerId: this.workerId,
+        });
+
+        if (!continued) {
+          releaseActiveJobsIfCurrentAccountActive(currentNow());
+        }
+        return finishPass();
+      }
+
       const successOptions: {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
         nextReconcileAt?: string | null;
+        updatesLastSyncCompletedAt?: boolean;
       } = {
         localConnectionRevision,
       };
@@ -1125,7 +1241,20 @@ class DeviceSyncServiceController {
         successOptions.nextReconcileAt = result.nextReconcileAt ?? null;
       }
 
-      const scheduledJobs = this.normalizeJobsForEnqueue(storedAccount, result.scheduledJobs ?? []);
+      if (result.updatesLastSyncCompletedAt === false) {
+        successOptions.updatesLastSyncCompletedAt = false;
+      }
+
+      const scheduledJobs = this.normalizeJobsForEnqueue(
+        storedAccount,
+        (result.scheduledJobs ?? []).map((scheduledJob) =>
+          inheritDeviceMemberEditConflictWorkJob(
+            scheduledJob,
+            memberEditConflictWork,
+            activeParentDedupeKeys,
+          )
+        ),
+      );
       const completed = this.store.completeJobsMarkSyncSucceededAndEnqueueJobs({
         accountId: storedAccount.id,
         completedAt: currentNow(),
@@ -1821,33 +1950,146 @@ function connectionChangedDuringDisconnectError(): DeviceSyncError {
   });
 }
 
-function resolveDeviceMemberEditConflictResolution(
-  jobs: readonly Pick<DeviceSyncJobRecord, "payload">[],
-): { memberEditConflictResolution?: DeviceMemberEditConflictResolution } {
-  const resolutions = new Set<DeviceMemberEditConflictResolution>();
-  for (const job of jobs) {
-    const value = job.payload.memberEditConflictResolution;
-    if (value === undefined) {
-      continue;
-    }
-    if (value !== "keep_member" && value !== "use_provider") {
-      throw deviceSyncError({
-        code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
-        message: "Device sync member-edit conflict resolution is invalid.",
-        retryable: false,
-      });
-    }
-    resolutions.add(value);
+function createDeviceMemberEditConflictWork(
+  account: Pick<
+    StoredDeviceSyncAccount,
+    "connectedAt" | "lastErrorCode" | "lastSyncErrorAt" | "localConnectionRevision" | "provider"
+  >,
+  resolution: DeviceMemberEditConflictResolution | undefined,
+): DeviceMemberEditConflictWork | null {
+  if (resolution === undefined) {
+    return null;
   }
-  if (resolutions.size > 1) {
+  if (resolution !== "keep_member" && resolution !== "use_provider") {
     throw deviceSyncError({
-      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
-      message: "A device job batch cannot mix member-edit conflict resolutions.",
+      code: "DEVICE_MEMBER_EDIT_CONFLICT_RESOLUTION_INVALID",
+      message: "Device member-edit conflict resolution must be keep_member or use_provider.",
       retryable: false,
+      httpStatus: 400,
     });
   }
-  const memberEditConflictResolution = [...resolutions][0];
-  return memberEditConflictResolution ? { memberEditConflictResolution } : {};
+  if (
+    account.provider !== "junction"
+    || account.lastErrorCode !== DEVICE_MEMBER_EDIT_CONFLICT_ERROR_CODE
+    || !account.lastSyncErrorAt
+  ) {
+    throw deviceSyncError({
+      code: "DEVICE_MEMBER_EDIT_CONFLICT_NOT_CURRENT",
+      message: "This device connection does not have a current member-edit conflict to resolve.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  return {
+    occurrence: sha256Text(stringifyJson([
+      "device-member-edit-conflict-v1",
+      account.connectedAt,
+      account.lastSyncErrorAt,
+      account.localConnectionRevision,
+    ])),
+    resolution,
+  };
+}
+
+function resolveDeviceMemberEditConflictWork(
+  jobs: readonly Pick<DeviceSyncJobRecord, "payload">[],
+): DeviceMemberEditConflictWork | null {
+  let resolved: DeviceMemberEditConflictWork | null | undefined;
+  for (const job of jobs) {
+    const candidate = readDeviceMemberEditConflictWork(job.payload);
+    if (resolved === undefined) {
+      resolved = candidate;
+      continue;
+    }
+    if (
+      (resolved === null) !== (candidate === null)
+      || (
+        resolved !== null
+        && candidate !== null
+        && (
+          resolved.occurrence !== candidate.occurrence
+          || resolved.resolution !== candidate.resolution
+        )
+      )
+    ) {
+      throw invalidDeviceMemberEditConflictWorkError();
+    }
+  }
+  return resolved ?? null;
+}
+
+function readDeviceMemberEditConflictWork(
+  payload: Readonly<Record<string, unknown>>,
+): DeviceMemberEditConflictWork | null {
+  const occurrence = payload[DEVICE_MEMBER_EDIT_CONFLICT_OCCURRENCE_FIELD];
+  const resolution = payload[DEVICE_MEMBER_EDIT_CONFLICT_RESOLUTION_FIELD];
+  if (occurrence === undefined && resolution === undefined) {
+    return null;
+  }
+  if (
+    typeof occurrence !== "string"
+    || !DEVICE_MEMBER_EDIT_CONFLICT_OCCURRENCE_PATTERN.test(occurrence)
+    || (resolution !== "keep_member" && resolution !== "use_provider")
+  ) {
+    throw invalidDeviceMemberEditConflictWorkError();
+  }
+  return { occurrence, resolution };
+}
+
+function inheritDeviceMemberEditConflictWorkPayload(
+  payload: Readonly<Record<string, unknown>>,
+  work: DeviceMemberEditConflictWork | null,
+): Record<string, unknown> {
+  const carried = readDeviceMemberEditConflictWork(payload);
+  if (!work) {
+    if (carried) {
+      throw invalidDeviceMemberEditConflictWorkError();
+    }
+    return { ...payload };
+  }
+  if (
+    carried
+    && (
+      carried.occurrence !== work.occurrence
+      || carried.resolution !== work.resolution
+    )
+  ) {
+    throw invalidDeviceMemberEditConflictWorkError();
+  }
+  return {
+    ...payload,
+    [DEVICE_MEMBER_EDIT_CONFLICT_OCCURRENCE_FIELD]: work.occurrence,
+    [DEVICE_MEMBER_EDIT_CONFLICT_RESOLUTION_FIELD]: work.resolution,
+  };
+}
+
+function inheritDeviceMemberEditConflictWorkJob(
+  job: DeviceSyncJobInput,
+  work: DeviceMemberEditConflictWork | null,
+  activeParentDedupeKeys: ReadonlySet<string>,
+): DeviceSyncJobInput {
+  const payload = inheritDeviceMemberEditConflictWorkPayload(job.payload ?? {}, work);
+  if (!work || !job.dedupeKey || activeParentDedupeKeys.has(job.dedupeKey)) {
+    return { ...job, payload };
+  }
+  return {
+    ...job,
+    payload,
+    dedupeKey: `member-edit-work:v1:${sha256Text(stringifyJson([
+      work.occurrence,
+      work.resolution,
+      job.dedupeKey,
+    ]))}`,
+  };
+}
+
+function invalidDeviceMemberEditConflictWorkError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+    message: "Device sync jobs must carry one complete member-edit conflict occurrence and resolution.",
+    retryable: false,
+  });
 }
 
 function isVaultMemberEditConflict(error: unknown): boolean {

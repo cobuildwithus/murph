@@ -8,6 +8,7 @@ import {
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedJunctionHistoricalBackfillMetadata,
@@ -27,6 +28,7 @@ import type { DeviceMemberEditConflictResolution } from "./types.ts";
 
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillProgress,
@@ -44,6 +46,24 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT = 64;
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES =
+  256 * 1024;
+/** Maximum database rows one hosted runtime snapshot page may collect. */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT = 32;
+/**
+ * Maximum source-authority rows one connection snapshot may collect. This is
+ * separate from the connection-page bound because one aggregator connection
+ * can legitimately contain every configured source.
+ */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT = 64;
+/**
+ * Maximum connections one complete credential hydration may return. This is
+ * intentionally aligned with the apply ceiling so one hydrated authority set
+ * can always be returned through the existing bounded write contract.
+ */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT =
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
@@ -219,11 +239,18 @@ const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN =
   /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|hmac|webhook[_-]?secret)\b|\bBearer\s+\S+/iu;
 
 export function mergeHostedDeviceSyncConnectionMetadata(input: {
+  authoritativeScheduleTimeCoverageClearProviderSlugs?: readonly string[];
   hostedMetadata: Record<string, unknown>;
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown> | null | undefined;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
   return mergeHostedJunctionHistoricalBackfillMetadata({
+    ...(input.authoritativeScheduleTimeCoverageClearProviderSlugs === undefined
+      ? {}
+      : {
+          authoritativeScheduleTimeCoverageClearProviderSlugs:
+            input.authoritativeScheduleTimeCoverageClearProviderSlugs,
+        }),
     hostedMetadata: input.hostedMetadata,
     localConnectionStateUnpublished: input.localConnectionStateUnpublished,
     localMetadata: input.localMetadata ?? {},
@@ -351,6 +378,8 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  /** Absent only during rolling deploys from a pre-epoch Web producer. */
+  lifecycleEpoch?: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -368,6 +397,11 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotCapabilities {
   connectionSourceApply?: boolean;
 }
 
+export interface HostedExecutionDeviceSyncRuntimeSnapshotCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
   connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
   credential: HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot;
@@ -376,6 +410,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
   connectionId?: string | null;
+  cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
   includeCredentialMaterial: boolean;
   limit?: number | null;
   provider?: string | null;
@@ -387,6 +422,8 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   capabilities?: HostedExecutionDeviceSyncRuntimeSnapshotCapabilities;
   connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
   generatedAt: string;
+  /** Null only when the current bounded page exhausted matching authority. */
+  nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
   /** Invocation-scoped client configuration for current app-bound connections. */
   providerConfigs?: SerializableConfiguredDeviceSyncProviderConfigs;
   userId: string;
@@ -416,11 +453,13 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
   observedLastSeenAt: string | null;
+  observedLifecycleEpoch?: number | null;
   displayName?: string | null;
   status: DeviceConnectionSourceStatus;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  lifecycleEpoch?: number;
   firstSeenAt?: string | null;
   lastSeenAt: string;
   lastDataAt?: string | null;
@@ -707,6 +746,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   emptyBackfillAttempts: "number",
   eventType: "string",
   historicalBackfill: "boolean",
+  historicalBackfillVersion: "number",
+  historicalNoProgressRescan: "boolean",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
@@ -837,6 +878,16 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
       record.generatedAt,
       "Hosted device-sync runtime snapshot response generatedAt",
     ),
+    ...(record.nextCursor === undefined
+      ? {}
+      : {
+          nextCursor: record.nextCursor === null
+            ? null
+            : parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+                record.nextCursor,
+                "Hosted device-sync runtime snapshot response nextCursor",
+              ),
+        }),
     ...(record.providerConfigs === undefined
       ? {}
       : {
@@ -876,6 +927,16 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
     ...(record.connectionId === undefined
       ? {}
       : { connectionId: readNullableStringValue(record.connectionId, "Hosted device-sync runtime snapshot request connectionId") }),
+    ...(record.cursor === undefined
+      ? {}
+      : {
+          cursor: record.cursor === null
+            ? null
+            : parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+                record.cursor,
+                "Hosted device-sync runtime snapshot request cursor",
+              ),
+        }),
     includeCredentialMaterial:
       record.includeCredentialMaterial === undefined
         ? false
@@ -903,6 +964,17 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
           ),
         }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeSnapshotCursor {
+  const record = requireObject(value, label);
+  return {
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
+    id: requireString(record.id, `${label}.id`),
   };
 }
 
@@ -1719,6 +1791,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
     lastErrorMessage: sanitizeHostedRuntimeErrorText(
       readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
     ),
+    ...(record.lifecycleEpoch === undefined
+      ? {}
+      : {
+          lifecycleEpoch: requirePositiveInteger(
+            record.lifecycleEpoch,
+            `${label}.lifecycleEpoch`,
+          ),
+        }),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
     // Absent means "produced before this field existed", which must stay
     // parseable: a runner-first deploy would otherwise reject every snapshot
@@ -1804,9 +1884,10 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
       );
   const sources = record.sources === undefined
     ? undefined
-    : requireArray(
+    : requireBoundedArray(
         record.sources,
         `Hosted device-sync runtime apply request updates[${index}].sources`,
+        HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT,
       ).map((entry, sourceIndex) =>
         parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
           entry,
@@ -1853,6 +1934,8 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
     "lastErrorCode",
     "lastErrorMessage",
     "lastSeenAt",
+    "lifecycleEpoch",
+    "observedLifecycleEpoch",
     "observedLastSeenAt",
     "resourceAvailabilitySummary",
     "sourceInstanceKey",
@@ -1882,6 +1965,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       record.observedLastSeenAt,
       `${label}.observedLastSeenAt`,
     ),
+    ...(record.observedLifecycleEpoch === undefined
+      ? {}
+      : {
+          observedLifecycleEpoch: readNullablePositiveInteger(
+            record.observedLifecycleEpoch,
+            `${label}.observedLifecycleEpoch`,
+          ),
+        }),
     sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`),
     sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     ...(record.displayName === undefined
@@ -1901,6 +1992,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       : {
           lastErrorMessage: sanitizeHostedRuntimeErrorText(
             readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
+          ),
+        }),
+    ...(record.lifecycleEpoch === undefined
+      ? {}
+      : {
+          lifecycleEpoch: requirePositiveInteger(
+            record.lifecycleEpoch,
+            `${label}.lifecycleEpoch`,
           ),
         }),
     ...(record.firstSeenAt === undefined

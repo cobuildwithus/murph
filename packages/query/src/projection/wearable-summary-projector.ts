@@ -25,7 +25,10 @@ import type {
   WearableMetricCandidate,
   WearableSleepWindowCandidate,
 } from "../wearables/types.ts";
-import { ACTIVITY_METRIC_KEYS } from "../wearables/types.ts";
+import {
+  ACTIVITY_METRIC_KEYS,
+  isActivitySummaryMetricCandidate,
+} from "../wearables/types.ts";
 import {
   normalizeWearableProviders,
   wearableProviderRowKey,
@@ -45,9 +48,7 @@ export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWear
 export function buildWearableSummaryProjectionFromDataset(dataset: WearableDataset): QueryWearableSummaryRow[] {
   const datasetsByProvider = groupWearableDatasetByPublicProvider(dataset);
   const providers = normalizeWearableProviders([...datasetsByProvider.keys()]);
-  const activityCandidates = dataset.metricCandidates.filter((candidate) =>
-    [...ACTIVITY_METRIC_KEYS].some((metric) => metric === candidate.metric)
-  );
+  const activityCandidates = dataset.metricCandidates.filter(isActivitySummaryMetricCandidate);
   const activityMetricEvidenceKeys = buildActivityMetricEvidenceKeys(
     activityCandidates,
   );

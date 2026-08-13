@@ -5056,14 +5056,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             instructions: "Replace the group newsletter with free-form instructions.",
             schedule: { expression: "0 13 * * 1", kind: "cron" },
             title: "Family weekly health newsletter",
-          })).resolves.toMatchObject({ action: "save", created: false });
+          })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
           await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Replace the group newsletter by slug.",
+            schedule: { expression: "0 13 * * 1", kind: "cron" },
+            slug: "group-health-newsletter",
+            title: "Family weekly health newsletter",
+          })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+          const rescheduledNewsletter = await executionContext.hosted?.automationTool?.request({
             action: "patch",
+            expectedUpdatedAt: newsletter.updatedAt,
             lookup: "group-health-newsletter",
             schedule: { expression: "0 14 * * 1", kind: "cron" },
-          })).resolves.toMatchObject({ action: "patch", routeBinding: "preserved" });
+          });
+          expect(rescheduledNewsletter).toMatchObject({
+            action: "patch",
+            routeBinding: "preserved",
+          });
+          if (!rescheduledNewsletter || rescheduledNewsletter.action !== "patch") {
+            throw new Error("Expected rescheduled group newsletter.");
+          }
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
+            expectedUpdatedAt: rescheduledNewsletter.updatedAt,
             lookup: "group-health-newsletter",
             status: "paused",
           })).resolves.toEqual(expect.objectContaining({
@@ -5160,13 +5176,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "read_shared",
             projectionScopes: [{ projectionKind: "steps-days.v0" }],
           });
-          return await executionContext.hosted?.automationTool?.request({
-            action: "save",
-            continuityPolicy: "fresh",
-            instructions: "Read and follow the group-newsletter skill before every execution.",
-            schedule: { expression: "0 13 * * 1", kind: "cron" },
+          const current = await showAutomation({
             slug: "group-health-newsletter",
-            title: "Family weekly health newsletter",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected current group newsletter.");
+          }
+          return await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: current.updatedAt,
+            lookup: "group-health-newsletter",
+            retargetToCurrentConversation: true,
+            title: "Telegram group health newsletter",
           });
         },
         turnEnvironment: null,
@@ -5177,11 +5199,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(telegramResult).toEqual(expect.objectContaining({
-        action: "save",
+        action: "patch",
         created: false,
         lookupId: "group-health-newsletter",
         routeBinding: "current_conversation",
-        status: "active",
+        status: "paused",
       }));
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
@@ -5231,7 +5253,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           threadIsDirect: false,
         }),
         instructions: expect.stringContaining("group-newsletter skill"),
-        status: "active",
+        status: "paused",
       }));
       await expect(showAutomation({
         slug: "stale-group-check-in",
@@ -5311,7 +5333,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         turnEnvironment: null,
       });
 
-      await expect(requestAutomation({
+      const nextWorkout = await requestAutomation({
         action: "save",
         instructions: "Ask how the next workout felt.",
         schedule: {
@@ -5322,7 +5344,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
         slug: "next-workout-check-in",
         title: "Next workout check-in",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (nextWorkout.action !== "save") {
+        throw new Error("Expected next-workout save result.");
+      }
+      expect(nextWorkout).toEqual(expect.objectContaining({
         effectiveTimeZone: null,
         nextOccurrenceAt: null,
         schedule: {
@@ -5336,6 +5362,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: nextWorkout.updatedAt,
         instructions: "Ask briefly how the next workout felt.",
         lookup: "next-workout-check-in",
       })).resolves.toEqual(expect.objectContaining({
@@ -5345,7 +5372,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const dailyEveningReminder = await requestAutomation({
         action: "save",
         instructions: "Send the daily evening reminder.",
         schedule: {
@@ -5356,13 +5383,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "daily-evening-reminder",
         status: "paused",
         title: "Daily evening reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyEveningReminder.action !== "save") {
+        throw new Error("Expected daily reminder save result.");
+      }
+      expect(dailyEveningReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: null,
         status: "paused",
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const oneTimeEveningReminder = await requestAutomation({
         action: "save",
         instructions: "Send the one-time evening reminder.",
         schedule: {
@@ -5372,13 +5403,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "one-time-evening-reminder",
         status: "paused",
         title: "One-time evening reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (oneTimeEveningReminder.action !== "save") {
+        throw new Error("Expected one-time reminder save result.");
+      }
+      expect(oneTimeEveningReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: null,
         status: "paused",
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const finiteOneTimeReminder = await requestAutomation({
         action: "save",
         activeUntil: "2026-08-01T12:45:00.000Z",
         instructions: "Send the finite one-time reminder.",
@@ -5389,13 +5424,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "finite-one-time-reminder",
         status: "paused",
         title: "Finite one-time reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (finiteOneTimeReminder.action !== "save") {
+        throw new Error("Expected finite reminder save result.");
+      }
+      expect(finiteOneTimeReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: null,
         status: "paused",
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const recurringIntervalReminder = await requestAutomation({
         action: "save",
         instructions: "Send the recurring interval reminder.",
         schedule: {
@@ -5404,7 +5443,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
         slug: "recurring-interval-reminder",
         title: "Recurring interval reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (recurringIntervalReminder.action !== "save") {
+        throw new Error("Expected recurring reminder save result.");
+      }
+      expect(recurringIntervalReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: "2026-08-02T12:00:00.000Z",
         status: "active",
         timingVerified: true,
@@ -5413,6 +5456,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: finiteOneTimeReminder.updatedAt,
         lookup: "finite-one-time-reminder",
         status: "active",
       })).resolves.toEqual(expect.objectContaining({
@@ -5424,6 +5468,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: recurringIntervalReminder.updatedAt,
         instructions: "Send the revised recurring interval reminder.",
         lookup: "recurring-interval-reminder",
       })).resolves.toEqual(expect.objectContaining({
@@ -5437,6 +5482,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: oneTimeEveningReminder.updatedAt,
         lookup: "one-time-evening-reminder",
         status: "active",
       })).resolves.toEqual(expect.objectContaining({
@@ -5448,11 +5494,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "active",
         timingVerified: true,
       }));
-      await expect(requestAutomation({
+      const dailyReactivated = await requestAutomation({
         action: "patch",
+        expectedUpdatedAt: dailyEveningReminder.updatedAt,
         lookup: "daily-evening-reminder",
         status: "active",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyReactivated.action !== "patch") {
+        throw new Error("Expected daily reminder patch result.");
+      }
+      expect(dailyReactivated).toEqual(expect.objectContaining({
         effectiveTimeZone: "America/Chicago",
         nextOccurrenceAt: "2026-08-10T02:00:00.000Z",
         timingVerified: true,
@@ -5465,15 +5516,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
 
       vi.setSystemTime(new Date("2026-08-10T00:28:19.000Z"));
-      await expect(requestAutomation({
+      const dailyRevised = await requestAutomation({
         action: "patch",
+        expectedUpdatedAt: dailyReactivated.updatedAt,
         lookup: "daily-evening-reminder",
         schedule: {
           kind: "dailyLocal",
           localTime: "22:00",
           timeZone: "America/Chicago",
         },
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyRevised.action !== "patch") {
+        throw new Error("Expected daily revised patch result.");
+      }
+      expect(dailyRevised).toEqual(expect.objectContaining({
         nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
         schedule: {
           kind: "dailyLocal",
@@ -5489,18 +5545,59 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         state: { nextRunAt: "2026-08-10T03:00:00.000Z" },
       });
 
+      const beforeInspect = await showAutomation({
+        slug: "daily-evening-reminder",
+        vaultRoot,
+      });
+      if (!beforeInspect) {
+        throw new Error("Expected daily reminder before inspection.");
+      }
+      const recordPath = path.join(vaultRoot, beforeInspect.relativePath);
+      const recordBytesBeforeInspect = await readFile(recordPath, "utf8");
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "daily-evening-reminder",
+      })).resolves.toEqual({
+        action: "inspect",
+        automationId: beforeInspect.automationId,
+        effectiveTimeZone: "America/Chicago",
+        lookupId: "daily-evening-reminder",
+        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        routeBinding: "preserved",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+        status: "active",
+        timingVerified: true,
+        updatedAt: dailyRevised.updatedAt,
+      });
+      await expect(readFile(recordPath, "utf8")).resolves.toBe(
+        recordBytesBeforeInspect,
+      );
+      await expect(showAutomation({
+        slug: "daily-evening-reminder",
+        vaultRoot,
+      })).resolves.toEqual(beforeInspect);
+
       mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
         timeZone: "America/New_York",
         vaultTimeZoneVerified: false,
       });
-      await expect(requestAutomation({
+      const dailyPreservedTimeZone = await requestAutomation({
         action: "patch",
+        expectedUpdatedAt: dailyRevised.updatedAt,
         lookup: "daily-evening-reminder",
         schedule: {
           kind: "dailyLocal",
           localTime: "23:00",
         },
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyPreservedTimeZone.action !== "patch") {
+        throw new Error("Expected daily preserved-timezone patch result.");
+      }
+      expect(dailyPreservedTimeZone).toEqual(expect.objectContaining({
         action: "patch",
         effectiveTimeZone: "America/Chicago",
         nextOccurrenceAt: "2026-08-10T04:00:00.000Z",
@@ -5515,6 +5612,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await expect(requestAutomation({
         action: "patch",
         activeUntil: "2026-08-10T02:30:00.000Z",
+        expectedUpdatedAt: dailyPreservedTimeZone.updatedAt,
         lookup: "daily-evening-reminder",
       })).resolves.toEqual(expect.objectContaining({
         action: "patch",
@@ -5755,8 +5853,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             if (!automationTool) {
               throw new Error("Expected scoped hosted automation tool.");
             }
+            const current = await showAutomation({
+              slug: "existing-reminder",
+              vaultRoot,
+            });
+            if (!current) {
+              throw new Error("Expected existing reminder.");
+            }
             return await automationTool.request({
               action: "patch",
+              expectedUpdatedAt: current.updatedAt,
               lookup: "existing-reminder",
               retargetToCurrentConversation,
               title: retargetToCurrentConversation
@@ -5810,8 +5916,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
+          const current = await showAutomation({
+            slug: "existing-reminder",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected existing reminder.");
+          }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: current.updatedAt,
             lookup: "existing-reminder",
             schedule: { at: "2026-08-01T13:00:00.000Z", kind: "at" },
           });
@@ -5838,8 +5952,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
+          const current = await showAutomation({
+            slug: "existing-reminder",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected existing reminder.");
+          }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: current.updatedAt,
             instructions: `${availabilityBase.replace(
               "Availability conflict policy: skip-when-busy",
               "Availability conflict policy: fixed",
@@ -6047,6 +6169,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         routeBinding: "current_conversation",
         status: "active",
       }));
+      if (saved.action !== "save") {
+        throw new Error("Expected first-read save result.");
+      }
       await expect(showAutomation({
         slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         vaultRoot,
@@ -6068,6 +6193,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: saved.updatedAt,
             lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
             status: "archived",
           });
@@ -7607,6 +7733,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const accountSnapshots = Array.from({ length: 33 }, (_, index) => ({
+      connection: {
+        accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
+        connectedAt: "2026-04-28T00:00:00.000Z",
+        createdAt: new Date(Date.parse("2026-04-28T00:00:00.000Z") - index * 1_000)
+          .toISOString(),
+        displayName: index === 0 ? "Training wearable" : `Training wearable ${index + 1}`,
+        externalAccountId: `external-account-not-for-assistant-${index + 1}`,
+        id: index === 0
+          ? "conn_synthetic_whoop"
+          : `conn_synthetic_whoop_${String(index + 1).padStart(2, "0")}`,
+        metadata: { privateProviderDetail: "not-for-assistant" },
+        provider: "whoop",
+        scopes: ["read:recovery"],
+        status: "active" as const,
+      },
+      credential: {
+        credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
+        kind: "none" as const,
+      },
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
+        lastWebhookAt: "2026-04-28T23:58:00.000Z",
+        nextReconcileAt: null,
+      },
+    }));
+    const accountCursor = {
+      createdAt: accountSnapshots[31]!.connection.createdAt,
+      id: accountSnapshots[31]!.connection.id,
+    };
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -7627,36 +7787,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         };
       },
       async fetchSnapshot(request) {
+        const pageIndex = fetchSnapshotRequests.length;
         fetchSnapshotRequests.push(request);
         return {
-          connections: [{
-            connection: {
-              accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
-              connectedAt: "2026-04-28T00:00:00.000Z",
-              createdAt: "2026-04-28T00:00:00.000Z",
-              displayName: "Training wearable",
-              externalAccountId: "external-account-not-for-assistant",
-              id: "conn_synthetic_whoop",
-              metadata: { privateProviderDetail: "not-for-assistant" },
-              provider: "whoop",
-              scopes: ["read:recovery"],
-              status: "active" as const,
-            },
-            credential: {
-              credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
-              kind: "none" as const,
-            },
-            localState: {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-              lastSyncErrorAt: null,
-              lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
-              lastWebhookAt: "2026-04-28T23:58:00.000Z",
-              nextReconcileAt: null,
-            },
-          }],
+          connections: pageIndex === 0
+            ? accountSnapshots.slice(0, 32)
+            : accountSnapshots.slice(32),
           generatedAt: "2026-04-29T00:00:00.000Z",
+          nextCursor: pageIndex === 0 ? accountCursor : null,
           userId: "member_synthetic_phase",
         };
       },
@@ -7677,7 +7815,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["fitbit"],
+            providerFilter: ["fitbit", "dexcom_v3", "dexcom"],
             region: "us",
           },
           strava: {
@@ -7701,6 +7839,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
+          { label: "Dexcom (G6 and older)", provider: "dexcom" },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
@@ -7716,24 +7855,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       provider: " whoop ",
       sourceProvider: " whoop_v2 ",
     }, { signal: abortController.signal })).resolves.toEqual({
-      accounts: [{
-        accountId: "conn_synthetic_whoop",
-        displayName: "Training wearable",
-        lastErrorCode: null,
-        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-        provider: "whoop",
-        status: "active",
-      }],
+      accounts: accountSnapshots.map(({ connection, localState }) => ({
+        accountId: connection.id,
+        displayName: connection.displayName,
+        lastErrorCode: localState.lastErrorCode,
+        lastSyncCompletedAt: localState.lastSyncCompletedAt,
+        provider: connection.provider,
+        status: connection.status,
+      })),
       action: "list_accounts",
       provider: "whoop",
       sourceProvider: "whoop_v2",
     });
-    expect(fetchSnapshotRequests).toEqual([{
-      includeCredentialMaterial: false,
-      provider: "whoop",
-      signal: abortController.signal,
-      sourceProviderSlug: "whoop_v2",
-    }]);
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+      {
+        cursor: accountCursor,
+        includeCredentialMaterial: false,
+        limit: 32,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+    ]);
     await expect(
       deviceTool.request({
         action: "connect",
@@ -7775,7 +7924,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "connect",
       provider: "strava",
     })).rejects.toThrow("not available to connect");
-    expect(connectLinkRequests).toHaveLength(1);
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom_v3",
+    })).rejects.toThrow("not available to connect");
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom",
+    })).resolves.toEqual({
+      action: "connect",
+      link: expect.objectContaining({ provider: "dexcom" }),
+    });
+    expect(connectLinkRequests).toEqual([
+      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
+      { connectTarget: "dexcom", messagingReturnTarget: "telegram" },
+    ]);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -7784,8 +7947,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 2,
-        deviceConnectProviders: ["whoop", "fitbit"],
+        deviceConnectProviderCount: 3,
+        deviceConnectProviders: ["whoop", "fitbit", "dexcom"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -7801,6 +7964,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectReturnTarget: "telegram",
         expiresAtPresent: true,
         provider: "whoop",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "requested",
+        deviceConnectReturnTarget: "telegram",
+        provider: "dexcom",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "issued",
+        deviceConnectReturnTarget: "telegram",
+        expiresAtPresent: true,
+        provider: "dexcom",
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
@@ -7861,14 +8037,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotRequests.push(request);
-        if (request?.sourceProviderSlug !== "whoop_v2") {
-          return {
-            connections: [],
-            generatedAt: "2026-04-29T00:00:00.000Z",
-            userId: "member_synthetic_phase",
-          };
-        }
-
         return {
           connections: [
             {
@@ -7963,23 +8131,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),
     );
-    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
-      "fitbit",
-      "garmin",
-      "oura",
-      "withings",
-      "whoop_v2",
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        signal: expect.any(AbortSignal),
+      },
     ]);
-    expect(fetchSnapshotRequests).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          includeCredentialMaterial: false,
-          limit: 4,
-          signal: expect.any(AbortSignal),
-          sourceProviderSlug: "whoop_v2",
-        }),
-      ]),
-    );
+    for (const request of fetchSnapshotRequests) {
+      expect(request).not.toHaveProperty("limit");
+    }
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
@@ -8156,7 +8316,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
     expect(prompt).toContain("Strava currently needs reconnect");
-    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).toContain("Reconnect is not currently available for this wearable/source");
+    expect(prompt).toContain("Do not offer or issue a reconnect link");
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 
@@ -8709,8 +8870,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("writes an outbox delivery summary after committed delivery effects drain", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const deliveryEffect = {
+      ...createDeliveryEffect(),
+      payload: {
+        ...createDeliveryEffect().payload,
+        media: [
+          {
+            alt: "Start",
+            kind: "image" as const,
+            source: "exercise_catalog:movement:1",
+            url: "https://cdn.example.test/exercises/start.png",
+          },
+          {
+            alt: "Finish",
+            contentType: "image/png" as const,
+            filename: "finish.png",
+            kind: "vault_image" as const,
+            ref: "generated/finish.png",
+            sha256: "a".repeat(64),
+            sizeBytes: 1234,
+            source: "murph.generate_image",
+          },
+        ],
+      },
+    };
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      createDeliveryEffect(),
+      deliveryEffect,
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
@@ -8752,9 +8937,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         attempted: 1,
         failed: 0,
+        imageBearingIntentCount: 1,
+        imageMediaItemCount: 2,
+        maxMediaItemsPerIntent: 2,
+        maxMessageLength: "Synthetic delivery".length,
+        mediaItemCount: 2,
+        mediaKindSummary: "image:1,vault_image:1",
+        privateImageMediaItemCount: 1,
+        publicImageMediaItemCount: 1,
         retryable: 0,
         sent: 1,
         statusSummary: "sent:1",
+        totalImageAltTextLength: "Start".length + "Finish".length,
+        totalMessageLength: "Synthetic delivery".length,
+        vaultFileMediaItemCount: 0,
+        voiceMemoMediaItemCount: 0,
       }),
     }));
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
@@ -9388,6 +9585,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             ref: "documents/lab-results.pdf",
             sha256: "a".repeat(64),
             sizeBytes: 1234,
+          }, {
+            alt: "Start position",
+            kind: "image" as const,
+            source: "exercise_catalog:movement:1",
+            url: "https://cdn.example.test/exercises/start.png",
           }],
         },
       };
@@ -9495,6 +9697,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "outgoing message failed to send and was NOT delivered",
       );
       expect(event?.content.text).toContain('vault file "lab-results.pdf"');
+      expect(event?.content.text).toContain("1 image");
+      expect(event?.content.text).toContain(
+        "A text-only substitute is not equivalent; do not offer or send one as recovery",
+      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -12315,6 +12521,102 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(serializedLog).not.toContain("REDACTED_TOKEN");
     expect(serializedLog).not.toContain("private-object");
     expect(serializedLog).not.toContain("uploads.example.test");
+    expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
+  });
+
+  it("projects Linq payload shape and response signatures without provider content", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+        deliveryErrorDetails: {
+          failureStage: "http",
+          method: "POST",
+          name: "VaultCliError",
+          operation: "send_message",
+          providerErrorCode: "INVALID_MEDIA",
+          providerErrorMessage: "provider response prose",
+          providerRequestId: "trace_safe_123",
+          requestAttachmentMediaPartCount: 1,
+          requestBodyShape: "object:message|message:idempotency_key,parts",
+          requestMediaPartCount: 8,
+          requestMessageLength: 4321,
+          requestMessagePartCount: 9,
+          requestPublicUrlMediaPartCount: 7,
+          requestTextPartCount: 1,
+          responseBodyKeyCount: 4,
+          responseBodyKeySummary: "code,errors,trace_id",
+          responseBodyKind: "json_object",
+          responseBodySha256: "a".repeat(64),
+          responseBodyStringFieldCount: 3,
+          responseBodyStringFieldSummary: "code,trace_id",
+          responseBodyTextLength: 246,
+          retryable: false,
+          status: 400,
+        },
+        deliveryErrorMessage:
+          "Linq request POST /chats/[chat]/messages failed with HTTP 400.",
+        effectId: "effect_linq_payload_diagnostics",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+    const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests)[1];
+
+    expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      deliveryErrorSummaries: [
+        expect.objectContaining({
+          deliveryErrorDetailFailureStage: "http",
+          deliveryErrorDetailMethod: "POST",
+          deliveryErrorDetailOperation: "send_message",
+          deliveryErrorDetailProviderCode: "INVALID_MEDIA",
+          deliveryErrorDetailProviderRequestId: "trace_safe_123",
+          deliveryErrorDetailRequestSummary: JSON.stringify({
+            messageLength: 4321,
+            partCount: 9,
+            textPartCount: 1,
+            mediaPartCount: 8,
+            publicUrlMediaPartCount: 7,
+            attachmentMediaPartCount: 1,
+            bodyShape: "object:message|message:idempotency_key,parts",
+          }),
+          deliveryErrorDetailResponseSummary: JSON.stringify({
+            kind: "json_object",
+            textLength: 246,
+            keyCount: 4,
+            keySummary: "code,errors,trace_id",
+            stringFieldCount: 3,
+            stringFieldSummary: "code,trace_id",
+          }),
+          deliveryErrorDetailResponseSignature: "a".repeat(64),
+          deliveryErrorDetailStatus: 400,
+        }),
+      ],
+    }));
+    const deliveryErrorSummaries = deliveryLogRequest?.entries[0]?.redactedJson
+      ?.deliveryErrorSummaries;
+    expect(Array.isArray(deliveryErrorSummaries)).toBe(true);
+    if (!Array.isArray(deliveryErrorSummaries)) {
+      throw new Error("Expected delivery error summaries.");
+    }
+    const deliveryErrorSummary = deliveryErrorSummaries[0];
+    expect(deliveryErrorSummary).toBeDefined();
+    if (
+      deliveryErrorSummary === null
+      || typeof deliveryErrorSummary !== "object"
+      || Array.isArray(deliveryErrorSummary)
+    ) {
+      throw new Error("Expected a delivery error summary object.");
+    }
+    expect(Object.keys(deliveryErrorSummary)).toHaveLength(16);
+    expect(JSON.stringify(deliveryLogRequest)).not.toContain("provider response prose");
     expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });
 
@@ -15163,6 +15465,48 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: codexAuthItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
+  it("defers vault-share projection work until after the durable checkpoint", async () => {
+    const vaultShareItem = createVaultShareProjectionSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: vaultShareItem,
+      itemId: vaultShareItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Array),
+      checkpointReason: "system_mailbox_receipt",
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecordDeferred: true,
+      }),
+    }));
+
+    const effects = postCheckpoint?.afterDurableCheckpoint;
+    const effect = typeof effects === "function" ? effects : effects?.[0];
+    if (!effect) {
+      throw new Error("Expected deferred vault-share projection effect.");
+    }
+    await effect();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: vaultShareItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
@@ -18479,6 +18823,24 @@ function createCodexAuthSystemMailboxItem() {
       attemptId: "hca_abcdefghijklmnop",
       eventId: "runtime-control:codex-auth",
       kind: "runtime.codex-auth-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createVaultShareProjectionSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_vault_share_projection",
+    mailboxDedupeKey: "runtime-control:group-share-projection:synthetic",
+    postCheckpointRecord: {
+      kind: "vault-share.projection" as const,
+    },
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      eventId: "runtime-control:group-share-projection:synthetic",
+      kind: "runtime.maintenance-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },

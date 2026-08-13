@@ -1,9 +1,10 @@
-import { PrismaClient, type Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 import {
   generateHostedRandomPrefixedId,
@@ -23,6 +24,7 @@ export const hostedConnectionSourceRecordArgs = {
     id: true,
     lastErrorCode: true,
     lastErrorMessage: true,
+    lifecycleEpoch: true,
     lastSeenAt: true,
     lastDataAt: true,
     resourceAvailabilitySummaryJson: true,
@@ -46,6 +48,7 @@ export interface HostedDeviceConnectionSource {
   resourceAvailabilitySummary: DeviceConnectionSourceResourceAvailabilitySummary | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lifecycleEpoch: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -63,6 +66,7 @@ export interface UpsertHostedDeviceConnectionSourceInput {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary | null;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  lifecycleEpoch?: number;
   firstSeenAt?: string | null;
   lastSeenAt?: string | null;
   /** Omit to preserve the stored arrival signal; the reconcile projection must. */
@@ -84,12 +88,17 @@ export interface MarkHostedDeviceConnectionSourcesDisconnectedInput {
   tx?: HostedPrismaTransactionClient;
 }
 
-export interface ListHostedRuntimeSnapshotConnectionSourcesInput {
-  connectionId: string;
-  limit: number;
-  sourceProviderSlugs: readonly string[];
+export interface ListHostedBoundedConnectionSourcesForConnectionsInput {
+  connectionIds: readonly string[];
+  excludeDisconnected?: boolean;
+  limitPerConnection?: number;
+  sourceProviderSlugs?: readonly string[] | null;
   tx?: HostedPrismaTransactionClient;
 }
+
+type HostedBoundedConnectionSourceRecord = HostedConnectionSourceRecord & {
+  projectionRowNumber: bigint | number;
+};
 
 const SAFE_SOURCE_INSTANCE_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
 const SAFE_SOURCE_PROVIDER_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
@@ -118,6 +127,7 @@ export class PrismaHostedConnectionSourceStore {
     const hasResourceAvailabilitySummary = hasOwnInputProperty(input, "resourceAvailabilitySummary");
     const hasLastErrorCode = hasOwnInputProperty(input, "lastErrorCode");
     const hasLastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage");
+    const hasLifecycleEpoch = hasOwnInputProperty(input, "lifecycleEpoch");
     const hasLastDataAt = hasOwnInputProperty(input, "lastDataAt");
     const lastDataAt = hasLastDataAt ? maybeDate(input.lastDataAt) ?? null : null;
     const displayName = hasDisplayName
@@ -156,6 +166,10 @@ export class PrismaHostedConnectionSourceStore {
       update.lastErrorMessage = lastErrorMessage;
     }
 
+    if (hasLifecycleEpoch) {
+      update.lifecycleEpoch = requireSourceLifecycleEpoch(input.lifecycleEpoch);
+    }
+
     // Only an explicit value moves the arrival signal. The reconcile projection
     // omits it, so a source the provider still lists but no longer feeds keeps
     // its real last-delivery instant.
@@ -177,6 +191,9 @@ export class PrismaHostedConnectionSourceStore {
         id: generateHostedRandomPrefixedId("dcs"),
         lastErrorCode,
         lastErrorMessage,
+        lifecycleEpoch: hasLifecycleEpoch
+          ? requireSourceLifecycleEpoch(input.lifecycleEpoch)
+          : 1,
         lastSeenAt,
         lastDataAt,
         resourceAvailabilitySummaryJson: toNullablePrismaJsonValue(resourceAvailabilitySummary),
@@ -299,35 +316,85 @@ export class PrismaHostedConnectionSourceStore {
     return records.map(mapHostedConnectionSourceRecord);
   }
 
-  async listRuntimeSnapshotConnectionSources(
-    input: ListHostedRuntimeSnapshotConnectionSourcesInput,
+  async listBoundedConnectionSourcesForConnections(
+    input: ListHostedBoundedConnectionSourcesForConnectionsInput,
   ): Promise<HostedDeviceConnectionSource[]> {
     const prisma = input.tx ?? this.prisma;
-    const sourceProviderSlugs = normalizeSourceProviderSlugList(input.sourceProviderSlugs);
-
-    if (sourceProviderSlugs.length === 0) {
+    const connectionIds = [...new Set(input.connectionIds.map(requireConnectionId))];
+    if (connectionIds.length === 0) {
       return [];
     }
+    const requestedLimit = input.limitPerConnection
+      ?? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT;
+    const limitPerConnection = Math.min(
+      requireSourceProjectionLimit(requestedLimit),
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+    );
+    const sourceProviderSlugs = input.sourceProviderSlugs == null
+      ? null
+      : normalizeSourceProviderSlugList(input.sourceProviderSlugs);
+    if (sourceProviderSlugs !== null && sourceProviderSlugs.length === 0) {
+      return [];
+    }
+    const sourceFilter = sourceProviderSlugs === null
+      ? Prisma.empty
+      : Prisma.sql`AND source_provider_slug IN (${Prisma.join(sourceProviderSlugs)})`;
+    const statusFilter = input.excludeDisconnected === true
+      ? Prisma.sql`AND status <> 'disconnected'`
+      : Prisma.empty;
+    const records = await prisma.$queryRaw<HostedBoundedConnectionSourceRecord[]>(
+      Prisma.sql`
+        SELECT
+          id,
+          connection_id AS "connectionId",
+          source_instance_key AS "sourceInstanceKey",
+          source_provider_slug AS "sourceProviderSlug",
+          display_name AS "displayName",
+          status,
+          resource_availability_summary_json AS "resourceAvailabilitySummaryJson",
+          last_error_code AS "lastErrorCode",
+          last_error_message AS "lastErrorMessage",
+          first_seen_at AS "firstSeenAt",
+          last_seen_at AS "lastSeenAt",
+          last_data_at AS "lastDataAt",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          "projectionRowNumber"
+        FROM (
+          SELECT
+            source.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY connection_id
+              ORDER BY
+                last_seen_at DESC,
+                source_provider_slug ASC,
+                source_instance_key ASC,
+                id ASC
+            ) AS "projectionRowNumber"
+          FROM device_connection_source AS source
+          WHERE connection_id IN (${Prisma.join(connectionIds)})
+            ${sourceFilter}
+            ${statusFilter}
+        ) AS bounded_source
+        WHERE "projectionRowNumber" <= ${limitPerConnection + 1}
+        ORDER BY
+          connection_id ASC,
+          last_seen_at DESC,
+          source_provider_slug ASC,
+          source_instance_key ASC,
+          id ASC
+      `,
+    );
 
-    const records = await prisma.deviceConnectionSource.findMany({
-      where: {
-        connectionId: requireConnectionId(input.connectionId),
-        sourceProviderSlug: {
-          in: sourceProviderSlugs,
-        },
-        status: {
-          not: "disconnected",
-        },
-      },
-      orderBy: [
-        { lastSeenAt: "desc" },
-        { sourceProviderSlug: "asc" },
-        { sourceInstanceKey: "asc" },
-        { id: "asc" },
-      ],
-      take: requireSourceProjectionLimit(input.limit),
-      ...hostedConnectionSourceRecordArgs,
-    });
+    const saturatedConnection = records.find(
+      (record) => Number(record.projectionRowNumber) > limitPerConnection,
+    );
+    if (saturatedConnection) {
+      throw sourceContractError(
+        "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+        `Hosted device connection source authority exceeds the ${limitPerConnection}-row per-connection snapshot bound.`,
+      );
+    }
 
     return records.map(mapHostedConnectionSourceRecord);
   }
@@ -344,6 +411,7 @@ export function mapHostedConnectionSourceRecord(
     id: record.id,
     lastErrorCode: sanitizeSourceErrorCode(record.lastErrorCode),
     lastErrorMessage: omitHostedSqlErrorText(record.lastErrorMessage),
+    lifecycleEpoch: readSourceLifecycleEpoch(record.lifecycleEpoch),
     lastSeenAt: record.lastSeenAt.toISOString(),
     lastDataAt: record.lastDataAt?.toISOString() ?? null,
     resourceAvailabilitySummary: sanitizeResourceAvailabilitySummary(
@@ -354,6 +422,27 @@ export function mapHostedConnectionSourceRecord(
     status: normalizeSourceStatus(record.status),
     updatedAt: record.updatedAt.toISOString(),
   };
+}
+
+function requireSourceLifecycleEpoch(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw sourceContractError(
+      "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+      "Hosted device connection source lifecycle epochs must be positive integers.",
+    );
+  }
+  return value;
+}
+
+function readSourceLifecycleEpoch(value: unknown): number {
+  // The expand-only hosted migration leaves the column nullable, and legacy
+  // projections can omit it or expose the pre-invariant zero sentinel. All
+  // three represent the original lifecycle, while explicit writes continue to
+  // pass through the strict positive-integer validator above.
+  if (value === null || value === undefined || value === 0) {
+    return 1;
+  }
+  return requireSourceLifecycleEpoch(value);
 }
 
 function requireConnectionId(value: string): string {

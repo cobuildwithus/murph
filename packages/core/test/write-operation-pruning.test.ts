@@ -23,6 +23,7 @@ import {
 const tempRoots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     tempRoots.splice(0).map((directory) =>
       fs.rm(directory, {
@@ -30,6 +31,23 @@ afterEach(async () => {
         recursive: true,
       }),
     ),
+  );
+});
+
+test("a hosted marker does not block ordinary canonical write batches", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const batch = await WriteBatch.create({
+    operationType: "test_hosted_ordinary_write",
+    summary: "test hosted ordinary write",
+    vaultRoot,
+  });
+  await batch.stageTextWrite("bank/hosted-ordinary.md", "allowed\n");
+  vi.stubEnv("MURPH_HOSTED_RUNTIME_PROCESS", "1");
+
+  await batch.commit();
+  assert.equal(
+    await fs.readFile(resolveVaultPath(vaultRoot, "bank/hosted-ordinary.md").absolutePath, "utf8"),
+    "allowed\n",
   );
 });
 

@@ -88,8 +88,10 @@ export interface WearableActivityDay {
   activityAverageHeartRate: WearableResolvedMetric;
   activityScore: WearableResolvedMetric;
   activeCalories: WearableResolvedMetric;
+  activityMinutes: WearableResolvedMetric;
   activityTypes: string[];
   altitudeChangeMeters: WearableResolvedMetric;
+  averageHeartRate: WearableResolvedMetric;
   date: string;
   dayStrain: WearableResolvedMetric;
   distanceKm: WearableResolvedMetric;
@@ -98,6 +100,7 @@ export interface WearableActivityDay {
   heartRateZones: WearableHeartRateZoneAggregate[];
   highActivityMinutes: WearableResolvedMetric;
   lowActivityMinutes: WearableResolvedMetric;
+  lowestHeartRate: WearableResolvedMetric;
   maxHeartRate: WearableResolvedMetric;
   mediumActivityMinutes: WearableResolvedMetric;
   minimumHeartRate: WearableResolvedMetric;
@@ -109,8 +112,8 @@ export interface WearableActivityDay {
   summaryConfidence: WearableSummaryConfidence;
   totalCalories: WearableResolvedMetric;
   totalElevationGainMeters: WearableResolvedMetric;
-  workoutStrain: WearableResolvedMetric;
   walkingAverageHeartRate: WearableResolvedMetric;
+  workoutStrain: WearableResolvedMetric;
 }
 
 /**
@@ -300,11 +303,15 @@ export interface WearableRecoveryDay {
 export interface WearableBodyStateDay {
   bmi: WearableResolvedMetric;
   bodyFatPercentage: WearableResolvedMetric;
+  bodyWaterPercentage: WearableResolvedMetric;
+  boneMassPercentage: WearableResolvedMetric;
   date: string;
   leanBodyMassKg: WearableResolvedMetric;
+  muscleMassPercentage: WearableResolvedMetric;
   notes: string[];
   summaryConfidence: WearableSummaryConfidence;
   temperature: WearableResolvedMetric;
+  visceralFatIndex: WearableResolvedMetric;
   waistCircumference: WearableResolvedMetric;
   weightKg: WearableResolvedMetric;
 }
@@ -718,8 +725,12 @@ export const RECOVERY_METRIC_KEYS = new Set<WearableMetricKey>([
 export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
   "bmi",
   "bodyFatPercentage",
+  "bodyWaterPercentage",
+  "boneMassPercentage",
   "leanBodyMassKg",
+  "muscleMassPercentage",
   "temperature",
+  "visceralFatIndex",
   "waistCircumference",
   "weightKg",
 ]);
@@ -727,14 +738,17 @@ export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
 export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "activeCalories",
   "activityAverageHeartRate",
+  "activityMinutes",
   "activityScore",
   "altitudeChangeMeters",
+  "averageHeartRate",
   "dayStrain",
   "distanceKm",
   "estimatedVo2Max",
   "floorsClimbed",
   "highActivityMinutes",
   "lowActivityMinutes",
+  "lowestHeartRate",
   "maxHeartRate",
   "mediumActivityMinutes",
   "minimumHeartRate",
@@ -744,9 +758,38 @@ export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "steps",
   "totalCalories",
   "totalElevationGainMeters",
-  "workoutStrain",
   "walkingAverageHeartRate",
+  "workoutStrain",
 ]);
+
+const ACTIVITY_SLEEP_SHARED_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set([
+  "averageHeartRate",
+  "lowestHeartRate",
+]);
+
+export function isActivitySummaryMetricCandidate(candidate: WearableMetricCandidate): boolean {
+  if (!ACTIVITY_METRIC_KEYS.has(candidate.metric as WearableMetricKey)) {
+    return false;
+  }
+
+  return !ACTIVITY_SLEEP_SHARED_METRIC_KEYS.has(candidate.metric as WearableMetricKey)
+    || isExplicitActivitySummaryResource(candidate);
+}
+
+export function isSleepSummaryMetricCandidate(candidate: WearableMetricCandidate): boolean {
+  if (!SLEEP_METRIC_KEYS.has(candidate.metric as WearableMetricKey)) {
+    return false;
+  }
+
+  return !ACTIVITY_SLEEP_SHARED_METRIC_KEYS.has(candidate.metric as WearableMetricKey)
+    || !isExplicitActivitySummaryResource(candidate);
+}
+
+function isExplicitActivitySummaryResource(candidate: WearableMetricCandidate): boolean {
+  const resourceType = candidate.externalRef?.resourceType?.trim().toLowerCase() ?? "";
+  return resourceType === "cycle"
+    || resourceType.includes("activity");
+}
 
 export const DAILY_CUMULATIVE_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set(
   ACTIVITY_SESSION_WORKOUT_METRIC_SPECS

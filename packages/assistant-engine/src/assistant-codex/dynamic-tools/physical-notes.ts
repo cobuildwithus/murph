@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   normalizeHostedPhysicalNoteRecipient,
+  type HostedPhysicalNoteFailureReason,
   type HostedPhysicalNoteRecipient,
 } from '@murphai/hosted-execution/physical-notes'
 
@@ -217,4 +218,27 @@ export function createPhysicalNoteRequestKey(input: {
     }))
     .digest('hex')
   return `physical_note_${digest}`
+}
+
+export function buildPhysicalNoteFailureInstruction(
+  reason: HostedPhysicalNoteFailureReason | null | undefined,
+): string {
+  switch (reason) {
+    case 'recipient_address':
+      return 'The printer could not verify or accept the recipient address. Nothing was sent. Ask the person to check the street and unit, city, state, and ZIP before making a new explicit send request. Do not retry automatically.'
+    case 'artwork':
+      return 'The printer could not render the generated artwork. Nothing was sent. Explain that Murph needs to regenerate the image, and require a new explicit send request before trying again. Do not retry automatically.'
+    case 'service_unavailable':
+      return 'Murph\'s printing service or account setup was unavailable. Nothing was sent. Explain that the problem is on Murph\'s side, not the recipient address. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+    case 'request_invalid':
+      return 'The printer rejected Murph\'s print request. Nothing was sent. Explain that Murph needs to correct the printing request. Do not ask the person to change a confirmed address. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+    case 'prior_note_unresolved':
+      return 'An earlier physical-note submission is still unresolved, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. No automatic investigation, retry, notification, or follow-up is running. A later explicit physical-note request may recheck the earlier outcome, but do not send while it remains unresolved. Do not retry automatically.'
+    case 'prior_note_accepted':
+      return 'An earlier physical note was accepted for printing, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. No automatic retry, notification, or follow-up is running. Do not retry automatically; that applies only to this request. A separately authorized future request is distinct.'
+    case 'unknown':
+    case null:
+    case undefined:
+      return 'Murph could not complete the physical-note request with a recognized safe correction. Nothing was sent for this request. Do not guess that the address or artwork was wrong. Explain that Murph needs to investigate. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+  }
 }

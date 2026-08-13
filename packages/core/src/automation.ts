@@ -143,6 +143,7 @@ export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
+  createOnly?: boolean;
   now?: Date;
   vaultRoot: string;
 }
@@ -1590,6 +1591,12 @@ async function upsertAutomationWithLatestRegistry(
     records ?? await loadAutomationRecords(input.vaultRoot),
     { automationId: normalizedId, slug: requestedSlug },
   );
+  if (input.createOnly === true && existingRecord !== null) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_CONFLICT",
+      "Automation already exists; use a versioned patch to change it.",
+    );
+  }
   const now = (input.now ?? new Date()).toISOString();
   const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
   const createdAt = existingRecord?.createdAt ?? now;

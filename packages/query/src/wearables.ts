@@ -121,6 +121,8 @@ import {
   ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
+  isActivitySummaryMetricCandidate,
+  isSleepSummaryMetricCandidate,
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
 } from "./wearables/types.ts";
@@ -186,7 +188,7 @@ export function listWearableActivityDays(
 
 function listWearableActivityDaysFromDataset(dataset: WearableDataset): WearableActivityDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
-    dataset.metricCandidates.filter((candidate) => metricSetHas(ACTIVITY_METRIC_KEYS, candidate.metric)),
+    dataset.metricCandidates.filter(isActivitySummaryMetricCandidate),
   );
   const activitySessionDayRollupsByDate = groupActivitySessionAggregatesByDate(
     dataset.activitySessionDayRollups,
@@ -202,6 +204,26 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const aggregates = activitySessionDayRollupsByDate.get(date) ?? [];
     const workoutMetricCandidates = aggregates.flatMap(buildActivitySessionWorkoutMetricCandidates);
     const steps = resolveMetric("steps", selectMetricCandidates(explicitDateCandidates, "steps"), { metricFamily: "activity" });
+    const activityMinutes = resolveMetric(
+      "activityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "activityMinutes"),
+      { metricFamily: "activity" },
+    );
+    const lowActivityMinutes = resolveMetric(
+      "lowActivityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "lowActivityMinutes"),
+      { metricFamily: "activity" },
+    );
+    const mediumActivityMinutes = resolveMetric(
+      "mediumActivityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "mediumActivityMinutes"),
+      { metricFamily: "activity" },
+    );
+    const highActivityMinutes = resolveMetric(
+      "highActivityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "highActivityMinutes"),
+      { metricFamily: "activity" },
+    );
     const activeCalories = resolveDailyCumulativeMetric(
       "activeCalories",
       explicitDateCandidates,
@@ -249,21 +271,6 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       selectMetricCandidates(explicitDateCandidates, "minimumHeartRate"),
       { metricFamily: "activity" },
     );
-    const lowActivityMinutes = resolveMetric(
-      "lowActivityMinutes",
-      selectMetricCandidates(explicitDateCandidates, "lowActivityMinutes"),
-      { metricFamily: "activity" },
-    );
-    const mediumActivityMinutes = resolveMetric(
-      "mediumActivityMinutes",
-      selectMetricCandidates(explicitDateCandidates, "mediumActivityMinutes"),
-      { metricFamily: "activity" },
-    );
-    const highActivityMinutes = resolveMetric(
-      "highActivityMinutes",
-      selectMetricCandidates(explicitDateCandidates, "highActivityMinutes"),
-      { metricFamily: "activity" },
-    );
     const dayStrain = resolveMetric("dayStrain", selectMetricCandidates(explicitDateCandidates, "dayStrain"), {
       metricFamily: "activity",
     });
@@ -274,6 +281,16 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const maxHeartRate = resolveDailyMaximumMetric(
       "maxHeartRate",
       selectMetricCandidates([...explicitDateCandidates, ...workoutMetricCandidates], "maxHeartRate"),
+    );
+    const averageHeartRate = resolveMetric(
+      "averageHeartRate",
+      selectMetricCandidates(explicitDateCandidates, "averageHeartRate"),
+      { metricFamily: "activity" },
+    );
+    const lowestHeartRate = resolveMetric(
+      "lowestHeartRate",
+      selectMetricCandidates(explicitDateCandidates, "lowestHeartRate"),
+      { metricFamily: "activity" },
     );
     const percentRecorded = resolveMetric("percentRecorded", selectMetricCandidates(explicitDateCandidates, "percentRecorded"), {
       metricFamily: "activity",
@@ -298,6 +315,10 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const heartRateZones = resolveSelectedHeartRateZones(aggregates, sessionMinutes.selection);
     const summaryConfidence = summarizeMetricsConfidence([
       ["steps", steps],
+      ["activityMinutes", activityMinutes],
+      ["lowActivityMinutes", lowActivityMinutes],
+      ["mediumActivityMinutes", mediumActivityMinutes],
+      ["highActivityMinutes", highActivityMinutes],
       ["activeCalories", activeCalories],
       ["totalCalories", totalCalories],
       ["distanceKm", distanceKm],
@@ -309,12 +330,11 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ["activityAverageHeartRate", activityAverageHeartRate],
       ["walkingAverageHeartRate", walkingAverageHeartRate],
       ["minimumHeartRate", minimumHeartRate],
-      ["lowActivityMinutes", lowActivityMinutes],
-      ["mediumActivityMinutes", mediumActivityMinutes],
-      ["highActivityMinutes", highActivityMinutes],
       ["dayStrain", dayStrain],
       ["workoutStrain", workoutStrain],
       ["maxHeartRate", maxHeartRate],
+      ["averageHeartRate", averageHeartRate],
+      ["lowestHeartRate", lowestHeartRate],
       ["percentRecorded", percentRecorded],
       ["sessionMinutes", sessionMinutes],
       ["sessionCount", sessionCount],
@@ -332,8 +352,10 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       activityAverageHeartRate,
       activityScore,
       activeCalories,
+      activityMinutes,
       activityTypes,
       altitudeChangeMeters,
+      averageHeartRate,
       date,
       dayStrain,
       distanceKm,
@@ -342,6 +364,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       heartRateZones,
       highActivityMinutes,
       lowActivityMinutes,
+      lowestHeartRate,
       maxHeartRate,
       mediumActivityMinutes,
       minimumHeartRate,
@@ -353,8 +376,8 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       summaryConfidence,
       totalCalories,
       totalElevationGainMeters,
-      workoutStrain,
       walkingAverageHeartRate,
+      workoutStrain,
     };
   });
 }
@@ -713,7 +736,7 @@ function buildDerivedTotalSleepCandidatesForWindow(
 
 function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableSleepNight[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
-    dataset.metricCandidates.filter((candidate) => metricSetHas(SLEEP_METRIC_KEYS, candidate.metric)),
+    dataset.metricCandidates.filter(isSleepSummaryMetricCandidate),
   );
   const sleepWindowsByDate = groupSleepWindowsByDate(dataset.sleepWindows);
   const dates = collectSortedDatesDesc([
@@ -1080,7 +1103,8 @@ export function listWearableRecoveryDays(
 function listWearableRecoveryDaysFromDataset(dataset: WearableDataset): WearableRecoveryDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) =>
-      metricSetHas(RECOVERY_METRIC_KEYS, candidate.metric) || candidate.metric === "lowestHeartRate"
+      metricSetHas(RECOVERY_METRIC_KEYS, candidate.metric)
+      || (candidate.metric === "lowestHeartRate" && isSleepSummaryMetricCandidate(candidate))
     ),
   );
   const dates = collectSortedDatesDesc([...metricCandidatesByDate.keys()]);
@@ -1185,14 +1209,26 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const bodyFatPercentage = resolveMetric("bodyFatPercentage", selectMetricCandidates(dateCandidates, "bodyFatPercentage"), {
       metricFamily: "body",
     });
+    const bodyWaterPercentage = resolveMetric("bodyWaterPercentage", selectMetricCandidates(dateCandidates, "bodyWaterPercentage"), {
+      metricFamily: "body",
+    });
+    const boneMassPercentage = resolveMetric("boneMassPercentage", selectMetricCandidates(dateCandidates, "boneMassPercentage"), {
+      metricFamily: "body",
+    });
     const bmi = resolveMetric("bmi", selectMetricCandidates(dateCandidates, "bmi"), {
       metricFamily: "body",
     });
     const leanBodyMassKg = resolveMetric("leanBodyMassKg", selectMetricCandidates(dateCandidates, "leanBodyMassKg"), {
       metricFamily: "body",
     });
+    const muscleMassPercentage = resolveMetric("muscleMassPercentage", selectMetricCandidates(dateCandidates, "muscleMassPercentage"), {
+      metricFamily: "body",
+    });
     const temperature = resolveMetric("temperature", selectMetricCandidates(dateCandidates, "temperature"), {
       metricFamily: "temperature",
+    });
+    const visceralFatIndex = resolveMetric("visceralFatIndex", selectMetricCandidates(dateCandidates, "visceralFatIndex"), {
+      metricFamily: "body",
     });
     const waistCircumference = resolveMetric("waistCircumference", selectMetricCandidates(dateCandidates, "waistCircumference"), {
       metricFamily: "body",
@@ -1200,9 +1236,13 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const summaryConfidence = summarizeMetricsConfidence([
       ["weightKg", weightKg],
       ["bodyFatPercentage", bodyFatPercentage],
+      ["bodyWaterPercentage", bodyWaterPercentage],
+      ["boneMassPercentage", boneMassPercentage],
       ["bmi", bmi],
       ["leanBodyMassKg", leanBodyMassKg],
+      ["muscleMassPercentage", muscleMassPercentage],
       ["temperature", temperature],
+      ["visceralFatIndex", visceralFatIndex],
       ["waistCircumference", waistCircumference],
     ], {
       missingSummaryNote: "No body-state metrics were available for this date.",
@@ -1216,11 +1256,15 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     return {
       bmi,
       bodyFatPercentage,
+      bodyWaterPercentage,
+      boneMassPercentage,
       date,
       leanBodyMassKg,
+      muscleMassPercentage,
       notes,
       summaryConfidence,
       temperature,
+      visceralFatIndex,
       waistCircumference,
       weightKg,
     };
@@ -1302,12 +1346,18 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
   { metric: "waistCircumference", summaryKind: "bodyState" },
 ];
 const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
+  "activity-average-heart-rate": "activityAverageHeartRate",
+  "activity-lowest-heart-rate": "minimumHeartRate",
   "skin-temp": "temperatureDeviation",
   "skin-temperature": "temperatureDeviation",
   "session-count": "sessionCount",
   "session-minutes": "sessionMinutes",
   "workout-minutes": "sessionMinutes",
 };
+const ACTIVITY_OWNED_WEARABLE_METRIC_ALIASES = new Set([
+  "activity-average-heart-rate",
+  "activity-lowest-heart-rate",
+]);
 
 function resolveWearableMetricWindowDays(windowDays: number | undefined): number {
   return Number.isInteger(windowDays) && (windowDays ?? 0) > 0
@@ -1367,6 +1417,10 @@ function resolveWearableRequestedSummaryKind(
 ): WearableMetricSummaryKind {
   if (summaryKind) {
     return summaryKind;
+  }
+
+  if (ACTIVITY_OWNED_WEARABLE_METRIC_ALIASES.has(normalizedMetricRequest)) {
+    return "activity";
   }
 
   if (

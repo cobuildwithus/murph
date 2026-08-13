@@ -45,27 +45,36 @@ Current providers:
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
-- Junction fetches the sparse `note` timeseries by default. Oura note tags become
-  completed intervention events for Personal Patterns. Free-text note values are
-  dropped before raw snapshot and compact evidence retention.
-- Junction resource admission derives from the static 57-resource policy in
-  `@murphai/contracts`. Sparse supported VO2 max, temperature, caffeine,
-  one-minute heart-rate recovery, sleep-breathing-disturbance, and AFib-burden
-  resources use the existing per-source history owner for a 180-day initial
-  scan. That scan advances in one bounded 30-day provider window per resource
-  job, schedules at most eight resource/source pairs per reconcile pass, and
-  retains only the existing compact daily facts. It never persists full
-  provider timeseries arrays or emits canonical sample rows.
-- Extended source/resource completion has one writable owner:
-  `junctionExtendedHistoryCoverage`. Its `mN` prefix is the normalization
-  coverage-policy version; adding support for a previously noncanonical shape
-  must increment that version so exhausted history is reconsidered. The older
-  blood-pressure and note lists are read-only migration inputs and are removed
-  by the metadata merge once their bits are represented in the matrix.
+- Junction fetches the sparse `note` timeseries by default. Normalized tags from
+  every admitted Junction source persist as neutral canonical notes. Personal
+  Patterns currently derives an action factor only from the exact Oura `sauna`
+  tag; other-source, symptom, context, outcome, and custom tags remain neutral.
+  Free-text note values are dropped before raw snapshot and compact evidence
+  retention. Coverage policy version 2 reopens note history completed under the
+  legacy intervention normalizer while preserving unrelated resource coverage.
 - Long-history anchoring is resource policy, not scheduler inference.
   Rollout-added resources end their first scan at scheduling time so existing
   connections receive recent history; resources whose history predates source
   admission may explicitly use the source-first-seen anchor.
+- Schedule-time history jobs bind the existing exact source row's lifecycle
+  epoch. Hosted Web advances that epoch when the source moves from disconnected
+  to connected and clears only that source's schedule-time coverage in the same
+  admission lock. A same-epoch runtime projection cannot move a disconnected
+  Junction source to connected, so provider polling cannot preempt that owner.
+  Hosted Postgres adds this field as a nullable, defaulted expansion: reads map
+  legacy missing, null, or zero state to epoch 1, while explicit writes still
+  require a positive integer. Local SQLite owns a direct non-null migration.
+  Hosted hydration accepts the newer epoch before merging coverage, and the
+  runner rereads it before import and again before publishing progress. A queued
+  or in-flight job from an older epoch therefore cannot block the replacement
+  job or certify current coverage; pre-epoch jobs exit without importing.
+  Source-first-seen history is unchanged.
+- Schedule-time retry chains retain one stable logical identity and their
+  original fixed window. Before terminal coverage is published, that window
+  must still touch the ordinary rolling daily reconcile interval. A stale row
+  finishes without a matrix bit, allowing the existing scheduler to enqueue
+  one current-anchored replacement under the same identity; only that
+  replacement can close the obligation.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
@@ -127,6 +136,31 @@ such as workouts or body measurements do not become failed-export signals.
 that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
+
+Junction timeseries use one exhaustive static history policy. Dense daily
+aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
+max, heart-rate recovery, body and basal temperatures, sleep-breathing
+disturbance, caffeine, water, and mindfulness use the summary-history window,
+180 days by default. The existing source-scoped sparse-history jobs fetch one
+day at a time, serialize per account, and record terminal coverage in compact
+connection metadata; they do not add another queue or lifecycle. Blood pressure
+keeps exact per-reading completion, and note history keeps complete-fetch
+semantics. All extended timeseries completion shares one fixed-width,
+source-by-resource matrix in an existing blood-pressure or note metadata slot;
+legacy values still read, and unsupported route identities fail before history
+egress rather than advancing an unretainable checkpoint. Every date-mode
+timeseries fetch preserves one complete provider
+calendar date during both migration and normal reconcile; a provider-bearing
+date with any row rejected by the canonical aggregate parser retries only that
+date on the existing bounded ladder. Historical-pull status is re-read before
+coverage, with supported connect-route aliases canonicalized on both sides:
+matching pulled state takes precedence, success permits terminal empty history,
+nonterminal state waits, and explicit failure remains uncovered. Explicit
+`not_pulled` is no obligation only without a pulled entry, while unavailable
+status requires canonical history evidence. Delayed work derives
+the live reconcile boundary after every completed segment and continues until
+no middle gap remains. An explicit timeseries backfill override still governs
+every timeseries resource.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero

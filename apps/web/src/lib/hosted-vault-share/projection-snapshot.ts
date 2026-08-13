@@ -88,6 +88,7 @@ export async function encryptHostedVaultShareProjectionSnapshot(input: {
   prisma?: HostedSecureBoxPrismaClient;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: HostedVaultShareProjectionSnapshotAuthority;
+  signal?: AbortSignal;
 }): Promise<string> {
   const value = serializeHostedVaultShareProjectionSnapshot(input);
   const ciphertext = await sealHostedUserSecureBoxString({
@@ -95,6 +96,7 @@ export async function encryptHostedVaultShareProjectionSnapshot(input: {
     lane: "mailbox-payload",
     prisma: input.prisma,
     scope: HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCOPE,
+    signal: input.signal,
     userId: input.share.destinationMemberId,
     value,
   });

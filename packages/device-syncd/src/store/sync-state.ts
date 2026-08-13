@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { mergeStoredDeviceSyncMetadataPatch, stringifyJson } from "../shared.ts";
-import type { DeviceSyncAccountStatus } from "../types.ts";
+import type { DeviceSyncAccountStatus, StoredDeviceSyncAccount } from "../types.ts";
 import {
   decodeNextReconcileRow,
   getAccountById,
@@ -34,6 +34,7 @@ export function markSyncSucceededInTransaction(
     localConnectionRevision?: number | null;
     metadataPatch?: Record<string, unknown>;
     nextReconcileAt?: string | null;
+    updatesLastSyncCompletedAt?: boolean;
   } = {},
 ): boolean {
   const existing = getAccountById(database, accountId);
@@ -77,7 +78,7 @@ export function markSyncSucceededInTransaction(
   database.prepare(`
     update device_observation_state
     set next_reconcile_at = ?,
-        last_sync_completed_at = ?,
+        last_sync_completed_at = case when ? = 1 then ? else last_sync_completed_at end,
         last_sync_error_at = null,
         last_error_code = null,
         last_error_message = null,
@@ -86,6 +87,7 @@ export function markSyncSucceededInTransaction(
     where account_id = ?
   `).run(
     nextReconcileAt,
+    options.updatesLastSyncCompletedAt === false ? 0 : 1,
     now,
     existing.localConnectionRevision + 1,
     now,
@@ -93,6 +95,66 @@ export function markSyncSucceededInTransaction(
   );
 
   return true;
+}
+
+export function patchSyncContinuationMetadataInTransaction(
+  database: DatabaseSync,
+  accountId: string,
+  now: string,
+  disconnectGeneration: number | null,
+  options: {
+    localConnectionRevision: number;
+    metadataPatch?: Record<string, unknown>;
+  },
+): StoredDeviceSyncAccount | null {
+  const existing = getAccountById(database, accountId);
+
+  if (
+    !existing
+    || existing.localConnectionRevision !== options.localConnectionRevision
+    || (
+      disconnectGeneration !== null
+      && (
+        existing.disconnectGeneration !== disconnectGeneration
+        || existing.status !== "active"
+      )
+    )
+  ) {
+    return null;
+  }
+
+  const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
+  const metadataJson = stringifyJson(metadata);
+  if (metadataJson === stringifyJson(existing.metadata)) {
+    return existing;
+  }
+
+  const connectionResult = database.prepare(`
+    update device_connection
+    set metadata_json = ?,
+        updated_at = ?
+    where id = ?
+      and (? is null or (disconnect_generation = ? and status = 'active'))
+  `).run(
+    metadataJson,
+    now,
+    accountId,
+    disconnectGeneration ?? null,
+    disconnectGeneration ?? null,
+  ) as { changes: number };
+
+  if ((connectionResult.changes ?? 0) === 0) {
+    return null;
+  }
+
+  database.prepare(`
+    update device_observation_state
+    set local_connection_revision = ?,
+        updated_at = ?
+    where account_id = ?
+  `).run(existing.localConnectionRevision + 1, now, accountId);
+
+  return getAccountById(database, accountId);
 }
 
 export function markSyncSucceeded(
@@ -104,6 +166,7 @@ export function markSyncSucceeded(
     localConnectionRevision?: number | null;
     metadataPatch?: Record<string, unknown>;
     nextReconcileAt?: string | null;
+    updatesLastSyncCompletedAt?: boolean;
   } = {},
 ): boolean {
   return withImmediateTransaction(database, () =>

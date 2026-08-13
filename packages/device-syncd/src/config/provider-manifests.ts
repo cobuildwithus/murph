@@ -171,9 +171,14 @@ const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_DEVICE_PROVIDER_DES
 const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
 const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 
+const JUNCTION_SYNC = requireDeviceProviderSyncDescriptor(
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+);
+
 const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   backfill: {
     payload: {
+      memberEditConflictOccurrence: stringJobField(),
       memberEditConflictResolution: stringJobField(),
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
@@ -184,14 +189,18 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   },
   reconcile: {
     payload: {
+      memberEditConflictOccurrence: stringJobField(),
       memberEditConflictResolution: stringJobField(),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      timeseriesCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesResourceIndex: numberJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
   },
   push_source_recovery: {
     payload: {
+      memberEditConflictOccurrence: stringJobField(),
       memberEditConflictResolution: stringJobField(),
       silentSinceAt: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
@@ -199,14 +208,18 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   },
   resource: {
     payload: {
+      memberEditConflictOccurrence: stringJobField(),
       memberEditConflictResolution: stringJobField(),
       companionAdmissionId: stringJobField({ includeInHostedHint: true }),
       companionObservationJson: stringJobField({ includeInHostedHint: true }),
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       eventType: stringJobField({ includeInHostedHint: true }),
       historicalBackfill: booleanJobField({ includeInHostedHint: true }),
+      historicalBackfillVersion: numberJobField({ includeInHostedHint: true }),
+      historicalNoProgressRescan: booleanJobField({ includeInHostedHint: true }),
       historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
+      sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
       historicalUnresolvedProviderRecordIdentitiesJson: stringJobField({ includeInHostedHint: true }),
       historicalUnresolvedProviderRecordCount: numberJobField({ includeInHostedHint: true }),
       historicalWindowStart: stringJobField({ includeInHostedHint: true }),
@@ -523,6 +536,7 @@ export function resolveConfiguredDeviceSyncProviderDescriptor(
 export interface NormalizedJunctionDeviceSyncRuntimeConfig {
   clientUserIdSecret: string;
   providerFilter: string[];
+  reconcileIntervalMs: number;
   summaryResources: string[];
   timeseriesResources: string[];
 }
@@ -535,10 +549,9 @@ export function buildConfiguredDeviceSyncProviderRuntimeDescriptor<
 ): DeviceProviderDescriptor {
   switch (provider) {
     case "junction":
-      normalizeJunctionDeviceSyncRuntimeConfig(
+      return buildJunctionDeviceSyncRuntimeDescriptor(
         config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
       );
-      return getConfiguredDeviceSyncProviderDescriptor("junction");
     case "oura":
       return buildOuraDeviceSyncRuntimeDescriptor(
         config as ConfiguredDeviceSyncProviderConfigByKey["oura"],
@@ -572,6 +585,10 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
     "timeseries",
   );
   const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
+  const reconcileIntervalMs = Math.max(
+    60_000,
+    config.reconcileIntervalMs ?? JUNCTION_SYNC.windows.reconcileIntervalMs,
+  );
 
   if (providerFilter.length === 0) {
     throw new TypeError("Junction provider filter must include at least one hosted Link provider.");
@@ -580,8 +597,26 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   return {
     clientUserIdSecret,
     providerFilter,
+    reconcileIntervalMs,
     summaryResources,
     timeseriesResources,
+  };
+}
+
+export function buildJunctionDeviceSyncRuntimeDescriptor(
+  config: JunctionDeviceSyncProviderConfig,
+): DeviceProviderDescriptor {
+  const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
+
+  return {
+    ...getConfiguredDeviceSyncProviderDescriptor("junction"),
+    sync: {
+      ...JUNCTION_SYNC,
+      windows: {
+        ...JUNCTION_SYNC.windows,
+        reconcileIntervalMs: runtimeConfig.reconcileIntervalMs,
+      },
+    },
   };
 }
 

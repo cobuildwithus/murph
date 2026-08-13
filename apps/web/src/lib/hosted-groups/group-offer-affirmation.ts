@@ -9,7 +9,7 @@ import {
   readHostedPostCommitRemainingMs,
   waitForHostedPostCommitOperation,
 } from "../hosted-onboarding/bounded-post-commit";
-import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
+import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -49,8 +49,8 @@ export type HostedGroupOfferAffirmationKind = "disclosure" | "join";
 export async function acceptHostedGroupOfferAffirmation(input: {
   affirmationEventId: string;
   /**
-   * Runs the optional post-commit tail (join confirmation and maintenance
-   * wake) after the caller has already acknowledged the member.
+   * Runs the optional post-commit tail (join-confirmation recovery and
+   * projection wake) after the caller has already acknowledged the member.
    * Telegram passes this so a tapped button is never held behind work that does
    * not decide whether the grant committed.
    */
@@ -158,6 +158,23 @@ export async function acceptHostedGroupOfferAffirmation(input: {
 
   const runPostCommitTail = async (): Promise<void> => {
     const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
+    const projectionMaintenanceSignal = result.projectionMaintenanceSignal;
+    const projectionWake = projectionMaintenanceSignal
+      ? runHostedGroupOfferAffirmationPostCommitBestEffort({
+          deadlineMs: postCommitDeadlineMs,
+          operation: (abortSignal) =>
+            signalHostedMailboxAppendRuntime({
+              abortSignal,
+              expectedUserId: projectionMaintenanceSignal.memberId,
+              knownCheckpoint: {
+                lane: projectionMaintenanceSignal.lane,
+                laneSeq: projectionMaintenanceSignal.laneSeq,
+                userId: projectionMaintenanceSignal.memberId,
+              },
+              mailboxItemId: projectionMaintenanceSignal.mailboxItemId,
+            }),
+        })
+      : null;
     if (result.joinConfirmationSignal) {
       await signalHostedGroupJoinConfirmationRuntimeBestEffort({
         ...result.joinConfirmationSignal,
@@ -173,19 +190,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       ...(input.signal ? { signal: input.signal } : {}),
       timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
     });
-
-    if (result.grantedVaultShareProjectionKinds.length > 0) {
-      await runHostedGroupOfferAffirmationPostCommitBestEffort({
-        deadlineMs: postCommitDeadlineMs,
-        operation: (abortSignal) =>
-          signalHostedRuntimeMaintenanceRuntime({
-            abortSignal,
-            userId: input.memberId,
-          }),
-        signal: input.signal,
-      });
-    }
-
+    await projectionWake;
   };
 
   if (input.deferPostCommit) {
@@ -199,13 +204,11 @@ export async function acceptHostedGroupOfferAffirmation(input: {
 async function runHostedGroupOfferAffirmationPostCommitBestEffort(input: {
   deadlineMs: number;
   operation: (signal: AbortSignal) => Promise<unknown>;
-  signal?: AbortSignal;
 }): Promise<void> {
   try {
     await waitForHostedPostCommitOperation({
       deadlineMs: input.deadlineMs,
       operation: input.operation,
-      signal: input.signal,
     });
   } catch {
     // The durable join, grants, and mailbox items remain available for a later wake.
