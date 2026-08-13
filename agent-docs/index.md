@@ -101,14 +101,17 @@ provider-no-replay recovery, are jointly specified by
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 Independent partial PlanetScale metric normalization, explicit unknown-family
-evidence, continued evaluation of available database signals, bounded safe
-direct-counter-only confirmation with cross-scrape evidence composition and
-without suppressing unsafe observations, and one-shot telemetry-only operator
-paging with unresolved-window coalescing, current-pressure
-priority including direct errors in one combined pre-first-page incident,
-post-ack recurrence suppression, durable owed-page preservation inside
-non-replayable direct-error admission, truthful direct-error and mixed telemetry
-window provenance, and rollback-compatible additive state are
+evidence when either expected connection-error port is missing, continued
+evaluation of available database signals, per-port baseline advancement with
+new/reset suppression, bounded safe connection-error confirmation with
+cross-scrape port composition and without suppressing unsafe observations, and
+one-shot telemetry-only operator paging with unresolved-window coalescing,
+current-pressure priority including direct and pooled connection errors in one
+combined pre-first-page incident, post-ack recurrence suppression, durable
+owed-page preservation inside non-replayable category-specific admission,
+truthful connection-error and mixed telemetry window provenance, and
+rollback-compatible additive state with deliberately compatible physical sample
+columns are
 jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
 `apps/cloudflare/README.md`.
