@@ -68,6 +68,8 @@ Murph first when no line may safely open a proactive conversation.
   welcome suppression disabled.
 - Focused proof passes across four Vitest files (98 tests), including hard-cap
   and inbound-routing cases. Full workspace typecheck passes.
+- PR 1761 supplies the changelog source number; its public fragment generation
+  and focused archive proof pass across two files (45 tests).
 
 ## Rollout
 

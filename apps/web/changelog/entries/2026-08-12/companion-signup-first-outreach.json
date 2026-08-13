@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 200,
+  "item": {
+    "id": "companion-signup-first-outreach",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph starts the companion conversation",
+    "summary": "After finishing account setup in the companion app with a verified phone, Murph can now start the conversation with the standard first iMessage.",
+    "details": "If every healthy line is at its proactive limit, setup still completes and you can text Murph first.",
+    "relevanceTags": ["companion", "imessage", "onboarding", "reliability"],
+    "sourcePullRequests": [1761]
+  }
+}
