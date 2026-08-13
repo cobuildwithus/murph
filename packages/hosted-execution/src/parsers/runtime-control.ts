@@ -2577,6 +2577,10 @@ function parseHostedRuntimeGroupCurrentSenderDirectResult(
     assertAllowedObjectKeys(result, new Set(["status"]), label);
     return { status };
   }
+  if (status === "clarification_required") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
   if (status === "unavailable") {
     assertAllowedObjectKeys(
       result,

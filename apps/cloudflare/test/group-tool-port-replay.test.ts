@@ -78,6 +78,34 @@ const replaySafeRequests = [
     },
     wireResponse: undefined,
   },
+  {
+    action: "ask_current_sender clarification",
+    request: {
+      action: "ask_current_sender",
+      mode: "clarification",
+      origin: {
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    response: {
+      action: "ask_current_sender",
+      result: { status: "clarification_required" },
+    },
+    wireRequest: {
+      action: "ask_current_sender",
+      [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+      mode: "clarification",
+      origin: {
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    wireResponse: undefined,
+  },
 ] as const satisfies readonly {
   action: string;
   request: HostedRuntimeGroupToolRequest;

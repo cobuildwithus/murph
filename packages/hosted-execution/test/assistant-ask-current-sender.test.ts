@@ -138,6 +138,27 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/not allowed/u);
   });
 
+  it("parses clarification success strictly without treating it as accepted", () => {
+    const clarification = {
+      action: "ask_current_sender",
+      result: { status: "clarification_required" as const },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(clarification)).toEqual(
+      clarification,
+    );
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...clarification,
+      result: {
+        status: "clarification_required",
+        unexpected: true,
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...clarification,
+      result: { status: "clarification_pending" },
+    })).toThrow(/status is invalid/u);
+  });
+
   it("rejects removed completion audience metadata and parses persisted completion replay", () => {
     const requestId = `aask_req_${"e".repeat(64)}`;
     const result = {
