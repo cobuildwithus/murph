@@ -251,6 +251,34 @@ Updated: 2026-08-12
   exact-original correction first. Deleted latest revisions are exempt from
   the live provider-payload check because their original attachment already
   proves identity and they remain suppressed.
+- Final ReviewGPT round 13 proved that making persisted activity-session
+  duration optional also widened the public generic event JSONL writer. The
+  renewed requirement-level decision is to keep unknown duration as an
+  evidence-bound CSV exception: persisted records may omit it, but generic
+  JSONL and ordinary workout writers must still require it. The correction
+  splits the public JSONL input shape from the broader persisted record shape
+  and reasserts the ordinary structured-write result invariant before any
+  runtime dependency or canonical write.
+
+## Round 13 renewed retrospective
+
+- Trigger: the immediately preceding unknown-duration correction did not cover
+  the generic `event import-jsonl` path, repeating the same shared-contract
+  widening mechanism and contradicting the stated CSV-only authority boundary.
+- Requirement decision: an absent duration is not general public authoring
+  authority. Only the verified Strong/Hevy CSV owner may persist a structured
+  workout with unknown duration because it retains the raw source, aggregate
+  warning, and complete-batch validation evidence.
+- Shape decision: continue the indivisible feature without another owner or
+  compatibility mechanism. Keep the persisted activity-session schema broad
+  enough to represent verified CSV evidence, derive a stricter public JSONL
+  input schema by requiring duration, and keep ordinary workout writers behind
+  their existing duration derivation/validation boundary.
+- Growth decision: the correction is a schema split, one boundary assertion,
+  and focused regressions. It removes accidental authority instead of adding
+  state, reconciliation, migration, or a parallel write path. This stays
+  inside the prior continuation decision and does not reset the first-reviewed
+  baseline.
 
 ## Verification
 
@@ -315,3 +343,9 @@ Updated: 2026-08-12
   weight-and-distance reinterpretation without storing raw or audit state,
   admits expansion after exact correction, and preserves provider-corrected
   live edits plus tombstones through expansion and replay.
+- Round 13 remediation proof: the exact public `event import-jsonl` command and
+  its emitted payload schema reject a durationless activity session without a
+  write, while a duration-bearing row succeeds and the verified CSV decision
+  route still preserves unknown-duration sessions. Six focused files passed 85
+  tests; contracts artifacts, CLI schema generation, scenario integrity, and
+  affected contracts, core, query, vault-usecases, and CLI typechecks passed.

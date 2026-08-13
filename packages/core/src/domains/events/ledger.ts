@@ -288,6 +288,16 @@ export function buildPublicEventImportRecord(
   return buildEventRecord(payload, fallbackTimeZone);
 }
 
+// Import decisions are produced by trusted domain owners after their own
+// evidence validation. Unlike generic public JSONL payloads, a verified workout
+// CSV decision may preserve an activity session whose duration is unknown.
+export function buildEventImportDecisionRecord(
+  payload: JsonObject,
+  fallbackTimeZone?: string,
+): EventRecord {
+  return buildEventRecord(payload, fallbackTimeZone);
+}
+
 export function toEventLedgerFile(occurredAt: string): string {
   return toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,

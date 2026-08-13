@@ -462,6 +462,13 @@ export async function addStructuredWorkoutRecord(input: {
   draft: ActivitySessionDraft
   mediaPaths?: string[]
 }) {
+  const durationMinutes = input.draft.durationMinutes
+  if (durationMinutes === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
+    )
+  }
   const mediaPaths = Array.isArray(input.mediaPaths)
     ? input.mediaPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
     : []
@@ -491,7 +498,7 @@ export async function addStructuredWorkoutRecord(input: {
       kind: 'activity_session' as const,
       title: result.event.title,
       activityType: result.event.activityType,
-      durationMinutes: result.event.durationMinutes,
+      durationMinutes,
       distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
       workout: result.event.workout ?? null,
       manifestFile: result.manifestPath,

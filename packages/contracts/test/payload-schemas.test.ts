@@ -340,6 +340,8 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   const noteSchema = publicEventImportJsonlRowPayloadSchemasByKind.note;
   const clinicalAssertionSchema =
     publicEventImportJsonlRowPayloadSchemasByKind.clinical_assertion;
+  const activitySessionSchema =
+    publicEventImportJsonlRowPayloadSchemasByKind.activity_session;
 
   const validSymptom = {
     kind: "symptom",
@@ -354,6 +356,32 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     },
   };
   assert.equal(safeParseContract(symptomSchema, validSymptom).success, true);
+  const activitySession = {
+    kind: "activity_session",
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Strength training",
+    activityType: "strength-training",
+    workout: {
+      exercises: [
+        {
+          name: "Squat",
+          order: 1,
+          sets: [{ order: 1, reps: 5 }],
+        },
+      ],
+    },
+  };
+  assert.equal(
+    safeParseContract(activitySessionSchema, activitySession).success,
+    false,
+  );
+  assert.equal(
+    safeParseContract(activitySessionSchema, {
+      ...activitySession,
+      durationMinutes: 45,
+    }).success,
+    true,
+  );
   assert.equal(
     safeParseContract(noteSchema, {
       kind: "note",

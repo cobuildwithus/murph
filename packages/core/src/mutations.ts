@@ -82,6 +82,7 @@ import {
   type EventSpineEntry,
 } from "./history/event-spine.ts";
 import {
+  buildEventImportDecisionRecord,
   buildPublicEventImportRecord,
   loadEventLedgerShardsById,
   selectLatestMatchedEvent,
@@ -5572,7 +5573,13 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         return;
       }
 
-      const record = buildPublicEventImportRecord({ ...decision.payload }, vault.metadata.timezone);
+      // Decisions are the trusted importer-owner path. Their contract permits
+      // verified workout CSV evidence to retain an unknown duration, while the
+      // generic public payload path above remains stricter.
+      const record = buildEventImportDecisionRecord(
+        { ...decision.payload },
+        vault.metadata.timezone,
+      );
       decisions.push({
         action: "upsert",
         allowsKindReplacement: true,
