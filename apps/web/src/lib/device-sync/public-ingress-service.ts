@@ -630,7 +630,24 @@ export class HostedDeviceSyncPublicIngressService {
     }
   }
 
-  async handleWebhook(provider: string, rawBody?: Buffer): Promise<HandleWebhookResult> {
+  async verifyWebhookForDurableEnqueue(
+    provider: string,
+    rawBody: Buffer,
+    receivedAt: Date,
+  ): Promise<{ receivedAt: string }> {
+    return this.ingress.verifyWebhookForDurableEnqueue(
+      provider,
+      this.context.request.headers,
+      rawBody,
+      receivedAt,
+    );
+  }
+
+  async handleWebhook(
+    provider: string,
+    rawBody?: Buffer,
+    receivedAt?: Date,
+  ): Promise<HandleWebhookResult> {
     const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
     // One webhook request opens and seals several secure-box fields under the
     // member's device domain roots. Scope the unwrap memo to the request so
@@ -640,7 +657,12 @@ export class HostedDeviceSyncPublicIngressService {
     // sealing payloads is a separate cache key whose first unwrap still runs
     // inside the transaction. Hosted-onboarding webhooks use the same seam.
     return runWithHostedDomainRootUnwrapCache(() =>
-      this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody),
+      this.ingress.handleWebhook(
+        provider,
+        this.context.request.headers,
+        resolvedRawBody,
+        receivedAt,
+      ),
     );
   }
 

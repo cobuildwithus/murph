@@ -21,8 +21,12 @@ import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
 import {
   environmentVoiceRoutes,
 } from "./route-handlers/environment-voice-stage.ts";
+import {
+  deviceWebhookEnqueueRoutes,
+} from "./route-handlers/device-webhook-enqueue.ts";
 
 export const workerInternalRoutes = [
+  ...deviceWebhookEnqueueRoutes,
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
   ...inferenceVerificationRoutes,

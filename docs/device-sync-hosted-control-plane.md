@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-08-11
+Last verified against repo layout: 2026-08-13
 
 ## Current split
 
@@ -8,6 +8,7 @@ Murph's hosted device-sync stack is now split this way:
 
 - `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/reconcile/dirty-state/pending/ack routes.
 - `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, or start a provider connect link, but it is not a second durable device-sync control plane.
+- `apps/cloudflare` also owns encrypted, non-canonical Queue transport for provider webhook bursts. Queue and its encrypted DLQ are delivery buffers only; they own no connection, trace, dirty, consent, lifecycle, or health fact.
 - local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
 This is the live repo shape, not a future rollout plan.
@@ -59,6 +60,7 @@ It does not own canonical health-data import, token authority, or canonical host
 - signed Temporal `ensure-processing` handling, per-user Durable Object coordination, and bounded hosted workspace invocation drive
 - invoking signed internal `apps/web` callbacks when a hosted job needs current device-sync runtime authority
 - consuming current runtime snapshots during a hosted job and sending narrow runtime updates back to web
+- durably accepting ciphertext-only device-webhook envelopes and returning decrypted deliveries to Web in signed, sequential, size-bounded batches
 
 `apps/cloudflare` must not:
 
@@ -128,6 +130,43 @@ Recommended durable tables remain:
 - optional `device_webhook_subscription`
 
 Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, dirty resource/window summaries, and the canonical hosted runtime authority consumed by the internal snapshot/apply/dirty-state/pending/ack routes. It should not store canonical health facts.
+
+### Bursty webhook transport
+
+For providers explicitly listed in `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS`, the
+public Web route verifies the provider signature against the exact bounded body
+and freezes that receipt instant without reading Postgres. It then minimizes the
+headers to the provider signature fields, seals the provider name, headers,
+receipt time, and exact body under a one-message ingress root wrapped to the
+existing Cloudflare automation P-256 recipient, and calls the OIDC-authenticated
+Cloudflare enqueue route. Provider success is returned only after `Queue.send`
+confirms durable acceptance. A failed or ambiguous enqueue never falls through
+to synchronous admission; provider redelivery converges through the existing
+provider-scoped trace identity. Payloads outside the Queue size contract use the
+existing synchronous path before any enqueue attempt.
+
+The Queue consumer is configured for 100 messages, five-second collection,
+one consumer, ten retries, and an encrypted DLQ. It decrypts outside Postgres
+and partitions each delivery into signed Web callbacks of at most 25 messages.
+Web validates the whole callback, then uses an explicit serial loop around the
+existing shared ingress. The frozen receipt instant prevents valid signatures
+from becoming stale while queued; the trace processing lease begins at Web
+admission time so a delayed delivery never starts with an expired lease.
+Existing trace claims, health-data consent,
+provider-application revision, setup, source, reconnect, disconnect, dirty
+state, exact encrypted payload, mailbox wake, and post-commit Temporal behavior
+remain unchanged. Thus a 100-message burst creates peak-one webhook admission
+pressure, although it still performs the existing sequential canonical writes.
+No raw-SQL batch owner, Queue database, Durable Object state, Vercel Workflow,
+or Temporal webhook workflow is introduced.
+
+Queue-visible state contains random transport identifiers, ciphertext, and key
+wrap metadata only. Provider, member, account, event, trace, signature headers,
+body, token, and health identity remain inside the secure box. Tamper, unknown
+key, malformed envelope, callback ambiguity, and every failed Web admission
+retain the individual encrypted message for retry and eventual DLQ. Only
+accepted and duplicate dispositions acknowledge a message; failures cannot be
+dropped without a separate durable quarantine owner.
 
 `device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The hosted browser start also requires its configured provider callback base to use that request's hostname; a mismatch fails before OAuth state creation or provider authorization. Start sets a short-lived provider-, state-, member-, and session-bound host-only proof. The provider callback GET validates that proof, passes `expectedOwnerId` into shared ingress, and redirects back into the app without an interstitial. A missing proof burns the OAuth state and returns to Connect so the callback URL cannot be relayed. Intent rows must not store raw provider or Junction authorization URLs.
 

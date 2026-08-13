@@ -15,11 +15,14 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   exportTokenBundle: vi.fn(),
+  enqueueHostedDeviceWebhook: vi.fn(),
   handleWebhook: vi.fn(),
   pairAgent: vi.fn(),
+  prepareHostedDeviceWebhookQueueTransport: vi.fn(),
   readWebhookRawBody: vi.fn(),
   refreshTokenBundle: vi.fn(),
   resolveWebhookPreflight: vi.fn(),
+  verifyWebhookForDurableEnqueue: vi.fn(),
   requireAgentSession: vi.fn(),
   requireAuthenticatedUser: vi.fn(),
   requireRegistry: vi.fn(),
@@ -30,6 +33,11 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 }));
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
+}));
+vi.mock("@/src/lib/device-sync/webhook-queue", () => ({
+  enqueueHostedDeviceWebhook: mocks.enqueueHostedDeviceWebhook,
+  prepareHostedDeviceWebhookQueueTransport:
+    mocks.prepareHostedDeviceWebhookQueueTransport,
 }));
 vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
   createHostedDeviceSyncAgentSessionContext: mocks.createHostedDeviceSyncAgentSessionContext,
@@ -77,6 +85,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       handleWebhook: mocks.handleWebhook,
       readWebhookRawBody: mocks.readWebhookRawBody,
       resolveWebhookPreflight: mocks.resolveWebhookPreflight,
+      verifyWebhookForDurableEnqueue: mocks.verifyWebhookForDurableEnqueue,
     });
     mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
       exportTokenBundle: mocks.exportTokenBundle,
@@ -112,6 +121,10 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
     mocks.readWebhookRawBody.mockResolvedValue(Buffer.from('{"event":"sleep.updated"}', "utf8"));
     mocks.resolveWebhookPreflight.mockResolvedValue(null);
+    mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValue({
+      enabled: false,
+      headers: [],
+    });
     mocks.pairAgent.mockResolvedValue({
       agent: {
         createdAt: "2026-03-26T12:00:00.000Z",
@@ -358,6 +371,73 @@ describe("hosted device-sync agent and webhook routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
     });
+  });
+
+  it("durably enqueues a verified provider-gated webhook without synchronous admission", async () => {
+    const rawBody = Buffer.from('{"event":"sleep.updated"}', "utf8");
+    mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValueOnce({
+      enabled: true,
+      headers: [{ name: "x-oura-signature", value: "opaque-signature" }],
+    });
+    mocks.verifyWebhookForDurableEnqueue.mockResolvedValueOnce({
+      receivedAt: "2026-04-10T12:00:00.000Z",
+    });
+    mocks.enqueueHostedDeviceWebhook.mockResolvedValueOnce({
+      accepted: true,
+      transportId: "00000000-0000-4000-8000-000000000001",
+    });
+
+    const response = await webhookRoute.POST(
+      new Request("https://example.test/api/device-sync/webhooks/oura", {
+        headers: { "x-oura-signature": "opaque-signature" },
+        method: "POST",
+      }),
+      createRouteContext({ provider: "oura" }),
+    );
+
+    expect(mocks.verifyWebhookForDurableEnqueue).toHaveBeenCalledWith(
+      "oura",
+      rawBody,
+      expect.any(Date),
+    );
+    expect(mocks.enqueueHostedDeviceWebhook).toHaveBeenCalledWith({
+      headers: [{ name: "x-oura-signature", value: "opaque-signature" }],
+      provider: "oura",
+      rawBody,
+      receivedAt: "2026-04-10T12:00:00.000Z",
+    });
+    expect(mocks.handleWebhook).not.toHaveBeenCalled();
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      queued: true,
+    });
+  });
+
+  it("does not fall back to synchronous admission after an enqueue failure", async () => {
+    mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValueOnce({
+      enabled: true,
+      headers: [],
+    });
+    mocks.verifyWebhookForDurableEnqueue.mockResolvedValueOnce({
+      receivedAt: "2026-04-10T12:00:00.000Z",
+    });
+    mocks.enqueueHostedDeviceWebhook.mockRejectedValueOnce(deviceSyncError({
+      code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+      httpStatus: 503,
+      message: "Durable transport did not confirm acceptance.",
+      retryable: true,
+    }));
+
+    const response = await webhookRoute.POST(
+      new Request("https://example.test/api/device-sync/webhooks/oura", {
+        method: "POST",
+      }),
+      createRouteContext({ provider: "oura" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.handleWebhook).not.toHaveBeenCalled();
   });
 
   it("returns 202 for hosted Junction orphan webhook deliveries instead of 503", async () => {

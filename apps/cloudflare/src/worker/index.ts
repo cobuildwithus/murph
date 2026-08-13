@@ -17,6 +17,8 @@ import {
 import {
   createWorkerFetchHandler,
 } from "./fetch-handler.ts";
+import { handleHostedDeviceWebhookQueueBatch } from "../device-webhook-queue.ts";
+import type { DeviceWebhookQueueEnvelopeV1 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
 
 export const handleWorkerFetch = createWorkerFetchHandler({
   internalRoutes: workerInternalRoutes,
@@ -62,6 +64,12 @@ export default {
     ctx?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<void> {
     await handleHostedEmailIngress(message, env, ctx);
+  },
+  async queue(
+    batch: MessageBatch<DeviceWebhookQueueEnvelopeV1>,
+    env: WorkerEnvironmentSource,
+  ): Promise<void> {
+    await handleHostedDeviceWebhookQueueBatch(batch, env);
   },
   scheduled(
     controller: ScheduledController,

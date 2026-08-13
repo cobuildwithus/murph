@@ -768,6 +768,18 @@ Last verified: 2026-08-12
   lock the dirty marker before touching payload rows.
   A larger nullable backlog fails retryably until runtime acknowledgement
   reduces it; classification may never run before the consent fence.
+- Queue-enabled provider webhooks verify and encrypt before any Postgres read,
+  then enter one Cloudflare Queue consumer configured for batches of 100,
+  five-second collection, concurrency one, ten retries, and an encrypted DLQ.
+  The consumer decrypts outside Postgres and sends sequential Web subbatches of
+  at most 25; Web admits each entry through the existing canonical ingress in an
+  explicit serial loop. The original receipt instant remains the signature and
+  audit instant, while the trace-processing lease starts when Web admits the
+  queued delivery. Only `accepted` and `duplicate` results ack one Queue
+  message; all failed, missing, malformed, tampered, ambiguous, or unavailable
+  results retain only that encrypted message for retry and DLQ recovery. Queue is transport,
+  not device truth, and cannot weaken consent, source, setup, reconnect,
+  disconnect, trace, dirty-payload, mailbox, or Temporal authority.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do

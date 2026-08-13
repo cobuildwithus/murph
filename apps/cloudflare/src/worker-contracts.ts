@@ -17,6 +17,9 @@ import type {
 } from "./workspace-snapshot-store.ts";
 import type { DatabaseHealthMonitorResult } from "./database-health/monitor.ts";
 import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
+import type {
+  DeviceWebhookQueueEnvelopeV1,
+} from "@murphai/cloudflare-hosted-control/device-webhook-queue";
 
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
@@ -232,6 +235,7 @@ export interface WorkerEnvironmentContract<
   };
   CF_PUBLIC_BASE_URL?: string;
   DATABASE_HEALTH_MONITOR?: WorkerDatabaseHealthNamespaceLike;
+  DEVICE_WEBHOOK_QUEUE?: Queue<DeviceWebhookQueueEnvelopeV1>;
   HOSTED_DATABASE_ALERT_ENABLED?: string;
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
   HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID?: string;

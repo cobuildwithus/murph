@@ -2,6 +2,10 @@ import type { DeviceSyncWebhookPreflightResponse } from "@murphai/device-syncd/t
 
 import { jsonOk, resolveDecodedRouteParam, withJsonError } from "@/src/lib/device-sync/http";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
+import {
+  enqueueHostedDeviceWebhook,
+  prepareHostedDeviceWebhookQueueTransport,
+} from "@/src/lib/device-sync/webhook-queue";
 
 export const GET = withJsonError(async (
   request: Request,
@@ -32,6 +36,29 @@ export const POST = withJsonError(async (
 
   if (preflight) {
     return createWebhookPreflightResponse(preflight);
+  }
+
+  const queueTransport = prepareHostedDeviceWebhookQueueTransport({
+    headers: request.headers,
+    provider,
+    rawBody,
+  });
+  if (queueTransport.enabled) {
+    const receipt = await publicIngress.verifyWebhookForDurableEnqueue(
+      provider,
+      rawBody,
+      new Date(),
+    );
+    await enqueueHostedDeviceWebhook({
+      headers: queueTransport.headers,
+      provider,
+      rawBody,
+      receivedAt: receipt.receivedAt,
+    });
+    return jsonOk({
+      accepted: true,
+      queued: true,
+    }, 202);
   }
 
   const result = await publicIngress.handleWebhook(provider, rawBody);

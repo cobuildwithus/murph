@@ -81,6 +81,25 @@
   "triggers": {
     "crons": ["*/5 * * * *"]
   },
+  "queues": {
+    "producers": [
+      {
+        "binding": "DEVICE_WEBHOOK_QUEUE",
+        "queue": "murph-hosted-device-webhooks"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "murph-hosted-device-webhooks",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_concurrency": 1,
+        "max_retries": 10,
+        "retry_delay": 30,
+        "dead_letter_queue": "murph-hosted-device-webhooks-dlq"
+      }
+    ]
+  },
   "r2_buckets": [
     {
       "binding": "BUNDLES",

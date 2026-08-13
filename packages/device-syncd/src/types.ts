@@ -319,6 +319,7 @@ export interface DeviceSyncWebhookTraceRecord {
 }
 
 export interface ClaimDeviceSyncWebhookTraceInput extends DeviceSyncWebhookTraceRecord {
+  claimedAt: string;
   claimToken: string;
   processingExpiresAt: string;
 }

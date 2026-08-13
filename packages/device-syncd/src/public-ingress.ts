@@ -1361,34 +1361,36 @@ export class DeviceSyncPublicIngress {
     }
   }
 
-  async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
-    const provider = this.requireProvider(providerName);
-    const verifyAndParseWebhook = resolveProviderWebhookVerifier(provider);
-
-    if (!provider.descriptor.webhook?.path || !verifyAndParseWebhook) {
-      throw deviceSyncError({
-        code: "WEBHOOKS_NOT_SUPPORTED",
-        message: `Device sync provider ${provider.provider} does not accept webhooks.`,
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    const now = toIsoTimestamp(new Date());
-    const parsed = await verifyAndParseWebhook({
+  async verifyWebhookForDurableEnqueue(
+    providerName: string,
+    headers: Headers,
+    rawBody: Buffer,
+    receivedAt: Date,
+  ): Promise<{ receivedAt: string }> {
+    const prepared = await this.prepareWebhook(
+      providerName,
       headers,
       rawBody,
+      receivedAt,
+    );
+    return { receivedAt: prepared.now };
+  }
+
+  async handleWebhook(
+    providerName: string,
+    headers: Headers,
+    rawBody: Buffer,
+    receivedAt: Date = new Date(),
+  ): Promise<HandleWebhookResult> {
+    const {
+      jobs,
       now,
-    });
-    const jobs = parsed.jobs.map((job) =>
-      normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "webhook")
-    );
-    const traceId = scopeWebhookTraceId(
-      provider.provider,
-      parsed.externalAccountId,
-      parsed.traceId,
-    );
+      parsed,
+      provider,
+      traceId,
+    } = await this.prepareWebhook(providerName, headers, rawBody, receivedAt);
     const claimToken = generateStateCode();
+    const claimedAt = toIsoTimestamp(new Date());
     const webhook = toIngressWebhook({
       ...parsed,
       jobs,
@@ -1397,14 +1399,14 @@ export class DeviceSyncPublicIngress {
     const claimWebhookTrace = () => this.store.claimWebhookTrace({
       provider: provider.provider,
       traceId,
+      claimedAt,
       claimToken,
       externalAccountId: parsed.externalAccountId,
       eventType: webhook.eventType,
       receivedAt: now,
-      processingExpiresAt: addMilliseconds(now, WEBHOOK_TRACE_PROCESSING_TTL_MS),
+      processingExpiresAt: addMilliseconds(claimedAt, WEBHOOK_TRACE_PROCESSING_TTL_MS),
     });
 
-    const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
     const webhookSourceProviderSlug = normalizeString(webhook.sourceProviderSlug);
 
     const traceClaim = await claimWebhookTrace();
@@ -1426,6 +1428,17 @@ export class DeviceSyncPublicIngress {
         retryable: true,
         httpStatus: 503,
       });
+    }
+
+    let account;
+    try {
+      account = await this.store.getConnectionByExternalAccount(
+        provider.provider,
+        parsed.externalAccountId,
+      );
+    } catch (error) {
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+      throw error;
     }
 
     if (!account) {
@@ -1702,6 +1715,42 @@ export class DeviceSyncPublicIngress {
       eventType: webhook.eventType,
       traceId,
     };
+  }
+
+  private async prepareWebhook(
+    providerName: string,
+    headers: Headers,
+    rawBody: Buffer,
+    receivedAt: Date,
+  ) {
+    const provider = this.requireProvider(providerName);
+    const verifyAndParseWebhook = resolveProviderWebhookVerifier(provider);
+
+    if (!provider.descriptor.webhook?.path || !verifyAndParseWebhook) {
+      throw deviceSyncError({
+        code: "WEBHOOKS_NOT_SUPPORTED",
+        message: `Device sync provider ${provider.provider} does not accept webhooks.`,
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
+
+    const now = toIsoTimestamp(receivedAt);
+    const parsed = await verifyAndParseWebhook({
+      headers,
+      rawBody,
+      now,
+    });
+    const jobs = parsed.jobs.map((job) =>
+      normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "webhook")
+    );
+    const traceId = scopeWebhookTraceId(
+      provider.provider,
+      parsed.externalAccountId,
+      parsed.traceId,
+    );
+
+    return { jobs, now, parsed, provider, traceId };
   }
 
   private requireProvider(providerName: string): DeviceSyncProvider {

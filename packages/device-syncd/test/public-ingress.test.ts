@@ -56,6 +56,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
   >();
   lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
+  lastWebhookTraceClaim: ClaimDeviceSyncWebhookTraceInput | null = null;
   claimWebhookTraceCalls = 0;
   completedWebhookTraceCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
@@ -306,6 +307,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
     this.claimWebhookTraceCalls += 1;
+    this.lastWebhookTraceClaim = input;
     const key = `${input.provider}:${input.traceId}`;
     const existing = this.webhookTraces.get(key);
 
@@ -329,7 +331,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       return "processed";
     }
 
-    if (existing.expiresAt && Date.parse(existing.expiresAt) > Date.parse(input.receivedAt)) {
+    if (existing.expiresAt && Date.parse(existing.expiresAt) > Date.parse(input.claimedAt)) {
       return "processing";
     }
 
@@ -2845,6 +2847,86 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
       && error.code === "WEBHOOKS_NOT_SUPPORTED"
       && error.httpStatus === 404,
   );
+});
+
+test("public ingress verifies a queued webhook at its frozen receipt instant without touching the store", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const receivedAt = new Date("2026-04-10T12:00:00.000Z");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook({ now }) {
+          assert.equal(now, receivedAt.toISOString());
+          return {
+            externalAccountId: "opaque-account",
+            eventType: "demo.updated",
+            jobs: [],
+            traceId: "opaque-trace",
+          };
+        },
+      }),
+    ]),
+    store,
+  });
+
+  assert.deepEqual(await ingress.verifyWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    receivedAt,
+  ), { receivedAt: receivedAt.toISOString() });
+  assert.equal(store.claimWebhookTraceCalls, 0);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+});
+
+test("public ingress leases a delayed queued trace from dequeue time while preserving its receipt time", async () => {
+  const receivedAt = new Date("2026-04-10T12:00:00.000Z");
+  const claimedAt = new Date("2026-04-10T12:30:00.000Z");
+  vi.useFakeTimers();
+  vi.setSystemTime(claimedAt);
+  try {
+    const store = new InMemoryPublicIngressStore();
+    const ingress = createDeviceSyncPublicIngress({
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      registry: createDeviceSyncRegistry([
+        createFakeProvider({
+          async verifyAndParseWebhook({ now }) {
+            assert.equal(now, receivedAt.toISOString());
+            return {
+              externalAccountId: "demo-abc",
+              eventType: "demo.updated",
+              jobs: [],
+              traceId: "queued-trace",
+            };
+          },
+        }),
+      ]),
+      store,
+      hooks: {
+        onWebhookAccepted({ account, claimToken, traceId }) {
+          return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+        },
+      },
+    });
+    const begin = await ingress.startConnection({ provider: "demo" });
+    await ingress.handleOAuthCallback({
+      code: "abc",
+      provider: "demo",
+      state: begin.state,
+    });
+
+    await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"), receivedAt);
+
+    assert.equal(store.lastWebhookTraceClaim?.receivedAt, receivedAt.toISOString());
+    assert.equal(store.lastWebhookTraceClaim?.claimedAt, claimedAt.toISOString());
+    assert.equal(
+      Date.parse(store.lastWebhookTraceClaim?.processingExpiresAt ?? ""),
+      claimedAt.getTime() + 5 * 60 * 1_000,
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("public ingress leaves retryable unknown-account webhook traces retryable without running orphan hooks", async () => {

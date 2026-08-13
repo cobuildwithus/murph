@@ -861,6 +861,9 @@ Set these in the selected GitHub environment as secrets:
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
+`CLOUDFLARE_API_TOKEN` must include account-scoped Workers Queues write access
+so deploy automation can create/update the producer, consumer, and DLQ binding.
+
 The protected GitHub Environment may also hold the optional
 `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` secret. Deploy
 automation forwards it to the Worker secret store without exposing it to the
@@ -1129,6 +1132,21 @@ Correct the callback hostname before either Web or Worker deployment, and ship
 the Web start/build guard with the Cloudflare preflight change. During a skewed
 rollout the Web start guard still fails closed before OAuth state or provider
 authorization; do not bypass it to recover an invalid split-host environment.
+
+Device-webhook burst transport requires a main Queue and DLQ named from the
+deployed Worker (`<worker>-device-webhooks` and
+`<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
+Deploy the Queue-capable Worker and the Web batch-admission callback before
+setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
+gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, and Web admission stays serial before expanding. To roll back, clear the
+Web gate first, drain the main Queue through the still-deployed consumer, retain
+the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+During Cloudflare automation-key rotation, keep the prior private key as
+`decrypt_only` until Web uses the new public key and both the main Queue and
+encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ
+retention is part of the key-retirement floor; elapsed rollout time alone is not
+proof that the old key is safe to disable.
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 

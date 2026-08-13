@@ -1127,6 +1127,25 @@ export function buildWranglerLocalDevConfig(
     triggers: {
       crons: ["*/5 * * * *"],
     },
+    queues: {
+      producers: [
+        {
+          binding: "DEVICE_WEBHOOK_QUEUE",
+          queue: `${workerName}-device-webhooks`,
+        },
+      ],
+      consumers: [
+        {
+          dead_letter_queue: `${workerName}-device-webhooks-dlq`,
+          max_batch_size: 100,
+          max_batch_timeout: 5,
+          max_concurrency: 1,
+          max_retries: 10,
+          queue: `${workerName}-device-webhooks`,
+          retry_delay: 30,
+        },
+      ],
+    },
     r2_buckets: [
       {
         binding: "BUNDLES",
