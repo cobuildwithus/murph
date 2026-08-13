@@ -1208,7 +1208,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `device-sync.wake` mailbox handoffs for the Temporal global reconciler.
   Webhook freshness is not scheduler input: Web persists dirty state, appends
   one bounded wake on a clean-to-dirty transition, and the runner drains and
-  acknowledges dirty-pending rows through signed callbacks. Hosted provider
+  acknowledges dirty-pending rows through signed callbacks. Web classifies,
+  compresses, and seals dirty payloads and prepares clean-to-dirty mailbox
+  crypto outside consent/member/connection locks through request-local
+  capabilities; the final transaction revalidates consent, exact connection and
+  source authority, the dirty snapshot, and every applicable prepared root
+  identity before mutation, with one fresh-cache full replan on drift. Hosted provider
   registration reuses the shared `device-syncd` provider-manifest assembly path
   rather than maintaining an app-local provider list.
 - Group sponsorship remains an extension of the existing Web-owned

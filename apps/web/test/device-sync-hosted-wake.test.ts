@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => {
     getStoredConnectionAccountForUser: vi.fn(),
     requireHostedCloudflareCallbackRequest: vi.fn(),
     clearStoredProviderConfigCredential: vi.fn(),
+    listConnectionSourceAdmissionCandidates: vi.fn(),
     listConnectionSources: vi.fn(),
     listConnectionsForUser: vi.fn(),
     markConnectionSourcesDisconnected: vi.fn(),
@@ -47,7 +48,10 @@ const mocks = vi.hoisted(() => {
     sha256Hex: vi.fn<(value: string) => string>(() => "a".repeat(64)),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
+    prepareDirtyConnectionUpsert: vi.fn(),
+    shouldRequestWakeForDirtyConnectionUpsert: vi.fn(),
     upsertDirtyConnection: vi.fn(),
+    upsertDirtyConnectionWithPreparedPlanTx: vi.fn(),
     upsertConnectionSource: vi.fn(),
     upsertConnectionWithProviderApplication: vi.fn(),
     withConnectionMutationLock: vi.fn(),
@@ -86,6 +90,11 @@ const mocks = vi.hoisted(() => {
         },
       };
     }),
+    prepareHostedMailboxItemAppendCrypto: vi.fn(async (input: { userId: string }) => ({
+      domain: "ingress",
+      rootKeyId: "root_test",
+      userId: input.userId,
+    })),
   };
 
   return state;
@@ -113,6 +122,8 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: mocks.appendHostedMailboxEnvelopeTx,
+  prepareHostedMailboxItemAppendCrypto: mocks.prepareHostedMailboxItemAppendCrypto,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -283,6 +294,15 @@ function buildWebhookAdmissionRecord(
   };
 }
 
+function mockConnectionForAdmission(
+  connection: ReturnType<typeof buildHostedConnection> | null,
+): void {
+  mocks.getConnectionForUser.mockResolvedValue(connection);
+  mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+    connection ? buildWebhookAdmissionRecord(connection) : null,
+  );
+}
+
 function buildDisconnectingConnection(
   connection: ReturnType<typeof buildHostedConnection>,
 ) {
@@ -389,6 +409,20 @@ function buildHostedConnectionSource(
   };
 }
 
+function buildHostedConnectionSourceAdmissionCandidate(
+  source: ReturnType<typeof buildHostedConnectionSource>,
+) {
+  return {
+    id: source.id,
+    lastErrorCode: source.lastErrorCode,
+    lastErrorMessage: source.lastErrorMessage,
+    lastSeenAt: new Date(source.lastSeenAt),
+    sourceInstanceKey: source.sourceInstanceKey,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+  };
+}
+
 function buildDirtyConnectionRecord(overrides: Partial<{
   connectionId: string;
   dirtyRevision: bigint;
@@ -445,6 +479,9 @@ vi.mock("@/src/lib/device-sync/provider-applications", async () => {
 });
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
+  hasHostedDeviceSyncDirtyResourcePayload: (resource: {
+    payload?: Record<string, unknown>;
+  }) => Object.keys(resource.payload ?? {}).length > 0,
   PrismaDeviceSyncControlPlaneStore: class PrismaDeviceSyncControlPlaneStore {
     completeWebhookTrace = mocks.completeWebhookTrace;
     createSignal = mocks.createSignal;
@@ -459,6 +496,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getDirtyConnection = mocks.getDirtyConnection;
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
     clearStoredProviderConfigCredential = mocks.clearStoredProviderConfigCredential;
+    listConnectionSourceAdmissionCandidates = mocks.listConnectionSourceAdmissionCandidates;
     listConnectionSources = mocks.listConnectionSources;
     listConnectionsForUser = mocks.listConnectionsForUser;
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
@@ -466,7 +504,12 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     persistStoredConnectionTokenBundle = mocks.persistStoredConnectionTokenBundle;
     readOAuthStateProviderApplicationBinding = mocks.readOAuthStateProviderApplicationBinding;
     syncDurableConnectionState = mocks.syncDurableConnectionState;
+    prepareDirtyConnectionUpsert = mocks.prepareDirtyConnectionUpsert;
+    shouldRequestWakeForDirtyConnectionUpsert =
+      mocks.shouldRequestWakeForDirtyConnectionUpsert;
     upsertDirtyConnection = mocks.upsertDirtyConnection;
+    upsertDirtyConnectionWithPreparedPlanTx =
+      mocks.upsertDirtyConnectionWithPreparedPlanTx;
     upsertConnectionSource = mocks.upsertConnectionSource;
     upsertConnectionWithProviderApplication =
       mocks.upsertConnectionWithProviderApplication;
@@ -508,7 +551,11 @@ import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@/src/lib/device-sync/connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
-import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import {
+  areHostedDomainRootProviderCallsDisabled,
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import { HostedDomainRootPreparationMismatchError } from "@/src/lib/hosted-crypto/domain-root-store";
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
@@ -555,7 +602,9 @@ describe("hosted device-sync wakes", () => {
     mocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue(null);
     mocks.prismaTx.$queryRaw.mockResolvedValue([{ acquired: true }]);
     mocks.prismaTx.deviceConnection.findUnique.mockReset();
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(buildWebhookAdmissionRecord());
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord(),
+    );
     mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(0);
     mocks.getConnectionRecordForUser.mockImplementation(async (
       userId: string,
@@ -746,10 +795,30 @@ describe("hosted device-sync wakes", () => {
       dirty: buildDirtyConnectionRecord(),
       shouldRequestWake: true,
     });
+    mocks.prepareDirtyConnectionUpsert.mockImplementation(async (input) => ({
+      ...input,
+      dirtyRevision: 1n,
+      shouldRequestWake: true,
+    }));
+    mocks.shouldRequestWakeForDirtyConnectionUpsert.mockResolvedValue(true);
+    mocks.upsertDirtyConnectionWithPreparedPlanTx.mockImplementation(async (input) => {
+      return mocks.upsertDirtyConnection({
+        connectionId: input.prepared.connectionId,
+        dirtyAt: input.prepared.dirtyAt,
+        eventType: input.prepared.eventType,
+        provider: input.prepared.provider,
+        resourceCategory: input.prepared.resourceCategory,
+        resources: input.prepared.resources,
+        traceId: input.prepared.traceId,
+        tx: input.tx,
+        userId: input.prepared.userId,
+      });
+    });
     mocks.getDirtyConnection.mockResolvedValue(null);
     mocks.markDirtyConnectionProcessed.mockResolvedValue(null);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection());
     mocks.listConnectionSources.mockResolvedValue([]);
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([]);
     mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.markConnectionSourcesDisconnected.mockResolvedValue(0);
     mocks.clearStoredProviderConfigCredential.mockResolvedValue(true);
@@ -903,7 +972,7 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
       setupPhase: "source_confirmed",
     });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
     mocks.listConnectionSources.mockResolvedValue([
       buildHostedConnectionSource(connection.id, "apple_health_kit", {
@@ -989,7 +1058,7 @@ describe("hosted device-sync wakes", () => {
     const deferredSession = createDeferred<typeof session>();
     mocks.createSdkSignInSession.mockReturnValue(deferredSession.promise);
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.listConnectionSources.mockImplementation(async () => [source]);
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
@@ -1555,9 +1624,12 @@ describe("hosted device-sync wakes", () => {
     mocks.registryGet.mockReturnValue({
       connectionHandler: { isSourceAccessActive: providerRead },
     });
-    mocks.listConnectionSources
-      .mockResolvedValueOnce([initialSource])
-      .mockResolvedValueOnce([{ ...initialSource, lastSeenAt: "2026-03-26T12:01:00.000Z" }]);
+    mocks.listConnectionSourceAdmissionCandidates
+      .mockResolvedValueOnce([buildHostedConnectionSourceAdmissionCandidate(initialSource)])
+      .mockResolvedValueOnce([buildHostedConnectionSourceAdmissionCandidate({
+        ...initialSource,
+        lastSeenAt: "2026-03-26T12:01:00.000Z",
+      })]);
     mocks.getConnectionRecordForUser.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
     );
@@ -1621,7 +1693,9 @@ describe("hosted device-sync wakes", () => {
     mocks.registryGet.mockReturnValue({
       connectionHandler: { isSourceAccessActive: providerRead },
     });
-    mocks.listConnectionSources.mockResolvedValue([source]);
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
+      buildHostedConnectionSourceAdmissionCandidate(source),
+    ]);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection({ provider: "junction" }));
     mocks.getConnectionRecordForUser.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
@@ -1645,10 +1719,10 @@ describe("hosted device-sync wakes", () => {
     await expect(controlPlane.handlePreparedWebhook(prepared)).resolves.toEqual({ accepted: true });
 
     expect(providerRead).toHaveBeenCalledOnce();
-    expect(admissionPhase).toBe(2);
+    expect(admissionPhase).toBe(3);
     expect(mocks.materializeStoredConnectionAccount).toHaveBeenCalledOnce();
     expect(mocks.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
-    expect(mocks.getConnectionRecordForUser).toHaveBeenCalledTimes(2);
+    expect(mocks.getConnectionRecordForUser).toHaveBeenCalledTimes(3);
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: "dsc_123",
       sourceProviderSlug: "apple_health_kit",
@@ -1686,7 +1760,9 @@ describe("hosted device-sync wakes", () => {
     mocks.registryGet.mockReturnValue({
       connectionHandler: { isSourceAccessActive: providerRead },
     });
-    mocks.listConnectionSources.mockResolvedValue([source]);
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
+      buildHostedConnectionSourceAdmissionCandidate(source),
+    ]);
     const firstCredentialEpoch = buildWebhookAdmissionRecord({
       provider: "junction",
       setupPhase: "source_confirmed",
@@ -1734,7 +1810,7 @@ describe("hosted device-sync wakes", () => {
 
   it("preserves the sole Junction source on webhook receipt signals", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction" }),
     );
 
@@ -1784,7 +1860,7 @@ describe("hosted device-sync wakes", () => {
 
   it("omits source attribution for a data-less historical completion", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction" }),
     );
 
@@ -1829,11 +1905,7 @@ describe("hosted device-sync wakes", () => {
     const dirty = buildDirtyConnectionRecord({
       provider: "junction",
     });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
-    mocks.listConnectionSources.mockResolvedValue([{
-      sourceProviderSlug: "apple_health_kit",
-      status: "connected",
-    }]);
+    mockConnectionForAdmission(connection);
     mocks.upsertDirtyConnection.mockResolvedValue({
       dirty,
       shouldRequestWake: true,
@@ -1872,11 +1944,17 @@ describe("hosted device-sync wakes", () => {
       userId: "user-123",
     });
 
-    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
-      "user-123",
-      connection.id,
-      mocks.prismaTx,
-    );
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.prismaTx.deviceConnection.findUnique).toHaveBeenCalledWith({
+      select: {
+        connectedAt: true,
+        provider: true,
+        setupPhase: true,
+        status: true,
+        userId: true,
+      },
+      where: { id: connection.id },
+    });
     // Companion ingestion has no provider redelivery loop, so it must not opt
     // into the webhook-only member-row lock bound (exact three-argument call).
     expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
@@ -1884,7 +1962,12 @@ describe("hosted device-sync wakes", () => {
       connection.id,
       expect.any(Function),
     );
-    expect(mocks.listConnectionSources).toHaveBeenCalledWith("dsc_123", mocks.prismaTx);
+    expect(mocks.listConnectionSourceAdmissionCandidates).toHaveBeenCalledTimes(2);
+    expect(mocks.listConnectionSourceAdmissionCandidates).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      sourceProviderSlug: "apple_health_kit",
+      tx: mocks.prismaTx,
+    });
     expect(mocks.prismaTx.deviceSyncDirtyPayload.count).toHaveBeenCalledWith({
       where: {
         connectionId: connection.id,
@@ -1920,9 +2003,88 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("fully replans companion admission after the real mailbox root preparation drifts", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    const preparationCaches: unknown[] = [];
+    mockConnectionForAdmission(connection);
+    mocks.prepareDirtyConnectionUpsert.mockImplementation(async (input) => {
+      preparationCaches.push(getHostedDomainRootUnwrapCache());
+      return {
+        ...input,
+        dirtyRevision: 1n,
+        shouldRequestWake: true,
+      };
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(
+      new HostedDomainRootPreparationMismatchError(),
+    );
+
+    await persistHostedDeviceSyncCompanionMetadata({
+      connectionId: connection.id,
+      occurredAt: "2026-07-09T12:00:00.000Z",
+      resource: {
+        count: 1,
+        jobKind: "resource",
+        payload: { webhookDataJson: "{}" },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      },
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      userId: "user-123",
+    });
+
+    expect(preparationCaches).toHaveLength(2);
+    expect(preparationCaches[0]).toBeDefined();
+    expect(preparationCaches[1]).toBeDefined();
+    expect(preparationCaches[1]).not.toBe(preparationCaches[0]);
+    expect(mocks.prepareDirtyConnectionUpsert).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertDirtyConnectionWithPreparedPlanTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns retryable stale preparation when companion mailbox root drift repeats", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mockConnectionForAdmission(connection);
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError())
+      .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError());
+
+    await expect(persistHostedDeviceSyncCompanionMetadata({
+      connectionId: connection.id,
+      occurredAt: "2026-07-09T12:00:00.000Z",
+      resource: {
+        count: 1,
+        jobKind: "resource",
+        payload: { webhookDataJson: "{}" },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      },
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_DEVICE_SYNC_PREPARATION_STALE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.prepareDirtyConnectionUpsert).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertDirtyConnectionWithPreparedPlanTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("does not append a second wake while companion dirty work is already pending", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
       status: "connected",
@@ -1958,7 +2120,7 @@ describe("hosted device-sync wakes", () => {
 
   it("rejects companion metadata while the connection backlog is full", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
       status: "connected",
@@ -1995,7 +2157,7 @@ describe("hosted device-sync wakes", () => {
 
   it("accepts an exact replay at the backlog cap after the store no-ops it", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.listConnectionSources.mockResolvedValue([{
       sourceProviderSlug: "apple_health_kit",
       status: "connected",
@@ -2049,7 +2211,7 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     })],
   ])("rejects companion metadata when the selected runtime lane is %s", async (_case, connection) => {
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     const connectionId = connection?.id ?? "dsc_missing";
 
     await expect(persistHostedDeviceSyncCompanionMetadata({
@@ -2229,7 +2391,7 @@ describe("hosted device-sync wakes", () => {
     });
     const revokeSourceAccess = vi.fn(() => revokePending);
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async () => sources);
     mocks.registryGet.mockReturnValue({
@@ -2393,7 +2555,7 @@ describe("hosted device-sync wakes", () => {
       status: "error",
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async () => [source]);
     mocks.registryGet.mockReturnValue({
@@ -2468,7 +2630,7 @@ describe("hosted device-sync wakes", () => {
       }
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async () => sources);
     mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
@@ -2539,7 +2701,7 @@ describe("hosted device-sync wakes", () => {
       throw new Error("provider unavailable");
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async () => sources);
     mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
@@ -2594,7 +2756,7 @@ describe("hosted device-sync wakes", () => {
     });
     const revokeSourceAccess = vi.fn(async () => undefined);
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async () => [source]);
     mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
@@ -2646,7 +2808,7 @@ describe("hosted device-sync wakes", () => {
     ];
     const sibling = { ...sources[1]! };
     const revokeSourceAccess = vi.fn(async () => undefined);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async () => sources);
     mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
@@ -3448,7 +3610,7 @@ describe("hosted device-sync wakes", () => {
     });
     const revokeSourceAccess = vi.fn(async () => undefined);
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
     mocks.listConnectionSources.mockResolvedValue([
       buildHostedConnectionSource(connection.id, "fitbit", {
         lastErrorCode: HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -4708,7 +4870,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("terminally supersedes webhook work when the locked connection owner differs from the pre-lock owner", async () => {
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce({
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue({
       ...buildWebhookAdmissionRecord(),
       userId: "user-456",
     });
@@ -4748,7 +4910,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("retries webhook work when setup becomes pending before dirty-state commit", async () => {
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({
         setupExpiresAt: "2026-03-26T12:15:00.000Z",
         setupPhase: "pending_link",
@@ -4786,11 +4948,13 @@ describe("hosted device-sync wakes", () => {
         setupPhase: "source_confirmed",
       }),
     );
-    mocks.listConnectionSources.mockResolvedValueOnce([
-      buildHostedConnectionSource("dsc_123", "fitbit", {
-        lastErrorCode: null,
-        status: "disconnected",
-      }),
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValueOnce([
+      buildHostedConnectionSourceAdmissionCandidate(
+        buildHostedConnectionSource("dsc_123", "fitbit", {
+          lastSeenAt: "2026-03-26T11:59:00.000Z",
+          status: "disconnected",
+        }),
+      ),
     ]);
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
@@ -4821,10 +4985,11 @@ describe("hosted device-sync wakes", () => {
       retryable: true,
     });
 
-    expect(mocks.listConnectionSources).toHaveBeenCalledWith({
+    expect(mocks.listConnectionSourceAdmissionCandidates).toHaveBeenCalledWith({
       connectionId: "dsc_123",
       sourceProviderSlug: "fitbit",
-    }, mocks.prismaTx);
+      tx: mocks.prismaTx,
+    });
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
@@ -4837,7 +5002,7 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
 
     await acceptTestCompanionHrvRmssdObservation();
 
@@ -4914,8 +5079,8 @@ describe("hosted device-sync wakes", () => {
       displayName: "Apple Health",
       provider: "junction",
     });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
-    mocks.listConnectionSources.mockResolvedValue([
+    mockConnectionForAdmission(connection);
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
       buildHostedConnectionSource(connection.id, "apple_health_kit", {
         lastErrorCode: "SOURCE_USER_DISCONNECTED",
         status: "disconnected",
@@ -4957,7 +5122,7 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mockConnectionForAdmission(connection);
 
     await expect(acceptTestCompanionHrvRmssdObservation({
       acceptedAt: "2026-07-11T06:00:00.000Z",
@@ -4981,10 +5146,9 @@ describe("hosted device-sync wakes", () => {
     });
     const connectedSource = buildHostedConnectionSource(connection.id, "whoop_v2");
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.getConnectionForUser.mockResolvedValue(connection);
-    mocks.listConnectionSources
-      .mockResolvedValueOnce([connectedSource])
-      .mockResolvedValueOnce([{
+    mockConnectionForAdmission(connection);
+    mocks.listConnectionSources.mockResolvedValueOnce([connectedSource]);
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValueOnce([{
         ...connectedSource,
         lastErrorCode: "SOURCE_USER_DISCONNECTED",
         status: "disconnected",
@@ -5147,7 +5311,7 @@ describe("hosted device-sync wakes", () => {
       }),
       establishedConnection,
     ]);
-    mocks.getConnectionForUser.mockResolvedValue(establishedConnection);
+    mockConnectionForAdmission(establishedConnection);
 
     await acceptTestCompanionHrvRmssdObservation();
 
@@ -5163,7 +5327,7 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     mocks.listConnectionsForUser.mockResolvedValue([establishedConnection]);
-    mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection({
+    mockConnectionForAdmission(buildHostedConnection({
       id: "dsc_junction_123",
       provider: "junction",
       setupPhase: "pending_link",
@@ -5180,11 +5344,7 @@ describe("hosted device-sync wakes", () => {
       establishedConnection.id,
       expect.any(Function),
     );
-    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
-      "user-123",
-      establishedConnection.id,
-      mocks.prismaTx,
-    );
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
@@ -5426,6 +5586,270 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps the maximum webhook resource batch outside two sequential provider-closed transactions", async () => {
+    const transactionProviderCallFences: boolean[] = [];
+    const finalMutationProviderCallFences: boolean[] = [];
+    let activeTransactions = 0;
+    let peakTransactions = 0;
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
+    mocks.withHealthDataAdmissionLock.mockImplementation(async (
+      _userId: string,
+      _connectionId: string,
+      callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
+    ) => {
+      activeTransactions += 1;
+      peakTransactions = Math.max(peakTransactions, activeTransactions);
+      transactionProviderCallFences.push(areHostedDomainRootProviderCallsDisabled());
+      try {
+        return await callback(mocks.prismaTx);
+      } finally {
+        activeTransactions -= 1;
+      }
+    });
+    mocks.upsertDirtyConnectionWithPreparedPlanTx.mockImplementation(async (input) => {
+      finalMutationProviderCallFences.push(areHostedDomainRootProviderCallsDisabled());
+      return mocks.upsertDirtyConnection({
+        connectionId: input.prepared.connectionId,
+        dirtyAt: input.prepared.dirtyAt,
+        eventType: input.prepared.eventType,
+        provider: input.prepared.provider,
+        resourceCategory: input.prepared.resourceCategory,
+        resources: input.prepared.resources,
+        traceId: input.prepared.traceId,
+        tx: input.tx,
+        userId: input.prepared.userId,
+      });
+    });
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "provider.connection.updated",
+        jobs: [
+          {
+            kind: "backfill",
+            payload: {
+              windowEnd: "2026-03-26T00:00:00.000Z",
+              windowStart: "2026-03-19T00:00:00.000Z",
+            },
+          },
+          {
+            kind: "reconcile",
+            payload: {
+              windowEnd: "2026-03-26T00:00:00.000Z",
+              windowStart: "2026-03-25T00:00:00.000Z",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(peakTransactions).toBe(1);
+    expect(transactionProviderCallFences).toEqual([false, true]);
+    expect(finalMutationProviderCallFences).toEqual([true]);
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareDirtyConnectionUpsert).toHaveBeenCalledTimes(1);
+    expect(mocks.shouldRequestWakeForDirtyConnectionUpsert).not.toHaveBeenCalled();
+    expect(mocks.prepareDirtyConnectionUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resources: [
+          expect.objectContaining({ jobKind: "backfill" }),
+          expect.objectContaining({ jobKind: "reconcile" }),
+        ],
+      }),
+    );
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertDirtyConnectionWithPreparedPlanTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps compact-only webhook admission on the canonical final transaction owner", async () => {
+    const finalMutationProviderCallFences: boolean[] = [];
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
+    mocks.shouldRequestWakeForDirtyConnectionUpsert.mockResolvedValue(false);
+    mocks.upsertDirtyConnection.mockImplementation(async () => {
+      finalMutationProviderCallFences.push(areHostedDomainRootProviderCallsDisabled());
+      return {
+        dirty: buildDirtyConnectionRecord({ dirtyRevision: 2n }),
+        shouldRequestWake: false,
+      };
+    });
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "provider.connection.updated",
+        jobs: [],
+      },
+    });
+
+    expect(mocks.shouldRequestWakeForDirtyConnectionUpsert).toHaveBeenCalledOnce();
+    expect(mocks.prepareDirtyConnectionUpsert).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnectionWithPreparedPlanTx).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      resources: [expect.objectContaining({ jobKind: "reconcile" })],
+      tx: mocks.prismaTx,
+    }));
+    expect(finalMutationProviderCallFences).toEqual([true]);
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("replans compact-only admission once when pending state becomes unexpectedly clean", async () => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
+    mocks.shouldRequestWakeForDirtyConnectionUpsert
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    mocks.upsertDirtyConnection.mockResolvedValue({
+      dirty: buildDirtyConnectionRecord({ dirtyRevision: 2n }),
+      shouldRequestWake: true,
+    });
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "provider.connection.updated",
+        jobs: [],
+      },
+    });
+
+    expect(mocks.shouldRequestWakeForDirtyConnectionUpsert).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareDirtyConnectionUpsert).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+  });
+
+  it("rejects webhook resource batches above the provider-owned maximum before admission", async () => {
+    await expect(handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "provider.connection.updated",
+        jobs: [
+          { kind: "backfill" },
+          { kind: "reconcile" },
+          { kind: "reconcile" },
+        ],
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_DEVICE_SYNC_WEBHOOK_RESOURCE_BATCH_TOO_LARGE",
+      retryable: false,
+    });
+
+    expect(mocks.withHealthDataAdmissionLock).not.toHaveBeenCalled();
+    expect(mocks.prepareDirtyConnectionUpsert).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+  });
+
+  it("performs one full fresh-cache replan after the real mailbox root preparation drifts", async () => {
+    const preparationCaches: unknown[] = [];
+    mocks.prepareDirtyConnectionUpsert.mockImplementation(async (input) => {
+      preparationCaches.push(getHostedDomainRootUnwrapCache());
+      return {
+        ...input,
+        dirtyRevision: 1n,
+        shouldRequestWake: true,
+      };
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(
+      new HostedDomainRootPreparationMismatchError(),
+    );
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({ event: "sleep.updated" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
+    expect(mocks.prepareDirtyConnectionUpsert).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertDirtyConnectionWithPreparedPlanTx).toHaveBeenCalledTimes(2);
+    expect(preparationCaches).toHaveLength(2);
+    expect(preparationCaches[0]).toBeDefined();
+    expect(preparationCaches[1]).toBeDefined();
+    expect(preparationCaches[1]).not.toBe(preparationCaches[0]);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a retryable error when the real mailbox root preparation drifts twice", async () => {
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError())
+      .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError());
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({ event: "sleep.updated" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "HOSTED_DEVICE_SYNC_PREPARATION_STALE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.prepareDirtyConnectionUpsert).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertDirtyConnectionWithPreparedPlanTx).toHaveBeenCalledTimes(2);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
   it("keeps webhook acceptance retryable when dirty wake mailbox dedupe conflicts", async () => {
@@ -5940,7 +6364,7 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction" }),
     );
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
@@ -6027,11 +6451,13 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction" }),
     );
-    mocks.listConnectionSources.mockResolvedValueOnce([
-      buildHostedConnectionSource("dsc_123", "fitbit"),
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
+      buildHostedConnectionSourceAdmissionCandidate(
+        buildHostedConnectionSource("dsc_123", "fitbit"),
+      ),
     ]);
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
@@ -6121,7 +6547,7 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction" }),
     );
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
@@ -6227,7 +6653,7 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction" }),
     );
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
@@ -6318,7 +6744,7 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "whoop" }),
     );
     const controlPlane = createHostedDeviceSyncPublicIngressService(
