@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
+import { normalizeJunctionSnapshot } from "@murphai/importers/device-providers/junction";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
@@ -9322,27 +9323,38 @@ test("Junction polling updates source projection and imports bounded summary/tim
       const cursor = new URL(url).searchParams.get("next_cursor");
       if (cursor === "page-2") {
         return createJsonResponse({
-          data: [{
+          activity: [{
             id: "summary-2",
             accountId: "junction-account-raw-2",
+            calendar_date: "2026-04-02",
+            created_at: "2026-04-02T01:00:00+00:00",
+            date: "2026-04-02T00:00:00+00:00",
             providerConnectionId: "provider-connection-oura-ring-2",
-            userId: "junction-user-raw-2",
+            source: { provider: "oura", type: "ring" },
             steps: 2000,
+            updated_at: "2026-04-02T02:00:00+00:00",
+            user_id: "junction-user-raw-2",
           }],
         });
       }
 
       return createJsonResponse({
-        data: [{
+        activity: [{
           id: "summary-1",
           Source: { id: "nested-source-summary-1", name: "Nested Source Summary" },
           account_id: "junction-account-raw-1",
           account: { id: "nested-account-summary-1" },
           app: { id: "nested-app-summary-1", name: "Nested Summary App" },
+          calendar_date: "2026-04-02",
           client_user_id: "client-user-raw-1",
+          created_at: "2026-04-02T01:00:00+00:00",
+          date: "2026-04-02T00:00:00+00:00",
           device: { id: "nested-device-summary-1", name: "Nested Summary Device" },
           provider_connection_id: "provider-connection-oura-ring-1",
+          source: { provider: "oura", type: "ring" },
           steps: 1000,
+          updated_at: "2026-04-02T02:00:00+00:00",
+          user_id: "junction-user-raw-1",
         }],
         next_cursor: "page-2",
       });
@@ -9484,12 +9496,24 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(summarySnapshot.summaries?.activity?.[0]?.account, undefined);
   assert.equal(summarySnapshot.summaries?.activity?.[0]?.app, undefined);
   assert.equal(summarySnapshot.summaries?.activity?.[0]?.client_user_id, undefined);
+  assert.equal(summarySnapshot.summaries?.activity?.[0]?.date, "2026-04-02T00:00:00.000Z");
   assert.equal(summarySnapshot.summaries?.activity?.[0]?.device, undefined);
   assert.equal(summarySnapshot.summaries?.activity?.[0]?.provider_connection_id, undefined);
   assert.equal(summarySnapshot.summaries?.activity?.[1]?.accountId, undefined);
   assert.equal(summarySnapshot.summaries?.activity?.[1]?.providerConnectionId, undefined);
   assert.equal(summarySnapshot.summaries?.activity?.[1]?.userId, undefined);
   assert.deepEqual(summarySnapshot.timeseries, {});
+  const normalizedSummary = normalizeJunctionSnapshot(summarySnapshot);
+  const activityStepsEvent = requireValue(
+    normalizedSummary.events?.find((event) =>
+      event.fields?.metric === "daily-steps" && event.fields.value === 1000
+    ),
+    "Sanitized Junction activity should reach the canonical importer.",
+  );
+  assert.deepEqual(
+    [activityStepsEvent.occurredAt, activityStepsEvent.dayKey],
+    ["2026-04-02T00:00:00.000Z", "2026-04-02"],
+  );
 
   const timeseriesSnapshots = importedSnapshots.slice(1) as Array<{
     timeseries?: Record<string, Array<Record<string, unknown>>>;
@@ -9525,14 +9549,37 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(bloodOxygenRecord?.sourceName, undefined);
   assert.equal(bloodOxygenRecord?.sourceDeviceId, undefined);
   assert.equal(bloodOxygenRecord?.sourceAppId, undefined);
+  assert.equal(bloodOxygenRecord?.timestamp, "2026-04-02T14:30:52.000Z");
   assert.equal(bloodOxygenRecord?.user_id, undefined);
   assert.equal((bloodOxygenRecord as { source?: unknown } | undefined)?.source, undefined);
   assert.equal((bloodOxygenRecord as { provider?: unknown } | undefined)?.provider, undefined);
   assert.equal(typeof bloodOxygenRecord?.sourceInstanceId, "string");
   assert.match(String(bloodOxygenRecord?.sourceInstanceId), /^source-[a-f0-9]{24}$/u);
   assert.equal(timeseries.stress_level?.[0]?.sourceType, "ring");
+  assert.equal(timeseries.stress_level?.[0]?.timestamp, "2026-04-02T14:30:52.000Z");
   assert.equal(timeseries.blood_oxygen?.[0]?.junctionResource, "blood_oxygen");
   assert.equal(timeseries.stress_level?.[0]?.unit, "score");
+  const normalizedTimeseries = normalizeJunctionSnapshot(requireValue(
+    timeseriesSnapshots[0],
+    "Junction polling should produce one sanitized timeseries snapshot.",
+  ));
+  const bloodOxygenEvent = requireValue(
+    normalizedTimeseries.events?.find((event) => event.fields?.metric === "spo2"),
+    "Sanitized Junction blood oxygen should reach the canonical importer.",
+  );
+  const stressLevelEvent = requireValue(
+    normalizedTimeseries.events?.find((event) => event.fields?.metric === "stress-level"),
+    "Sanitized Junction stress level should reach the canonical importer.",
+  );
+  assert.deepEqual(
+    [bloodOxygenEvent.occurredAt, bloodOxygenEvent.dayKey],
+    ["2026-04-02T14:30:52.000Z", "2026-04-02"],
+  );
+  assert.deepEqual(
+    [stressLevelEvent.occurredAt, stressLevelEvent.dayKey],
+    ["2026-04-02T14:30:52.000Z", "2026-04-02"],
+  );
+  assert.notEqual(bloodOxygenEvent.externalRef?.resourceId, stressLevelEvent.externalRef?.resourceId);
   assert.doesNotMatch(
     JSON.stringify(timeseries),
     /Timeseries Oura Ring|timeseries-device-oura-ring-1|timeseries-app-oura-cloud-1/u,

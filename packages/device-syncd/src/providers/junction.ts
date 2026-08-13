@@ -5203,6 +5203,10 @@ function sanitizeJunctionImportSnapshotValue(
     return redactJunctionBlockedStringValue(value, options.blockedStringValues ?? []);
   }
 
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+
   const record = readPlainObject(value);
   if (!record) {
     return value;
