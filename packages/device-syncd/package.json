@@ -54,6 +54,10 @@
       "types": "./dist/junction-inline-authority.d.ts",
       "default": "./dist/junction-inline-authority.js"
     },
+    "./junction-historical-backfill-progress": {
+      "types": "./dist/junction-historical-backfill-progress.d.ts",
+      "default": "./dist/junction-historical-backfill-progress.js"
+    },
     "./junction-push-source-recovery": {
       "types": "./dist/junction-push-source-recovery.d.ts",
       "default": "./dist/junction-push-source-recovery.js"

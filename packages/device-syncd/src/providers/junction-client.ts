@@ -23,6 +23,7 @@ import {
 } from "@junction-api/sdk/user";
 import { VitalsClient, type StepsGroupedVitalsRequest } from "@junction-api/sdk/vitals";
 import { WorkoutsClient } from "@junction-api/sdk/workouts";
+import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 
 import {
@@ -108,8 +109,16 @@ export interface JunctionProviderConnection {
 
 export type JunctionDateQueryFormat = "date" | "datetime";
 
+export interface JunctionCollectionWorkLimit {
+  maxAttemptsPerPage: number;
+  maxPages: number;
+  requestTimeoutMs: number;
+}
+
 export interface JunctionWindowInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
   dateQueryFormat?: JunctionDateQueryFormat;
+  maxRecords?: number;
   resource: string;
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
@@ -122,6 +131,12 @@ export interface JunctionProfileSummaryInput {
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
   userId: string;
+}
+
+export interface JunctionWorkoutStreamInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
+  signal?: AbortSignal | null;
+  workoutId: string;
 }
 
 export interface JunctionIntrospectionInput {
@@ -452,10 +467,43 @@ export class JunctionClient {
   }
 
   async listTimeseries(input: JunctionWindowInput): Promise<unknown[]> {
+    const policy = resolveJunctionTimeseriesResourcePolicy(input.resource);
+    if (policy?.fetchMode === "workout_stream") {
+      throw new TypeError(
+        "Junction workout_stream uses the dedicated workout stream endpoint.",
+      );
+    }
     return this.fetchWindowedCollection(
-      input,
+      {
+        ...input,
+        maxRecords: policy?.maxSamplesPerWindow === undefined
+          ? input.maxRecords
+          : Math.min(input.maxRecords ?? policy.maxSamplesPerWindow, policy.maxSamplesPerWindow),
+      },
       extractTimeseriesRecords,
       (cursor) => this.requestTimeseriesPage(input, cursor),
+    );
+  }
+
+  async getWorkoutStream(input: JunctionWorkoutStreamInput): Promise<unknown> {
+    const workoutId = normalizeString(input.workoutId);
+    if (!workoutId) {
+      throw new TypeError("Junction workout stream requires a workout id.");
+    }
+    return this.requestSdkResource<unknown>(
+      "GET",
+      {
+        endpointKind: "junction_workout_stream",
+        signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
+      },
+      (clientOptions, requestOptions) => new WorkoutsClient(clientOptions)
+        .getByWorkoutId({ workoutId }, requestOptions),
     );
   }
 
@@ -584,27 +632,36 @@ export class JunctionClient {
     const records: unknown[] = [];
     let cursor: string | null = null;
     let pages = 0;
+    const pageLimit = input.collectionWorkLimit?.maxPages ?? MAX_COLLECTION_PAGES;
 
     do {
-      if (pages >= MAX_COLLECTION_PAGES) {
+      if (pages >= pageLimit) {
         throw deviceSyncError({
-          code: "JUNCTION_API_PAGINATION_LIMIT",
-          message: `Junction ${input.resource} response exceeded the configured page limit.`,
+          code: input.collectionWorkLimit
+            ? "JUNCTION_API_WINDOW_TOO_LARGE"
+            : "JUNCTION_API_PAGINATION_LIMIT",
+          message: `Junction ${input.resource} response exceeded the page budget for one complete window.`,
           retryable: true,
           httpStatus: 502,
         });
       }
       const payload = await requestPage(cursor);
-      records.push(...extractRecords(payload, input.resource));
-      pages += 1;
-      if (records.length > MAX_COLLECTION_RECORDS) {
-        throw deviceSyncError({
-          code: "JUNCTION_API_RECORD_LIMIT",
-          message: `Junction ${input.resource} response exceeded the configured record limit.`,
-          retryable: true,
-          httpStatus: 502,
-        });
+      const maxRecords = input.maxRecords ?? MAX_COLLECTION_RECORDS;
+      if (!Number.isSafeInteger(maxRecords) || maxRecords < 1) {
+        throw new TypeError("Junction collection record limit must be a positive integer.");
       }
+      for (const record of extractRecords(payload, input.resource)) {
+        if (records.length >= maxRecords) {
+          throw deviceSyncError({
+            code: "JUNCTION_API_RECORD_LIMIT",
+            message: `Junction ${input.resource} response exceeded the configured record limit.`,
+            retryable: true,
+            httpStatus: 502,
+          });
+        }
+        records.push(record);
+      }
+      pages += 1;
       cursor = extractNextCursor(payload);
     } while (cursor);
 
@@ -705,6 +762,31 @@ export class JunctionClient {
           case "glucose": return client.glucoseGrouped(request, requestOptions);
           case "blood_pressure": return client.bloodPressureGrouped(request, requestOptions);
           case "note": return client.noteGrouped(request, requestOptions);
+          case "body_mass_index": return client.bodyMassIndexGrouped(request, requestOptions);
+          case "carbohydrates": return client.carbohydratesGrouped(request, requestOptions);
+          case "fat": return client.bodyFatGrouped(request, requestOptions);
+          case "forced_expiratory_volume_1": return client.forcedExpiratoryVolume1Grouped(request, requestOptions);
+          case "forced_vital_capacity": return client.forcedVitalCapacityGrouped(request, requestOptions);
+          case "heart_rate_alert": return client.heartRateAlertGrouped(request, requestOptions);
+          case "inhaler_usage": return client.inhalerUsageGrouped(request, requestOptions);
+          case "insulin_injection": return client.insulinInjectionGrouped(request, requestOptions);
+          case "lean_body_mass": return client.leanBodyMassGrouped(request, requestOptions);
+          case "peak_expiratory_flow_rate": return client.peakExpiratoryFlowRateGrouped(request, requestOptions);
+          case "sleep_apnea_alert": return client.sleepApneaAlertGrouped(request, requestOptions);
+          case "waist_circumference": return client.waistCircumferenceGrouped(request, requestOptions);
+          case "calories_basal": return client.caloriesBasalGrouped(request, requestOptions);
+          case "daylight_exposure": return client.daylightExposureGrouped(request, requestOptions);
+          case "fall": return client.fallGrouped(request, requestOptions);
+          case "floors_climbed": return client.floorsClimbedGrouped(request, requestOptions);
+          case "handwashing": return client.handwashingGrouped(request, requestOptions);
+          case "stand_duration": return client.standDurationGrouped(request, requestOptions);
+          case "stand_hour": return client.standHourGrouped(request, requestOptions);
+          case "uv_exposure": return client.uvExposureGrouped(request, requestOptions);
+          case "wheelchair_push": return client.wheelchairPushGrouped(request, requestOptions);
+          case "workout_distance": return client.workoutDistanceGrouped(request, requestOptions);
+          case "workout_duration": return client.workoutDurationGrouped(request, requestOptions);
+          case "workout_swimming_stroke": return client.workoutSwimmingStrokeGrouped(request, requestOptions);
+          case "electrocardiogram_voltage": return client.electrocardiogramVoltageGrouped(request, requestOptions);
           default: throw new TypeError(`Unsupported Junction timeseries resource: ${input.resource}`);
         }
       },
@@ -716,16 +798,20 @@ export class JunctionClient {
     options: {
       bodyFieldNames?: readonly string[];
       endpointKind: string;
+      maxAttempts?: number;
       optional404?: boolean;
       queryParameterNames?: readonly string[];
       signal?: AbortSignal | null;
+      timeoutMs?: number;
     },
     invoke: (
       clientOptions: JunctionSdkClientOptions,
       requestOptions: JunctionSdkRequestOptions,
     ) => PromiseLike<unknown>,
   ): Promise<T> {
-    const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
+    const attempts = method === "GET"
+      ? options.maxAttempts ?? MAX_GET_ATTEMPTS
+      : 1;
     let lastError: unknown;
     const hasJsonBody = (options.bodyFieldNames?.length ?? 0) > 0;
     const requestDiagnostics = buildProviderRequestDiagnostics({
@@ -744,7 +830,7 @@ export class JunctionClient {
       throwIfProviderRequestAborted(options.signal);
       const requestAbort = createProviderRequestAbortSignal({
         signal: options.signal ?? null,
-        timeoutMs: this.requestTimeoutMs,
+        timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
       });
       let capturedResponse: JunctionSdkResponseCapture | null = null;
       const sdkFetch: typeof fetch = async (input, init) => {
@@ -779,7 +865,7 @@ export class JunctionClient {
           },
         );
       };
-      const timeoutInSeconds = this.requestTimeoutMs / 1_000;
+      const timeoutInSeconds = (options.timeoutMs ?? this.requestTimeoutMs) / 1_000;
       const clientOptions: JunctionSdkClientOptions = {
         apiKey: this.apiKey,
         baseUrl: this.baseUrl,
@@ -1168,6 +1254,17 @@ function isJunctionDisabledEndpointError(error: unknown): boolean {
 
   const status = error.details?.status;
   return status === 403 || status === 404;
+}
+
+export function resolveJunctionTimeseriesApiResource(resource: string): string {
+  switch (resource) {
+    case "fat":
+      return "body_fat";
+    case "weight":
+      return "body_weight";
+    default:
+      return resource;
+  }
 }
 
 function resolveJunctionSummaryDateQueryFormat(input: JunctionWindowInput): JunctionDateQueryFormat {
@@ -1608,13 +1705,36 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
     for (const rawGroup of asArray(rawGroups)) {
       const group = readPlainObject(rawGroup);
       if (!group) {
+        if (resource === "electrocardiogram_voltage") {
+          throw new TypeError("Junction ECG group must be an object.");
+        }
         continue;
+      }
+
+      const groupId = firstDefinedString(group, ["id", "recordingId", "recording_id"]);
+      if (resource === "electrocardiogram_voltage" && !groupId) {
+        throw new TypeError("Junction ECG group lacked a stable recording id.");
+      }
+      if (resource === "electrocardiogram_voltage" && !Array.isArray(group.data)) {
+        throw new TypeError("Junction ECG group data must be an array.");
       }
 
       for (const rawSample of asArray(group.data)) {
         const sample = readPlainObject(rawSample);
         if (!sample) {
+          if (resource === "electrocardiogram_voltage") {
+            throw new TypeError("Junction ECG sample must be an object.");
+          }
           continue;
+        }
+
+        const sampleId = firstDefinedString(sample, ["recordingId", "recording_id"]);
+        if (
+          resource === "electrocardiogram_voltage"
+          && sampleId
+          && sampleId !== groupId
+        ) {
+          throw new TypeError("Junction ECG sample conflicted with its group recording id.");
         }
 
         const origin = resolveJunctionOrigin(sample, {
@@ -1623,6 +1743,9 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
         });
         records.push(stripUndefinedRecord({
           ...sample,
+          junctionGroupId: resource === "electrocardiogram_voltage"
+            ? groupId
+            : undefined,
           sourceProviderSlug: normalizeSourceSlug(origin.sourceProviderSlug) ?? undefined,
           sourceType: origin.sourceType,
           sourceInstanceId: origin.sourceInstanceId,
@@ -1633,6 +1756,25 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   }
 
   return records;
+}
+
+function firstDefinedValue(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function firstDefinedString(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  return normalizeString(firstDefinedValue(record, keys));
 }
 
 function asArray(value: unknown): unknown[] {
