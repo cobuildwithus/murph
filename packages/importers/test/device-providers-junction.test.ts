@@ -4944,6 +4944,9 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "calories_active",
     "heartrate",
     "weight",
+  ]);
+  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
+  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], [
     "body_mass_index",
     "carbohydrates",
     "fat",
@@ -4971,8 +4974,6 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "electrocardiogram_voltage",
     "workout_stream",
   ]);
-  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
-  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
   assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
     ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
