@@ -781,8 +781,13 @@ function selectPublicSourceMetricSeries(input: {
   );
 }
 
-function uniqueMetricPoints(points: readonly MetricPoint[]): MetricPoint[] {
-  return [...new Map(points.map((point) => [point.id, point])).values()];
+function uniqueMetricPointsByPublicSource(
+  points: readonly MetricPoint[],
+): MetricPoint[] {
+  return [...new Map(points.map((point) => {
+    const source = resolveMetricPointPublicSource(point);
+    return [`${source?.source ?? "unresolved"}\u0000${point.id}`, point] as const;
+  })).values()];
 }
 
 async function readMetricPointsByPublicSource(input: {
@@ -808,7 +813,7 @@ async function readMetricPointsByPublicSource(input: {
       metricKey,
     }))),
   ]);
-  return uniqueMetricPoints([
+  return uniqueMetricPointsByPublicSource([
     ...sourceGroups.flatMap((group) => group.points),
     ...fallbackPoints.filter((point) => {
       const source = resolveMetricPointPublicSource(point);
@@ -1842,10 +1847,6 @@ export function selectProjectableActivityMinutesDays(
       ...(group.source ? { source: group.source } : {}),
       ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision(group.rows)),
     });
-
-    if (records.length >= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
-      break;
-    }
   }
 
   return records;
@@ -1919,10 +1920,6 @@ export function selectProjectableActivityDistanceDays(
       ...(group.source ? { source: group.source } : {}),
       ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision(group.rows)),
     });
-
-    if (records.length >= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
-      break;
-    }
   }
 
   return records;
@@ -1977,10 +1974,6 @@ export function selectProjectableActivitySessionCountDays(
       ...(group.source ? { source: group.source } : {}),
       ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision(group.rows)),
     });
-
-    if (records.length >= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
-      break;
-    }
   }
 
   return records;
@@ -2082,10 +2075,6 @@ export function selectProjectableHeartRateZoneDays(
       ...(group.source ? { source: group.source } : {}),
       ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision(group.points)),
     });
-
-    if (records.length >= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
-      break;
-    }
   }
 
   return records;

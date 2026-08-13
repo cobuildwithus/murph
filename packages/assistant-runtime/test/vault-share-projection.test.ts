@@ -52,6 +52,7 @@ import {
   readProjectableActivityMinutesDays,
   readProjectableActivitySessionCountDays,
   readProjectableDailyMetricDays,
+  readProjectableHeartRateZoneDays,
   readProjectableWorkoutDays,
   readProjectableWorkoutsDays,
   readProjectableMealNutritionDays,
@@ -407,6 +408,68 @@ async function createActivitySessionVault(
     "utf8",
   );
   return vaultRoot;
+}
+
+function sparseNinthSourceActivityRecords(input?: {
+  includeSparseNinthSource?: boolean;
+}): Record<string, unknown>[] {
+  const dates = [
+    "2026-07-02",
+    "2026-07-03",
+    "2026-07-04",
+    "2026-07-05",
+    "2026-07-06",
+    "2026-07-07",
+    "2026-07-08",
+  ];
+  const providers = [
+    "coros",
+    "fitbit",
+    "garmin",
+    "oura",
+    "polar",
+    "strava",
+    "suunto",
+    "whoop",
+  ];
+  const record = (
+    date: string,
+    provider: string,
+    sourceIndex: number,
+    zone: number,
+  ): Record<string, unknown> => ({
+    schemaVersion: "murph.event.v1",
+    id: `evt_sparse_${date}_${provider}`,
+    kind: "activity_session",
+    occurredAt: `${date}T${String(sourceIndex + 1).padStart(2, "0")}:30:00.000Z`,
+    dayKey: date,
+    recordedAt: `${date}T20:00:00.000Z`,
+    source: "device",
+    externalRef: {
+      system: provider,
+      resourceType: "activity_session",
+      resourceId: `sparse-${date}-${provider}`,
+    },
+    activityType: "running",
+    distanceKm: sourceIndex + 2,
+    durationMinutes: sourceIndex + 21,
+    workout: {
+      heartRateZones: [{
+        durationMinutes: 10,
+        label: `Zone ${zone}`,
+        zone,
+      }],
+    },
+  });
+
+  const records = dates.flatMap((date) =>
+    providers.map((provider, sourceIndex) =>
+      record(date, provider, sourceIndex, 1)
+    )
+  );
+  return input?.includeSparseNinthSource === false
+    ? records
+    : [...records, record(dates[0]!, "withings", -1, 2)];
 }
 
 async function createMemoryDisplayNameVault(displayName: string | null): Promise<string> {
@@ -4405,6 +4468,31 @@ describe("selectProjectableActivityMinutesDays", () => {
     }
   });
 
+  it("fails every exact activity scope closed for a sparse ninth source after 56 records", async () => {
+    const vaultRoot = await createActivitySessionVault(
+      sparseNinthSourceActivityRecords(),
+    );
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-07-08T12:00:00.000Z"),
+    );
+
+    try {
+      await expect(readProjectableActivityMinutesDays(vaultRoot, runningSpec))
+        .resolves.toEqual([]);
+      await expect(readProjectableActivityDistanceDays(
+        vaultRoot,
+        requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
+      )).resolves.toEqual([]);
+      await expect(readProjectableActivitySessionCountDays(
+        vaultRoot,
+        requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
+      )).resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps activity-minute reads bounded to query projection entities", async () => {
     const source = await readFile(
       new URL("../src/hosted-runtime/vault-share-projection.ts", import.meta.url),
@@ -5149,6 +5237,35 @@ describe("selectProjectableHeartRateZoneDays", () => {
         ),
       },
     }], utcDateKey(nowMs))).toEqual([]);
+  });
+
+  it("fails closed when sparse zone subseries contain a ninth public source", async () => {
+    const exactBoundVaultRoot = await createActivitySessionVault(
+      sparseNinthSourceActivityRecords({
+        includeSparseNinthSource: false,
+      }),
+    );
+    const overBoundVaultRoot = await createActivitySessionVault(
+      sparseNinthSourceActivityRecords(),
+    );
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-07-08T12:00:00.000Z"),
+    );
+
+    try {
+      const exactBound = await readProjectableHeartRateZoneDays(
+        exactBoundVaultRoot,
+      );
+      expect(exactBound).toHaveLength(56);
+      expect(new Set(exactBound.map((record) => record.source?.source)).size)
+        .toBe(8);
+      await expect(readProjectableHeartRateZoneDays(overBoundVaultRoot))
+        .resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(exactBoundVaultRoot, { recursive: true, force: true });
+      await rm(overBoundVaultRoot, { recursive: true, force: true });
+    }
   });
 });
 
