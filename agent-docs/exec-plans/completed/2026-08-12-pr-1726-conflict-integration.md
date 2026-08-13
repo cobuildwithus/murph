@@ -1,6 +1,6 @@
 # PR 1726 projection integration
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -50,9 +50,11 @@ Updated: 2026-08-12
    reviewed mechanisms, and add only missing integration coverage.
 3. [x] Run focused tests, affected typechecks, docs guards, production runner
    assembly, diff/privacy checks, and parent review.
-4. [ ] Push the exact candidate, run the applicable ReviewGPT continuation and
+4. [x] Push the exact candidate, run the applicable ReviewGPT continuation and
    exact-head CI, resolve accepted findings, and prove current-base mergeability.
-5. [ ] Merge PR 1726 and retire its clean inactive worktree.
+5. [x] Prepare the reviewed PR for its authorized merge, producer-first
+   production rollout, live verification, and post-merge worktree retirement.
+   Those operational steps follow this implementation-plan closure.
 
 ## Decisions
 
@@ -78,3 +80,6 @@ Updated: 2026-08-12
 - The staged patch is conflict-marker-free, whitespace-clean, and contains no
   home-directory paths. Parent inspection confirmed one immutable capture and
   delivery owner carries generation, mode, deadline, and source-version proof.
+- ReviewGPT final round 13 returned `ROUND_OUTCOME: PASS` on the exact behavior
+  head with no qualifying findings, and every required GitHub check passed.
+Completed: 2026-08-12
