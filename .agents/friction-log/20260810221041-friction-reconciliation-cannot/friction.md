@@ -1,6 +1,7 @@
 ---
 title: 'Friction reconciliation cannot open its sync pull request under the organization Actions policy'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1636'
 ---
 
 ## Expected Behavior
