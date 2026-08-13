@@ -61,12 +61,14 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
+  buildDeviceSyncSourceCanonicalCoverageReadyAtKey,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE,
   isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isDeviceSyncSourceResourceAvailabilityMetadataKey,
   readDeviceSyncSourceCanonicalCoverageBoundary,
+  readDeviceSyncSourceCanonicalCoverageReadyAt,
 } from "../fitbit-migration.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
@@ -4916,7 +4918,10 @@ async function recordAcceptedJunctionFitbitCoverage(
     return;
   }
 
-  const coverageByResource = new Map<string, string>();
+  const coverageByResource = new Map<string, {
+    coverageBoundary: string;
+    coverageReadyAt?: string;
+  }>();
   for (const evidence of canonicalCoverage) {
     if (
       normalizeProviderSlug(evidence.sourceProviderSlug)
@@ -4926,16 +4931,19 @@ async function recordAcceptedJunctionFitbitCoverage(
       continue;
     }
     const existing = coverageByResource.get(evidence.resource);
-    coverageByResource.set(
-      evidence.resource,
-      existing
-        ? maxJunctionCanonicalCoverageBoundary(
-            evidence.resource,
-            existing,
-            evidence.coverageBoundary,
-          )
-        : evidence.coverageBoundary,
-    );
+    const coverageBoundary = existing
+      ? maxJunctionCanonicalCoverageBoundary(
+          evidence.resource,
+          existing.coverageBoundary,
+          evidence.coverageBoundary,
+        )
+      : evidence.coverageBoundary;
+    coverageByResource.set(evidence.resource, {
+      coverageBoundary,
+      coverageReadyAt: coverageBoundary === evidence.coverageBoundary
+        ? evidence.coverageReadyAt
+        : existing?.coverageReadyAt,
+    });
   }
 
   if (coverageByResource.size === 0) {
@@ -4959,7 +4967,7 @@ async function recordAcceptedJunctionFitbitCoverage(
     ...(legacy.resourceAvailabilitySummary ?? {}),
   };
   let changed = false;
-  for (const [resource, coverageBoundary] of coverageByResource) {
+  for (const [resource, coverage] of coverageByResource) {
     const key = buildDeviceSyncSourceCanonicalCoverageBoundaryKey(resource);
     if (!key) {
       continue;
@@ -4968,17 +4976,37 @@ async function recordAcceptedJunctionFitbitCoverage(
       resourceAvailabilitySummary,
       resource,
     );
-    if (
-      existingCoverage
-      && maxJunctionCanonicalCoverageBoundary(
+    const coverageAdvanced =
+      !existingCoverage
+      || maxJunctionCanonicalCoverageBoundary(
           resource,
           existingCoverage,
-          coverageBoundary,
-        ) === existingCoverage
+          coverage.coverageBoundary,
+        ) !== existingCoverage;
+    if (coverageAdvanced) {
+      resourceAvailabilitySummary[key] = coverage.coverageBoundary;
+      changed = true;
+    }
+    const readyAtKey = buildDeviceSyncSourceCanonicalCoverageReadyAtKey(resource);
+    if (!readyAtKey) {
+      continue;
+    }
+    const existingReadyAt = readDeviceSyncSourceCanonicalCoverageReadyAt(
+      resourceAvailabilitySummary,
+      resource,
+    );
+    if (coverageAdvanced) {
+      resourceAvailabilitySummary[readyAtKey] = coverage.coverageReadyAt ?? null;
+      continue;
+    }
+    if (
+      existingCoverage !== coverage.coverageBoundary
+      || !coverage.coverageReadyAt
+      || existingReadyAt
     ) {
       continue;
     }
-    resourceAvailabilitySummary[key] = coverageBoundary;
+    resourceAvailabilitySummary[readyAtKey] = coverage.coverageReadyAt;
     changed = true;
   }
 
@@ -8110,6 +8138,7 @@ function readProviderSnapshotCanonicalEventExternalRefResourceIds(
 
 function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly {
   coverageBoundary: string;
+  coverageReadyAt?: string;
   resource: string;
   sourceProviderSlug: string;
 }[] {
@@ -8133,8 +8162,12 @@ function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly
     ) {
       return [];
     }
+    const coverageReadyAt = toIsoTimestampIfValid(evidence.coverageReadyAt);
     return [{
       coverageBoundary,
+      ...(coverageReadyAt
+        ? { coverageReadyAt }
+        : {}),
       resource,
       sourceProviderSlug: evidence.sourceProviderSlug,
     }];

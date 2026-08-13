@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  addDaysToIsoDate,
   extractIsoDatePrefix,
   ID_PREFIXES,
   JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
@@ -162,13 +163,13 @@ export interface JunctionBloodPressureProviderRecordIdentityEvidence {
 
 export interface JunctionCanonicalCoverageEvidence {
   readonly coverageBoundary: string;
+  readonly coverageReadyAt?: string;
   readonly resource: string;
   readonly sourceProviderSlug: string;
 }
 
 export interface JunctionCanonicalCoverageDerivationOptions {
   readonly defaultTimeZone?: string;
-  readonly importedAt?: string;
 }
 
 export interface JunctionCanonicalCoverageEvent {
@@ -1050,30 +1051,32 @@ export function normalizeJunctionSnapshot(
  * Derives provider cutover coverage only from the canonical events returned by
  * the committed vault import. This deliberately does not replay raw Junction
  * normalization: the stored event owns the canonical provider day or interval.
- * Import receipts pass their provider-local clock so daily coverage excludes
- * the still-open day; interval coverage remains anchored to its accepted end.
+ * Daily coverage carries the exact instant after its provider-local day closes;
+ * interval coverage remains anchored to its accepted end.
  */
 export function deriveJunctionCanonicalCoverageEvidence(
   events: readonly JunctionCanonicalCoverageEvent[],
   options?: JunctionCanonicalCoverageDerivationOptions,
 ): readonly JunctionCanonicalCoverageEvidence[] {
   const coverageBySourceAndResource = new Map<string, JunctionCanonicalCoverageEvidence>();
-  const openProviderDay = options
-    ? resolveVaultLocalDayKey(options.importedAt ?? "", options.defaultTimeZone)
-    : undefined;
-
   for (const event of events) {
     const evidence = resolveJunctionCanonicalCoverageEvidence(event);
     if (!evidence) {
       continue;
     }
-    if (
-      options
-      && isJunctionDailyCanonicalCoverageResource(evidence.resource)
-      && (!openProviderDay || evidence.coverageBoundary >= openProviderDay)
-    ) {
-      continue;
-    }
+    const coverageReadyAt = options
+        && isJunctionDailyCanonicalCoverageResource(evidence.resource)
+      ? resolveJunctionProviderDayReadyAt(
+          evidence.coverageBoundary,
+          options.defaultTimeZone,
+        )
+      : undefined;
+    const resolvedEvidence = coverageReadyAt
+      ? {
+          ...evidence,
+          coverageReadyAt,
+        }
+      : evidence;
 
     const key = `${evidence.sourceProviderSlug}\u0000${evidence.resource}`;
     const existing = coverageBySourceAndResource.get(key);
@@ -1085,7 +1088,16 @@ export function deriveJunctionCanonicalCoverageEvidence(
           evidence.coverageBoundary,
         ) === evidence.coverageBoundary
     ) {
-      coverageBySourceAndResource.set(key, evidence);
+      coverageBySourceAndResource.set(
+        key,
+        existing?.coverageBoundary === resolvedEvidence.coverageBoundary
+          ? {
+              ...resolvedEvidence,
+              coverageReadyAt:
+                existing.coverageReadyAt ?? resolvedEvidence.coverageReadyAt,
+            }
+          : resolvedEvidence,
+      );
     }
   }
 
@@ -1093,6 +1105,40 @@ export function deriveJunctionCanonicalCoverageEvidence(
     left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
     || left.resource.localeCompare(right.resource)
   );
+}
+
+function resolveJunctionProviderDayReadyAt(
+  dayKey: string,
+  defaultTimeZone: string | undefined,
+): string | undefined {
+  if (!defaultTimeZone) {
+    return undefined;
+  }
+
+  try {
+    const nextDayKey = addDaysToIsoDate(dayKey, 1);
+    const nominalNextDayMs = Date.parse(`${nextDayKey}T00:00:00.000Z`);
+    let lowerBoundMs = nominalNextDayMs - 36 * 60 * 60_000;
+    let upperBoundMs = nominalNextDayMs + 36 * 60 * 60_000;
+    if (
+      toLocalDayKey(lowerBoundMs, defaultTimeZone) > dayKey
+      || toLocalDayKey(upperBoundMs, defaultTimeZone) <= dayKey
+    ) {
+      return undefined;
+    }
+
+    while (upperBoundMs - lowerBoundMs > 1) {
+      const midpointMs = Math.floor((lowerBoundMs + upperBoundMs) / 2);
+      if (toLocalDayKey(midpointMs, defaultTimeZone) > dayKey) {
+        upperBoundMs = midpointMs;
+      } else {
+        lowerBoundMs = midpointMs;
+      }
+    }
+    return new Date(upperBoundMs).toISOString();
+  } catch {
+    return undefined;
+  }
 }
 
 function applyJunctionCanonicalCoverageFence(

@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   countAvailableDeviceSyncSourceResources,
   buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
+  buildDeviceSyncSourceCanonicalCoverageReadyAtKey,
   DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   isDeviceSyncSourceHistoricalBackfillComplete,
@@ -13,6 +14,7 @@ import {
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isGoogleHealthFitbitMigrationLegacyTerminal,
   readDeviceSyncSourceCanonicalCoverageBoundary,
+  readDeviceSyncSourceCanonicalCoverageReadyAt,
 } from "../src/fitbit-migration.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
@@ -210,6 +212,10 @@ test("Google Health Fitbit migration accepts only explicit terminal disconnect e
 test("Google Health Fitbit cutover requires strict successor availability for each produced legacy resource", () => {
   const coverageKey = buildDeviceSyncSourceCanonicalCoverageBoundaryKey("sleep");
   assert.equal(coverageKey, "canonicalCoverageBoundary_sleep");
+  assert.equal(
+    buildDeviceSyncSourceCanonicalCoverageReadyAtKey("activity"),
+    "canonicalCoverageReadyAt_activity",
+  );
   assert.ok(coverageKey);
   assert.equal(
     buildDeviceSyncSourceCanonicalCoverageBoundaryKey(`s${"x".repeat(39)}`),
@@ -228,17 +234,42 @@ test("Google Health Fitbit cutover requires strict successor availability for ea
       activity: true,
       sleep: true,
       canonicalCoverageBoundary_activity: "2026-08-11",
+      canonicalCoverageReadyAt_activity: "2026-08-12T00:00:00.000Z",
       canonicalCoverageBoundary_sleep: "2026-08-11T12:00:00.000Z",
     },
     successorSummary,
+    now: "2026-08-12T00:00:00.000Z",
   }), true);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: {
+      activity: true,
+      canonicalCoverageReadyAt_activity: "2026-08-12T05:00:00.000Z",
+      canonicalCoverageBoundary_activity: "2026-08-11",
+    },
+    now: "2026-08-12T04:59:59.999Z",
+    successorSummary,
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacyAccessTerminal: true,
+    legacySummary: {
+      activity: true,
+      canonicalCoverageReadyAt_activity: "2026-08-12T05:00:00.000Z",
+      canonicalCoverageBoundary_activity: "2026-08-11",
+    },
+    successorSummary,
+  }), true);
+  assert.equal(readDeviceSyncSourceCanonicalCoverageReadyAt({
+    canonicalCoverageReadyAt_activity: "2026-08-12T05:00:00.000Z",
+  }, "activity"), "2026-08-12T05:00:00.000Z");
   assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
     legacySummary: {
       activity: true,
       sleep: true,
       canonicalCoverageBoundary_activity: "2026-08-11",
+      canonicalCoverageReadyAt_activity: "2026-08-12T00:00:00.000Z",
       canonicalCoverageBoundary_sleep: "2026-08-11T12:00:00.000Z",
     },
+    now: "2026-08-12T00:00:00.000Z",
     successorSummary: { activity: true, sleep: false },
   }), false);
   assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
@@ -246,7 +277,9 @@ test("Google Health Fitbit cutover requires strict successor availability for ea
       activity: true,
       sleep: true,
       canonicalCoverageBoundary_activity: "2026-08-11",
+      canonicalCoverageReadyAt_activity: "2026-08-12T00:00:00.000Z",
     },
+    now: "2026-08-12T00:00:00.000Z",
     successorSummary,
   }), false);
   assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
@@ -255,7 +288,9 @@ test("Google Health Fitbit cutover requires strict successor availability for ea
       activity: true,
       sleep: true,
       canonicalCoverageBoundary_activity: "2026-08-11",
+      canonicalCoverageReadyAt_activity: "2026-08-12T00:00:00.000Z",
     },
+    now: "2026-08-12T00:00:00.000Z",
     successorSummary,
   }), false);
   assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
@@ -267,8 +302,10 @@ test("Google Health Fitbit cutover requires strict successor availability for ea
       activity: true,
       profile: true,
       provider_metadata: true,
+      canonicalCoverageReadyAt_activity: "2026-08-12T00:00:00.000Z",
       canonicalCoverageBoundary_activity: "2026-08-11",
     },
+    now: "2026-08-12T00:00:00.000Z",
     successorSummary: {
       activity: true,
       profile: true,
@@ -294,8 +331,10 @@ test("Google Health Fitbit cutover requires strict successor availability for ea
   assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
     legacySummary: {
       activity: false,
+      canonicalCoverageReadyAt_activity: "2026-08-12T00:00:00.000Z",
       canonicalCoverageBoundary_activity: "2026-08-11",
     },
+    now: "2026-08-12T00:00:00.000Z",
     successorSummary: { activity: { status: "available" }, sleep: false },
   }), true);
 });
@@ -303,6 +342,7 @@ test("Google Health Fitbit cutover requires strict successor availability for ea
 test("available source resource counts exclude lifecycle metadata and unavailable values", () => {
   assert.equal(countAvailableDeviceSyncSourceResources({
     canonicalCoverageBoundary_sleep: "2026-08-11T12:00:00.000Z",
+    canonicalCoverageReadyAt_activity: "2026-08-12T00:00:00.000Z",
     [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
       "2026-08-11T12:00:00.000Z",
     heartrate: null,

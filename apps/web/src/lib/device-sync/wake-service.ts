@@ -1946,6 +1946,7 @@ function isHostedGoogleHealthFitbitMigrationCutoverReady(
     && isGoogleHealthFitbitMigrationLegacyCoverageReady({
       legacyAccessTerminal: isGoogleHealthFitbitMigrationLegacyTerminal(legacy),
       legacySummary: legacy.resourceAvailabilitySummary,
+      now: new Date().toISOString(),
       successorSummary: successor.resourceAvailabilitySummary,
     })
     && isGoogleHealthFitbitMigrationSuccessorReady({

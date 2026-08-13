@@ -299,21 +299,9 @@ function createCanonicalImportReceipt(
       })),
       {
         defaultTimeZone,
-        importedAt: normalizeTestImportedAt(snapshot.importedAt),
       },
     ),
   };
-}
-
-function normalizeTestImportedAt(value: JunctionSnapshotInput["importedAt"]): string | undefined {
-  const timestampMs = value instanceof Date
-    ? value.getTime()
-    : typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Date.parse(value)
-        : Number.NaN;
-  return Number.isFinite(timestampMs) ? new Date(timestampMs).toISOString() : undefined;
 }
 
 function assertJunctionSnapshotInput(
@@ -12172,7 +12160,18 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   acceptCanonicalEvents = true;
   await executeJunctionJob(provider, createContext("2026-08-12T01:00:00.000Z"), job);
 
-  assert.equal(upserts.length, 0);
+  assert.equal(
+    upserts.at(-1)?.resourceAvailabilitySummary
+      ?.canonicalCoverageBoundary_activity,
+    "2026-08-11",
+  );
+  assert.equal(
+    upserts.at(-1)?.resourceAvailabilitySummary
+      ?.canonicalCoverageReadyAt_activity,
+    "2026-08-12T04:00:00.000Z",
+  );
+
+  upserts.length = 0;
 
   await executeJunctionJob(provider, createContext("2026-08-12T05:00:00.000Z"), job);
 
@@ -12184,6 +12183,11 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
     upserts.at(-1)?.resourceAvailabilitySummary
       ?.canonicalCoverageBoundary_activity,
     "2026-08-11",
+  );
+  assert.equal(
+    upserts.at(-1)?.resourceAvailabilitySummary
+      ?.canonicalCoverageReadyAt_activity,
+    "2026-08-12T04:00:00.000Z",
   );
 });
 

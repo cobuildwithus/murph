@@ -1,4 +1,5 @@
 import {
+  isJunctionDailyCanonicalCoverageResource,
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   normalizeJunctionCanonicalCoverageBoundary,
@@ -18,6 +19,9 @@ export const DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY =
 
 export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX =
   "canonicalCoverageBoundary_";
+
+export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_READY_AT_KEY_PREFIX =
+  "canonicalCoverageReadyAt_";
 
 export const DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE =
   "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED";
@@ -59,6 +63,9 @@ export function isDeviceSyncSourceResourceAvailabilityMetadataKey(
   return DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS.has(key)
     || key.startsWith(
       DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
+    )
+    || key.startsWith(
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_READY_AT_KEY_PREFIX,
     );
 }
 
@@ -71,6 +78,15 @@ export function buildDeviceSyncSourceCanonicalCoverageBoundaryKey(
     : null;
 }
 
+export function buildDeviceSyncSourceCanonicalCoverageReadyAtKey(
+  resource: string,
+): string | null {
+  const normalized = resource.trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,38}$/u.test(normalized)
+    ? `${DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_READY_AT_KEY_PREFIX}${normalized}`
+    : null;
+}
+
 export function readDeviceSyncSourceCanonicalCoverageBoundary(
   summary: Record<string, unknown> | null | undefined,
   resource: string,
@@ -78,6 +94,21 @@ export function readDeviceSyncSourceCanonicalCoverageBoundary(
   const key = buildDeviceSyncSourceCanonicalCoverageBoundaryKey(resource);
   const value = key ? summary?.[key] : undefined;
   return normalizeJunctionCanonicalCoverageBoundary(resource, value);
+}
+
+export function readDeviceSyncSourceCanonicalCoverageReadyAt(
+  summary: Record<string, unknown> | null | undefined,
+  resource: string,
+): string | null {
+  const key = buildDeviceSyncSourceCanonicalCoverageReadyAtKey(resource);
+  const value = key ? summary?.[key] : undefined;
+  if (typeof value !== "string") {
+    return null;
+  }
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs) && new Date(timestampMs).toISOString() === value
+    ? value
+    : null;
 }
 
 export function isGoogleHealthFitbitMigrationLegacyTerminal(source: {
@@ -96,6 +127,7 @@ export function isGoogleHealthFitbitMigrationLegacyTerminal(source: {
 export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
   legacyAccessTerminal?: boolean;
   legacySummary: Record<string, unknown> | null | undefined;
+  now?: string;
   successorSummary: Record<string, unknown> | null | undefined;
 }): boolean {
   const producedLegacyResources = [...DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES]
@@ -115,6 +147,20 @@ export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
     return false;
   }
 
+  if (
+    input.legacyAccessTerminal !== true
+    && producedLegacyResources.some((resource) =>
+      isJunctionDailyCanonicalCoverageResource(resource)
+      && !hasDeviceSyncSourceCanonicalCoverageReadyAtElapsed(
+        input.legacySummary,
+        resource,
+        input.now,
+      )
+    )
+  ) {
+    return false;
+  }
+
   return producedLegacyResources.length === 0
     ? input.legacyAccessTerminal === true
     : producedLegacyResources.every((resource) =>
@@ -123,6 +169,18 @@ export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
         input.successorSummary?.[resource],
       )
     );
+}
+
+function hasDeviceSyncSourceCanonicalCoverageReadyAtElapsed(
+  summary: Record<string, unknown> | null | undefined,
+  resource: string,
+  now: string | undefined,
+): boolean {
+  const readyAt = readDeviceSyncSourceCanonicalCoverageReadyAt(summary, resource);
+  const nowMs = typeof now === "string" ? Date.parse(now) : Number.NaN;
+  return readyAt !== null
+    && Number.isFinite(nowMs)
+    && nowMs >= Date.parse(readyAt);
 }
 
 export function countAvailableDeviceSyncSourceResources(

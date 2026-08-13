@@ -297,9 +297,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
-  const junctionCoverageImportedAt = payload.provider === "junction"
-    ? resolveJunctionSnapshotImportedAt(input)
-    : undefined;
   const result = await writer.importDeviceBatch(payload);
   const resultRecord = readPlainObject(result);
   if (payload.provider !== "junction" || !resultRecord || !Array.isArray(resultRecord.events)) {
@@ -312,29 +309,9 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
       resultRecord.events.filter(isEventRecord),
       {
         defaultTimeZone: resolvedDefaultTimeZone,
-        importedAt: junctionCoverageImportedAt,
       },
     ),
   } as TResult;
-}
-
-function resolveJunctionSnapshotImportedAt(input: unknown): string | undefined {
-  const request = deviceProviderSnapshotImportSchema.safeParse(input);
-  if (!request.success || request.data.provider !== "junction") {
-    return undefined;
-  }
-
-  const importedAt = readPlainObject(request.data.snapshot)?.importedAt;
-  const timestampMs = importedAt instanceof Date
-    ? importedAt.getTime()
-    : typeof importedAt === "number"
-      ? importedAt
-      : typeof importedAt === "string"
-        ? Date.parse(importedAt)
-        : Number.NaN;
-  return Number.isFinite(timestampMs)
-    ? new Date(timestampMs).toISOString()
-    : undefined;
 }
 
 function readPlainObject(value: unknown): Record<string, unknown> | null {

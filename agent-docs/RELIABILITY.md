@@ -634,7 +634,10 @@ Last verified: 2026-08-11
   published successor history/resource/freshness evidence and each overlapping
   temporal resource has a durable canonical legacy-coverage boundary. Web
   rechecks those durable rows before the targeted provider revoke. Boundary
-  markers advance only after accepted canonical delivery; post-cutover imports
+  markers advance only after accepted canonical delivery. A daily marker is
+  paired with its provider-local next-midnight instant and cannot authorize an
+  active-provider cutover before that instant; once elapsed, the hosted pass
+  attempts cutover before scheduling another legacy import. Post-cutover imports
   compare daily coverage ends and interval ends per resource so delayed daily
   records and straddling sessions cannot be lost to a wall-clock fence.
   Provider failure restores legacy Fitbit and writes only the retry
