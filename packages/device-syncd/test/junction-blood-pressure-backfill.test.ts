@@ -652,17 +652,6 @@ async function executeImmediateFullTimeseriesContinuations(input: {
   throw new Error("Full Junction timeseries continuation did not terminate.");
 }
 
-function readFullTimeseriesActiveResource(job: DeviceSyncJobInput | undefined): string | null {
-  const encoded = job?.payload?.timeseriesResourceCursor;
-  if (typeof encoded !== "string") {
-    return null;
-  }
-  const parsed = JSON.parse(encoded) as { a?: unknown; i?: unknown; v?: unknown };
-  assert.equal(parsed.v, 1);
-  assert.equal(Array.isArray(parsed.i), true);
-  return typeof parsed.a === "string" ? parsed.a : null;
-}
-
 test("the persisted-source scheduler gives sparse blood pressure its own full-history resumable job", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({ requests });
@@ -702,7 +691,10 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   const boundedRequests = [...requests];
   assert.equal(boundedRequests.length, 0);
   assert.equal(boundedResult.scheduledJobs?.length, 1);
-  assert.equal(readFullTimeseriesActiveResource(boundedResult.scheduledJobs?.[0]), "blood_pressure");
+  assert.equal(
+    boundedResult.scheduledJobs?.[0]?.payload?.timeseriesResourceCursor,
+    "blood_pressure",
+  );
   assert.equal(
     boundedResult.scheduledJobs?.[0]?.payload?.timeseriesCursor,
     "2026-05-28T00:00:00.000Z",

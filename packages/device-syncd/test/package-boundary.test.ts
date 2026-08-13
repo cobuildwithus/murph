@@ -66,6 +66,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     default: "./dist/junction-inline-authority.js",
     types: "./dist/junction-inline-authority.d.ts",
   });
+  assert.deepEqual(packageManifest.exports?.["./junction-historical-backfill-progress"], {
+    default: "./dist/junction-historical-backfill-progress.js",
+    types: "./dist/junction-historical-backfill-progress.d.ts",
+  });
   assert.deepEqual(packageManifest.exports?.["./junction-resources"], {
     default: "./dist/junction-resources.js",
     types: "./dist/junction-resources.d.ts",
