@@ -10220,7 +10220,6 @@
         "title",
         "kind",
         "activityType",
-        "durationMinutes",
         "workout"
       ],
       "additionalProperties": false

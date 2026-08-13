@@ -58,6 +58,16 @@ export { importDocument, prepareDocumentImport } from "./document-importer.ts";
 export * from "./device-providers/index.ts";
 export { addMeal, prepareMealImport } from "./meal-importer.ts";
 export {
+  planWorkoutCsvImport,
+  type PlannedWorkoutCsvSession,
+  type WorkoutCsvImportPlan,
+  type WorkoutCsvDistanceUnit,
+  type WorkoutCsvPlannerInput,
+  type WorkoutCsvSkipReasonCount,
+  type WorkoutCsvSource,
+  type WorkoutCsvWeightUnit,
+} from "./workout-csv-planner.ts";
+export {
   createSamplePresetRegistry,
   defineSampleImportPreset,
   resolveSampleImportConfig,
