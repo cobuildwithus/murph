@@ -26,6 +26,7 @@ export const handleWorkerFetch = createWorkerFetchHandler({
 });
 
 const DATABASE_HEALTH_SINGLETON_NAME = "production";
+const DEVICE_WEBHOOK_QUEUE_HEALTH_SINGLETON_NAME = "production";
 
 export function handleDatabaseHealthScheduled(
   controller: ScheduledController,
@@ -43,6 +44,26 @@ export function handleDatabaseHealthScheduled(
     namespace.getByName(DATABASE_HEALTH_SINGLETON_NAME).runScheduledCheck({
       scheduledAtMs: controller.scheduledTime,
     }),
+  );
+}
+
+export function handleDeviceWebhookQueueHealthScheduled(
+  controller: ScheduledController,
+  env: WorkerEnvironmentSource,
+  ctx: WorkerExecutionContext,
+): void {
+  if (env.HOSTED_DATABASE_ALERT_ENABLED !== "1") {
+    return;
+  }
+  const namespace = env.DEVICE_WEBHOOK_QUEUE_MONITOR;
+  if (!namespace) {
+    throw new Error("DEVICE_WEBHOOK_QUEUE_MONITOR binding is required.");
+  }
+  ctx.waitUntil(
+    namespace.getByName(DEVICE_WEBHOOK_QUEUE_HEALTH_SINGLETON_NAME)
+      .runScheduledCheck({
+        scheduledAtMs: controller.scheduledTime,
+      }),
   );
 }
 
@@ -77,5 +98,6 @@ export default {
     ctx: WorkerExecutionContext,
   ): void {
     handleDatabaseHealthScheduled(controller, env, ctx);
+    handleDeviceWebhookQueueHealthScheduled(controller, env, ctx);
   },
 };

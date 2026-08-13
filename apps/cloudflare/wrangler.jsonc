@@ -48,6 +48,10 @@
         "class_name": "DatabaseHealthDurableObject"
       },
       {
+        "name": "DEVICE_WEBHOOK_QUEUE_MONITOR",
+        "class_name": "DeviceWebhookQueueHealthDurableObject"
+      },
+      {
         "name": "RUNNER_CONTAINER",
         "class_name": "RunnerContainer"
       },
@@ -76,6 +80,10 @@
     {
       "tag": "v4",
       "new_sqlite_classes": ["DatabaseHealthDurableObject"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["DeviceWebhookQueueHealthDurableObject"]
     }
   ],
   "triggers": {
@@ -86,6 +94,10 @@
       {
         "binding": "DEVICE_WEBHOOK_QUEUE",
         "queue": "murph-hosted-device-webhooks"
+      },
+      {
+        "binding": "DEVICE_WEBHOOK_DLQ",
+        "queue": "murph-hosted-device-webhooks-dlq"
       }
     ],
     "consumers": [

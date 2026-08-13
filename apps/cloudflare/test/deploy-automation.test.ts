@@ -342,6 +342,10 @@ describe("hosted deploy automation helpers", () => {
         name: "DATABASE_HEALTH_MONITOR",
       },
       {
+        class_name: "DeviceWebhookQueueHealthDurableObject",
+        name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
+      },
+      {
         class_name: "RunnerContainer",
         name: "RUNNER_CONTAINER",
       },
@@ -372,6 +376,10 @@ describe("hosted deploy automation helpers", () => {
       {
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
         tag: "v4",
+      },
+      {
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+        tag: "v5",
       },
     ]);
     expect(config).toMatchObject({
@@ -407,6 +415,10 @@ describe("hosted deploy automation helpers", () => {
         {
           binding: "DEVICE_WEBHOOK_QUEUE",
           queue: "hosted-worker-device-webhooks",
+        },
+        {
+          binding: "DEVICE_WEBHOOK_DLQ",
+          queue: "hosted-worker-device-webhooks-dlq",
         },
       ],
     });

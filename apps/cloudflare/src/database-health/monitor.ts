@@ -1,5 +1,9 @@
 import type { DurableObjectSqlStorageLike } from "../user-runner/types.js";
 import {
+  classifyOperatorLinqAlertFailure,
+  sendOperatorLinqAlert,
+} from "../operator-alert/linq.js";
+import {
   advanceConnectionErrorCounterBaseline,
   calculateConnectionErrorDeltas,
   DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
@@ -35,7 +39,6 @@ const CONNECTION_ERROR_METRIC_NAME =
     DatabaseHealthRequiredMetricName;
 const PLANETSCALE_DISCOVERY_BODY_LIMIT_BYTES = 256 * 1_024;
 const PLANETSCALE_METRICS_BODY_LIMIT_BYTES = 2 * 1_024 * 1_024;
-const LINQ_HEALTH_BODY_LIMIT_BYTES = 256 * 1_024;
 const PLANETSCALE_DISCOVERY_TARGET_LIMIT = 64;
 const PLANETSCALE_DISCOVERY_TARGET_LENGTH_LIMIT = 512;
 const PLANETSCALE_METRICS_PATH_LENGTH_LIMIT = 2_048;
@@ -194,7 +197,7 @@ interface DatabaseHealthMonitorConfig {
   databaseName: string;
   linqApiBaseUrl: string;
   linqApiToken: string;
-  linqChatIds: readonly string[];
+  linqChatIds: readonly [primary: string, secondary: string];
   organization: string;
   planetScaleServiceToken: string;
   planetScaleServiceTokenId: string;
@@ -205,10 +208,6 @@ interface PlanetScaleDiscoveryGroup {
   targets: readonly string[];
 }
 
-interface ResolvedDatabaseHealthLinqDestination {
-  recipient: string;
-  sendable: boolean;
-}
 
 interface DatabaseHealthTransactionalStorage {
   sql?: DurableObjectSqlStorageLike;
@@ -812,84 +811,14 @@ export class DatabaseHealthMonitor {
 
     this.store.recordAlertAttempt(attemptedAtMs);
     try {
-      const destinationResults = await Promise.allSettled(
-        this.config.linqChatIds.map((chatId) =>
-          resolveDatabaseHealthLinqDestination({
-            apiBaseUrl: this.config.linqApiBaseUrl,
-            apiToken: this.config.linqApiToken,
-            chatId,
-            fetchImplementation: this.fetchImplementation,
-          })
-        ),
-      );
-      const primaryResult = destinationResults[0];
-      const secondaryResult = destinationResults[1];
-      if (!primaryResult || !secondaryResult) {
-        throw new Error(
-          "Database health monitor requires two Linq destinations.",
-        );
-      }
-      const failures: unknown[] = [];
-      const destinations: Array<{
-        idempotencyKey: string;
-        recipient: string;
-      }> = [];
-      if (primaryResult.status === "rejected") {
-        failures.push(primaryResult.reason);
-      } else {
-        if (primaryResult.value.sendable) {
-          destinations.push({
-            idempotencyKey,
-            recipient: primaryResult.value.recipient,
-          });
-        } else {
-          failures.push(
-            new LinqDatabaseAlertError("linq_health_suppressed"),
-          );
-        }
-      }
-      if (secondaryResult.status === "rejected") {
-        failures.push(secondaryResult.reason);
-      } else if (primaryResult.status === "fulfilled") {
-        if (
-          secondaryResult.value.recipient
-          === primaryResult.value.recipient
-        ) {
-          failures.push(
-            new LinqDatabaseAlertError("linq_duplicate_recipient"),
-          );
-        } else if (!secondaryResult.value.sendable) {
-          failures.push(
-            new LinqDatabaseAlertError("linq_health_suppressed"),
-          );
-        } else {
-          destinations.push({
-            idempotencyKey: `${idempotencyKey}-recipient-2`,
-            recipient: secondaryResult.value.recipient,
-          });
-        }
-      }
-      const sendResults = await Promise.allSettled(
-        destinations.map((destination) =>
-          sendDatabaseHealthLinqAlert({
-            apiBaseUrl: this.config.linqApiBaseUrl,
-            apiToken: this.config.linqApiToken,
-            fetchImplementation: this.fetchImplementation,
-            idempotencyKey: destination.idempotencyKey,
-            message,
-            recipient: destination.recipient,
-          })
-        ),
-      );
-      for (const result of sendResults) {
-        if (result.status === "rejected") {
-          failures.push(result.reason);
-        }
-      }
-      const failure = failures[0];
-      if (failure !== undefined) {
-        throw failure;
-      }
+      await sendOperatorLinqAlert({
+        apiBaseUrl: this.config.linqApiBaseUrl,
+        apiToken: this.config.linqApiToken,
+        chatIds: this.config.linqChatIds,
+        fetchImplementation: this.fetchImplementation,
+        idempotencyKey,
+        message,
+      });
       this.store.recordAlertSuccess();
       const stateAfterSuccess = this.store.readAlertState();
       if (
@@ -908,7 +837,7 @@ export class DatabaseHealthMonitor {
       };
     } catch (error) {
       console.warn("Database health Linq alert failed.", {
-        failureCode: classifyLinqAlertFailure(error),
+        failureCode: classifyOperatorLinqAlertFailure(error),
       });
       return {
         conditions: input.conditions,
@@ -1190,121 +1119,6 @@ function resolvePlanetScaleBranchMetricsUrl(
   return targetUrl;
 }
 
-async function resolveDatabaseHealthLinqDestination(input: {
-  apiBaseUrl: string;
-  apiToken: string;
-  chatId: string;
-  fetchImplementation: DatabaseHealthFetch;
-}): Promise<ResolvedDatabaseHealthLinqDestination> {
-  const authorization = `Bearer ${input.apiToken}`;
-  const chatUrl = new URL(
-    `chats/${encodeURIComponent(input.chatId)}`,
-    ensureTrailingSlash(input.apiBaseUrl),
-  );
-  const phoneNumbersUrl = new URL(
-    "phone_numbers",
-    ensureTrailingSlash(input.apiBaseUrl),
-  );
-  const [chatResponseResult, phoneNumbersResponseResult] =
-    await Promise.allSettled([
-      fetchWithTimeout(
-        input.fetchImplementation,
-        chatUrl,
-        {
-          headers: { authorization },
-          method: "GET",
-        },
-      ),
-      fetchWithTimeout(
-        input.fetchImplementation,
-        phoneNumbersUrl,
-        {
-          headers: { authorization },
-          method: "GET",
-        },
-      ),
-    ]);
-  if (
-    chatResponseResult.status === "rejected"
-    || !chatResponseResult.value.ok
-  ) {
-    throw new LinqDatabaseAlertError("linq_health_unavailable");
-  }
-  const chatBody = await readBoundedResponseText(
-    chatResponseResult.value,
-    LINQ_HEALTH_BODY_LIMIT_BYTES,
-  ).catch(() => {
-    throw new LinqDatabaseAlertError("linq_health_unavailable");
-  });
-  const chatIdentity = resolveLinqDirectChatIdentity(chatBody);
-  if (
-    phoneNumbersResponseResult.status === "rejected"
-    || !phoneNumbersResponseResult.value.ok
-  ) {
-    return {
-      recipient: chatIdentity.recipient,
-      sendable: false,
-    };
-  }
-  const phoneNumbersBody = await readBoundedResponseText(
-    phoneNumbersResponseResult.value,
-    LINQ_HEALTH_BODY_LIMIT_BYTES,
-  ).catch(() => null);
-  return {
-    recipient: chatIdentity.recipient,
-    sendable:
-      chatIdentity.chatHealthy
-      && phoneNumbersBody !== null
-      && hasHealthyLinqSenderLine({
-        phoneNumbersBody,
-        sender: chatIdentity.sender,
-      }),
-  };
-}
-
-async function sendDatabaseHealthLinqAlert(input: {
-  apiBaseUrl: string;
-  apiToken: string;
-  fetchImplementation: DatabaseHealthFetch;
-  idempotencyKey: string;
-  message: string;
-  recipient: string;
-}): Promise<void> {
-  const authorization = `Bearer ${input.apiToken}`;
-  const url = new URL("messages", ensureTrailingSlash(input.apiBaseUrl));
-  const response = await fetchWithTimeout(
-    input.fetchImplementation,
-    url,
-    {
-      body: JSON.stringify({
-        message: {
-          idempotency_key: input.idempotencyKey,
-          parts: [
-            {
-              type: "text",
-              value: input.message,
-            },
-          ],
-        },
-        to: [input.recipient],
-      }),
-      headers: {
-        authorization,
-        "content-type": "application/json",
-        "idempotency-key": input.idempotencyKey,
-      },
-      method: "POST",
-    },
-  );
-  if (!response.ok) {
-    throw new LinqDatabaseAlertError(
-      response.status === 429 || response.status >= 500
-        ? "linq_retryable_response"
-        : "linq_rejected_response",
-    );
-  }
-}
-
 function buildDatabaseAlertMessage(input: {
   alertSequence: number;
   checkedAtMs: number;
@@ -1349,91 +1163,6 @@ function buildDatabaseAlertMessage(input: {
 
 function normalizeModulo(value: number, modulus: number): number {
   return ((value % modulus) + modulus) % modulus;
-}
-
-function resolveLinqDirectChatIdentity(
-  chatBody: string,
-): {
-  chatHealthy: boolean;
-  recipient: string;
-  sender: string;
-} {
-  let chatValue: unknown;
-  try {
-    chatValue = JSON.parse(chatBody);
-  } catch {
-    throw new LinqDatabaseAlertError("linq_health_unavailable");
-  }
-  if (
-    !isObjectRecord(chatValue)
-    || chatValue.is_group !== false
-    || !Array.isArray(chatValue.handles)
-  ) {
-    throw new LinqDatabaseAlertError("linq_health_suppressed");
-  }
-
-  const activeHandles = chatValue.handles.filter(
-    (candidate): candidate is Record<string, unknown> =>
-      isObjectRecord(candidate)
-      && (candidate.status === undefined || candidate.status === "active"),
-  );
-  const senderHandles = activeHandles.filter(
-    (candidate) => candidate.is_me === true,
-  );
-  const recipientHandles = activeHandles.filter(
-    (candidate) => candidate.is_me === false,
-  );
-  if (senderHandles.length !== 1 || recipientHandles.length !== 1) {
-    throw new LinqDatabaseAlertError("linq_health_suppressed");
-  }
-  const sender = senderHandles[0]?.handle;
-  const recipient = recipientHandles[0]?.handle;
-  if (!isE164PhoneNumber(sender) || !isE164PhoneNumber(recipient)) {
-    throw new LinqDatabaseAlertError("linq_health_suppressed");
-  }
-  const chatHealthStatus = isObjectRecord(chatValue.health_status)
-    ? normalizeLinqHealthStatus(chatValue.health_status.status)
-    : null;
-  return {
-    chatHealthy: chatHealthStatus === "HEALTHY",
-    recipient,
-    sender,
-  };
-}
-
-function hasHealthyLinqSenderLine(input: {
-  phoneNumbersBody: string;
-  sender: string;
-}): boolean {
-  let phoneNumbersValue: unknown;
-  try {
-    phoneNumbersValue = JSON.parse(input.phoneNumbersBody);
-  } catch {
-    return false;
-  }
-  if (
-    !isObjectRecord(phoneNumbersValue)
-    || !Array.isArray(phoneNumbersValue.phone_numbers)
-  ) {
-    return false;
-  }
-  const currentLines = phoneNumbersValue.phone_numbers.filter(
-    (candidate) =>
-      isObjectRecord(candidate)
-      && normalizeLinqPhoneNumber(candidate.phone_number) === input.sender,
-  );
-  const currentLine = currentLines[0];
-  const reputation = isObjectRecord(currentLine?.reputation)
-    ? currentLine.reputation
-    : null;
-  const reputationStatus =
-    normalizeLinqHealthStatus(reputation?.status)
-    ?? normalizeLinqHealthStatus(currentLine?.health_status);
-  return !(
-    currentLines.length !== 1
-    || !isObjectRecord(currentLine)
-    || reputationStatus !== "HEALTHY"
-  );
 }
 
 function formatDatabaseHealthCondition(
@@ -1764,21 +1493,11 @@ function classifyDatabaseHealthFailure(
   return "metrics_scrape_failed";
 }
 
-function classifyLinqAlertFailure(error: unknown): string {
-  return error instanceof LinqDatabaseAlertError
-    ? error.code
-    : "linq_transport_failed";
-}
-
 function normalizeObservedAtMs(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return Date.now();
   }
   return Math.trunc(value);
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
 }
 
 function formatPercent(ratio: number): string {
@@ -1798,51 +1517,9 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isE164PhoneNumber(value: unknown): value is string {
-  return typeof value === "string" && /^\+[1-9]\d{7,14}$/.test(value);
-}
-
-function normalizeLinqPhoneNumber(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  if (!normalized) {
-    return null;
-  }
-  const compact = normalized.replace(/[\s().-]+/gu, "");
-  const prefixed = compact.startsWith("00") ? `+${compact.slice(2)}` : compact;
-  if (/^\+[1-9]\d{6,14}$/u.test(prefixed)) {
-    return prefixed;
-  }
-  return /^[1-9]\d{6,14}$/u.test(prefixed) ? `+${prefixed}` : null;
-}
-
-function normalizeLinqHealthStatus(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized || null;
-}
-
 class DatabaseHealthFetchError extends Error {
   constructor(readonly code: DatabaseHealthFailureCode) {
     super(code);
     this.name = "DatabaseHealthFetchError";
-  }
-}
-
-class LinqDatabaseAlertError extends Error {
-  constructor(
-    readonly code:
-      | "linq_health_suppressed"
-      | "linq_health_unavailable"
-      | "linq_duplicate_recipient"
-      | "linq_rejected_response"
-      | "linq_retryable_response",
-  ) {
-    super(code);
-    this.name = "LinqDatabaseAlertError";
   }
 }

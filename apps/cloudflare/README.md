@@ -124,6 +124,10 @@ Bindings:
   production database metric history and alert admission
 - `DEVICE_WEBHOOK_QUEUE`, encrypted non-canonical burst transport with one
   serial consumer and an encrypted dead-letter queue
+- `DEVICE_WEBHOOK_DLQ`, producer binding used only for encrypted dead-letter
+  Queue metrics
+- `DEVICE_WEBHOOK_QUEUE_MONITOR`, one environment-scoped SQLite Durable Object
+  for five-minute Queue-health observations and restart-safe operator paging
 - `RUNNER_CONTAINER`
 - `BUNDLES`
 - `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request

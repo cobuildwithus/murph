@@ -797,6 +797,17 @@ Last verified: 2026-08-13
   results retain only that encrypted message for retry and DLQ recovery. Queue is transport,
   not device truth, and cannot weaken consent, source, setup, reconnect,
   disconnect, trace, dirty-payload, mailbox, or Temporal authority.
+  A separate five-minute SQLite Durable Object monitor reads only native Queue
+  metrics from the main transport and encrypted DLQ. It pages immediately for
+  any DLQ backlog or a main message at least 15 minutes old, and after two
+  consecutive metric-collection failures. A two-minute persisted run lease
+  coalesces overlapping cron deliveries. Incident sequence, exact pending body
+  and idempotency key, latest typed observation, and the last provider-attempt
+  time survive restart. Alert attempts and continuing-incident recurrences are
+  paced to one hour. Only acknowledged delivery to both configured operator
+  chats clears pending state; an incident closes only after the pending page is
+  cleared and both Queue observations are healthy. The monitor persists no
+  webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do

@@ -158,9 +158,13 @@ Before deploying the Worker version that introduces
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
-migration `v4` creates the SQLite Durable Object namespace and the generated
-config installs the five-minute cron. After deployment, confirm one scheduled
-invocation records an `ok` sample without a Linq send under healthy metrics.
+migration `v4` creates the database-health SQLite Durable Object namespace,
+migration `v5` creates the independent device-webhook Queue-health namespace,
+and the generated config installs the shared five-minute cron. The Queue-health
+owner reuses these two operator chats and the Linq token, but it has separate
+incident, pending-message, and pacing state and never reads Postgres. After
+deployment, confirm one scheduled invocation records healthy database and Queue
+observations without a Linq send.
 Then use the test-only fake-provider coverage for threshold and delivery proof;
 do not induce a production database failure or mutate a real counter for smoke.
 Confirm Workers Observability contains no configuration or collection failure
@@ -1147,6 +1151,25 @@ During Cloudflare automation-key rotation, keep the prior private key as
 encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ
 retention is part of the key-retirement floor; elapsed rollout time alone is not
 proof that the old key is safe to disable.
+
+The Queue-health Durable Object reads only native main-Queue and DLQ metrics.
+It pages both configured operator chats immediately when the DLQ is nonempty,
+when the oldest main-Queue message reaches 15 minutes, or after two consecutive
+metric failures. Keep `HOSTED_DATABASE_ALERT_ENABLED=1` and the existing Linq
+alert secrets configured for production so both independent monitors run.
+
+For encrypted DLQ recovery, first fix the admission failure and retain every
+Cloudflare automation private key still referenced by either Queue. Pause the
+main Queue consumer while producers continue writing. Temporarily configure the
+same Worker as the DLQ consumer with batch size 100, five-second batching,
+concurrency one, ten retries, a 30-second retry delay, and the paused main Queue
+as that temporary consumer's dead-letter target. Wait until DLQ metrics report
+zero, remove the temporary DLQ consumer, resume the ordinary main consumer, and
+verify that main depth returns to zero while the DLQ stays empty. Do not purge,
+download, decrypt, or manually copy messages. This redrive acknowledges only
+successful canonical admissions; work that still fails returns encrypted to the
+paused main Queue instead of being deleted. Keep both Queues at the configured
+14-day retention throughout recovery.
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
