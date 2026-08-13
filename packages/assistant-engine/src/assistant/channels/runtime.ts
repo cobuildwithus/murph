@@ -104,7 +104,7 @@ type PreparedTelegramPhoto =
 type TelegramMessageEntity = {
   length: number
   offset: number
-  type: MessageTextDecoration['style']
+  type: MessageTextDecoration['style'] | 'pre'
 }
 
 type DecoratedTelegramPhotoCaption = {
@@ -286,6 +286,8 @@ export async function sendTelegramRichMessage(
           {
             idempotencyKey: input.idempotencyKey ?? null,
             message: input.fallbackMessage,
+            protectAutomaticEntities:
+              input.richMessage.skip_entity_detection === true,
             replyToMessageId: input.replyToMessageId ?? null,
             target: targetLabel,
           },
@@ -1490,6 +1492,7 @@ async function sendTelegramMessageDetailed(
   input: {
     idempotencyKey?: string | null
     message: string
+    protectAutomaticEntities?: boolean
     replyToMessageId?: string | null
     target: string
   },
@@ -1541,7 +1544,9 @@ async function sendTelegramMessageDetailed(
       const delivered = await sendTelegramTextChunk({
         authorityBoundTarget: dependencies.authorityBoundTarget,
         baseUrl,
-        entities: buildTelegramMessageEntities(chunk.decorations),
+        entities: input.protectAutomaticEntities
+          ? [{ length: chunk.text.length, offset: 0, type: 'pre' }]
+          : buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
         maxDeliveryAttempts,
         replyToMessageId,

@@ -1125,6 +1125,66 @@ describe('assistant channels runtime seam', () => {
     expect(LONG_ROUTINE_CARD_TEXT.length).toBeLessThanOrEqual(4_096)
   })
 
+  it('keeps automatic entities disabled in the generic rich-content fallback', async () => {
+    const fallbackMessage = [
+      'https://example.test example.test help@example.test',
+      '@helper #topic /start +48 123 456 789',
+      '[support](https://support.example.test)',
+    ].join('\n')
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'Bad Request: rich messages are not supported',
+        error_code: 400,
+        ok: false,
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2503 },
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage,
+        replyToMessageId: '42',
+        richMessage: {
+          html: '<h2>Contact options</h2>',
+          skip_entity_detection: true,
+        },
+        target: '123:topic:9',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).resolves.toMatchObject({
+      providerMessageId: '2503',
+      target: '123:topic:9',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    const fallbackPayload = readJsonBody(
+      fetchImplementation.mock.calls[1]?.[1]?.body,
+    )
+    if (typeof fallbackPayload.text !== 'string') {
+      throw new Error('Expected the Telegram fallback payload to contain text.')
+    }
+    expect(fallbackPayload).toEqual({
+      chat_id: '123',
+      entities: [{
+        length: fallbackPayload.text.length,
+        offset: 0,
+        type: 'pre',
+      }],
+      message_thread_id: 9,
+      reply_to_message_id: 42,
+      text: expect.stringContaining('https://example.test'),
+    })
+  })
+
   it('keeps an ambiguous definitive-rejection fallback terminal and single-attempt', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1139,8 +1199,11 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendTelegramRichMessage(
       {
-        fallbackMessage: LONG_ROUTINE_CARD_TEXT,
-        richMessage: { html: '<h2>Routine</h2>' },
+        fallbackMessage: 'Contact https://example.test or @helper',
+        richMessage: {
+          html: '<h2>Contact options</h2>',
+          skip_entity_detection: true,
+        },
         target: '123',
       },
       {
@@ -1157,6 +1220,12 @@ describe('assistant channels runtime seam', () => {
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      entities: [{
+        offset: 0,
+        type: 'pre',
+      }],
+    })
   })
 
   it('rejects a multi-message rich fallback before provider entry', async () => {
