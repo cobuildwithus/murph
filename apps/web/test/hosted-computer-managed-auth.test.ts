@@ -1109,6 +1109,7 @@ describe("Kernel managed-login handoffs", () => {
       })),
       findManagedAuthConnection: vi.fn(async () => connection),
     });
+    const requestProviderSetupContinuation = vi.fn(async () => undefined);
     const service = new ComputerUseService({
       crypto: createCrypto(),
       env: {
@@ -1116,6 +1117,7 @@ describe("Kernel managed-login handoffs", () => {
       },
       kernel,
       now: () => NOW,
+      requestProviderSetupContinuation,
       store,
     });
 
@@ -1146,6 +1148,12 @@ describe("Kernel managed-login handoffs", () => {
       expectedPendingHandoffId: handoff.id,
       runId: run.id,
     }));
+    expect(requestProviderSetupContinuation).toHaveBeenCalledWith({
+      handoffId: handoff.id,
+      memberId: run.memberId,
+      runId: run.id,
+      setupId: "dps_setup123",
+    });
   });
 
   it("reuses an in-progress Kernel Hosted UI flow for duplicate opens", async () => {

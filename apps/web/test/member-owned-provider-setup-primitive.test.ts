@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chromium, type Page } from "@playwright/test";
+import { parseHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
 
 import { parseHostedRuntimeProviderSetupToolRequest } from "@murphai/hosted-execution/provider-setup";
@@ -143,10 +143,7 @@ describe("member-owned provider setup contract", () => {
   });
 
   it("executes trusted capture against the exact marked form and rejects cross-object selectors", async () => {
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage();
-      await page.setContent(`
+    const page = createFixturePage(`
         <form data-owned-application>
           <input name="name" value="Unrelated application" />
           <button class="cross-submit" type="button">Create</button>
@@ -172,7 +169,7 @@ describe("member-owned provider setup contract", () => {
         submitSelector: null,
       });
       const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: Page,
+        page: FixturePage,
       ) => Promise<{ clientId: string; clientSecret: string }>;
 
       await expect(run(page)).resolves.toEqual({
@@ -201,20 +198,14 @@ describe("member-owned provider setup contract", () => {
       const runCrossObject = new Function(
         "page",
         `return (async () => {${crossObject}})();`,
-      ) as (page: Page) => Promise<unknown>;
+      ) as (page: FixturePage) => Promise<unknown>;
       await expect(runCrossObject(page)).rejects.toThrow(
         /owned-application element/u,
       );
-    } finally {
-      await browser.close();
-    }
   });
 
   it("rejects duplicate deterministic markers before any irreversible control", async () => {
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage();
-      await page.setContent(`
+    const page = createFixturePage(`
         <form data-owned-application>
           <input name="name" value="Murph Private Sync fixture" />
           <button class="owned-submit" type="button">Create</button>
@@ -236,20 +227,14 @@ describe("member-owned provider setup contract", () => {
         submitSelector: ".owned-submit",
       });
       const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: Page,
+        page: FixturePage,
       ) => Promise<unknown>;
 
       await expect(run(page)).rejects.toThrow(/marker_ambiguous/u);
-    } finally {
-      await browser.close();
-    }
   });
 
   it("derives one application authority when its marker is rendered in multiple fields", async () => {
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage();
-      await page.setContent(`
+    const page = createFixturePage(`
         <section data-owned-application>
           <h3>Murph Private Sync fixture</h3>
           <input name="name" value="Murph Private Sync fixture" />
@@ -268,27 +253,17 @@ describe("member-owned provider setup contract", () => {
         submitSelector: null,
       });
       const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: Page,
+        page: FixturePage,
       ) => Promise<{ clientId: string; clientSecret: string }>;
 
       await expect(run(page)).resolves.toEqual({
         clientId: "right-id",
         clientSecret: "right-secret",
       });
-    } finally {
-      await browser.close();
-    }
   });
 
   it("confines deletion to the marked application and the dialog it opens", async () => {
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage();
-      const clicks: string[] = [];
-      await page.exposeFunction("recordProviderFixtureClick", (label: string) => {
-        clicks.push(label);
-      });
-      await page.setContent(`
+    const page = createFixturePage(`
         <section data-owned-application id="unrelated-app">
           <h3>Unrelated application</h3>
           <button class="other-delete" type="button">Delete</button>
@@ -299,6 +274,10 @@ describe("member-owned provider setup contract", () => {
         </section>
         <button class="confirm" id="global-confirm" type="button">Global confirm</button>
       `);
+      const clicks: string[] = [];
+      await page.exposeFunction("recordProviderFixtureClick", (label: string) => {
+        clicks.push(label);
+      });
       await page.evaluate(() => {
         document.querySelector(".owned-delete")?.addEventListener("click", () => {
           void Reflect.get(window, "recordProviderFixtureClick")("owned-delete");
@@ -321,7 +300,7 @@ describe("member-owned provider setup contract", () => {
         safeLandingUrl: "about:blank",
       });
       const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: Page,
+        page: FixturePage,
       ) => Promise<{ kind: string }>;
 
       await expect(run(page)).resolves.toEqual({ kind: "deleted" });
@@ -343,13 +322,10 @@ describe("member-owned provider setup contract", () => {
       const runCrossObject = new Function(
         "page",
         `return (async () => {${crossObject}})();`,
-      ) as (page: Page) => Promise<unknown>;
+      ) as (page: FixturePage) => Promise<unknown>;
       await expect(runCrossObject(page)).rejects.toThrow(
         /owned-application element/u,
       );
-    } finally {
-      await browser.close();
-    }
   });
 
   it("projects only member-facing actions from the reduced durable lifecycle", () => {
@@ -376,3 +352,177 @@ describe("member-owned provider setup contract", () => {
     ).action).toBe("disconnect_first");
   });
 });
+
+type FixtureWindow = Window & typeof globalThis;
+
+class FixtureLocator {
+  constructor(
+    private readonly page: FixturePage,
+    private readonly roots: readonly Element[],
+    private readonly selector: string,
+    private readonly index: number | null = null,
+  ) {}
+
+  async click(): Promise<void> {
+    const element = this.requireOne();
+    await this.page.withGlobals(() => (element as HTMLElement).click());
+  }
+
+  async count(): Promise<number> {
+    return this.elements().length;
+  }
+
+  async evaluate<T>(callback: (element: Element) => T): Promise<T> {
+    return await this.page.withGlobals(() => callback(this.requireOne()));
+  }
+
+  async evaluateAll<T, TArgument>(
+    callback: (elements: Element[], argument: TArgument) => T,
+    argument: TArgument,
+  ): Promise<T> {
+    return await this.page.withGlobals(() => callback(this.elements(), argument));
+  }
+
+  first(): FixtureLocator {
+    return new FixtureLocator(this.page, this.roots, this.selector, 0);
+  }
+
+  async inputValue(): Promise<string> {
+    return (this.requireOne() as HTMLInputElement | HTMLTextAreaElement).value;
+  }
+
+  async isVisible(): Promise<boolean> {
+    return this.elements().length === 1;
+  }
+
+  locator(selector: string): FixtureLocator {
+    return new FixtureLocator(this.page, this.elements(), selector);
+  }
+
+  async textContent(): Promise<string | null> {
+    return this.requireOne().textContent;
+  }
+
+  async waitFor(): Promise<void> {
+    this.requireOne();
+  }
+
+  private elements(): Element[] {
+    const matches = this.roots.flatMap((root) =>
+      Array.from(root.querySelectorAll(this.selector))
+    );
+    return this.index === null
+      ? matches
+      : matches[this.index]
+        ? [matches[this.index]]
+        : [];
+  }
+
+  private requireOne(): Element {
+    const elements = this.elements();
+    if (elements.length !== 1) {
+      throw new Error(`Fixture locator expected one element for ${this.selector}.`);
+    }
+    return elements[0];
+  }
+}
+
+class FixturePage {
+  private document: Document;
+  private url = "about:blank";
+  private window: FixtureWindow;
+
+  constructor(html: string) {
+    ({ document: this.document, window: this.window } = parseFixtureDocument(html));
+    this.installLocation();
+  }
+
+  async evaluate<T, TArgument = undefined>(
+    callback: (argument: TArgument) => T,
+    argument?: TArgument,
+  ): Promise<T> {
+    return await this.withGlobals(() => callback(argument as TArgument));
+  }
+
+  async exposeFunction<TArguments extends unknown[]>(
+    name: string,
+    callback: (...args: TArguments) => unknown,
+  ): Promise<void> {
+    Reflect.set(this.window, name, callback);
+  }
+
+  async goto(url: string): Promise<void> {
+    this.url = url;
+    this.installLocation();
+  }
+
+  locator(selector: string): FixtureLocator {
+    return new FixtureLocator(this, [this.document.documentElement], selector);
+  }
+
+  async setContent(html: string): Promise<void> {
+    ({ document: this.document, window: this.window } = parseFixtureDocument(html));
+    this.installLocation();
+  }
+
+  async waitForFunction<TArgument>(
+    callback: (argument: TArgument) => boolean,
+    argument: TArgument,
+  ): Promise<void> {
+    const complete = await this.withGlobals(() => callback(argument));
+    if (!complete) {
+      throw new Error("Fixture waitForFunction predicate was not satisfied.");
+    }
+  }
+
+  async waitForLoadState(): Promise<void> {}
+
+  async withGlobals<T>(callback: () => T | Promise<T>): Promise<T> {
+    const previous = new Map<string, PropertyDescriptor | undefined>();
+    for (const [name, value] of Object.entries({
+      document: this.document,
+      HTMLInputElement: this.window.HTMLInputElement,
+      HTMLTextAreaElement: this.window.HTMLTextAreaElement,
+      window: this.window,
+    })) {
+      previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+      Object.defineProperty(globalThis, name, {
+        configurable: true,
+        value,
+        writable: true,
+      });
+    }
+    try {
+      return await callback();
+    } finally {
+      for (const [name, descriptor] of previous) {
+        if (descriptor) {
+          Object.defineProperty(globalThis, name, descriptor);
+        } else {
+          Reflect.deleteProperty(globalThis, name);
+        }
+      }
+    }
+  }
+
+  private installLocation(): void {
+    Object.defineProperty(this.window, "location", {
+      configurable: true,
+      value: { href: this.url },
+    });
+  }
+}
+
+function createFixturePage(html: string): FixturePage {
+  return new FixturePage(html);
+}
+
+function parseFixtureDocument(html: string): {
+  document: Document;
+  window: FixtureWindow;
+} {
+  return parseHTML(`<!doctype html><html><body>${html}</body></html>`) as {
+    document: Document;
+    window: FixtureWindow;
+  };
+}
