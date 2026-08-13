@@ -255,7 +255,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // materialization measured a 1,689,721B entry, 7,992,470B static closure, and
 // 9,975,121B total. Ratchet each baseline to that integrated measurement and
 // retain the established cross-platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_975_121 + 32_768;
+//
+// The official provider-client migration externalizes the exact-pinned SDKs
+// already installed in the runner payload. Its lazy device-sync provider graph
+// measured 10,053,341B on macOS; preserve the boot-path ratchets and the
+// established 32KB total allowance against that integrated baseline.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_053_341 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

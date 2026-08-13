@@ -5203,6 +5203,10 @@ function sanitizeJunctionImportSnapshotValue(
     return redactJunctionBlockedStringValue(value, options.blockedStringValues ?? []);
   }
 
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+
   const record = readPlainObject(value);
   if (!record) {
     return value;
@@ -5491,7 +5495,10 @@ function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown
     "startAt",
     "start_at",
   ]) {
-    const normalized = normalizeString(record[key]);
+    const value = record[key];
+    const normalized = value instanceof Date
+      ? Number.isFinite(value.getTime()) ? value.toISOString() : null
+      : normalizeString(value);
     if (!normalized) {
       continue;
     }

@@ -138,6 +138,26 @@ describe("hosted Linq contact card client", () => {
     );
   });
 
+  it("accepts the legacy single-card retrieve response", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => createJsonResponse({
+      first_name: "Murph",
+      image_url: null,
+      is_active: true,
+      last_name: null,
+      phone_number: "+15550000001",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listHostedLinqContactCards()).resolves.toEqual([{
+      firstName: "Murph",
+      imageUrl: null,
+      imageUrlPresent: true,
+      isActive: true,
+      lastName: null,
+      phoneNumber: "+15550000001",
+    }]);
+  });
+
   it("gets one contact card by phone number", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => createJsonResponse({
       contact_cards: [
