@@ -7853,6 +7853,135 @@ test("Junction reconcile keeps distinct same-time fidelity records while dedupli
   );
 });
 
+test("Junction transport preserves provider-day conflicts for importer rejection", async () => {
+  const first = {
+    id: "water-provider-day-conflict",
+    start: "2026-04-02T09:00:00.000Z",
+    end: "2026-04-02T09:05:00.000Z",
+    updatedAt: "2026-04-03T08:00:00.000Z",
+    unit: "mL",
+    value: 250,
+  };
+  const conflicts = [
+    [
+      { ...first, calendarDate: "2026-04-02" },
+      { ...first, calendarDate: "2026-04-03" },
+    ],
+    [
+      { ...first, timestampSemantics: "utc" },
+      { ...first, timestampSemantics: "floating" },
+    ],
+  ];
+
+  for (const conflict of conflicts) {
+    for (const records of [conflict, [...conflict].reverse()]) {
+      const provider = createJunctionProvider(async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-user-1") {
+          return createJsonResponse({ providers: [] });
+        }
+        if (url.pathname === "/v2/timeseries/junction-user-1/water/grouped") {
+          return createJsonResponse({
+            groups: {
+              garmin: [{
+                data: records,
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          });
+        }
+        if (url.pathname === "/v2/summary/activity/junction-user-1") {
+          return createJsonResponse({ data: [] });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      }, {
+        summaryResources: ["activity"],
+        timeseriesResources: ["water"],
+      });
+
+      await assert.rejects(
+        executeJunctionJob(
+          provider,
+          createJunctionJobContext({
+            now: "2026-04-03T12:00:00.000Z",
+            importSnapshot: async (snapshot) => {
+              normalizeJunctionSnapshot(snapshot as Parameters<typeof normalizeJunctionSnapshot>[0]);
+              return { durableDeliveryAccepted: true, canonicalEventCount: 0 };
+            },
+          }),
+          createJob("reconcile", {
+            windowStart: "2026-04-02T00:00:00.000Z",
+            windowEnd: "2026-04-03T00:00:00.000Z",
+          }),
+        ),
+        /Junction water stable-id records with different bodies require distinct explicit provider revisions/u,
+      );
+    }
+  }
+
+  const newerBody = {
+    ...first,
+    calendarDate: "2026-04-03",
+    updatedAt: "2026-04-03T09:00:00.000Z",
+  };
+  for (const records of [
+    [{ ...first, calendarDate: "2026-04-02" }, newerBody],
+    [newerBody, { ...first, calendarDate: "2026-04-02" }],
+  ]) {
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/water/grouped") {
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: records,
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, {
+      summaryResources: ["activity"],
+      timeseriesResources: ["water"],
+    });
+    const intervalDayKeys: string[] = [];
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        now: "2026-04-04T12:00:00.000Z",
+        importSnapshot: async (snapshot) => {
+          const normalized = normalizeJunctionSnapshot(
+            snapshot as Parameters<typeof normalizeJunctionSnapshot>[0],
+          );
+          intervalDayKeys.push(...(normalized.events ?? []).flatMap((event) =>
+            event.kind === "measurement" && event.externalRef?.facet === "interval"
+              ? [event.dayKey]
+              : []
+          ));
+          return {
+            canonicalEventCount: normalized.events?.length ?? 0,
+            canonicalEventDayKeys: intervalDayKeys,
+            durableDeliveryAccepted: true,
+          };
+        },
+      }),
+      createJob("resource", {
+        resource: "water",
+        resourceCategory: "timeseries",
+        windowStart: "2026-04-02T08:00:00.000Z",
+        windowEnd: "2026-04-02T10:00:00.000Z",
+      }),
+    );
+
+    assert.deepEqual([...new Set(intervalDayKeys)], ["2026-04-03"]);
+  }
+});
+
 test("Junction historical reconcile jobs preserve their summary window", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {

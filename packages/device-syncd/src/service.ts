@@ -2120,12 +2120,13 @@ function readCanonicalDeviceImportEventDayKeys(value: unknown): string[] {
     return [];
   }
 
-  return [...new Set(record.events.flatMap((event) => {
-    const dayKey = toPlainRecord(event)?.dayKey;
-    return typeof dayKey === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(dayKey)
-      ? [dayKey]
-      : [];
-  }))].sort();
+  return [...new Set([
+    ...record.events.flatMap((event) => {
+      const dayKey = toPlainRecord(event)?.dayKey;
+      return typeof dayKey === "string" ? [dayKey] : [];
+    }),
+    ...readStringArray(record.affectedEventDayKeys),
+  ].filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/u.test(dayKey)))].sort();
 }
 
 function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): string[] {

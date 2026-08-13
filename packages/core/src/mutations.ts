@@ -322,6 +322,7 @@ interface ImportDeviceBatchInput {
 }
 
 interface ImportDeviceBatchResultBase {
+  affectedEventDayKeys?: string[];
   applied: boolean;
   ingestId: string | null;
   ingestShardPath: string | null;
@@ -1698,6 +1699,36 @@ function isJunctionSparseIntervalExternalRef(externalRef: ExternalRef): boolean 
     );
 }
 
+function junctionSparseAffectedDayKeys(
+  events: readonly EventRecord[],
+  index: EventExternalRefIndex,
+): string[] {
+  const dayKeys = new Set<string>();
+  for (const event of events) {
+    if (!event.externalRef || !isJunctionSparseIntervalExternalRef(event.externalRef)) {
+      continue;
+    }
+    dayKeys.add(event.dayKey);
+    // A precise correction can land before its calendar refresh. Retain the
+    // immediately displaced provider day on exact retry so that a failed
+    // post-import refresh can be retried without a second persisted owner.
+    const previousRevision = eventSpineRevision(event) - 1;
+    if (previousRevision < 1) {
+      continue;
+    }
+    const dayHistory = index.junctionSparseDayHistoryById.get(event.id);
+    const previousDayKey = dayHistory?.latest.revision === previousRevision
+      ? dayHistory.latest.dayKey
+      : dayHistory?.previous?.revision === previousRevision
+        ? dayHistory.previous.dayKey
+        : undefined;
+    if (previousDayKey) {
+      dayKeys.add(previousDayKey);
+    }
+  }
+  return [...dayKeys].sort();
+}
+
 // Device-sync content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
 // paths on every sync run.
@@ -1856,6 +1887,10 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
+  junctionSparseDayHistoryById: Map<string, {
+    latest: { dayKey: string; revision: number };
+    previous?: { dayKey: string; revision: number };
+  }>;
   deviceOwnerRevisionsByRefKeyAndFingerprint: Map<
     string,
     Map<string, Map<string, Set<number>>>
@@ -1888,6 +1923,8 @@ async function indexLatestEventsByExternalRef(
     string,
     Map<string, Map<string, Set<number>>>
   >();
+  const junctionSparseDayHistoryById: EventExternalRefIndex["junctionSparseDayHistoryById"] =
+    new Map();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
@@ -1919,8 +1956,30 @@ async function indexLatestEventsByExternalRef(
           Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
         );
         const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
-        revisions.add(eventSpineRevision(entry.record));
+        const revision = eventSpineRevision(entry.record);
+        revisions.add(revision);
         revisionsById.set(entry.record.id, revisions);
+        if (
+          entry.record.externalRef
+          && isJunctionSparseIntervalExternalRef(entry.record.externalRef)
+        ) {
+          const candidate = { dayKey: entry.record.dayKey, revision };
+          const history = junctionSparseDayHistoryById.get(entry.record.id);
+          if (!history || revision > history.latest.revision) {
+            junctionSparseDayHistoryById.set(entry.record.id, {
+              latest: candidate,
+              ...(history ? { previous: history.latest } : {}),
+            });
+          } else if (
+            revision < history.latest.revision
+            && (!history.previous || revision > history.previous.revision)
+          ) {
+            junctionSparseDayHistoryById.set(entry.record.id, {
+              latest: history.latest,
+              previous: candidate,
+            });
+          }
+        }
 
         const state = entriesById.get(entry.record.id);
         const latestDeviceExternalRefEntryByRefKey =
@@ -2003,6 +2062,7 @@ async function indexLatestEventsByExternalRef(
 
   return {
     deviceOwnerRevisionsByRefKeyAndFingerprint,
+    junctionSparseDayHistoryById,
     latestByRefKey,
     latestById,
     maxRevisionById,
@@ -2395,6 +2455,7 @@ async function buildDeviceEventIdentityContext(
     return {
       index: {
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+        junctionSparseDayHistoryById: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
         maxRevisionById: new Map(),
@@ -2420,6 +2481,7 @@ function cloneDeviceEventIdentityContext(
     index: {
       deviceOwnerRevisionsByRefKeyAndFingerprint:
         context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
+      junctionSparseDayHistoryById: context.index.junctionSparseDayHistoryById,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
       maxRevisionById: new Map(context.index.maxRevisionById),
@@ -2434,6 +2496,7 @@ function buildEmptyDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+    junctionSparseDayHistoryById: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
     maxRevisionById: new Map(),
@@ -4790,8 +4853,8 @@ export async function importDeviceBatch({
   };
   const buildExactNoopResult = (
     storedDelivery: IntegrationIngestRecord,
-  ): NoopDeviceBatchImportResult =>
-    buildStoredDeviceDeliveryNoopResult({
+  ): NoopDeviceBatchImportResult => {
+    const result = buildStoredDeviceDeliveryNoopResult({
       associationEvidenceRolesByPreparedRecordId,
       currentEventOwners,
       deviceBatchPlan,
@@ -4800,6 +4863,14 @@ export async function importDeviceBatch({
       sampleRecords,
       storedDelivery,
     });
+    const affectedEventDayKeys = junctionSparseAffectedDayKeys(
+      result.events,
+      eventIdentityContext.index,
+    );
+    return affectedEventDayKeys.length > 0
+      ? { ...result, affectedEventDayKeys }
+      : result;
+  };
   let fullInspectionAttempted = false;
   const ensureFullInspection = async (): Promise<void> => {
     if (fullInspectionAttempted || (ingestIdInspection.historyComplete && !ingestIdInspection.unsafe)) {
@@ -5175,6 +5246,10 @@ export async function importDeviceBatch({
       const preparedId = deviceBatchPlan.preparedEvents[index]?.record.id;
       return preparedId !== undefined && associablePreparedEventIds.has(preparedId);
     });
+    const affectedEventDayKeys = junctionSparseAffectedDayKeys(
+      canonicalEventRecords,
+      eventIdentityContext.index,
+    );
     const persistenceEvidenceRolesByPreparedRecordId = new Map(
       deviceBatchPlan.preparedEvents
         .filter((entry) =>
@@ -5265,6 +5340,9 @@ export async function importDeviceBatch({
       retainedEvidenceRolesByPreparedRecordId,
     );
     const buildNoopResult = (): NoopDeviceBatchImportResult => ({
+      ...(affectedEventDayKeys.length > 0
+        ? { affectedEventDayKeys }
+        : {}),
       applied: false,
       ingestId: null,
       ingestShardPath: null,
@@ -5280,6 +5358,7 @@ export async function importDeviceBatch({
       auditPath: null,
     });
     return {
+      affectedEventDayKeys,
       buildNoopResult,
       eventAppendPlan,
       eventOutputs,
@@ -5336,6 +5415,7 @@ export async function importDeviceBatch({
   }
 
   const {
+    affectedEventDayKeys,
     buildNoopResult,
     eventAppendPlan,
     eventOutputs,
@@ -5428,6 +5508,9 @@ export async function importDeviceBatch({
       });
 
       return {
+        ...(affectedEventDayKeys.length > 0
+          ? { affectedEventDayKeys }
+          : {}),
         applied: true,
         ingestId: persistedImportId,
         ingestShardPath,

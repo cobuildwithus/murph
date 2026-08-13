@@ -4313,6 +4313,87 @@ test("Junction sparse stable-ID revisions select newer provider-day metadata in 
   }
 });
 
+test("Junction sparse cross-day revisions report both affected provider days", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sparse-cross-day-revision");
+  const snapshotFor = (input: {
+    end: string;
+    importedAt: string;
+    start: string;
+    updatedAt: string;
+  }) => ({
+    accountId: "junction-account-sparse-cross-day-revision",
+    importedAt: input.importedAt,
+    timeseriesWindowKind: "precise" as const,
+    timeseries: {
+      water: {
+        groups: {
+          garmin: [{
+            data: [{
+              id: "water-cross-day-revision",
+              start: input.start,
+              end: input.end,
+              updatedAt: input.updatedAt,
+              unit: "mL",
+              value: 250,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: snapshotFor({
+          start: "2026-04-21T23:30:00Z",
+          end: "2026-04-21T23:31:00Z",
+          updatedAt: "2026-04-22T01:00:00Z",
+          importedAt: "2026-04-22T12:00:00Z",
+        }),
+      },
+      { corePort: coreRuntime },
+    );
+    const correctionSnapshot = snapshotFor({
+      start: "2026-04-22T00:30:00Z",
+      end: "2026-04-22T00:31:00Z",
+      updatedAt: "2026-04-22T02:00:00Z",
+      importedAt: "2026-04-22T13:00:00Z",
+    });
+    const correction = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: correctionSnapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    const retry = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: correctionSnapshot },
+      { corePort: coreRuntime },
+    );
+
+    for (const result of [correction, retry]) {
+      assert.deepEqual(result.affectedEventDayKeys, ["2026-04-21", "2026-04-22"]);
+    }
+    assert.equal(correction.events[0]?.dayKey, "2026-04-22");
+    assert.equal(retry.applied, false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("Junction unversioned calendar aggregates reconcile through the serialized event spine", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-unversioned-fidelity-correction");
   const inputFor = (value: number) => ({

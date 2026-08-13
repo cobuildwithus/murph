@@ -53,9 +53,11 @@ Updated: 2026-08-12
    run round nine against the exact pushed head.
 10. [x] Resolve round nine's provider-day correction finding and recover the
     interrupted round-ten result.
-11. [ ] Resolve the recovered ledger gap by making sparse stable-ID equality
-    include provider-day metadata, obtain exact-head green CI and a ReviewGPT
-    PASS, then merge and retire the task worktree.
+11. [x] Resolve the recovered ledger gap by making sparse stable-ID equality
+    include provider-day metadata, then rerun substantive round ten.
+12. [ ] Resolve round ten's cross-day receipt and transport-dedupe findings,
+    obtain exact-head green CI and a ReviewGPT PASS, then merge and retire the
+    task worktree.
 
 ## Decisions
 
@@ -119,6 +121,13 @@ Updated: 2026-08-12
   offset, and timestamp-semantics metadata. The importer now reuses its existing
   full fidelity record key as the content fingerprint, deleting the narrower
   duplicate fingerprint without adding an identity owner or state.
+- The valid round-ten retry's two review-induced findings are accepted. Core's
+  existing supersession boundary now returns the bounded union of displaced and
+  incoming provider days through the existing transient import result and
+  receipt. Fidelity transport dedupe now retains the importer-owned provider-day
+  and timestamp-semantics fields instead of adding another conflict comparator.
+  Neither correction adds persisted state, a queue, a scheduler, or a second
+  revision owner.
 
 ## Verification
 
@@ -172,5 +181,19 @@ Updated: 2026-08-12
   then passed after the importer reused the full fidelity record key. A strictly
   newer explicit revision now also selects the newer provider-day metadata in
   either payload order.
-- Pending: focused verification, commit/push, exact-head CI, ReviewGPT PASS,
+- The valid round-ten retry found that a cross-day stable interval correction
+  refreshed only its incoming day and that fetch-side first-win dedupe could
+  hide provider-day conflicts before importer validation. Both production-path
+  regressions failed before remediation and now pass: the first reports both
+  affected days through importer and core, while the second rejects both input
+  orders for calendar-date and timestamp-semantics conflicts. Exact correction
+  replay also retains both days, so a failed calendar follow-up remains
+  retryable without persisted repair state.
+- Passed the final 177-test core device-import file, 174-test Junction importer
+  file, 329-test Junction provider/service files, and 21-test normalized query
+  file; owning package typechecks, importer build, docs drift, scenario
+  integrity, and `git diff --check` pass. The dependency-aware `test:diff` run
+  also passed all affected package and app phases before the retry-proof
+  tightening; the final focused rerun covers that narrow core result change.
+- Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

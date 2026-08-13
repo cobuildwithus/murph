@@ -154,10 +154,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
    retain precise windows because each admitted interval has its own exact-start
    identity, but those precise snapshots emit intervals only. The canonical
-   import receipt returns the provider-local day keys that own those intervals;
-   the resource job refreshes each such date through the calendar-day path only
-   after the UTC-12 close boundary. That path is the sole writer of their daily
-   sums, so a UTC-normalized execution window cannot select the wrong provider
+   import receipt returns the provider-local day keys that own those intervals.
+   When an accepted stable-row correction moves an interval between provider
+   dates, the transient receipt includes both the displaced and incoming day;
+   the resource job refreshes each affected date through the calendar-day path
+   only after the UTC-12 close boundary. That path is the sole writer of their
+   daily sums, so a UTC-normalized execution window cannot select the wrong provider
    date and a growing precise set cannot
    create an immutable partial aggregate or block a later interval. Every
    scheduled reconcile refreshes the latest globally closed date for the six
@@ -174,7 +176,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    provider revisions belong only to stable sparse interval identities. One
    versioned interval may supersede a pre-versioning baseline; after that, only
    a strictly newer revision may change it, while stale replay is a no-op and
-   conflicting equal or unversioned interval content fails closed. This keeps
+   conflicting equal or unversioned interval content fails closed. Fetch-side
+   fidelity dedupe must preserve provider calendar-date and timestamp-semantics
+   differences so those conflicts reach this importer-owned comparison in
+   either response order. This keeps
    each compact resolution consistent without a second cursor, watermark, or
    state owner.
 

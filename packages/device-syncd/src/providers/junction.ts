@@ -5351,6 +5351,16 @@ function junctionTimeseriesRecordValueIdentity(
         ?? "",
     ),
   ];
+  const providerDayIdentity = [
+    String(
+      entry.calendarDate
+        ?? entry.calendar_date
+        ?? entry.localDate
+        ?? entry.local_date
+        ?? "",
+    ),
+    String(entry.timestampSemantics ?? entry.timestamp_semantics ?? ""),
+  ];
 
   if (fidelityIntervalResource) {
     const intervalValue = resource === "mindfulness_minutes"
@@ -5364,6 +5374,7 @@ function junctionTimeseriesRecordValueIdentity(
       String(entry.end ?? entry.endAt ?? entry.end_at ?? entry.timeEnd ?? entry.time_end ?? ""),
       String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
       String(intervalValue ?? ""),
+      ...providerDayIdentity,
       ...timeZoneIdentity,
       fidelitySourceRevision,
     ];
@@ -5400,6 +5411,7 @@ function junctionTimeseriesRecordValueIdentity(
             ?? entry.stress_level_value
             ?? entry.score) ?? ""),
       String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
+      ...providerDayIdentity,
       ...timeZoneIdentity,
       fidelitySourceRevision,
     ];
