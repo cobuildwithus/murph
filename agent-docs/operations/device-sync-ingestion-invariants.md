@@ -162,16 +162,21 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    successful-empty completion and is reused by later scheduler passes,
    including after restart; queued/running rows remain the retry owner, and
    failed, dead, or yielded work never grants day authority. Dead work may be
-   recreated by a later reconcile. With two temporal resources, one reconcile
-   therefore performs at most two immediate one-day collections and schedules
-   at most 26 older one-resource/one-day jobs. Each child performs at most one
-   canonical import transaction, while the provider transport independently
-   caps the collection at 100 pages and 25,000 records with no more than three
-   attempts for each page request. The existing one-running-job-per-account
-   fence bounds composition with other device work. The ordinary completion
-   optimization remains limited to non-temporal resources. These rules do not
-   relax the no-full-timeseries retention boundary; base daily observations
-   and compact evidence remain the only non-temporal outputs.
+   recreated by a later reconcile. A failed, unavailable, or yielded immediate
+   resource becomes the same stable resource/day job ahead of the older
+   backlog; a retryable failure does not block an independent temporal sibling.
+   With two temporal resources, one reconcile therefore performs at most two
+   immediate one-day collections and normally schedules at most 26 older
+   one-resource/one-day jobs. If both immediate resources require durable
+   continuation, the queue bound is 28 resource/day jobs across the full
+   14-day horizon. Each child performs at most one canonical import transaction,
+   while the provider transport independently caps the collection at 100 pages
+   and 25,000 records with no more than three attempts for each page request.
+   The existing one-running-job-per-account fence bounds composition with other
+   device work. The ordinary completion optimization remains limited to
+   non-temporal resources. These rules do not relax the no-full-timeseries
+   retention boundary; base daily observations and compact evidence remain the
+   only non-temporal outputs.
 
 5. **Louder, never quieter.** Drops and skips surface as persisted
    `device-sync.job_failed`/skip metadata. But observability is not recovery:

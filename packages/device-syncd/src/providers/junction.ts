@@ -1194,13 +1194,14 @@ export function createJunctionDeviceSyncProvider(
       : [];
     const newestTemporalWindow = temporalRecoveryWindows[0] ?? null;
     const temporalCatchUpJobs = job.kind === "reconcile" && context.vaultTimeZone
-      ? buildJunctionTemporalCatchUpJobs({
+      ? buildJunctionTemporalAuthorityJobs({
           now: context.now,
           resources: jobTimeseriesResources,
           timeZone: context.vaultTimeZone,
           windows: temporalRecoveryWindows.slice(1),
         })
       : [];
+    const deferredNewestTemporalResources = new Set<string>();
     let yieldedTimeseriesAt: string | null = null;
     if (jobTimeseriesResources.length > 0 && job.kind === "backfill") {
       yieldedTimeseriesAt = (await importTimeseriesDailySnapshots(
@@ -1218,7 +1219,7 @@ export function createJunctionDeviceSyncProvider(
         context.vaultTimeZone,
       );
       const remainingSparseClinicalReadingsByDay = new Map<string, number>();
-      for (const resource of jobTimeseriesResources) {
+      for (const [resourceIndex, resource] of jobTimeseriesResources.entries()) {
         const temporalResource = JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource);
         if (!temporalResource && !importNonTemporalResources) {
           continue;
@@ -1226,35 +1227,86 @@ export function createJunctionDeviceSyncProvider(
         if (temporalResource && !newestTemporalWindow) {
           continue;
         }
-        yieldedTimeseriesAt = (await importTimeseriesDailySnapshots(
-          context,
-          sourceProviders,
-          temporalResource ? newestTemporalWindow!.windowStart : timeseriesWindowStart,
-          temporalResource ? newestTemporalWindow!.windowEnd : window.windowEnd,
-          skippedOptionalResources,
-          [resource],
-          undefined,
-          {
-            ...(temporalResource ? { dailyWindows: [newestTemporalWindow!] } : {}),
-            remainingSparseClinicalReadingsByDay,
-          },
-        )).yieldedAt;
+        const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+        try {
+          yieldedTimeseriesAt = (await importTimeseriesDailySnapshots(
+            context,
+            sourceProviders,
+            temporalResource ? newestTemporalWindow!.windowStart : timeseriesWindowStart,
+            temporalResource ? newestTemporalWindow!.windowEnd : window.windowEnd,
+            skippedOptionalResources,
+            [resource],
+            undefined,
+            {
+              ...(temporalResource ? { dailyWindows: [newestTemporalWindow!] } : {}),
+              remainingSparseClinicalReadingsByDay,
+            },
+          )).yieldedAt;
+        } catch (error) {
+          if (
+            temporalResource
+            && context.vaultTimeZone
+            && isRetryableDeviceSyncFailure(error)
+            && !isJunctionJobSignalAbort(error, context.signal)
+          ) {
+            deferredNewestTemporalResources.add(resource);
+            continue;
+          }
+          throw error;
+        }
+        if (
+          temporalResource
+          && skippedOptionalResources.length > skippedResourceCountBeforeFetch
+        ) {
+          deferredNewestTemporalResources.add(resource);
+        }
         if (yieldedTimeseriesAt) {
+          if (context.vaultTimeZone) {
+            for (const remainingResource of jobTimeseriesResources.slice(resourceIndex)) {
+              if (JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(remainingResource)) {
+                deferredNewestTemporalResources.add(remainingResource);
+              }
+            }
+          }
           break;
         }
       }
     }
+    const temporalContinuationJobs = (
+      newestTemporalWindow
+      && context.vaultTimeZone
+      && deferredNewestTemporalResources.size > 0
+    )
+      ? [
+          ...buildJunctionTemporalAuthorityJobs({
+            now: context.now,
+            resources: [...deferredNewestTemporalResources],
+            timeZone: context.vaultTimeZone,
+            windows: [newestTemporalWindow],
+          }),
+          ...temporalCatchUpJobs,
+        ]
+      : temporalCatchUpJobs;
     if (yieldedTimeseriesAt) {
+      const yieldedResult = buildYieldedJunctionJobResult({
+        context,
+        job,
+        windowEnd: window.windowEnd,
+        windowStart: job.kind === "backfill" ? window.windowStart : yieldedTimeseriesAt,
+        timeseriesCursor: job.kind === "backfill" ? yieldedTimeseriesAt : null,
+      });
       return withJunctionSkippedResourceMetadata(
         context,
         withJunctionMetadataPatch(
-          buildYieldedJunctionJobResult({
-            context,
-            job,
-            windowEnd: window.windowEnd,
-            windowStart: job.kind === "backfill" ? window.windowStart : yieldedTimeseriesAt,
-            timeseriesCursor: job.kind === "backfill" ? yieldedTimeseriesAt : null,
-          }),
+          temporalContinuationJobs.length > 0
+            ? {
+                ...yieldedResult,
+                scheduledJobs: [
+                  ...temporalContinuationJobs,
+                  ...(yieldedResult.scheduledJobs ?? []),
+                ],
+              }
+            : yieldedResult,
           profileMetadataPatch,
         ),
         skippedOptionalResources,
@@ -1346,11 +1398,11 @@ export function createJunctionDeviceSyncProvider(
       withJunctionMetadataPatch(
         {
           ...backfillFollowUp,
-          ...(temporalCatchUpJobs.length > 0
+          ...(temporalContinuationJobs.length > 0
             ? {
                 scheduledJobs: [
                   ...(backfillFollowUp.scheduledJobs ?? []),
-                  ...temporalCatchUpJobs,
+                  ...temporalContinuationJobs,
                 ],
               }
             : {}),
@@ -5726,7 +5778,7 @@ function buildLatestAuthoritativeDailyWindows(input: {
   return windows;
 }
 
-function buildJunctionTemporalCatchUpJobs(input: {
+function buildJunctionTemporalAuthorityJobs(input: {
   now: string;
   resources: readonly string[];
   timeZone: string;

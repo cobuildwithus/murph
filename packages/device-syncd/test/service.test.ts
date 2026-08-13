@@ -780,7 +780,7 @@ test("local shared-Junction target starts preserve established siblings through 
 });
 
 test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
-  const now = new Date("2026-07-28T10:00:00.000Z");
+  const now = new Date("2026-07-29T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
   const importerInputs: unknown[] = [];
   const importerResults: unknown[] = [];
@@ -795,9 +795,14 @@ test("local Junction workers exclude a disconnected source from production-norma
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     importer: {
+      async resolveDeviceProviderSnapshotDefaultTimeZone() {
+        return "UTC";
+      },
       async importDeviceProviderSnapshot(input) {
         importerInputs.push(input);
-        const result = await prepareDeviceProviderSnapshotImport(input);
+        const result = await prepareDeviceProviderSnapshotImport(input, {
+          defaultTimeZone: "UTC",
+        });
         importerResults.push(result);
         return { events: result.events ?? [] };
       },

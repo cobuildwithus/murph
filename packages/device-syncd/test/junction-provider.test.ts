@@ -7344,6 +7344,132 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
   );
 });
 
+test("Junction reconcile preserves healthy temporal work and the older backlog when one newest fetch fails", async () => {
+  const requestedResources: string[] = [];
+  const importedAuthority: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
+    )?.[1];
+    if (resource) {
+      requestedResources.push(resource);
+      return resource === "blood_oxygen"
+        ? createJsonResponse({ code: "upstream_unavailable" }, 503)
+        : createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 3,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-06T00:00:00.000Z",
+      importSnapshot: async (_snapshot, options) => {
+        if (options) {
+          importedAuthority.push(options);
+        }
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-03T00:00:00.000Z",
+      windowEnd: "2026-04-06T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requestedResources.filter((resource) => resource === "blood_oxygen").length, 3);
+  assert.equal(requestedResources.filter((resource) => resource === "stress_level").length, 1);
+  assert.deepEqual(
+    (importedAuthority[0] as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "acct-junction-1",
+      dayKey: "2026-04-04",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-06T00:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+  assert.deepEqual(
+    (result.scheduledJobs ?? []).map((job) => [
+      job.payload?.temporalAuthorityDayKey,
+      job.payload?.resource,
+    ]),
+    [
+      ["2026-04-04", "blood_oxygen"],
+      ["2026-04-03", "blood_oxygen"],
+      ["2026-04-03", "stress_level"],
+      ["2026-04-02", "blood_oxygen"],
+      ["2026-04-02", "stress_level"],
+    ],
+  );
+  assert.equal(new Set((result.scheduledJobs ?? []).map((job) => job.dedupeKey)).size, 5);
+});
+
+test("Junction reconcile durably schedules yielded temporal work and the older backlog", async () => {
+  const requestedResources: string[] = [];
+  let yieldChecks = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
+    )?.[1];
+    if (resource) {
+      requestedResources.push(resource);
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 3,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-06T00:00:00.000Z",
+      shouldYield: () => {
+        yieldChecks += 1;
+        return yieldChecks > 1;
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-03T00:00:00.000Z",
+      windowEnd: "2026-04-06T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedResources, ["blood_oxygen"]);
+  assert.deepEqual(
+    (result.scheduledJobs ?? [])
+      .filter((job) => job.payload?.temporalAuthorityDayKey)
+      .map((job) => [job.payload?.temporalAuthorityDayKey, job.payload?.resource]),
+    [
+      ["2026-04-04", "stress_level"],
+      ["2026-04-03", "blood_oxygen"],
+      ["2026-04-03", "stress_level"],
+      ["2026-04-02", "blood_oxygen"],
+      ["2026-04-02", "stress_level"],
+    ],
+  );
+  assert.equal((result.scheduledJobs ?? []).some((job) => job.kind === "reconcile"), true);
+});
+
 test("Junction temporal recovery clamps its composed horizon to fourteen days", async () => {
   let temporalRequests = 0;
   const provider = createJunctionProvider(async (input) => {
@@ -7776,7 +7902,7 @@ test("Junction temporal authority waits for a closed vault-local day plus the sa
   );
 });
 
-test("Junction daily timeseries imports successful resources before retrying a failed peer", async () => {
+test("Junction daily timeseries continues healthy peers and queues a failed temporal resource", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -7804,42 +7930,46 @@ test("Junction daily timeseries imports successful resources before retrying a f
       });
     }
     if (parsed.pathname === "/v2/timeseries/junction-user-1/hrv/grouped") {
-      throw new Error("Junction should stop before fetching later peers after a retryable failure.");
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{ start: "2026-04-02T08:00:00.000Z", value: 42 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
     }
     throw new Error(`Unexpected request: ${url}`);
   }, {
     timeseriesResources: ["water", "blood_oxygen", "hrv"],
   });
 
-  await assert.rejects(
-    () => executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { canonicalEventCount: 1, durableDeliveryAccepted: true };
-        },
-        now: "2026-04-04T12:00:00.000Z",
-      }),
-      createJob("reconcile", {
-        windowStart: "2026-04-02T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    ),
-    (error) => {
-      assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.retryable, true);
-      return true;
-    },
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+      },
+      now: "2026-04-04T12:00:00.000Z",
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
   );
 
   assert.equal(requests.some((url) => url.includes("/blood_oxygen/grouped")), true);
   assert.equal(requests.some((url) => url.includes("/water/grouped")), true);
-  assert.equal(requests.some((url) => url.includes("/hrv/grouped")), false);
+  assert.equal(requests.some((url) => url.includes("/hrv/grouped")), true);
   const importedTimeseries = importedSnapshots.flatMap((snapshot) =>
     Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
   );
-  assert.deepEqual(importedTimeseries, ["water"]);
+  assert.deepEqual(importedTimeseries, ["water", "hrv"]);
+  assert.equal((result.scheduledJobs ?? []).some((job) =>
+    job.payload?.temporalAuthorityDayKey === "2026-04-02"
+    && job.payload?.resource === "blood_oxygen"
+  ), true);
 });
 
 test("Junction reconcile keeps same-time Oura notes with different tags", async () => {
