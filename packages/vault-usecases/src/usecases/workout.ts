@@ -263,6 +263,7 @@ function resolveStructuredDurationMinutes(input: {
   payloadDurationMinutes?: number
   structuredWorkout?: WorkoutSession
   fallbackText?: string
+  allowUnknownDuration?: boolean
 }): number | undefined {
   const explicitDurationMinutes =
     typeof input.explicitDurationMinutes === 'number'
@@ -288,7 +289,7 @@ function resolveStructuredDurationMinutes(input: {
     return derivedDurationMinutes
   }
 
-  if (input.structuredWorkout) {
+  if (input.structuredWorkout && input.allowUnknownDuration) {
     return undefined
   }
 
@@ -365,6 +366,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
   workout?: WorkoutSession | null
   text?: string
   title?: string
+  allowUnknownDuration?: boolean
 }): ActivitySessionDraft {
   const sourcePayload = parseWorkoutImportPayload(input.payload)
   const explicitStructuredWorkout =
@@ -399,6 +401,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
       payloadDurationMinutes: valueAsNumber(sourcePayload.durationMinutes),
       structuredWorkout: explicitStructuredWorkout,
       fallbackText: fallbackText ?? undefined,
+      allowUnknownDuration: input.allowUnknownDuration,
     })
   const distanceKm =
     typeof input.distanceKm === 'number'

@@ -1347,6 +1347,45 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
   assert.equal(structuredCreated.kind, 'activity_session')
   assert.equal(structuredCreated.durationMinutes, 35)
 
+  await writeFile(
+    workoutPayloadPath,
+    JSON.stringify({
+      title: 'No duration',
+      note: 'Structured workout payload.',
+      workout: {
+        routineName: 'No duration',
+        exercises: [{
+          name: 'pushups',
+          order: 1,
+          sets: [{ order: 1, reps: 20 }],
+        }],
+      },
+    }),
+    'utf8',
+  )
+  const structuredMissingDuration = await runWorkoutCli(cli, [
+    'workout',
+    'import-json',
+    '--input',
+    `@${workoutPayloadPath}`,
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(structuredMissingDuration.envelope.ok, false)
+  if (structuredMissingDuration.envelope.ok) {
+    throw new Error('Expected structured import-json without a duration to fail.')
+  }
+  assert.equal(structuredMissingDuration.envelope.error.code, 'invalid_option')
+  const afterRejectedStructured = requireData((await runWorkoutCli<{
+    count: number
+  }>(cli, [
+    'workout',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])).envelope)
+  assert.equal(afterRejectedStructured.count, 1)
+
   const minimalCreated = (
     await runWorkoutCli(cli, [
       'workout',
@@ -1606,4 +1645,53 @@ test('workout format save, show, list, and log handle structured input and media
   assert.equal(loggedDefault.activityType, 'strength-training')
   assert.equal(loggedDefault.durationMinutes, 20)
   assert.equal(loggedDefault.note, 'Strength training block.')
+
+  const noDurationPayloadPath = path.join(parentRoot, 'workout-format-no-duration.json')
+  await writeFile(
+    noDurationPayloadPath,
+    JSON.stringify({
+      title: 'No Duration Format',
+      activityType: 'strength-training',
+      template: {
+        routineNote: 'Train hard.',
+        exercises: [{
+          name: 'squats',
+          order: 1,
+          plannedSets: [{ order: 1, targetReps: 5 }],
+        }],
+      },
+    }),
+    'utf8',
+  )
+  requireData((await runWorkoutCli(cli, [
+    'workout',
+    'format',
+    'import-json',
+    '--input',
+    `@${noDurationPayloadPath}`,
+    '--vault',
+    vaultRoot,
+  ])).envelope)
+  const rejectedFormatLog = await runWorkoutCli(cli, [
+    'workout',
+    'format',
+    'log',
+    'No Duration Format',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(rejectedFormatLog.envelope.ok, false)
+  if (rejectedFormatLog.envelope.ok) {
+    throw new Error('Expected format log without a duration to fail.')
+  }
+  assert.equal(rejectedFormatLog.envelope.error.code, 'invalid_option')
+  const workoutsAfterRejectedFormatLog = requireData((await runWorkoutCli<{
+    count: number
+  }>(cli, [
+    'workout',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])).envelope)
+  assert.equal(workoutsAfterRejectedFormatLog.count, 2)
 })

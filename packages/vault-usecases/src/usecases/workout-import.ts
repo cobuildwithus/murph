@@ -234,6 +234,7 @@ function buildWorkoutEventDecisions(
         workout: session.workout,
       }) as JsonObject,
       source: 'import',
+      allowUnknownDuration: true,
     })
 
     const payload = {
@@ -810,6 +811,44 @@ async function resolvePriorSnapshotRecords(input: {
               input.plan.sessions[currentIndex]!.distanceKm,
             ))
       })
+    const legacyCanonicalWeightInterpretation = candidate.weightUnit === undefined
+      && fullMapping?.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(
+          priorPlan.sessions[priorIndex]!.sourceSessionKey,
+        )
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(weightOwnedProjection(record.workout))
+            === JSON.stringify(weightOwnedProjection(input.plan.sessions[currentIndex]!.workout))
+      }) === true
+    const legacyCanonicalDistanceInterpretation = candidate.distanceUnit === undefined
+      && fullMapping?.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(
+          priorPlan.sessions[priorIndex]!.sourceSessionKey,
+        )
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+            === JSON.stringify(distanceOwnedProjection(
+              input.plan.sessions[currentIndex]!.workout,
+              input.plan.sessions[currentIndex]!.distanceKm,
+            ))
+      }) === true
+    if (
+      (candidate.weightUnit === undefined
+        && input.plan.weightUnit !== null
+        && !legacyCanonicalWeightInterpretation)
+      || (candidate.distanceUnit === undefined
+        && input.plan.distanceUnit !== null
+        && !legacyCanonicalDistanceInterpretation)
+    ) {
+      throw new VaultCliError(
+        'conflict',
+        'Prior workout evidence does not prove the selected units. Rerun the exact original CSV with --correct-units, then retry this expanded snapshot; nothing was imported.',
+      )
+    }
     let comparisonPlan: WorkoutCsvImportPlan
     try {
       comparisonPlan = input.importers.planWorkoutCsvImport({
@@ -817,15 +856,15 @@ async function resolvePriorSnapshotRecords(input: {
         timeZone: input.plan.timeZone,
         source: input.plan.source,
         delimiter: candidate.delimiter,
-        weightUnit: correctedWeightInterpretation
+        weightUnit: correctedWeightInterpretation || legacyCanonicalWeightInterpretation
           ? input.plan.weightUnit ?? undefined
           : candidate.weightUnit === undefined
-          ? input.plan.weightUnit ?? undefined
+          ? undefined
           : candidate.weightUnit ?? undefined,
-        distanceUnit: correctedDistanceInterpretation
+        distanceUnit: correctedDistanceInterpretation || legacyCanonicalDistanceInterpretation
           ? input.plan.distanceUnit ?? undefined
           : candidate.distanceUnit === undefined
-          ? input.plan.distanceUnit ?? undefined
+          ? undefined
           : candidate.distanceUnit ?? undefined,
       })
     } catch {
@@ -896,8 +935,11 @@ async function resolvePriorSnapshotRecords(input: {
       if (!match) return
       const record = match.latest
       if (
-        record.kind !== 'activity_session'
-        || record.workout.sourceApp !== input.plan.source
+        record.lifecycle?.state !== 'deleted'
+        && (
+          record.kind !== 'activity_session'
+          || record.workout.sourceApp !== input.plan.source
+        )
       ) {
         throw new VaultCliError(
           'conflict',

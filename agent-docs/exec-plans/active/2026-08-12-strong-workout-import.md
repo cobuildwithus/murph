@@ -239,6 +239,18 @@ Updated: 2026-08-12
   delimiter, timezone, weight unit, and distance unit all match exactly;
   otherwise the structured import stores and attaches a correctly provenanced
   immutable batch.
+- Final ReviewGPT round 12 found that the unknown-duration exception had
+  widened every structured workout writer. The exception is now an
+  importer-only transient option; ordinary add, import-json, and saved-format
+  logging continue to derive or require duration before any write.
+- Final ReviewGPT round 12 also found that an expanded snapshot could use a
+  newly confirmed unit to compare legacy raw evidence while retaining old
+  unitless canonical loads, and that a provider-corrected tombstone kept its
+  old source label and blocked later expansion. Legacy unitless overlap now
+  requires its latest canonical projection to prove the selected units or an
+  exact-original correction first. Deleted latest revisions are exempt from
+  the live provider-payload check because their original attachment already
+  proves identity and they remain suppressed.
 
 ## Verification
 
@@ -297,3 +309,9 @@ Updated: 2026-08-12
   reuses the original raw batch. Focused contracts (12), importer planner (27),
   workout usecase (20), and CLI (10) tests pass; contracts artifacts and the
   affected contracts, core, query, and vault-usecases typechecks pass.
+- Round 12 remediation proof: production CLI and usecase coverage keeps the
+  unknown-duration exception limited to CSV, rejects ordinary structured and
+  saved-format writes before mutation, rejects direct expanded legacy
+  weight-and-distance reinterpretation without storing raw or audit state,
+  admits expansion after exact correction, and preserves provider-corrected
+  live edits plus tombstones through expansion and replay.
