@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   findProviderRequestBoundaryViolations,
+  providerBoundaryRegistry,
+  providerHttpExceptionRegistry,
   providerRequestScanRoots,
+  providerRequestSourceExtensions,
+  shouldScanProviderRequestSourceFile,
+  shouldSkipProviderRequestDirectory,
 } from "./check-provider-request-boundaries.ts";
 
 function blockedLines(source: string): number[] {
@@ -11,6 +16,16 @@ function blockedLines(source: string): number[] {
     source,
   ).filter((violation) => violation.kind === "object-spread").map(
     (violation) => violation.line,
+  );
+}
+
+function violationsOfKind(
+  kind: "handwritten-provider-transport" | "raw-provider-http",
+  source: string,
+  relativePath = "apps/web/src/example.ts",
+) {
+  return findProviderRequestBoundaryViolations(relativePath, source).filter(
+    (violation) => violation.kind === kind,
   );
 }
 
@@ -242,4 +257,448 @@ describe("check-provider-request-boundaries", () => {
       line: 1,
     }]);
   });
+
+  it("scans operational JavaScript modules while excluding tests, fixtures, and generated output", () => {
+    expect(providerRequestSourceExtensions).toContain(".mjs");
+    expect(shouldScanProviderRequestSourceFile("scripts/provider-sync.mjs")).toBe(true);
+    expect(shouldScanProviderRequestSourceFile("scripts/provider-sync.test.mjs")).toBe(false);
+    expect(shouldScanProviderRequestSourceFile("scripts/provider-sync.generated.mjs")).toBe(false);
+    expect(shouldSkipProviderRequestDirectory("fixtures")).toBe(true);
+    expect(shouldSkipProviderRequestDirectory("dist")).toBe(true);
+    expect(shouldSkipProviderRequestDirectory("build")).toBe(true);
+    expect(shouldSkipProviderRequestDirectory("out")).toBe(true);
+  });
+
+  it("reports canonical provider fetches in mjs files without an SDK import", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const ELEVENLABS_API_BASE_URL = 'https://api.elevenlabs.io';",
+        "const url = new URL('/v1/text-to-speech/voice', ELEVENLABS_API_BASE_URL);",
+        "await fetch(url, { method: 'POST' });",
+      ].join("\n"),
+      "scripts/generate-provider-preview.mjs",
+    );
+
+    expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
+      .toEqual([{
+        boundary: "ElevenLabs raw HTTP via fetch",
+        line: 3,
+      }]);
+  });
+
+  it("recognizes a canonical provider host literal without a scheme", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const apiHost = 'api.resend.com';",
+        "fetch(`https://${apiHost}/emails`, { method: 'POST' });",
+      ].join("\n"),
+      "scripts/send-provider-email.mjs",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2]);
+  });
+
+  it("reports direct, aliased, and typed-wrapper fetch transports", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "type ProviderFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;",
+        "const JUNCTION_BASE_URL = 'https://api.us.junction.com';",
+        "const fetchImplementation = fetch;",
+        "fetch(new URL('/v1/users', JUNCTION_BASE_URL));",
+        "fetchImplementation(`${JUNCTION_BASE_URL}/v1/connections`);",
+        "function request(fetchTransport: ProviderFetch) {",
+        "  return fetchTransport(new URL('/v1/summaries', JUNCTION_BASE_URL));",
+        "}",
+        "async function invoke(input: string | URL, init?: RequestInit): Promise<Response> {",
+        "  return fetch(input, init);",
+        "}",
+        "invoke(new URL('/v1/devices', JUNCTION_BASE_URL));",
+      ].join("\n"),
+      "packages/device-syncd/src/providers/junction-http.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4, 5, 7, 12]);
+  });
+
+  it("recognizes a constructor-injected fetch member by its call signature", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "class ResendTransport {",
+        "  constructor(private readonly request: typeof fetch) {}",
+        "  send() { return this.request('https://api.resend.com/emails'); }",
+        "}",
+      ].join("\n"),
+      "apps/web/src/lib/hosted-onboarding/resend-transport.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("follows configurable provider bases through locals, fields, parameters, and config names", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "class LinqTransport {",
+        "  private baseUrl: string;",
+        "  private openAiApiRoot: string;",
+        "  constructor(config: { apiRoot: string; linqApiBaseUrl: string }) {",
+        "    this.baseUrl = config.linqApiBaseUrl;",
+        "    this.openAiApiRoot = config.apiRoot || config.linqApiBaseUrl;",
+        "  }",
+        "  send(path: string, fetchImpl: typeof fetch) {",
+        "    const endpoint = new URL(path, this.baseUrl);",
+        "    return fetchImpl(endpoint);",
+        "  }",
+        "  sendOpenAi(fetchImpl: typeof fetch) {",
+        "    return fetchImpl(new URL('/v1/responses', this.openAiApiRoot));",
+        "  }",
+        "}",
+        "function sendOpenAi(openAiBaseUrl: string) {",
+        "  const endpoint = `${openAiBaseUrl}/v1/responses`;",
+        "  return fetch(endpoint);",
+        "}",
+        "const junctionEndpoint = new URL('/v1/users', process.env.JUNCTION_API_BASE_URL);",
+        "fetch(junctionEndpoint);",
+      ].join("\n"),
+      "apps/web/src/lib/linq/provider-transport.ts",
+    );
+
+    expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
+      .toEqual([
+        { boundary: "Linq raw HTTP via fetchImpl", line: 10 },
+        { boundary: "OpenAI raw HTTP via fetchImpl", line: 13 },
+        { boundary: "OpenAI raw HTTP via fetch", line: 18 },
+        { boundary: "Junction raw HTTP via fetch", line: 21 },
+      ]);
+  });
+
+  it("reports ambiguous provider dataflow without selecting registry order", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const openAiApiRoot = process.env.OPENAI_API_BASE_URL;",
+        "const linqApiBaseUrl = process.env.LINQ_API_BASE_URL;",
+        "const endpoint = Math.random() > 0.5 ? openAiApiRoot : linqApiBaseUrl;",
+        "fetch(endpoint);",
+      ].join("\n"),
+      "apps/web/src/lib/provider-transport.ts",
+    );
+
+    expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
+      .toEqual([{
+        boundary: "Linq/OpenAI raw HTTP via fetch",
+        line: 4,
+      }]);
+  });
+
+  it("follows a configurable Junction base through a parameter and new URL", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function readJunction(junctionBaseUrl: string, fetchImplementation: typeof fetch) {",
+        "  const endpoint = new URL('/v1/connections', junctionBaseUrl);",
+        "  await fetchImplementation(endpoint);",
+        "}",
+      ].join("\n"),
+      "packages/device-syncd/src/providers/configured-client.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("recognizes Google KMS, STS, and IAM Credentials endpoints", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "fetch('https://cloudkms.googleapis.com/v1/projects/p/locations/l/keyRings/r/cryptoKeys/k:encrypt');",
+        "fetch('https://sts.googleapis.com/v1/token');",
+        "fetch('https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/a:generateAccessToken');",
+      ].join("\n"),
+      "apps/web/src/lib/hosted-crypto/provider-auth.ts",
+    );
+
+    expect(matches.map((match) => match.boundary)).toEqual([
+      "Google Cloud KMS raw HTTP via fetch",
+      "Google STS raw HTTP via fetch",
+      "Google IAM Credentials raw HTTP via fetch",
+    ]);
+  });
+
+  it("reports handwritten provider fetch, client, request, and response contracts", () => {
+    const agentmailMatches = violationsOfKind(
+      "handwritten-provider-transport",
+      [
+        "const AGENTMAIL_API_BASE_URL = 'https://api.agentmail.to/v0';",
+        "interface AgentmailFetchResponse {",
+        "  json(): Promise<unknown>;",
+        "  status: number;",
+        "}",
+        "type AgentmailFetch = (input: string, init: RequestInit) => Promise<AgentmailFetchResponse>;",
+        "interface AgentmailHttpClient {",
+        "  request(input: RequestInfo, init?: RequestInit): Promise<Response>;",
+        "}",
+        "interface AgentmailApiClient {",
+        "  send(request: { body: string }): Promise<AgentmailFetchResponse>;",
+        "}",
+      ].join("\n"),
+      "packages/operator-config/src/agentmail-http.ts",
+    );
+    const exaMatches = violationsOfKind(
+      "handwritten-provider-transport",
+      [
+        "const EXA_RESEARCH_SCOUT_PATH = '/search';",
+        "const EXA_RESEARCH_SCOUT_METHOD = 'POST';",
+        "interface ExaResearchScoutRequestBody {",
+        "  query: string;",
+        "  numResults: number;",
+        "}",
+      ].join("\n"),
+      "packages/contracts/src/exa-wire.ts",
+    );
+
+    expect(agentmailMatches.map((match) => match.line)).toEqual([2, 6, 7]);
+    expect(exaMatches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("reports only the primitive inside provider-domain orchestration helpers", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "type ExaFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;",
+        "async function fetchExaResearchScoutResponse(body: unknown, fetchImpl: ExaFetch): Promise<unknown> {",
+        "  const response = await fetchImpl('https://api.exa.ai/search', { method: 'POST' });",
+        "  return await response.json();",
+        "}",
+        "async function fetchExaResearchScoutCandidates(fetchImpl: ExaFetch) {",
+        "  return await fetchExaResearchScoutResponse({}, fetchImpl);",
+        "}",
+        "type MigrationRunner = (command: string, args: readonly string[]) => Promise<void>;",
+        "async function runProductionMigrations(runCommand: MigrationRunner) {",
+        "  await runCommand('pnpm', ['linq:sync-lines']);",
+        "}",
+        "async function downloadHostedLinqAttachmentBytes(url: string, fetchImplementation: ExaFetch): Promise<Uint8Array> {",
+        "  const response = await fetchImplementation(url);",
+        "  return new Uint8Array(await response.arrayBuffer());",
+        "}",
+        "async function consumeAttachment(fetchImplementation: ExaFetch) {",
+        "  return await downloadHostedLinqAttachmentBytes('https://api.linqapp.com/v1/attachment', fetchImplementation);",
+        "}",
+      ].join("\n"),
+      "packages/cli/src/provider-orchestration.ts",
+    );
+
+    expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
+      .toEqual([{ boundary: "Exa raw HTTP via fetchImpl", line: 3 }]);
+  });
+
+  it("reports a fetch-shaped wrapper once rather than at every caller", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const EXA_BASE_URL = 'https://api.exa.ai';",
+        "async function requestExa(input: string | URL, init?: RequestInit): Promise<Response> {",
+        "  return fetch(new URL('/search', EXA_BASE_URL), init);",
+        "}",
+        "requestExa(new URL('/search', EXA_BASE_URL));",
+        "requestExa(new URL('/search', EXA_BASE_URL), { method: 'POST' });",
+      ].join("\n"),
+      "packages/cli/src/exa-http.ts",
+    );
+
+    expect(matches.map((match) => ({ boundary: match.boundary, line: match.line })))
+      .toEqual([{ boundary: "Exa raw HTTP via fetch", line: 3 }]);
+  });
+
+  it("allows SDK-backed business adapters while retaining provider wire declarations", () => {
+    expect(
+      violationsOfKind(
+        "handwritten-provider-transport",
+        [
+          "import Kernel from '@onkernel/sdk';",
+          "import type Stripe from 'stripe';",
+          "import { Client } from '@temporalio/client';",
+          "import { Retell } from 'retell-sdk';",
+          "const KMS_ROOT = 'https://cloudkms.googleapis.com/v1';",
+          "interface ComputerKernelClient { requestManagedAuthConnection(input: { url: string }): Promise<{ id: string }>; }",
+          "class KernelComputerClient { async listManagedAuthConnections(): Promise<readonly string[]> { return []; } }",
+          "interface HostedStripeLegacyUsageMigrationClient { fetchMigrationSummary(url: string): Promise<object>; }",
+          "interface HostedRuntimeTemporalSignalClient { signalWithStart(workflowId: string): Promise<unknown>; }",
+          "interface HostedRuntimeTemporalTerminationClient { terminate(reason: string): Promise<void>; }",
+          "interface RetellPhoneCallAccountDeletionRuntime { deleteProviderCall(id: string): Promise<void>; }",
+          "class RetellPhoneCallRuntime { async start(callId: string): Promise<void> {} }",
+          "interface HostedGcpKmsClient { encrypt(input: { plaintext: Uint8Array; signal?: AbortSignal }): Promise<{ ciphertext: string }>; }",
+          "interface HostedGcpAccessTokenProvider { getAccessToken(signal?: AbortSignal): Promise<string>; }",
+          "class HostedLocalGcpKmsClient { async encrypt(plaintext: Uint8Array): Promise<Uint8Array> { return plaintext; } }",
+          "interface GcpEncryptResponse { ciphertext?: string; name?: string; }",
+        ].join("\n"),
+        "apps/web/src/lib/provider-sdk-adapters.ts",
+      ).map((match) => ({ boundary: match.boundary, line: match.line })),
+    ).toEqual([{
+      boundary: "Google Cloud KMS handwritten transport declaration GcpEncryptResponse",
+      line: 16,
+    }]);
+  });
+
+  it("does not mistake provider-named domain projections for transport contracts", () => {
+    expect(
+      findProviderRequestBoundaryViolations(
+        "packages/contracts/src/provider-domain.ts",
+        [
+          "const OPENAI_API_URL = 'https://api.openai.com/v1/responses';",
+          "interface OpenAIResponse {",
+          "  status: 'ready' | 'failed';",
+          "  internalMessageId: string;",
+          "}",
+          "interface OpenAIResponseProjection {",
+          "  status: 'ready' | 'failed';",
+          "  internalMessageId: string;",
+          "}",
+          "interface JunctionConnectionSummary {",
+          "  connectedAt: string;",
+          "  sourceId: string;",
+          "}",
+        ].join("\n"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("allows an opaque presigned byte upload but reports a direct provider call beside it", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function uploadPresignedBytes(url: string, bytes: Uint8Array) {",
+        "  await fetch(url, {",
+        "    body: bytes,",
+        "    headers: { 'content-type': 'application/octet-stream' },",
+        "    method: 'PUT',",
+        "  });",
+        "  await fetch('https://api.linqapp.com/api/partner/v3/chats', { method: 'POST' });",
+        "}",
+      ].join("\n"),
+      "apps/web/src/lib/linq/attachment-upload.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([7]);
+  });
+
+  it("does not exempt credential-bearing or provider-synthesized uploads", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function upload(uploadUrl: string, token: string) {",
+        "  await fetch(uploadUrl, {",
+        "    headers: { Authorization: `Bearer ${token}` },",
+        "    method: 'PUT',",
+        "  });",
+        "  await fetch(uploadUrl, { credentials: 'include', method: 'PUT' });",
+        "  const providerUploadUrl = 'https://api.linqapp.com/api/partner/v3/uploads';",
+        "  await fetch(providerUploadUrl, { method: 'PUT' });",
+        "}",
+      ].join("\n"),
+      "apps/web/src/lib/linq/attachment-upload.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 6, 8]);
+  });
+
+  it("allows incoming Request pass-through but reports a direct provider call in the same proxy", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function proxy(input: { openaiRequest: Request }) {",
+        "  await fetch(input.openaiRequest);",
+        "  await fetch('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "}",
+      ].join("\n"),
+      "apps/cloudflare/src/hosted-runner-egress-proxy.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("allows dynamic SMART/FHIR traffic but reports a registered provider endpoint beside it", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function readFhir(fhirEndpoint: string, fetchImpl: typeof fetch) {",
+        "  await fetchImpl(fhirEndpoint);",
+        "  await fetchImpl('https://api.openai.com/v1/responses');",
+        "}",
+      ].join("\n"),
+      "apps/web/src/lib/openai/smart-fhir-client.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("keeps no-verified-SDK providers and xAI extensions as explicit registry exceptions", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "fetch('https://api.telegram.org/bot123/sendMessage');",
+        "fetch('https://api.x.ai/v1/chat/completions');",
+        "fetch('https://api.openai.com/v1/responses');",
+      ].join("\n"),
+      "scripts/provider-exceptions.mjs",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
+    expect(
+      providerBoundaryRegistry.find((provider) => provider.id === "xai")?.rawHttpPolicy,
+    ).toBe("allow-xai-openai-compatible-extension");
+    expect(
+      providerBoundaryRegistry.find((provider) => provider.id === "telegram")?.rawHttpPolicy,
+    ).toBe("allow-no-verified-sdk");
+  });
+
+  it("registers the known verified-SDK bypass inventory explicitly", () => {
+    const registeredIds = new Set(providerBoundaryRegistry.map((provider) => provider.id));
+    expect([
+      "junction",
+      "linq",
+      "openai",
+      "agentmail",
+      "resend",
+      "elevenlabs",
+      "exa",
+      "lob",
+      "google-cloud-kms",
+      "google-sts",
+      "google-iam-credentials",
+    ].every((providerId) => registeredIds.has(providerId))).toBe(true);
+  });
+
+  it("keeps the purpose-specific exception registry auditable", () => {
+    expect(providerHttpExceptionRegistry.map((entry) => entry.id)).toEqual([
+      "presigned-byte-transfer",
+      "internal-same-origin",
+      "incoming-request-pass-through",
+      "dynamic-smart-fhir",
+    ]);
+  });
+
+  it("allows provider-adjacent internal traffic without treating request.url as same-origin", () => {
+    const source = [
+      "const endpoint = '/api/openai/status';",
+      "fetch(endpoint);",
+      "fetch(new URL('/api/linq/status', location.origin));",
+      "fetch('http://localhost:3000/api/junction/status');",
+      "async function replay(input: { request: Request }) {",
+      "  await fetch(input.request.url);",
+      "}",
+    ].join("\n");
+
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        source,
+        "apps/web/src/lib/openai/internal-status.ts",
+      ).map((match) => match.line),
+    ).toEqual([6]);
+  });
+
 });

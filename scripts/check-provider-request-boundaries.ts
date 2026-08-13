@@ -4,8 +4,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parse, type ParserPlugin } from "@babel/parser";
 import {
+  isAssignmentExpression,
   isCallExpression,
   isClassProperty,
+  isExpression,
   isFunction,
   isIdentifier,
   isImportDeclaration,
@@ -13,6 +15,7 @@ import {
   isImportNamespaceSpecifier,
   isImportSpecifier,
   isMemberExpression,
+  isNewExpression,
   isObjectExpression,
   isObjectProperty,
   isOptionalCallExpression,
@@ -20,6 +23,7 @@ import {
   isReturnStatement,
   isSpreadElement,
   isStringLiteral,
+  isTemplateLiteral,
   isTSTypeAliasDeclaration,
   isVariableDeclarator,
   traverseFast,
@@ -37,41 +41,250 @@ export const providerRequestScanRoots = [
   "scripts",
 ] as const;
 
-const sourceExtensions = new Set([".cts", ".mts", ".ts", ".tsx"]);
+export const providerRequestSourceExtensions = [
+  ".cjs",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".mts",
+  ".ts",
+  ".tsx",
+] as const;
+
+const sourceExtensions = new Set<string>(providerRequestSourceExtensions);
 const skippedDirectoryNames = new Set([
   ".next",
   ".next-dev",
   ".next-smoke",
   "__tests__",
+  "build",
   "coverage",
   "dist",
   "e2e",
   "fixtures",
   "generated",
   "node_modules",
+  "out",
   "test",
   "tests",
 ]);
-const providerModulePrefixes = [
-  "@composio/client",
-  "@junction-api/sdk",
-  "@linqapp/sdk",
-  "@onkernel/sdk",
-  "@temporalio/client",
-  "openai",
-  "retell-sdk",
-  "stripe",
-] as const;
-const providerSourceMarkers = [
-  "@composio/client",
-  "@junction-api/sdk",
-  "@linqapp/sdk",
-  "@onkernel/sdk",
-  "@temporalio/client",
-  "openai",
-  "retell-sdk",
-  "stripe",
-] as const;
+
+type RegisteredProviderRawHttpPolicy =
+  | "allow-no-verified-sdk"
+  | "allow-xai-openai-compatible-extension"
+  | "require-official-sdk";
+
+interface RegisteredProviderBoundary {
+  readonly hosts: readonly string[];
+  readonly id: string;
+  readonly identifiers: readonly string[];
+  readonly label: string;
+  readonly rawHttpPolicy: RegisteredProviderRawHttpPolicy;
+  readonly sdkModules: readonly string[];
+}
+
+export const providerBoundaryRegistry = Object.freeze([
+  {
+    hosts: [],
+    id: "composio",
+    identifiers: ["composio"],
+    label: "Composio",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@composio/client"],
+  },
+  {
+    hosts: [
+      "api.us.junction.com",
+      "api.eu.junction.com",
+      "api.sandbox.us.junction.com",
+      "api.sandbox.eu.junction.com",
+    ],
+    id: "junction",
+    identifiers: ["junction"],
+    label: "Junction",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@junction-api/sdk"],
+  },
+  {
+    hosts: ["api.linqapp.com"],
+    id: "linq",
+    identifiers: ["linq"],
+    label: "Linq",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@linqapp/sdk"],
+  },
+  {
+    hosts: [],
+    id: "kernel",
+    identifiers: ["kernel"],
+    label: "Kernel",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@onkernel/sdk"],
+  },
+  {
+    hosts: [],
+    id: "temporal",
+    identifiers: ["temporal"],
+    label: "Temporal",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@temporalio/client"],
+  },
+  {
+    hosts: ["api.openai.com"],
+    id: "openai",
+    identifiers: ["openai", "open-ai"],
+    label: "OpenAI",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["openai"],
+  },
+  {
+    hosts: [],
+    id: "retell",
+    identifiers: ["retell"],
+    label: "Retell",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["retell-sdk"],
+  },
+  {
+    hosts: ["api.stripe.com"],
+    id: "stripe",
+    identifiers: ["stripe"],
+    label: "Stripe",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["stripe"],
+  },
+  {
+    hosts: ["api.agentmail.to"],
+    id: "agentmail",
+    identifiers: ["agentmail", "agent-mail"],
+    label: "AgentMail",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["agentmail"],
+  },
+  {
+    hosts: ["api.resend.com"],
+    id: "resend",
+    identifiers: ["resend"],
+    label: "Resend",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["resend"],
+  },
+  {
+    hosts: ["api.elevenlabs.io"],
+    id: "elevenlabs",
+    identifiers: ["elevenlabs", "eleven-labs"],
+    label: "ElevenLabs",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@elevenlabs/elevenlabs-js"],
+  },
+  {
+    hosts: ["api.exa.ai"],
+    id: "exa",
+    identifiers: ["exa"],
+    label: "Exa",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["exa-js"],
+  },
+  {
+    hosts: ["api.lob.com"],
+    id: "lob",
+    identifiers: ["lob"],
+    label: "Lob",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@lob/lob-typescript-sdk"],
+  },
+  {
+    hosts: ["cloudkms.googleapis.com"],
+    id: "google-cloud-kms",
+    identifiers: ["cloudkms", "cloud-kms", "gcp", "kms"],
+    label: "Google Cloud KMS",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@google-cloud/kms"],
+  },
+  {
+    hosts: ["sts.googleapis.com"],
+    id: "google-sts",
+    identifiers: ["gcp-sts", "sts"],
+    label: "Google STS",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["google-auth-library"],
+  },
+  {
+    hosts: ["iamcredentials.googleapis.com"],
+    id: "google-iam-credentials",
+    identifiers: ["iam", "iamcredentials", "iam-credentials"],
+    label: "Google IAM Credentials",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@google-cloud/iam-credentials"],
+  },
+  {
+    hosts: ["api.x.ai"],
+    id: "xai",
+    identifiers: ["xai", "x-ai"],
+    label: "xAI",
+    rawHttpPolicy: "allow-xai-openai-compatible-extension",
+    sdkModules: [],
+  },
+  {
+    hosts: ["api.telegram.org"],
+    id: "telegram",
+    identifiers: ["telegram"],
+    label: "Telegram",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+  {
+    hosts: ["api.ouraring.com"],
+    id: "oura",
+    identifiers: ["oura"],
+    label: "Oura",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+  {
+    hosts: ["api.prod.whoop.com"],
+    id: "whoop",
+    identifiers: ["whoop"],
+    label: "Whoop",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+  {
+    hosts: ["www.strava.com"],
+    id: "strava",
+    identifiers: ["strava"],
+    label: "Strava",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+] satisfies readonly RegisteredProviderBoundary[]);
+
+export const providerHttpExceptionRegistry = Object.freeze([
+  {
+    description:
+      "Opaque presigned upload/download byte transfer without provider credentials or provider endpoint synthesis.",
+    id: "presigned-byte-transfer",
+  },
+  {
+    description: "Internal or same-origin application HTTP traffic.",
+    id: "internal-same-origin",
+  },
+  {
+    description:
+      "Hosted runner proxy/pass-through forwarding an incoming Request object.",
+    id: "incoming-request-pass-through",
+  },
+  {
+    description: "Dynamic SMART/FHIR endpoints selected by the connected clinical system.",
+    id: "dynamic-smart-fhir",
+  },
+] as const);
+
+const providerModulePrefixes = providerBoundaryRegistry.flatMap(
+  (provider) => provider.sdkModules,
+);
+const providerSourceMarkers = providerModulePrefixes;
 const providerClientFactoryNames = new Set([
   "requireHostedStripeApi",
 ]);
@@ -79,8 +292,10 @@ const providerRequestTypeNamePattern =
   /(?:ConnectionOptions|MediaPart|MessageContent|Params?(?:NonStreaming|Streaming)?|RequestOptions|TextPart)$/u;
 
 type ProviderRequestBoundaryViolationKind =
+  | "handwritten-provider-transport"
   | "object-assign"
   | "object-spread"
+  | "raw-provider-http"
   | "untyped-request-object";
 
 interface VariableBinding {
@@ -90,6 +305,27 @@ interface VariableBinding {
   readonly scopeStart: number;
   readonly start: number;
   readonly typeAnnotation: string | null;
+}
+
+interface MemberBinding {
+  readonly initializer: Expression;
+  readonly start: number;
+}
+
+interface ParameterBinding {
+  readonly name: string;
+  readonly ownerName: string | null;
+  readonly scopeEnd: number;
+  readonly scopeStart: number;
+  readonly typeAnnotation: string | null;
+}
+
+interface ProviderHttpSourceAnalysis {
+  readonly fetchLikeNames: ReadonlySet<string>;
+  readonly fileProviderIds: ReadonlySet<string>;
+  readonly memberBindings: ReadonlyMap<string, readonly MemberBinding[]>;
+  readonly parameterBindings: ReadonlyMap<string, readonly ParameterBinding[]>;
+  readonly transportEvidenceProviderIds: ReadonlySet<string>;
 }
 
 interface LexicalScope {
@@ -119,17 +355,13 @@ export async function collectProviderRequestBoundaryViolations(): Promise<
   for (const root of providerRequestScanRoots) {
     await scanDirectory(root, violations);
   }
-  return violations;
+  return violations.sort(compareViolations);
 }
 
 export function findProviderRequestBoundaryViolations(
   relativePath: string,
   contents: string,
 ): ProviderRequestBoundaryViolation[] {
-  if (!containsProviderSourceMarker(contents)) {
-    return [];
-  }
-
   const sourceFile = parse(contents, {
     allowAwaitOutsideFunction: true,
     allowReturnOutsideFunction: true,
@@ -139,139 +371,154 @@ export function findProviderRequestBoundaryViolations(
     sourceFilename: relativePath,
     sourceType: "unambiguous",
   });
-  const analysis = analyzeProviderSource(sourceFile, contents);
-  if (
-    analysis.clientNames.size === 0 &&
-    analysis.requestTypeNames.size === 0 &&
-    analysis.typeRoots.size === 0
-  ) {
-    return [];
-  }
-
+  const hasProviderSdkSourceMarker = containsProviderSourceMarker(contents);
+  const analysis = hasProviderSdkSourceMarker
+    ? analyzeProviderSource(sourceFile, contents)
+    : emptyProviderSourceAnalysis();
   const bindings = collectVariableBindings(sourceFile, contents);
+  const httpAnalysis = analyzeProviderHttpSource(
+    sourceFile,
+    relativePath,
+    contents,
+  );
   const violationsByKey = new Map<string, ProviderRequestBoundaryViolation>();
 
-  traverseFast(sourceFile, (node) => {
-    if (!isProviderRequestCall(node, analysis)) {
-      return;
-    }
-
-    const boundary = readProviderBoundaryName(node, analysis, contents);
-    for (const argument of node.arguments) {
-      if (argument.type === "ArgumentPlaceholder") {
-        continue;
+  if (hasProviderSdkSourceMarker) {
+    traverseFast(sourceFile, (node) => {
+      if (!isProviderRequestCall(node, analysis)) {
+        return;
       }
-      collectUnsafeProviderRequestComposition({
-        bindings,
-        boundary,
-        contents,
-        node: argument,
-        relativePath,
-        resolvingBindings: new Set(),
-        violationsByKey,
-      });
-      recordUntypedRequestObject({
-        argument,
-        bindings,
-        boundary,
-        contents,
-        relativePath,
-        violationsByKey,
-      });
-    }
-  });
 
-  traverseFast(sourceFile, (node) => {
-    if (isFunction(node) && node.returnType) {
-      const returnType = readNodeText(node.returnType, contents);
-      if (isProviderRequestTypeText(returnType, analysis)) {
-        const boundary = `Provider-typed request builder ${readFunctionName(node)}`;
-        if (node.body.type !== "BlockStatement") {
-          collectUnsafeProviderRequestComposition({
-            bindings,
-            boundary,
-            contents,
-            node: node.body,
-            relativePath,
-            resolvingBindings: new Set(),
-            violationsByKey,
-          });
-          return;
+      const boundary = readProviderBoundaryName(node, analysis, contents);
+      for (const argument of node.arguments) {
+        if (argument.type === "ArgumentPlaceholder") {
+          continue;
         }
-        traverseFast(node.body, (child) => {
-          if (isFunction(child)) {
-            return traverseFast.skip;
-          }
-          if (isReturnStatement(child) && child.argument) {
+        collectUnsafeProviderRequestComposition({
+          bindings,
+          boundary,
+          contents,
+          node: argument,
+          relativePath,
+          resolvingBindings: new Set(),
+          violationsByKey,
+        });
+        recordUntypedRequestObject({
+          argument,
+          bindings,
+          boundary,
+          contents,
+          relativePath,
+          violationsByKey,
+        });
+      }
+    });
+
+    traverseFast(sourceFile, (node) => {
+      if (isFunction(node) && node.returnType) {
+        const returnType = readNodeText(node.returnType, contents);
+        if (isProviderRequestTypeText(returnType, analysis)) {
+          const boundary = `Provider-typed request builder ${readFunctionName(node)}`;
+          if (node.body.type !== "BlockStatement") {
             collectUnsafeProviderRequestComposition({
               bindings,
               boundary,
               contents,
-              node: child.argument,
+              node: node.body,
               relativePath,
               resolvingBindings: new Set(),
               violationsByKey,
             });
+            return;
           }
+          traverseFast(node.body, (child) => {
+            if (isFunction(child)) {
+              return traverseFast.skip;
+            }
+            if (isReturnStatement(child) && child.argument) {
+              collectUnsafeProviderRequestComposition({
+                bindings,
+                boundary,
+                contents,
+                node: child.argument,
+                relativePath,
+                resolvingBindings: new Set(),
+                violationsByKey,
+              });
+            }
+          });
+        }
+        return;
+      }
+
+      if (
+        isVariableDeclarator(node) &&
+        isIdentifier(node.id) &&
+        node.id.typeAnnotation &&
+        node.init &&
+        isProviderRequestTypeText(
+          readNodeText(node.id.typeAnnotation, contents),
+          analysis,
+        )
+      ) {
+        collectUnsafeProviderRequestComposition({
+          bindings,
+          boundary: `Provider-typed request object ${node.id.name}`,
+          contents,
+          node: node.init,
+          relativePath,
+          resolvingBindings: new Set(),
+          violationsByKey,
+        });
+        return;
+      }
+
+      if (
+        node.type === "TSSatisfiesExpression" &&
+        isProviderRequestTypeText(readNodeText(node.typeAnnotation, contents), analysis)
+      ) {
+        collectUnsafeProviderRequestComposition({
+          bindings,
+          boundary: "Provider-typed satisfies expression",
+          contents,
+          node: node.expression,
+          relativePath,
+          resolvingBindings: new Set(),
+          violationsByKey,
         });
       }
-      return;
-    }
+    });
+  }
 
-    if (
-      isVariableDeclarator(node) &&
-      isIdentifier(node.id) &&
-      node.id.typeAnnotation &&
-      node.init &&
-      isProviderRequestTypeText(
-        readNodeText(node.id.typeAnnotation, contents),
-        analysis,
-      )
-    ) {
-      collectUnsafeProviderRequestComposition({
-        bindings,
-        boundary: `Provider-typed request object ${node.id.name}`,
-        contents,
-        node: node.init,
-        relativePath,
-        resolvingBindings: new Set(),
-        violationsByKey,
-      });
-      return;
-    }
-
-    if (
-      node.type === "TSSatisfiesExpression" &&
-      isProviderRequestTypeText(readNodeText(node.typeAnnotation, contents), analysis)
-    ) {
-      collectUnsafeProviderRequestComposition({
-        bindings,
-        boundary: "Provider-typed satisfies expression",
-        contents,
-        node: node.expression,
-        relativePath,
-        resolvingBindings: new Set(),
-        violationsByKey,
-      });
-    }
+  collectRawProviderHttpViolations({
+    analysis: httpAnalysis,
+    bindings,
+    contents,
+    relativePath,
+    sourceFile,
+    violationsByKey,
+  });
+  collectHandwrittenProviderTransportViolations({
+    analysis: httpAnalysis,
+    contents,
+    relativePath,
+    sourceFile,
+    violationsByKey,
   });
 
-  return [...violationsByKey.values()].sort((left, right) =>
-    left.line - right.line || left.column - right.column ||
-    left.kind.localeCompare(right.kind)
-  );
+  return [...violationsByKey.values()].sort(compareViolations);
 }
 
 export async function main(): Promise<void> {
   const violations = await collectProviderRequestBoundaryViolations();
   if (violations.length === 0) {
-    console.log("Provider request boundaries use explicit typed object construction.");
+    console.log("External provider request boundaries use registered official SDK contracts.");
     return;
   }
 
   throw new Error([
-    "Found unsafe provider request object construction.",
-    "Use an official SDK request type, initialize visible fields directly, and assign optional fields individually.",
+    "Found external provider request boundary violations.",
+    "Use the registered official SDK client and SDK-owned request/response types. Keep SDK request objects explicit and assign optional fields individually.",
     ...violations.map(
       (violation) =>
         `- ${violation.filePath}:${violation.line}:${violation.column} ${formatViolationKind(violation.kind)} at \`${violation.boundary}\``,
@@ -408,6 +655,1744 @@ function analyzeProviderSource(sourceFile: Node, contents: string): ProviderSour
     requestTypeNames,
     typeRoots,
   };
+}
+
+
+function emptyProviderSourceAnalysis(): ProviderSourceAnalysis {
+  return {
+    clientNames: new Set(),
+    methodAliases: new Map(),
+    requestTypeNames: new Set(),
+    typeRoots: new Set(),
+  };
+}
+
+function analyzeProviderHttpSource(
+  sourceFile: Node,
+  relativePath: string,
+  contents: string,
+): ProviderHttpSourceAnalysis {
+  return {
+    fetchLikeNames: collectFetchLikeNames(sourceFile, contents),
+    fileProviderIds: collectFileProviderIds(sourceFile, relativePath),
+    memberBindings: collectMemberBindings(sourceFile),
+    parameterBindings: collectParameterBindings(sourceFile, contents),
+    transportEvidenceProviderIds: collectTransportEvidenceProviderIds(
+      sourceFile,
+      contents,
+    ),
+  };
+}
+
+function collectFetchLikeNames(sourceFile: Node, contents: string): Set<string> {
+  const fetchTypeAliases: Array<{
+    readonly name: string;
+    readonly typeText: string;
+  }> = [];
+  const fetchTypeNames = new Set<string>();
+  const fetchLikeNames = new Set<string>();
+
+  traverseFast(sourceFile, (node) => {
+    if (isTSTypeAliasDeclaration(node)) {
+      fetchTypeAliases.push({
+        name: node.id.name,
+        typeText: readNodeText(node.typeAnnotation, contents),
+      });
+    }
+  });
+
+  let fetchTypesChanged = true;
+  while (fetchTypesChanged) {
+    fetchTypesChanged = false;
+    for (const alias of fetchTypeAliases) {
+      if (
+        !fetchTypeNames.has(alias.name) &&
+        (
+          looksLikeFetchFunctionType(alias.typeText) ||
+          typeTextIsFetchCallable(alias.typeText, fetchTypeNames)
+        )
+      ) {
+        fetchTypeNames.add(alias.name);
+        fetchTypesChanged = true;
+      }
+    }
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    traverseFast(sourceFile, (node) => {
+      if (isVariableDeclarator(node) && isIdentifier(node.id)) {
+        const typeText = node.id.typeAnnotation
+          ? readNodeText(node.id.typeAnnotation, contents)
+          : "";
+        if (
+          typeTextIsFetchCallable(typeText, fetchTypeNames) ||
+          looksLikeFetchFunctionType(typeText) ||
+          (
+            node.init &&
+            (
+              isFetchLikeExpression(node.init, fetchLikeNames) ||
+              functionHasFetchCallSignature(node.init, contents) ||
+              functionDirectlyForwardsToFetch(node.init, fetchLikeNames)
+            )
+          )
+        ) {
+          if (!fetchLikeNames.has(node.id.name)) {
+            fetchLikeNames.add(node.id.name);
+            changed = true;
+          }
+        }
+        return;
+      }
+
+      if (
+        isAssignmentExpression(node) &&
+        node.operator === "=" &&
+        isFetchLikeExpression(node.right, fetchLikeNames)
+      ) {
+        const assignedName = isIdentifier(node.left)
+          ? node.left.name
+          : readMemberPath(node.left)?.at(-1) ?? null;
+        if (assignedName && !fetchLikeNames.has(assignedName)) {
+          fetchLikeNames.add(assignedName);
+          changed = true;
+        }
+        return;
+      }
+
+      if (isClassProperty(node) && isIdentifier(node.key)) {
+        const typeText = node.typeAnnotation
+          ? readNodeText(node.typeAnnotation, contents)
+          : "";
+        if (
+          typeTextIsFetchCallable(typeText, fetchTypeNames) ||
+          looksLikeFetchFunctionType(typeText) ||
+          (
+            node.value &&
+            (
+              isFetchLikeExpression(node.value, fetchLikeNames) ||
+              functionHasFetchCallSignature(node.value, contents) ||
+              functionDirectlyForwardsToFetch(node.value, fetchLikeNames)
+            )
+          )
+        ) {
+          if (!fetchLikeNames.has(node.key.name)) {
+            fetchLikeNames.add(node.key.name);
+            changed = true;
+          }
+        }
+        return;
+      }
+
+      if (
+        node.type === "TSPropertySignature" &&
+        isIdentifier(node.key) &&
+        node.typeAnnotation
+      ) {
+        const typeText = readNodeText(node.typeAnnotation, contents);
+        if (
+          (
+            typeTextIsFetchCallable(typeText, fetchTypeNames) ||
+            looksLikeFetchFunctionType(typeText)
+          ) &&
+          !fetchLikeNames.has(node.key.name)
+        ) {
+          fetchLikeNames.add(node.key.name);
+          changed = true;
+        }
+        return;
+      }
+
+      if (node.type === "TSMethodSignature") {
+        const methodName = readPropertyName(node.key);
+        if (
+          methodName &&
+          looksLikeFetchCallableSignature(readNodeText(node, contents)) &&
+          !fetchLikeNames.has(methodName)
+        ) {
+          fetchLikeNames.add(methodName);
+          changed = true;
+        }
+        return;
+      }
+
+      if (!isFunction(node)) {
+        return;
+      }
+      const callableName = readCallableName(node);
+      if (
+        callableName &&
+        (
+          functionHasFetchCallSignature(node, contents) ||
+          functionDirectlyForwardsToFetch(node, fetchLikeNames)
+        ) &&
+        !fetchLikeNames.has(callableName)
+      ) {
+        fetchLikeNames.add(callableName);
+        changed = true;
+      }
+      for (const parameter of node.params) {
+        const identifier = readParameterIdentifier(parameter);
+        if (!identifier) {
+          continue;
+        }
+        const typeText = identifier.typeAnnotation
+          ? readNodeText(identifier.typeAnnotation, contents)
+          : "";
+        const defaultExpression = readParameterDefaultExpression(parameter);
+        if (
+          (
+            typeTextIsFetchCallable(typeText, fetchTypeNames) ||
+            looksLikeFetchFunctionType(typeText) ||
+            (
+              defaultExpression &&
+              isFetchLikeExpression(defaultExpression, fetchLikeNames)
+            )
+          ) &&
+          !fetchLikeNames.has(identifier.name)
+        ) {
+          fetchLikeNames.add(identifier.name);
+          changed = true;
+        }
+      }
+    });
+  }
+
+  return fetchLikeNames;
+}
+
+function collectFileProviderIds(
+  sourceFile: Node,
+  relativePath: string,
+): Set<string> {
+  const providerIds = providerIdsFromIdentifier(relativePath);
+  traverseFast(sourceFile, (node) => {
+    if (isImportDeclaration(node)) {
+      addProviderIds(providerIds, providerIdsFromModule(node.source.value));
+      return;
+    }
+    if (isStringLiteral(node)) {
+      addProviderIds(providerIds, providerIdsFromStaticText(node.value));
+      return;
+    }
+    if (isTemplateLiteral(node)) {
+      for (const quasi of node.quasis) {
+        addProviderIds(
+          providerIds,
+          providerIdsFromStaticText(quasi.value.cooked ?? quasi.value.raw),
+        );
+      }
+    }
+  });
+  return providerIds;
+}
+
+function collectTransportEvidenceProviderIds(
+  sourceFile: Node,
+  contents: string,
+): Set<string> {
+  const providerIds = new Set<string>();
+  traverseFast(sourceFile, (node) => {
+    if (isImportDeclaration(node)) {
+      addProviderIds(providerIds, providerIdsFromModule(node.source.value));
+      return;
+    }
+    if (isStringLiteral(node)) {
+      addProviderIds(providerIds, providerIdsFromStaticText(node.value));
+      return;
+    }
+    if (
+      isVariableDeclarator(node) &&
+      isIdentifier(node.id) &&
+      node.init &&
+      isTransportEndpointBindingName(node.id.name)
+    ) {
+      addProviderIds(providerIds, providerIdsFromIdentifier(node.id.name));
+      addProviderIds(
+        providerIds,
+        providerIdsFromStaticText(readNodeText(node.init, contents)),
+      );
+      return;
+    }
+    if (
+      isClassProperty(node) &&
+      isIdentifier(node.key) &&
+      node.value &&
+      isTransportEndpointBindingName(node.key.name)
+    ) {
+      addProviderIds(providerIds, providerIdsFromIdentifier(node.key.name));
+      addProviderIds(
+        providerIds,
+        providerIdsFromStaticText(readNodeText(node.value, contents)),
+      );
+    }
+  });
+  return providerIds;
+}
+
+function isTransportEndpointBindingName(name: string): boolean {
+  const normalized = normalizeIdentifierForMatch(name);
+  return /(?:api(?:base|root)?url|apiroot|baseurl|endpoint|method|path|tokenuri)$/u
+    .test(normalized);
+}
+
+function collectMemberBindings(sourceFile: Node): Map<string, MemberBinding[]> {
+  const bindings = new Map<string, MemberBinding[]>();
+  traverseFast(sourceFile, (node) => {
+    if (
+      isAssignmentExpression(node) &&
+      node.operator === "=" &&
+      isExpression(node.right)
+    ) {
+      const pathParts = readMemberPath(node.left);
+      if (!pathParts || pathParts[0] !== "this") {
+        return;
+      }
+      const key = pathParts.join(".");
+      const current = bindings.get(key) ?? [];
+      current.push({
+        initializer: node.right,
+        start: node.start ?? 0,
+      });
+      bindings.set(key, current);
+      return;
+    }
+
+    if (
+      isClassProperty(node) &&
+      isIdentifier(node.key) &&
+      node.value &&
+      isExpression(node.value)
+    ) {
+      const key = `this.${node.key.name}`;
+      const current = bindings.get(key) ?? [];
+      current.push({
+        initializer: node.value,
+        start: node.start ?? 0,
+      });
+      bindings.set(key, current);
+    }
+  });
+  return bindings;
+}
+
+function collectParameterBindings(
+  sourceFile: Node,
+  contents: string,
+): Map<string, ParameterBinding[]> {
+  const bindings = new Map<string, ParameterBinding[]>();
+  traverseFast(sourceFile, (node) => {
+    if (!isFunction(node)) {
+      return;
+    }
+    for (const parameter of node.params) {
+      const identifier = readParameterIdentifier(parameter);
+      if (!identifier) {
+        continue;
+      }
+      const current = bindings.get(identifier.name) ?? [];
+      current.push({
+        name: identifier.name,
+        ownerName: readCallableName(node),
+        scopeEnd: node.end ?? Number.MAX_SAFE_INTEGER,
+        scopeStart: node.start ?? 0,
+        typeAnnotation: identifier.typeAnnotation
+          ? readNodeText(identifier.typeAnnotation, contents)
+          : null,
+      });
+      bindings.set(identifier.name, current);
+    }
+  });
+  return bindings;
+}
+
+interface ProviderHttpCandidate {
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly providers: readonly RegisteredProviderBoundary[];
+}
+
+interface LocalFunctionRange {
+  readonly end: number;
+  readonly name: string;
+  readonly start: number;
+}
+
+function collectRawProviderHttpViolations(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly relativePath: string;
+  readonly sourceFile: Node;
+  readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
+}): void {
+  const candidates: ProviderHttpCandidate[] = [];
+  traverseFast(input.sourceFile, (node) => {
+    if (
+      (!isCallExpression(node) && !isOptionalCallExpression(node)) ||
+      !isFetchLikeExpression(node.callee, input.analysis.fetchLikeNames)
+    ) {
+      return;
+    }
+    const urlArgument = node.arguments.find(
+      (argument) => argument.type !== "ArgumentPlaceholder",
+    );
+    if (!urlArgument || urlArgument.type === "SpreadElement") {
+      return;
+    }
+
+    const providerIds = inferProviderIdsFromExpression({
+      analysis: input.analysis,
+      before: node.start ?? Number.MAX_SAFE_INTEGER,
+      bindings: input.bindings,
+      contents: input.contents,
+      node: urlArgument,
+      resolving: new Set(),
+    });
+    const providers = providerBoundaryRegistry.filter(
+      (provider) =>
+        providerIds.has(provider.id) &&
+        provider.rawHttpPolicy === "require-official-sdk",
+    );
+    if (providers.length === 0) {
+      return;
+    }
+    if (
+      providers.every((provider) =>
+        matchesRegisteredProviderHttpException({
+          analysis: input.analysis,
+          bindings: input.bindings,
+          call: node,
+          contents: input.contents,
+          provider,
+          relativePath: input.relativePath,
+          urlArgument,
+        })
+      )
+    ) {
+      return;
+    }
+    candidates.push({ call: node, providers });
+  });
+
+  const localFunctions = collectLocalFunctionRanges(input.sourceFile);
+  const localFunctionNameCounts = new Map<string, number>();
+  for (const localFunction of localFunctions) {
+    localFunctionNameCounts.set(
+      localFunction.name,
+      (localFunctionNameCounts.get(localFunction.name) ?? 0) + 1,
+    );
+  }
+  const transportOwnerNames = new Set<string>();
+  for (const candidate of candidates) {
+    const calledName = readCalledName(candidate.call.callee);
+    if (calledName && localFunctionNameCounts.has(calledName)) {
+      continue;
+    }
+    const owner = findInnermostLocalFunction(
+      localFunctions,
+      candidate.call.start ?? 0,
+    );
+    if (owner && localFunctionNameCounts.get(owner.name) === 1) {
+      transportOwnerNames.add(owner.name);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const calledName = readCalledName(candidate.call.callee);
+    if (calledName && transportOwnerNames.has(calledName)) {
+      continue;
+    }
+    recordViolation(
+      {
+        boundary:
+          `${candidate.providers.map((provider) => provider.label).join("/")} raw HTTP via ${readNodeText(candidate.call.callee, input.contents)}`,
+        contents: input.contents,
+        relativePath: input.relativePath,
+        violationsByKey: input.violationsByKey,
+      },
+      candidate.call.callee,
+      "raw-provider-http",
+    );
+  }
+}
+
+function collectLocalFunctionRanges(sourceFile: Node): LocalFunctionRange[] {
+  const ranges: LocalFunctionRange[] = [];
+  traverseFast(sourceFile, (node) => {
+    if (isFunction(node)) {
+      const name = readCallableName(node);
+      if (name) {
+        ranges.push({
+          end: node.end ?? Number.MAX_SAFE_INTEGER,
+          name,
+          start: node.start ?? 0,
+        });
+      }
+      return;
+    }
+    if (
+      isVariableDeclarator(node) &&
+      isIdentifier(node.id) &&
+      node.init &&
+      isFunction(node.init)
+    ) {
+      ranges.push({
+        end: node.init.end ?? Number.MAX_SAFE_INTEGER,
+        name: node.id.name,
+        start: node.init.start ?? node.start ?? 0,
+      });
+    }
+  });
+  return ranges;
+}
+
+function findInnermostLocalFunction(
+  ranges: readonly LocalFunctionRange[],
+  position: number,
+): LocalFunctionRange | null {
+  let resolved: LocalFunctionRange | null = null;
+  for (const range of ranges) {
+    if (
+      range.start <= position &&
+      position <= range.end &&
+      (
+        !resolved ||
+        range.start > resolved.start ||
+        (range.start === resolved.start && range.end < resolved.end)
+      )
+    ) {
+      resolved = range;
+    }
+  }
+  return resolved;
+}
+
+function readCalledName(node: Node): string | null {
+  const expression = unwrapExpression(node);
+  return isIdentifier(expression) ? expression.name : null;
+}
+
+function collectHandwrittenProviderTransportViolations(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly contents: string;
+  readonly relativePath: string;
+  readonly sourceFile: Node;
+  readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
+}): void {
+  traverseFast(input.sourceFile, (node) => {
+    const declaration = readNamedTransportDeclaration(node);
+    if (!declaration) {
+      return;
+    }
+    const providerIds = providerIdsFromIdentifier(declaration.name);
+    const providers = providerBoundaryRegistry.filter(
+      (provider) =>
+        providerIds.has(provider.id) &&
+        provider.rawHttpPolicy === "require-official-sdk" &&
+        input.analysis.transportEvidenceProviderIds.has(provider.id),
+    );
+    if (providers.length === 0) {
+      return;
+    }
+    const declarationText = readNodeText(node, input.contents);
+    if (!isConcreteHandwrittenTransportDeclaration(declaration.name, declarationText)) {
+      return;
+    }
+
+    recordViolationAtPosition(
+      {
+        boundary:
+          `${providers.map((provider) => provider.label).join("/")} handwritten transport declaration ${declaration.name}`,
+        contents: input.contents,
+        relativePath: input.relativePath,
+        violationsByKey: input.violationsByKey,
+      },
+      declaration.start,
+      "handwritten-provider-transport",
+    );
+  });
+}
+
+function inferProviderIdsFromExpression(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): Set<string> {
+  const providerIds = new Set<string>();
+  const node = unwrapExpression(input.node);
+
+  if (isStringLiteral(node)) {
+    addProviderIds(providerIds, providerIdsFromStaticText(node.value));
+    return providerIds;
+  }
+  if (isTemplateLiteral(node)) {
+    for (const quasi of node.quasis) {
+      addProviderIds(
+        providerIds,
+        providerIdsFromStaticText(quasi.value.cooked ?? quasi.value.raw),
+      );
+    }
+    if (providerIds.size > 0) {
+      return providerIds;
+    }
+    for (const expression of node.expressions) {
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: expression }),
+      );
+    }
+    return providerIds;
+  }
+  if (isIdentifier(node)) {
+    addProviderIds(providerIds, providerIdsFromIdentifier(node.name));
+    if (providerIds.size > 0) {
+      return providerIds;
+    }
+    const bindingKey = `variable:${node.name}`;
+    if (!input.resolving.has(bindingKey)) {
+      const binding = resolveBinding(input.bindings, node.name, input.before);
+      if (binding) {
+        const resolving = new Set(input.resolving);
+        resolving.add(bindingKey);
+        addProviderIds(
+          providerIds,
+          inferProviderIdsFromExpression({
+            ...input,
+            before: node.start ?? input.before,
+            node: binding.initializer,
+            resolving,
+          }),
+        );
+      }
+    }
+    addSingleProviderFileHint(
+      providerIds,
+      node.name,
+      input.analysis.fileProviderIds,
+    );
+    return providerIds;
+  }
+  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
+    const pathParts = readMemberPath(node);
+    if (pathParts) {
+      const key = pathParts.join(".");
+      addProviderIds(providerIds, providerIdsFromIdentifier(key));
+      if (providerIds.size > 0) {
+        return providerIds;
+      }
+      const bindingKey = `member:${key}`;
+      if (!input.resolving.has(bindingKey)) {
+        const binding = resolveMemberBinding(
+          input.analysis.memberBindings,
+          key,
+          input.before,
+        );
+        if (binding) {
+          const resolving = new Set(input.resolving);
+          resolving.add(bindingKey);
+          addProviderIds(
+            providerIds,
+            inferProviderIdsFromExpression({
+              ...input,
+              before: node.start ?? input.before,
+              node: binding.initializer,
+              resolving,
+            }),
+          );
+        }
+      }
+      addSingleProviderFileHint(
+        providerIds,
+        key,
+        input.analysis.fileProviderIds,
+      );
+    }
+    return providerIds;
+  }
+  if (isNewExpression(node)) {
+    addProviderIds(
+      providerIds,
+      providerIdsFromIdentifier(readNodeText(node.callee, input.contents)),
+    );
+    if (providerIds.size > 0) {
+      return providerIds;
+    }
+    for (const argument of node.arguments) {
+      if (argument && argument.type !== "ArgumentPlaceholder" && argument.type !== "SpreadElement") {
+        addProviderIds(
+          providerIds,
+          inferProviderIdsFromExpression({ ...input, node: argument }),
+        );
+      }
+    }
+    return providerIds;
+  }
+  if (isCallExpression(node) || isOptionalCallExpression(node)) {
+    addProviderIds(
+      providerIds,
+      providerIdsFromIdentifier(readNodeText(node.callee, input.contents)),
+    );
+    if (providerIds.size > 0) {
+      return providerIds;
+    }
+    if (isMemberExpression(node.callee) || isOptionalMemberExpression(node.callee)) {
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: node.callee.object }),
+      );
+    }
+    for (const argument of node.arguments) {
+      if (argument.type !== "ArgumentPlaceholder" && argument.type !== "SpreadElement") {
+        addProviderIds(
+          providerIds,
+          inferProviderIdsFromExpression({ ...input, node: argument }),
+        );
+      }
+    }
+    return providerIds;
+  }
+
+  switch (node.type) {
+    case "AwaitExpression":
+      return inferProviderIdsFromExpression({ ...input, node: node.argument });
+    case "BinaryExpression":
+    case "LogicalExpression":
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: node.left }),
+      );
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: node.right }),
+      );
+      return providerIds;
+    case "ConditionalExpression":
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: node.consequent }),
+      );
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: node.alternate }),
+      );
+      return providerIds;
+    case "SequenceExpression":
+      for (const expression of node.expressions) {
+        addProviderIds(
+          providerIds,
+          inferProviderIdsFromExpression({ ...input, node: expression }),
+        );
+      }
+      return providerIds;
+    case "TaggedTemplateExpression":
+      addProviderIds(
+        providerIds,
+        providerIdsFromIdentifier(readNodeText(node.tag, input.contents)),
+      );
+      addProviderIds(
+        providerIds,
+        inferProviderIdsFromExpression({ ...input, node: node.quasi }),
+      );
+      return providerIds;
+    default:
+      return providerIds;
+  }
+}
+
+function matchesRegisteredProviderHttpException(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly contents: string;
+  readonly provider: RegisteredProviderBoundary;
+  readonly relativePath: string;
+  readonly urlArgument: Node;
+}): boolean {
+  return providerHttpExceptionRegistry.some((exception) => {
+    switch (exception.id) {
+      case "presigned-byte-transfer":
+        return isPresignedByteTransfer(input);
+      case "internal-same-origin":
+        return isInternalSameOriginRequest({
+          before: input.call.start ?? Number.MAX_SAFE_INTEGER,
+          bindings: input.bindings,
+          contents: input.contents,
+          node: input.urlArgument,
+          resolving: new Set(),
+        });
+      case "incoming-request-pass-through":
+        return isIncomingRequestPassThrough(input);
+      case "dynamic-smart-fhir":
+        return isDynamicSmartFhirRequest(input);
+    }
+  });
+}
+
+function isInternalSameOriginRequest(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  const expression = unwrapExpression(input.node);
+  if (isStringLiteral(expression)) {
+    return isInternalUrlText(expression.value);
+  }
+  if (isTemplateLiteral(expression)) {
+    const staticPrefix = expression.quasis[0]?.value.cooked ?? "";
+    return isInternalUrlText(staticPrefix);
+  }
+  if (isIdentifier(expression)) {
+    const key = `internal:${expression.name}`;
+    if (input.resolving.has(key)) {
+      return false;
+    }
+    const binding = resolveBinding(input.bindings, expression.name, input.before);
+    if (!binding) {
+      return false;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return isInternalSameOriginRequest({
+      ...input,
+      before: expression.start ?? input.before,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (isNewExpression(expression)) {
+    const callee = readNodeText(expression.callee, input.contents);
+    if (callee !== "URL") {
+      return false;
+    }
+    const firstArgument = expression.arguments[0];
+    const secondArgument = expression.arguments[1];
+    if (
+      !firstArgument ||
+      firstArgument.type === "ArgumentPlaceholder" ||
+      firstArgument.type === "SpreadElement"
+    ) {
+      return false;
+    }
+    if (
+      isInternalSameOriginRequest({ ...input, node: firstArgument }) &&
+      secondArgument &&
+      secondArgument.type !== "ArgumentPlaceholder" &&
+      secondArgument.type !== "SpreadElement"
+    ) {
+      const baseText = readNodeText(secondArgument, input.contents);
+      return /^(?:location\.origin|request\.url|input\.request\.url)$/u.test(
+        baseText,
+      );
+    }
+    return false;
+  }
+  const text = readNodeText(expression, input.contents);
+  return text === "location.origin";
+}
+
+function isInternalUrlText(value: string): boolean {
+  return value.startsWith("/") ||
+    /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::[0-9]+)?(?:\/|$)/u.test(
+      value,
+    );
+}
+
+function isIncomingRequestPassThrough(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly contents: string;
+  readonly relativePath: string;
+  readonly urlArgument: Node;
+}): boolean {
+  if (!/(?:egress|pass-?through|proxy|runner)/iu.test(input.relativePath)) {
+    return false;
+  }
+  return expressionResolvesToIncomingRequest({
+    analysis: input.analysis,
+    before: input.call.start ?? Number.MAX_SAFE_INTEGER,
+    bindings: input.bindings,
+    contents: input.contents,
+    node: input.urlArgument,
+    resolving: new Set(),
+  });
+}
+
+function expressionResolvesToIncomingRequest(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  const node = unwrapExpression(input.node);
+  if (isIdentifier(node)) {
+    const parameter = resolveParameterBinding(
+      input.analysis.parameterBindings,
+      node.name,
+      input.before,
+    );
+    if (parameter?.typeAnnotation && typeTextIsIncomingRequest(parameter.typeAnnotation)) {
+      return true;
+    }
+    const key = `incoming:${node.name}`;
+    if (input.resolving.has(key)) {
+      return false;
+    }
+    const binding = resolveBinding(input.bindings, node.name, input.before);
+    if (!binding) {
+      return false;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return expressionResolvesToIncomingRequest({
+      ...input,
+      before: node.start ?? input.before,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
+    const pathParts = readMemberPath(node);
+    if (!pathParts || pathParts.length < 2) {
+      return false;
+    }
+    const root = pathParts[0];
+    const property = pathParts.at(-1);
+    const parameter = root
+      ? resolveParameterBinding(
+          input.analysis.parameterBindings,
+          root,
+          input.before,
+        )
+      : null;
+    if (!parameter?.typeAnnotation || !property) {
+      return false;
+    }
+    return new RegExp(
+      `\\b${escapeRegExp(property)}\\??\\s*:\\s*(?:globalThis\\.)?Request\\b`,
+      "u",
+    ).test(parameter.typeAnnotation);
+  }
+  return false;
+}
+
+function isDynamicSmartFhirRequest(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly contents: string;
+  readonly relativePath: string;
+  readonly urlArgument: Node;
+}): boolean {
+  const context = `${input.relativePath} ${readNodeText(input.urlArgument, input.contents)}`;
+  if (!/(?:smart|fhir)/iu.test(context)) {
+    return false;
+  }
+  return !expressionHasRegisteredProviderHost({
+    analysis: input.analysis,
+    before: input.call.start ?? Number.MAX_SAFE_INTEGER,
+    bindings: input.bindings,
+    contents: input.contents,
+    node: input.urlArgument,
+    resolving: new Set(),
+  });
+}
+
+function expressionHasRegisteredProviderHost(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  const node = unwrapExpression(input.node);
+  if (providerIdsFromStaticText(readNodeText(node, input.contents)).size > 0) {
+    return true;
+  }
+  if (isIdentifier(node)) {
+    const key = `host:${node.name}`;
+    if (input.resolving.has(key)) {
+      return false;
+    }
+    const binding = resolveBinding(input.bindings, node.name, input.before);
+    if (!binding) {
+      return false;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return expressionHasRegisteredProviderHost({
+      ...input,
+      before: node.start ?? input.before,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
+    const pathParts = readMemberPath(node);
+    if (!pathParts) {
+      return false;
+    }
+    const key = pathParts.join(".");
+    const resolvingKey = `host-member:${key}`;
+    if (input.resolving.has(resolvingKey)) {
+      return false;
+    }
+    const binding = resolveMemberBinding(
+      input.analysis.memberBindings,
+      key,
+      input.before,
+    );
+    if (!binding) {
+      return false;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(resolvingKey);
+    return expressionHasRegisteredProviderHost({
+      ...input,
+      before: node.start ?? input.before,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (isNewExpression(node) || isCallExpression(node) || isOptionalCallExpression(node)) {
+    return node.arguments.some((argument) =>
+      argument.type !== "ArgumentPlaceholder" &&
+      argument.type !== "SpreadElement" &&
+      expressionHasRegisteredProviderHost({ ...input, node: argument })
+    );
+  }
+  switch (node.type) {
+    case "BinaryExpression":
+    case "LogicalExpression":
+      return expressionHasRegisteredProviderHost({ ...input, node: node.left }) ||
+        expressionHasRegisteredProviderHost({ ...input, node: node.right });
+    case "ConditionalExpression":
+      return expressionHasRegisteredProviderHost({ ...input, node: node.consequent }) ||
+        expressionHasRegisteredProviderHost({ ...input, node: node.alternate });
+    case "SequenceExpression":
+      return node.expressions.some((expression) =>
+        expressionHasRegisteredProviderHost({ ...input, node: expression })
+      );
+    default:
+      return false;
+  }
+}
+
+function isPresignedByteTransfer(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly contents: string;
+  readonly urlArgument: Node;
+}): boolean {
+  const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
+  if (!isOpaqueTransferUrl({
+    analysis: input.analysis,
+    before,
+    bindings: input.bindings,
+    contents: input.contents,
+    node: input.urlArgument,
+    resolving: new Set(),
+  })) {
+    return false;
+  }
+  const initArgument = input.call.arguments.find(
+    (argument, index) => index > 0 && argument.type !== "ArgumentPlaceholder",
+  );
+  if (!initArgument || initArgument.type === "SpreadElement") {
+    return true;
+  }
+  const init = resolveExpressionBinding(initArgument, input.bindings, before);
+  if (
+    !isObjectExpression(init) ||
+    init.properties.some((property) => isSpreadElement(property)) ||
+    !hasProvablyCredentialFreeHeaders({
+      before,
+      bindings: input.bindings,
+      contents: input.contents,
+      init,
+    })
+  ) {
+    return false;
+  }
+  const initText = readNodeText(init, input.contents);
+  if (
+    /(?:authorization|api[-_]?key|bearer|cookie|proxy-authorization|xi-api-key)/iu
+      .test(initText) ||
+    /\bcredentials\s*:\s*["'](?!omit["'])/iu.test(initText)
+  ) {
+    return false;
+  }
+  const method = readStaticObjectStringProperty(init, "method") ?? "GET";
+  return method === "GET" || method === "HEAD" || method === "PUT";
+}
+
+function hasProvablyCredentialFreeHeaders(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly init: Node;
+}): boolean {
+  if (!isObjectExpression(input.init)) {
+    return false;
+  }
+  for (const property of input.init.properties) {
+    if (!isObjectProperty(property)) {
+      continue;
+    }
+    const key = isIdentifier(property.key)
+      ? property.key.name
+      : isStringLiteral(property.key)
+        ? property.key.value
+        : null;
+    if (key?.toLowerCase() !== "headers") {
+      continue;
+    }
+    const headers = resolveExpressionBinding(
+      property.value,
+      input.bindings,
+      input.before,
+    );
+    if (isObjectExpression(headers)) {
+      for (const header of headers.properties) {
+        if (!isObjectProperty(header)) {
+          return false;
+        }
+        const headerName = isIdentifier(header.key)
+          ? header.key.name
+          : isStringLiteral(header.key)
+            ? header.key.value
+            : null;
+        if (
+          !headerName ||
+          /(?:authorization|api[-_]?key|bearer|cookie|proxy-authorization|token|xi-api-key)/iu
+            .test(headerName)
+        ) {
+          return false;
+        }
+      }
+      continue;
+    }
+    const headerText = readNodeText(headers, input.contents);
+    if (
+      !/(?:attachment|presigned|required|signed|upload).*headers/iu.test(
+        headerText,
+      ) ||
+      /(?:authorization|api[-_]?key|bearer|cookie|proxy-authorization|xi-api-key)/iu
+        .test(headerText)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isOpaqueTransferUrl(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  const node = unwrapExpression(input.node);
+  if (isStringLiteral(node) || isTemplateLiteral(node) || isNewExpression(node)) {
+    return false;
+  }
+  if (isIdentifier(node)) {
+    const key = `transfer:${node.name}`;
+    if (input.resolving.has(key)) {
+      return false;
+    }
+    const binding = resolveBinding(input.bindings, node.name, input.before);
+    if (binding) {
+      const initializerText = readNodeText(binding.initializer, input.contents);
+      if (expressionHasRegisteredProviderHost({
+        analysis: input.analysis,
+        before: node.start ?? input.before,
+        bindings: input.bindings,
+        contents: input.contents,
+        node: binding.initializer,
+        resolving: new Set(),
+      })) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      if (
+        isOpaqueTransferUrl({
+          ...input,
+          before: node.start ?? input.before,
+          node: binding.initializer,
+          resolving,
+        })
+      ) {
+        return true;
+      }
+      return isTransferUrlName(node.name) &&
+        /(?:attachment|download|file|image|media|presigned|required|signed|upload)/iu
+          .test(initializerText);
+    }
+    const parameter = resolveParameterBinding(
+      input.analysis.parameterBindings,
+      node.name,
+      input.before,
+    );
+    return Boolean(
+      parameter &&
+      (
+        isTransferUrlName(node.name) ||
+        isTransferOperationName(parameter.ownerName)
+      ),
+    );
+  }
+  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
+    const pathParts = readMemberPath(node);
+    return Boolean(pathParts && isTransferUrlName(pathParts.at(-1) ?? ""));
+  }
+  if (isCallExpression(node) || isOptionalCallExpression(node)) {
+    const callText = readNodeText(node, input.contents);
+    if (providerIdsFromStaticText(callText).size > 0) {
+      return false;
+    }
+    return /(?:attachment|download|file|image|media|presigned|signed|upload).*url/iu
+      .test(callText);
+  }
+  return false;
+}
+
+function readStaticObjectStringProperty(
+  object: Node,
+  propertyName: string,
+): string | null {
+  if (!isObjectExpression(object)) {
+    return null;
+  }
+  for (const property of object.properties) {
+    if (!isObjectProperty(property)) {
+      continue;
+    }
+    const key = isIdentifier(property.key)
+      ? property.key.name
+      : isStringLiteral(property.key)
+        ? property.key.value
+        : null;
+    if (key !== propertyName || !isStringLiteral(property.value)) {
+      continue;
+    }
+    return property.value.value.toUpperCase();
+  }
+  return null;
+}
+
+function resolveExpressionBinding(
+  node: Node,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+): Node {
+  const expression = unwrapExpression(node);
+  if (!isIdentifier(expression)) {
+    return expression;
+  }
+  return resolveBinding(bindings, expression.name, before)?.initializer ?? expression;
+}
+
+function readNamedTransportDeclaration(
+  node: Node,
+): { readonly name: string; readonly start: number } | null {
+  if (
+    node.type !== "TSInterfaceDeclaration" &&
+    node.type !== "TSTypeAliasDeclaration"
+  ) {
+    return null;
+  }
+  if (!node.id) {
+    return null;
+  }
+  return {
+    name: node.id.name,
+    start: node.id.start ?? node.start ?? 0,
+  };
+}
+
+function isConcreteHandwrittenTransportDeclaration(
+  name: string,
+  declarationText: string,
+): boolean {
+  const normalizedName = normalizeIdentifierForMatch(name);
+  if (
+    /(?:domain|event|normalized|parsed|projection|report|result|state|summary)(?:request|response)$/u
+      .test(normalizedName)
+  ) {
+    return false;
+  }
+  if (/(?:fetch|transport)$/u.test(normalizedName)) {
+    return looksLikeFetchCallableSignature(declarationText);
+  }
+  if (/(?:client|driver|runtime)$/u.test(normalizedName)) {
+    return hasLowLevelHttpClientContract(declarationText);
+  }
+  if (
+    /(?:request(?:body|input|options|params)?|requestoptions)$/u.test(
+      normalizedName,
+    )
+  ) {
+    const declaresObjectShape = /(?:interface|type)\s+[A-Za-z0-9_$]+/u.test(
+      declarationText,
+    );
+    if (normalizedName.endsWith("requestbody")) {
+      return declaresObjectShape && /\b[A-Za-z_$][A-Za-z0-9_$]*\??\s*:/u.test(
+        declarationText,
+      );
+    }
+    return declaresObjectShape &&
+      /(?:\bbody\??\s*:|\bheaders\??\s*:|\bmethod\??\s*:|\bpath\??\s*:|\burl\??\s*:|\b[a-z][a-z0-9]*_[a-z0-9_]+\??\s*:)/u
+        .test(declarationText);
+  }
+  if (/(?:response|responsebody)$/u.test(normalizedName)) {
+    return /(?:interface|type)\s+[A-Za-z0-9_$]+/u.test(declarationText) &&
+      /(?:(?:arrayBuffer|json|text)\s*\(|\b[a-z][a-z0-9]*_[a-z0-9_]+\??\s*:|\b(?:accessToken|ciphertext|expireTime|mac|plaintext|signature)\??\s*:)/u
+        .test(declarationText);
+  }
+  return false;
+}
+
+function hasLowLevelHttpClientContract(declarationText: string): boolean {
+  const member = /(?:^|[;{]\s*)(?:readonly\s+)?(?:fetch|request)\s*(?:\??\s*:|\()/imu
+    .exec(declarationText);
+  if (!member) {
+    return false;
+  }
+  const memberText = declarationText.slice(member.index);
+  return looksLikeFetchCallableSignature(memberText) ||
+    /(?:fetch|request)\s*\??\s*:\s*(?:typeof\s+(?:(?:globalThis|self|window)\.)?fetch|[A-Za-z_$][A-Za-z0-9_$]*Fetch)\b/iu
+      .test(memberText);
+}
+
+function providerIdsFromModule(moduleName: string): Set<string> {
+  const providerIds = new Set<string>();
+  for (const provider of providerBoundaryRegistry) {
+    if (
+      provider.sdkModules.some(
+        (modulePrefix) =>
+          moduleName === modulePrefix || moduleName.startsWith(`${modulePrefix}/`),
+      )
+    ) {
+      providerIds.add(provider.id);
+    }
+  }
+  return providerIds;
+}
+
+function providerIdsFromStaticText(text: string): Set<string> {
+  const providerIds = new Set<string>();
+  for (const provider of providerBoundaryRegistry) {
+    if (provider.hosts.some((host) => staticTextContainsHost(text, host))) {
+      providerIds.add(provider.id);
+    }
+  }
+  return providerIds;
+}
+
+function staticTextContainsHost(text: string, host: string): boolean {
+  return new RegExp(
+    `(?:^|[^A-Za-z0-9.-])${escapeRegExp(host)}(?::[0-9]+)?(?:[/?#]|$)`,
+    "iu",
+  ).test(text);
+}
+
+function providerIdsFromIdentifier(value: string): Set<string> {
+  const providerIds = new Set<string>();
+  for (const provider of providerBoundaryRegistry) {
+    if (
+      provider.identifiers.some((identifier) =>
+        identifierMatchesProvider(value, identifier)
+      )
+    ) {
+      providerIds.add(provider.id);
+    }
+  }
+  return providerIds;
+}
+
+function addSingleProviderFileHint(
+  providerIds: Set<string>,
+  value: string,
+  fileProviderIds: ReadonlySet<string>,
+): void {
+  if (
+    providerIds.size === 0 &&
+    fileProviderIds.size === 1 &&
+    isGenericProviderUrlName(value)
+  ) {
+    addProviderIds(providerIds, fileProviderIds);
+  }
+}
+
+function identifierMatchesProvider(value: string, providerIdentifier: string): boolean {
+  const words = normalizeIdentifierWords(value);
+  const identifierWords = normalizeIdentifierWords(providerIdentifier);
+  if (identifierWords.length === 0) {
+    return false;
+  }
+  if (identifierWords.length === 1 && (identifierWords[0]?.length ?? 0) <= 3) {
+    return words.includes(identifierWords[0] ?? "");
+  }
+  const compactValue = words.join("");
+  const compactIdentifier = identifierWords.join("");
+  return compactIdentifier.length > 0 && compactValue.includes(compactIdentifier);
+}
+
+function normalizeIdentifierWords(value: string): string[] {
+  return value
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .replace(/[^A-Za-z0-9]+/gu, " ")
+    .toLowerCase()
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+}
+
+function normalizeIdentifierForMatch(value: string): string {
+  return normalizeIdentifierWords(value).join("");
+}
+
+function isGenericProviderUrlName(value: string): boolean {
+  const terminal = normalizeIdentifierWords(value).at(-1) ?? "";
+  const compact = normalizeIdentifierForMatch(value);
+  return [
+    "apiBaseUrl",
+    "apiRoot",
+    "baseUrl",
+    "endpoint",
+    "endpointUrl",
+    "origin",
+    "providerBase",
+    "tokenUri",
+    "url",
+  ].some((candidate) => compact.endsWith(candidate.toLowerCase())) ||
+    terminal === "url" || terminal === "endpoint" || terminal === "origin";
+}
+
+function addProviderIds(target: Set<string>, source: Iterable<string>): void {
+  for (const providerId of source) {
+    target.add(providerId);
+  }
+}
+
+function resolveMemberBinding(
+  bindings: ReadonlyMap<string, readonly MemberBinding[]>,
+  name: string,
+  before: number,
+): MemberBinding | null {
+  const candidates = bindings.get(name);
+  if (!candidates) {
+    return null;
+  }
+  let resolved: MemberBinding | null = null;
+  for (const candidate of candidates) {
+    if (
+      candidate.start <= before &&
+      (!resolved || candidate.start > resolved.start)
+    ) {
+      resolved = candidate;
+    }
+  }
+  return resolved;
+}
+
+function resolveParameterBinding(
+  bindings: ReadonlyMap<string, readonly ParameterBinding[]>,
+  name: string,
+  position: number,
+): ParameterBinding | null {
+  const candidates = bindings.get(name);
+  if (!candidates) {
+    return null;
+  }
+  let resolved: ParameterBinding | null = null;
+  for (const candidate of candidates) {
+    if (
+      candidate.scopeStart <= position &&
+      position <= candidate.scopeEnd &&
+      (!resolved || candidate.scopeStart > resolved.scopeStart)
+    ) {
+      resolved = candidate;
+    }
+  }
+  return resolved;
+}
+
+function readParameterIdentifier(node: Node): (Node & {
+  readonly name: string;
+  readonly typeAnnotation?: Node | null;
+}) | null {
+  if (isIdentifier(node)) {
+    return node;
+  }
+  if (node.type === "AssignmentPattern" && isIdentifier(node.left)) {
+    return node.left;
+  }
+  if (node.type === "TSParameterProperty") {
+    return readParameterIdentifier(node.parameter);
+  }
+  return null;
+}
+
+function readParameterDefaultExpression(node: Node): Node | null {
+  if (node.type === "AssignmentPattern") {
+    return node.right;
+  }
+  if (node.type === "TSParameterProperty") {
+    return readParameterDefaultExpression(node.parameter);
+  }
+  return null;
+}
+
+function typeTextIsIncomingRequest(typeText: string): boolean {
+  return /:\s*(?:globalThis\.)?Request\b/u.test(typeText) &&
+    !/RequestInfo/u.test(typeText);
+}
+
+function looksLikeFetchFunctionType(typeText: string): boolean {
+  const normalized = stripLeadingTypeAnnotation(typeText);
+  const signature = readFetchCallableSignature(normalized);
+  return normalized.startsWith("(") && signature?.separator === "=>" &&
+    isFetchTargetParameter(signature.name, signature.type);
+}
+
+function looksLikeFetchCallableSignature(text: string): boolean {
+  const signature = readFetchCallableSignature(text);
+  return Boolean(
+    signature && isFetchTargetParameter(signature.name, signature.type),
+  );
+}
+
+function readFetchCallableSignature(text: string): {
+  readonly name: string;
+  readonly separator: ":" | "=>";
+  readonly type: string;
+} | null {
+  const openParenthesis = text.indexOf("(");
+  if (openParenthesis < 0) {
+    return null;
+  }
+  const match = /^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:\s*([^,\n)]+)(?:,[\s\S]*?)?\)\s*(=>|:)\s*Promise\s*<\s*(?:(?:globalThis\.)?Response|[A-Za-z_$][A-Za-z0-9_$]*(?:Fetch|Http)Response)\s*>/u
+    .exec(text.slice(openParenthesis));
+  if (!match?.[1] || !match[2] || (match[3] !== ":" && match[3] !== "=>")) {
+    return null;
+  }
+  return {
+    name: match[1],
+    separator: match[3],
+    type: match[2].trim(),
+  };
+}
+
+function isFetchTargetParameter(name: string, typeText: string): boolean {
+  const targetType = typeText.replace(/^\((.*)\)$/u, "$1").trim();
+  if (
+    !/^(?:(?:globalThis\.)?(?:RequestInfo|Request|URL)|string)(?:\s*\|\s*(?:(?:globalThis\.)?(?:RequestInfo|Request|URL)|string))*$/u
+      .test(targetType)
+  ) {
+    return false;
+  }
+  return /(?:RequestInfo|Request|URL)/u.test(targetType) ||
+    /^(?:endpoint|input|request|uri|url)$/iu.test(name);
+}
+
+function functionHasFetchCallSignature(
+  node: Node,
+  contents: string,
+): boolean {
+  if (!isFunction(node)) {
+    return false;
+  }
+  const firstParameter = node.params[0];
+  if (!firstParameter) {
+    return false;
+  }
+  const returnType = node.returnType
+    ? readNodeText(node.returnType, contents)
+    : "";
+  return looksLikeFetchCallableSignature(
+    `(${readNodeText(firstParameter, contents)}) ${returnType}`,
+  );
+}
+
+function functionDirectlyForwardsToFetch(
+  node: Node,
+  fetchLikeNames: ReadonlySet<string>,
+): boolean {
+  if (!isFunction(node)) {
+    return false;
+  }
+  const parameters = node.params.map(readParameterIdentifier);
+  if (parameters.length === 0 || parameters.some((parameter) => !parameter)) {
+    return false;
+  }
+  let returned: Node | null = null;
+  if (node.body.type === "BlockStatement") {
+    const statement = node.body.body[0];
+    if (node.body.body.length !== 1 || !statement || !isReturnStatement(statement)) {
+      return false;
+    }
+    returned = statement.argument ?? null;
+  } else {
+    returned = node.body;
+  }
+  if (!returned) {
+    return false;
+  }
+  const expression = unwrapExpression(returned);
+  const call = expression.type === "AwaitExpression"
+    ? unwrapExpression(expression.argument)
+    : expression;
+  if (
+    (!isCallExpression(call) && !isOptionalCallExpression(call)) ||
+    !isFetchLikeExpression(call.callee, fetchLikeNames)
+  ) {
+    return false;
+  }
+  const callArguments = call.arguments.filter(
+    (argument) => argument.type !== "ArgumentPlaceholder",
+  );
+  if (callArguments.length === 0 || callArguments.length > parameters.length) {
+    return false;
+  }
+  return callArguments.every((argument, index) => {
+    if (argument.type === "SpreadElement") {
+      return false;
+    }
+    const forwarded = unwrapExpression(argument);
+    return isIdentifier(forwarded) &&
+      forwarded.name === parameters[index]?.name;
+  });
+}
+
+function readCallableName(node: Node): string | null {
+  if ("id" in node && node.id && isIdentifier(node.id)) {
+    return node.id.name;
+  }
+  if ("key" in node && node.key) {
+    return readPropertyName(node.key as Node);
+  }
+  return null;
+}
+
+function readPropertyName(node: Node): string | null {
+  if (isIdentifier(node)) {
+    return node.name;
+  }
+  if (isStringLiteral(node)) {
+    return node.value;
+  }
+  return null;
+}
+
+function typeTextIsFetchCallable(
+  typeText: string,
+  fetchTypeNames: ReadonlySet<string>,
+): boolean {
+  const members = stripLeadingTypeAnnotation(typeText)
+    .split("|")
+    .map((member) => member.trim().replace(/^\(([^()]*)\)$/u, "$1").trim());
+  if (members.length === 0 || members.some((member) => member.length === 0)) {
+    return false;
+  }
+  let includesFetchType = false;
+  for (const member of members) {
+    if (
+      /^typeof\s+(?:(?:globalThis|self|window)\.)?fetch$/u.test(member) ||
+      fetchTypeNames.has(member)
+    ) {
+      includesFetchType = true;
+      continue;
+    }
+    if (member === "null" || member === "undefined") {
+      continue;
+    }
+    return false;
+  }
+  return includesFetchType;
+}
+
+function stripLeadingTypeAnnotation(typeText: string): string {
+  return typeText.trim().replace(/^:\s*/u, "");
+}
+
+function isFetchLikeExpression(
+  node: Node,
+  fetchLikeNames: ReadonlySet<string>,
+): boolean {
+  const expression = unwrapExpression(node);
+  if (isIdentifier(expression)) {
+    return expression.name === "fetch" || fetchLikeNames.has(expression.name);
+  }
+  if (isMemberExpression(expression) || isOptionalMemberExpression(expression)) {
+    const pathParts = readMemberPath(expression);
+    if (!pathParts) {
+      return false;
+    }
+    const pathText = pathParts.join(".");
+    return /^(?:globalThis|self|window)\.fetch$/u.test(pathText) ||
+      fetchLikeNames.has(pathParts.at(-1) ?? "");
+  }
+  if (expression.type === "LogicalExpression") {
+    return isFetchLikeExpression(expression.left, fetchLikeNames) ||
+      isFetchLikeExpression(expression.right, fetchLikeNames);
+  }
+  if (expression.type === "ConditionalExpression") {
+    return isFetchLikeExpression(expression.consequent, fetchLikeNames) ||
+      isFetchLikeExpression(expression.alternate, fetchLikeNames);
+  }
+  if (expression.type === "SequenceExpression") {
+    return expression.expressions.some((child) =>
+      isFetchLikeExpression(child, fetchLikeNames)
+    );
+  }
+  if (isCallExpression(expression) || isOptionalCallExpression(expression)) {
+    const pathParts = readMemberPath(expression.callee);
+    return pathParts?.at(-1) === "bind" &&
+      (isMemberExpression(expression.callee) || isOptionalMemberExpression(expression.callee)) &&
+      isFetchLikeExpression(expression.callee.object, fetchLikeNames);
+  }
+  return false;
+}
+
+function isTransferOperationName(name: string | null): boolean {
+  if (!name) {
+    return false;
+  }
+  const normalized = normalizeIdentifierForMatch(name);
+  return /(?:download|upload).*(?:body|bytes|stream)|(?:body|bytes|stream).*(?:download|upload)/u
+    .test(normalized);
+}
+
+function isTransferUrlName(name: string): boolean {
+  const normalized = normalizeIdentifierForMatch(name);
+  return /(?:attachment|download|file|image|media|presigned|signed|upload)(?:url|uri)$/u
+    .test(normalized);
+}
+
+function compareViolations(
+  left: ProviderRequestBoundaryViolation,
+  right: ProviderRequestBoundaryViolation,
+): number {
+  return left.filePath.localeCompare(right.filePath) ||
+    left.line - right.line ||
+    left.column - right.column ||
+    left.kind.localeCompare(right.kind) ||
+    left.boundary.localeCompare(right.boundary);
 }
 
 function collectVariableBindings(
@@ -862,6 +2847,7 @@ async function scanDirectory(
   violations: ProviderRequestBoundaryViolation[],
 ): Promise<void> {
   const entries = await readdir(path.join(repoRoot, relativePath), { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
   for (const entry of entries) {
     const entryRelativePath = path.posix.join(relativePath, entry.name);
     if (entry.isDirectory()) {
@@ -882,28 +2868,41 @@ async function scanDirectory(
 
 function parserPlugins(relativePath: string): ParserPlugin[] {
   const plugins: ParserPlugin[] = [["decorators", { decoratorsBeforeExport: true }], "typescript"];
-  if (/\.tsx$/u.test(relativePath)) {
+  if (/\.[jt]sx$/u.test(relativePath)) {
     plugins.push("jsx");
   }
   return plugins;
 }
 
-function shouldScanSourceFile(relativePath: string): boolean {
-  return !relativePath.endsWith(".d.ts") &&
-    !/\.(?:spec|test)\.[cm]?tsx?$/u.test(relativePath) &&
+export function shouldScanProviderRequestSourceFile(relativePath: string): boolean {
+  return !/\.d\.[cm]?ts$/u.test(relativePath) &&
+    !/\.(?:gen|generated)\.[cm]?[jt]sx?$/u.test(relativePath) &&
+    !/\.(?:spec|test)\.[cm]?[jt]sx?$/u.test(relativePath) &&
     sourceExtensions.has(path.posix.extname(relativePath));
 }
 
-function shouldSkipDirectory(name: string): boolean {
+function shouldScanSourceFile(relativePath: string): boolean {
+  return shouldScanProviderRequestSourceFile(relativePath);
+}
+
+export function shouldSkipProviderRequestDirectory(name: string): boolean {
   return skippedDirectoryNames.has(name) || name.startsWith(".next");
+}
+
+function shouldSkipDirectory(name: string): boolean {
+  return shouldSkipProviderRequestDirectory(name);
 }
 
 function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string {
   switch (kind) {
+    case "handwritten-provider-transport":
+      return "declares a handwritten provider transport contract";
     case "object-assign":
       return "uses Object.assign";
     case "object-spread":
       return "contains an object spread";
+    case "raw-provider-http":
+      return "uses raw provider HTTP";
     case "untyped-request-object":
       return "passes an untyped object-literal variable";
   }

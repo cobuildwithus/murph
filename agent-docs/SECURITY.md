@@ -293,10 +293,30 @@ Last verified: 2026-08-11
   use installed official SDK types and must not contain object spread syntax or
   `Object.assign`. Build the SDK-typed object first, then assign each optional
   field explicitly; this preserves excess-property checking that TypeScript
-  otherwise loses across composed objects. `pnpm provider-requests:guard`
-  enforces the registered Composio, Stripe, Kernel, Linq, Retell, Temporal,
-  OpenAI, and Junction boundaries across production apps, packages, and
-  scripts. Register each new official SDK boundary when it is introduced. The opt-in
+  otherwise loses across composed objects. `pnpm provider-requests:guard` scans
+  production JavaScript and TypeScript modules under `apps`, `packages`, and
+  `scripts`, including operational `.mjs` files, while excluding declarations,
+  generated output, fixtures, and tests. For the explicit provider registry it
+  preserves the SDK request-object checks, reports the global fetch primitive,
+  explicit aliases, injected fetch-call signatures, and strict fetch-shaped
+  wrappers when they resolve to provider literals or provider-configured URL
+  data, and reports only concrete low-level handwritten wire contracts that
+  replace an SDK-owned request, response, fetch, transport, or client contract.
+  Provider-domain helpers and SDK-backed business adapters are not transport
+  boundaries; when a local wrapper owns a reported network boundary, its callers
+  are not duplicated. Direct provider symbols and hosts outrank fallback file
+  hints, and genuinely ambiguous dataflow names every matching provider. Findings are
+  deterministic `raw-provider-http` or `handwritten-provider-transport` entries
+  with file, line, column, and boundary. Raw HTTP remains allowed only through
+  the auditable provider/exception registry: credential-free opaque presigned
+  byte transfer, internal or same-origin application traffic, incoming
+  `Request` pass-through in hosted runner proxies, dynamic SMART/FHIR endpoints,
+  registered providers without a verified provider-owned TypeScript SDK, and
+  the named xAI OpenAI-compatible extension exception. These are structural,
+  purpose-specific exceptions, not file-, line-, or provider-wide suppression.
+  Register each newly verified provider SDK and host explicitly; the guard does
+  not claim coverage for an unregistered provider or a provider endpoint whose
+  dataflow has no registered host or provider identifier. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode secret key and calls the real resume endpoint with a synthetic
   missing Subscription, so parameter drift fails without creating, charging,
