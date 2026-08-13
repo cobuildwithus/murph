@@ -26,6 +26,7 @@ import {
   revalidatePreparedHostedDomainRootForWebTx,
   type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
+import { readHostedUserSecureBoxStringRootReference } from "../hosted-crypto/secure-box";
 import type { PreparedHostedWebEncryptionRoot } from "../hosted-web/encryption";
 
 export interface HostedMemberIdentityState {
@@ -87,6 +88,8 @@ type HostedMemberIdentityCoreLookupRecord =
 type HostedMemberIdentityRecordWithMember = HostedMemberIdentity & {
   member: HostedMember;
 };
+
+export type HostedMemberIdentityRecord = HostedMemberIdentity;
 
 // Lookup helpers return the matched identity slice with the core row so auth
 // and onboarding flows do not need to round-trip through readHostedMemberIdentity.
@@ -258,6 +261,92 @@ export async function readHostedMemberIdentity(input: {
   });
 
   return identityRecord ? await projectHostedMemberIdentityState(identityRecord, input.prisma) : null;
+}
+
+/**
+ * Reads the exact encrypted identity row without projecting private fields.
+ * Prepared webhook paths use this to bind an outside-transaction projection
+ * to the row re-read while the member lock is held.
+ */
+export async function readHostedMemberIdentityRecord(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberIdentityRecord | null> {
+  return input.prisma.hostedMemberIdentity.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+  });
+}
+
+export async function lockHostedMemberIdentityStateTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_member_identity"
+    WHERE "member_id" = ${input.memberId}
+    FOR UPDATE
+  `;
+}
+
+const HOSTED_MEMBER_IDENTITY_RECORD_KEYS = [
+  "createdAt",
+  "maskedPhoneNumberHint",
+  "memberId",
+  "phoneLookupKey",
+  "phoneNumberEncrypted",
+  "phoneNumberVerifiedAt",
+  "privyUserIdEncrypted",
+  "privyUserLookupKey",
+  "signupPhoneCodeSendAttemptId",
+  "signupPhoneCodeSendAttemptStartedAt",
+  "signupPhoneCodeSentAt",
+  "signupPhoneNumberEncrypted",
+  "updatedAt",
+  "walletAddressEncrypted",
+  "walletAddressLookupKey",
+  "walletChainType",
+  "walletCreatedAt",
+  "walletProvider",
+] as const satisfies readonly (keyof HostedMemberIdentityRecord)[];
+
+export function hostedMemberIdentityRecordsEqual(
+  current: HostedMemberIdentityRecord | null,
+  prepared: HostedMemberIdentityRecord | null,
+): boolean {
+  if (!current || !prepared) {
+    return current === prepared;
+  }
+  return HOSTED_MEMBER_IDENTITY_RECORD_KEYS.every((key) => {
+    const currentValue = current[key];
+    const preparedValue = prepared[key];
+    return currentValue instanceof Date && preparedValue instanceof Date
+      ? currentValue.getTime() === preparedValue.getTime()
+      : currentValue === preparedValue;
+  });
+}
+
+export function readHostedMemberIdentityControlRootKeyIds(
+  identity: HostedMemberIdentityRecord | null,
+): string[] {
+  if (!identity) {
+    return [];
+  }
+  const encryptedValues = [
+    identity.phoneNumberEncrypted,
+    identity.privyUserIdEncrypted,
+    identity.signupPhoneNumberEncrypted,
+    identity.walletAddressEncrypted,
+  ];
+  return [...new Set(encryptedValues.flatMap((value) => {
+    const reference = readHostedUserSecureBoxStringRootReference({
+      lane: "hosted-member-private-field",
+      value,
+    });
+    return reference ? [reference.rootKeyId] : [];
+  }))];
 }
 
 export async function upsertHostedMemberIdentity(

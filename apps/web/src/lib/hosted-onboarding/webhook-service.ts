@@ -38,7 +38,6 @@ import {
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
-  readHostedMemberRoutingControlRootKeyIds,
   resolveHostedLinqDirectPreparationMemberId,
   resolveHostedLinqThreadContainerCryptoPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
@@ -149,6 +148,7 @@ import {
 import {
   projectHostedMemberRoutingState,
   readHostedMemberRoutingRecord,
+  readHostedMemberRoutingControlRootKeyIds,
   resolveHostedMemberCoreByTelegramUserId,
   type HostedMemberRoutingRecord,
   type HostedMemberRoutingStateSnapshot,
@@ -160,7 +160,18 @@ import {
   readActiveHostedMemberAccess,
   readHostedRuntimeAiAccessDecision,
 } from "./member-access";
-import { resolveHostedFamilyInviteTokenForInbound } from "./family-plan";
+import {
+  prepareHostedFamilyOwnerNotification,
+  resolveHostedFamilyInviteTokenForInbound,
+  type PreparedHostedFamilyOwnerNotification,
+} from "./family-plan";
+import {
+  projectHostedMemberIdentityState,
+  readHostedMemberIdentityControlRootKeyIds,
+  readHostedMemberIdentityRecord,
+  type HostedMemberIdentityRecord,
+  type HostedMemberIdentityState,
+} from "./hosted-member-identity-store";
 import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
@@ -2007,7 +2018,10 @@ interface HostedThreadRoutingCryptoPreparation {
     preparedControlRoot: PreparedHostedDomainRootForWeb;
     preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
     preparedFamilyInviteCode: string | null;
+    preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
     preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
+    identityRecord: HostedMemberIdentityRecord | null;
+    identityState: HostedMemberIdentityState | null;
     routingRecord: HostedMemberRoutingRecord | null;
     routingState: HostedMemberRoutingStateSnapshot | null;
   } | null;
@@ -2419,7 +2433,10 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   preparedControlRoot: PreparedHostedDomainRootForWeb;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyInviteCode: string | null;
+  preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
   preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
+  identityRecord: HostedMemberIdentityRecord | null;
+  identityState: HostedMemberIdentityState | null;
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
 } | null> {
@@ -2432,8 +2449,12 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   }
 
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
-  const [routingRecord, accessAllowed, preparedFamilyInviteCode] =
+  const [identityRecord, routingRecord, accessAllowed, preparedFamilyInviteCode] =
     await Promise.all([
+      readHostedMemberIdentityRecord({
+        memberId,
+        prisma: input.prisma,
+      }),
       readHostedMemberRoutingRecord({
         memberId,
         prisma: input.prisma,
@@ -2506,6 +2527,23 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       : Promise.resolve(null),
     preserveFirstPreparationError(async () => {
       const preparedControlRoot = await prepareDomainRoot("control");
+      for (const rootKeyId of readHostedMemberIdentityControlRootKeyIds(
+        identityRecord,
+      )) {
+        const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+          prisma: input.prisma,
+          references: [{
+            domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+            rootKeyId,
+            userId: memberId,
+          }],
+          retainFailureInScopedCache: true,
+          signal: undefined,
+        });
+        for (const root of roots) {
+          root.rootKey.fill(0);
+        }
+      }
       await warmHostedLinqRoutingControlRoots({
         memberId,
         prisma: input.prisma,
@@ -2532,11 +2570,23 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   if (controlRoutingResult.status === "rejected") {
     throw controlRoutingResult.reason;
   }
+  const identityState = identityRecord
+    ? await projectHostedMemberIdentityState(identityRecord, input.prisma)
+    : null;
+  const preparedFamilyOwnerNotification = preparedFamilyInviteCode
+    ? await prepareHostedFamilyOwnerNotification({
+        inviteCode: preparedFamilyInviteCode,
+        prisma: input.prisma,
+      })
+    : null;
   return {
+    identityRecord,
+    identityState,
     memberId,
     preparedControlRoot: controlRoutingResult.value.preparedControlRoot,
     preparedCryptoDomainRoots,
     preparedFamilyInviteCode,
+    preparedFamilyOwnerNotification,
     preparedIngressRoot: ingressRootResult.value,
     routingRecord,
     routingState: controlRoutingResult.value.routingState,

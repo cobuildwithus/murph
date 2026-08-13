@@ -195,6 +195,7 @@ const mocks = vi.hoisted(() => {
     appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
+    prepareHostedFamilyOwnerNotification: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
@@ -431,6 +432,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
     ...actual,
     acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
     buildHostedFamilyInviteAcceptedReplyText: mocks.buildHostedFamilyInviteAcceptedReplyText,
+    prepareHostedFamilyOwnerNotification: mocks.prepareHostedFamilyOwnerNotification,
     resolveHostedFamilyInviteTokenForInbound: mocks.resolveHostedFamilyInviteTokenForInbound,
   };
 });
@@ -1094,6 +1096,32 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
     mocks.checkHostedAiUsageGate.mockReset();
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
+    mocks.prepareHostedFamilyOwnerNotification.mockImplementation(async (input: {
+      inviteCode: string;
+    }) => ({
+      inviteCode: input.inviteCode,
+      ownerIdentity: null,
+      ownerIdentityState: null,
+      ownerMember: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-08-13T00:00:00.000Z"),
+        id: "member_family_owner",
+        suspendedAt: null,
+        updatedAt: new Date("2026-08-13T00:00:00.000Z"),
+      },
+      ownerRouting: null,
+      ownerRoutingState: null,
+      preparedControlRoot: {
+        domain: "control",
+        rootKeyId: "root-family-owner-control",
+        userId: "member_family_owner",
+      },
+      preparedIngressRoot: {
+        domain: "ingress",
+        rootKeyId: "root-family-owner-ingress",
+        userId: "member_family_owner",
+      },
+    }));
     mocks.buildHostedFamilyInviteAcceptedReplyText.mockReturnValue("Welcome to Murph Family.");
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
@@ -5229,7 +5257,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
     );
-    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue(null);
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockImplementation(
+      async ({ domain, userId }) => userId === "member_family_owner"
+        ? `root-family-owner-${domain}`
+        : null,
+    );
     const preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates = new Map([
       ["control", buildPreparedDomainRootCandidate({
         domain: "control",
@@ -5335,12 +5367,41 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       );
       expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith(
         expect.objectContaining({
+          acceptedMember: expect.objectContaining({
+            member: expect.objectContaining({ id: "member_123" }),
+            preparedControlRoot: expect.objectContaining({
+              domain: "control",
+              userId: "member_123",
+            }),
+          }),
           phoneNumber: "+15551234567",
           preparedCryptoDomainRoots,
+          preparedOwnerNotification: expect.objectContaining({
+            ownerMember: expect.objectContaining({
+              id: "member_family_owner",
+            }),
+            preparedControlRoot: {
+              domain: "control",
+              rootKeyId: "root-family-owner-control",
+              userId: "member_family_owner",
+            },
+            preparedIngressRoot: {
+              domain: "ingress",
+              rootKeyId: "root-family-owner-ingress",
+              userId: "member_family_owner",
+            },
+          }),
           text: "family_phone_token",
           tx: prisma,
         }),
       );
+      expect(mocks.prepareHostedFamilyOwnerNotification)
+        .toHaveBeenCalledExactlyOnceWith({
+          inviteCode: "phone_token",
+          prisma,
+        });
+      expect(mocks.prepareHostedFamilyOwnerNotification.mock.invocationCallOrder[0])
+        .toBeLessThan(prisma.$transaction?.mock.invocationCallOrder[0] ?? 0);
       expect(providerDomainsAfterTransactionStart).toEqual([]);
       expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
         isFullHostedMemberRoutingRecordQuery(query)

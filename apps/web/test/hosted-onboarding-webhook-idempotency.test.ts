@@ -161,30 +161,46 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
     mocks.ensureHostedMemberForPhoneResolutionTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
-}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/hosted-member-identity-store")>(
+    "@/src/lib/hosted-onboarding/hosted-member-identity-store",
+  );
+  return {
+    ...actual,
+    lookupHostedMemberIdentityByPhoneNumber:
+      mocks.lookupHostedMemberIdentityByPhoneNumber,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   lookupHostedMemberByVerifiedEmailAddress: mocks.lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  acquireHostedMemberHomeLinqRouteLockTx:
-    mocks.acquireHostedMemberHomeLinqRouteLockTx,
-  countHostedMemberHomeLinqBindingsByRecipientPhone:
-    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
-  lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
-  lookupHostedMemberCoreByPendingLinqParticipantContact:
-    mocks.lookupHostedMemberCoreByPendingLinqParticipantContact,
-  projectHostedMemberRoutingState: mocks.projectHostedMemberRoutingState,
-  readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
-  readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
-  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
-  upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
-  upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
-}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/hosted-member-routing-store")>(
+    "@/src/lib/hosted-onboarding/hosted-member-routing-store",
+  );
+  return {
+    ...actual,
+    acquireHostedMemberHomeLinqRouteLockTx:
+      mocks.acquireHostedMemberHomeLinqRouteLockTx,
+    countHostedMemberHomeLinqBindingsByRecipientPhone:
+      mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
+    lookupHostedMemberRoutingByHomeLinqChatId:
+      mocks.lookupHostedMemberRoutingByHomeLinqChatId,
+    lookupHostedMemberCoreByPendingLinqParticipantContact:
+      mocks.lookupHostedMemberCoreByPendingLinqParticipantContact,
+    projectHostedMemberRoutingState: mocks.projectHostedMemberRoutingState,
+    readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
+    readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
+    readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+    upsertHostedMemberHomeLinqBindingTx:
+      mocks.upsertHostedMemberHomeLinqBindingTx,
+    upsertHostedMemberPendingLinqBindingTx:
+      mocks.upsertHostedMemberPendingLinqBindingTx,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-daily-state")>(
@@ -2251,6 +2267,9 @@ function createPrismaStub() {
         suspendedAt: null,
         threadContainer: null,
       }),
+    },
+    hostedMemberIdentity: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMemberRouting: {
       findFirst: vi.fn().mockResolvedValue(null),

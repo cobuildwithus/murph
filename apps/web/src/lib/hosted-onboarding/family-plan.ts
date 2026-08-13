@@ -13,6 +13,7 @@ import {
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import {
   appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "../hosted-groups/group-join-confirmation";
@@ -43,6 +44,7 @@ import {
   normalizeHostedTelegramUsernameForLookup,
   readHostedPhoneHint,
 } from "./contact-privacy";
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
@@ -99,26 +101,52 @@ import {
   HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
-import { createHostedMember } from "./hosted-member-store";
+import {
+  createHostedMember,
+  readHostedMemberCoreState,
+  type HostedMemberCoreState,
+} from "./hosted-member-store";
 import {
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import {
+  hostedMemberIdentityRecordsEqual,
+  lockHostedMemberIdentityStateTx,
   lookupHostedMemberIdentityByPhoneNumber,
+  projectHostedMemberIdentityState,
+  readHostedMemberIdentityControlRootKeyIds,
   readHostedMemberIdentity,
+  readHostedMemberIdentityRecord,
+  type HostedMemberIdentityState,
+  type HostedMemberIdentityRecord,
 } from "./hosted-member-identity-store";
 import {
+  hostedMemberRoutingRecordsEqual,
+  lockHostedMemberRoutingStateTx,
+  projectHostedMemberRoutingState,
+  readHostedMemberRoutingRecord,
+  readHostedMemberRoutingControlRootKeyIds,
   readHostedMemberRoutingState,
   resolveHostedMemberRoutingByTelegramUserId,
+  type HostedMemberRoutingRecord,
+  type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
 import {
+  HostedDomainRootPreparationMismatchError,
+  prepareHostedDomainRootForWeb,
   prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  revalidatePreparedHostedDomainRootForWebTx,
+  unwrapHostedDomainRootsForWebByRootKeyIds,
   type PreparedHostedCryptoDomainRootCandidates,
+  type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
-import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
+import {
+  bindHostedMemberPhoneToPreparedMemberTx,
+  ensureHostedMemberForPhoneTx,
+} from "./member-identity-service";
 import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
@@ -4395,6 +4423,152 @@ export async function appendHostedFamilyChatNotificationTx(input: {
   };
 }
 
+async function appendHostedFamilyChatNotificationWithPreparedCryptoTx(input: {
+  occurredAt: string;
+  memberId: string;
+  notification: HostedFamilyChatNotificationRequest;
+  prepared: PreparedHostedDomainRootForWeb;
+  route: HostedExecutionAssistantNotificationRoute | null;
+  sourceEventId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{ mailboxItemId: string | null }> {
+  if (!input.route) {
+    return { mailboxItemId: null };
+  }
+  const eventId = `assistant.notification.requested:family-chat:${input.memberId}:${input.sourceEventId}`;
+  const append = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+    envelope: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: input.memberId,
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        instructions: input.notification.instructions,
+        responsePolicy: input.notification.responsePolicy,
+        route: input.route,
+      },
+      occurredAt: input.occurredAt,
+    }),
+    prepared: input.prepared,
+    tx: input.tx,
+  });
+  return { mailboxItemId: append.item.id };
+}
+
+async function revalidatePreparedHostedFamilyOwnerNotificationTx(input: {
+  invite: HostedAccountGroupInviteSnapshot;
+  prepared: PreparedHostedFamilyOwnerNotification;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedExecutionAssistantNotificationRoute | null> {
+  const ownerMemberId = input.invite.group.ownerMemberId;
+  assertPreparedHostedFamilyOwnerNotificationTarget(input);
+  await lockHostedMemberIdentityStateTx({
+    memberId: ownerMemberId,
+    prisma: input.tx,
+  });
+  await lockHostedMemberRoutingStateTx({
+    memberId: ownerMemberId,
+    prisma: input.tx,
+  });
+  const [ownerMember, ownerIdentity, ownerRouting] = await Promise.all([
+    readHostedMemberCoreState({ memberId: ownerMemberId, prisma: input.tx }),
+    readHostedMemberIdentityRecord({ memberId: ownerMemberId, prisma: input.tx }),
+    readHostedMemberRoutingRecord({ memberId: ownerMemberId, prisma: input.tx }),
+  ]);
+  if (
+    !ownerMember
+    || ownerMember.updatedAt.getTime() !== input.prepared.ownerMember.updatedAt.getTime()
+    || !hostedMemberIdentityRecordsEqual(ownerIdentity, input.prepared.ownerIdentity)
+    || !hostedMemberRoutingRecordsEqual(ownerRouting, input.prepared.ownerRouting)
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+  return buildHostedFamilyChatNotificationRoute({
+    identity: input.prepared.ownerIdentityState,
+    memberId: ownerMemberId,
+    routing: input.prepared.ownerRoutingState,
+  });
+}
+
+async function revalidatePreparedHostedFamilyOwnerNotificationRootsTx(
+  input: {
+    prepared: PreparedHostedFamilyOwnerNotification;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  await revalidatePreparedHostedDomainRootForWebTx({
+    prepared: input.prepared.preparedControlRoot,
+    tx: input.tx,
+  });
+  if (input.prepared.preparedIngressRoot) {
+    await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: input.prepared.preparedIngressRoot,
+      tx: input.tx,
+    });
+  }
+}
+
+function assertPreparedHostedFamilyOwnerNotificationTarget(input: {
+  invite: HostedAccountGroupInviteSnapshot;
+  prepared: PreparedHostedFamilyOwnerNotification;
+}): void {
+  const ownerMemberId = input.invite.group.ownerMemberId;
+  if (
+    input.prepared.inviteCode !== input.invite.inviteCode
+    || input.prepared.ownerMember.id !== ownerMemberId
+    || input.prepared.preparedControlRoot.domain !== "control"
+    || input.prepared.preparedControlRoot.userId !== ownerMemberId
+    || (
+      input.prepared.preparedIngressRoot
+      && (
+        input.prepared.preparedIngressRoot.domain !== "ingress"
+        || input.prepared.preparedIngressRoot.userId !== ownerMemberId
+      )
+    )
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+}
+
+function buildHostedFamilyChatNotificationRoute(input: {
+  fallbackTelegramThreadId?: string | null;
+  fallbackTelegramUserId?: string | null;
+  identity: HostedMemberIdentityState | null;
+  memberId: string;
+  routing: HostedMemberRoutingStateSnapshot | null;
+}): HostedExecutionAssistantNotificationRoute | null {
+  return resolveHostedMemberAssistantNotificationRoute({
+    linqChatId: input.routing?.linqChatId ?? input.routing?.pendingLinqChatId ?? null,
+    linqContactLookupKey:
+      input.routing?.pendingLinqParticipantContact?.lookupKey
+      ?? input.identity?.phoneLookupKey
+      ?? null,
+    linqRecipientPhone: input.routing?.linqRecipientPhone ?? null,
+    memberId: input.memberId,
+    memberPhoneNumber: input.identity?.phoneNumber ?? null,
+    messaging: resolveHostedMemberMessagingState({
+      identity: {
+        phoneLookupKey: input.identity?.phoneLookupKey ?? null,
+      },
+      routing: {
+        linqChatId: input.routing?.linqChatId ?? null,
+        pendingLinqChatId: input.routing?.pendingLinqChatId ?? null,
+        pendingLinqParticipantContact:
+          input.routing?.pendingLinqParticipantContact ?? null,
+        telegramThreadId:
+          input.routing?.telegramThreadId
+          ?? input.fallbackTelegramThreadId
+          ?? null,
+        telegramUserId:
+          input.routing?.telegramUserId
+          ?? input.fallbackTelegramUserId
+          ?? null,
+      },
+    }),
+  });
+}
+
 export async function resolveHostedFamilyChatNotificationRouteTx(input: {
   fallbackTelegramThreadId?: string | null;
   fallbackTelegramUserId?: string | null;
@@ -4411,33 +4585,12 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
       prisma: input.tx,
     }),
   ]);
-  return resolveHostedMemberAssistantNotificationRoute({
-    linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
-    linqContactLookupKey:
-      routing?.pendingLinqParticipantContact?.lookupKey
-      ?? identity?.phoneLookupKey
-      ?? null,
-    linqRecipientPhone: routing?.linqRecipientPhone ?? null,
+  return buildHostedFamilyChatNotificationRoute({
+    fallbackTelegramThreadId: input.fallbackTelegramThreadId,
+    fallbackTelegramUserId: input.fallbackTelegramUserId,
+    identity,
     memberId: input.memberId,
-    memberPhoneNumber: identity?.phoneNumber ?? null,
-    messaging: resolveHostedMemberMessagingState({
-      identity: {
-        phoneLookupKey: identity?.phoneLookupKey ?? null,
-      },
-      routing: {
-        linqChatId: routing?.linqChatId ?? null,
-        pendingLinqChatId: routing?.pendingLinqChatId ?? null,
-        pendingLinqParticipantContact: routing?.pendingLinqParticipantContact ?? null,
-        telegramThreadId:
-          routing?.telegramThreadId
-          ?? input.fallbackTelegramThreadId
-          ?? null,
-        telegramUserId:
-          routing?.telegramUserId
-          ?? input.fallbackTelegramUserId
-          ?? null,
-      },
-    }),
+    routing,
   });
 }
 
@@ -4569,6 +4722,123 @@ export async function resolveHostedFamilyInviteTokenForInbound(input: {
   });
 
   return invite ? inviteCode : null;
+}
+
+export interface PreparedHostedFamilyOwnerNotification {
+  inviteCode: string;
+  ownerIdentity: HostedMemberIdentityRecord | null;
+  ownerIdentityState: HostedMemberIdentityState | null;
+  ownerMember: HostedMemberCoreState;
+  ownerRouting: HostedMemberRoutingRecord | null;
+  ownerRoutingState: HostedMemberRoutingStateSnapshot | null;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
+}
+
+/**
+ * Prepares the distinct Family owner's notification route and mailbox root so
+ * phone acceptance can remain atomic without provider work after BEGIN.
+ */
+export async function prepareHostedFamilyOwnerNotification(input: {
+  inviteCode: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<PreparedHostedFamilyOwnerNotification | null> {
+  const invite = await input.prisma.hostedAccountGroupInvite.findUnique({
+    select: {
+      group: {
+        select: {
+          ownerMemberId: true,
+        },
+      },
+      inviteCode: true,
+    },
+    where: {
+      inviteCode: input.inviteCode,
+    },
+  });
+  if (!invite) {
+    return null;
+  }
+
+  const ownerMemberId = invite.group.ownerMemberId;
+  const [ownerMember, ownerIdentity, ownerRouting] = await Promise.all([
+    readHostedMemberCoreState({
+      memberId: ownerMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberIdentityRecord({
+      memberId: ownerMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberRoutingRecord({
+      memberId: ownerMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  if (!ownerMember) {
+    return null;
+  }
+
+  const controlRootKeyIds = [...new Set([
+    ...readHostedMemberIdentityControlRootKeyIds(ownerIdentity),
+    ...readHostedMemberRoutingControlRootKeyIds(ownerRouting),
+  ])];
+  // Keep every root owned by one sequential provider lane. The outer direct
+  // preparation has already drained the invitee's two-slot phase before this
+  // owner package starts, so the composed peak remains bounded at two.
+  const preparedControlRoot = await prepareHostedDomainRootForWeb({
+    domain: "control",
+    prisma: input.prisma,
+    reason: "hosted-family.invite-owner-notification",
+    userId: ownerMemberId,
+  });
+  for (const rootKeyId of controlRootKeyIds) {
+    const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: input.prisma,
+      references: [{
+        domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+        rootKeyId,
+        userId: ownerMemberId,
+      }],
+      retainFailureInScopedCache: true,
+      signal: undefined,
+    });
+    for (const root of roots) {
+      root.rootKey.fill(0);
+    }
+  }
+  const [ownerIdentityState, ownerRoutingState] = await Promise.all([
+    ownerIdentity
+      ? projectHostedMemberIdentityState(ownerIdentity, input.prisma)
+      : null,
+    ownerRouting
+      ? projectHostedMemberRoutingState(ownerRouting, input.prisma, true)
+      : null,
+  ]);
+  const route = buildHostedFamilyChatNotificationRoute({
+    identity: ownerIdentityState,
+    memberId: ownerMemberId,
+    routing: ownerRoutingState,
+  });
+  const preparedIngressRoot = route
+    ? await prepareHostedDomainRootForWeb({
+        domain: "ingress",
+        prisma: input.prisma,
+        reason: "hosted-family.invite-owner-notification",
+        userId: ownerMemberId,
+      })
+    : null;
+
+  return {
+    inviteCode: invite.inviteCode,
+    ownerIdentity,
+    ownerIdentityState,
+    ownerMember,
+    ownerRouting,
+    ownerRoutingState,
+    preparedControlRoot,
+    preparedIngressRoot,
+  };
 }
 
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
@@ -4805,6 +5075,11 @@ async function resolveHostedFamilyInviteCodeFromTelegramUsername(input: {
 }
 
 export async function acceptHostedFamilyInviteFromPhoneTx(input: {
+  acceptedMember?: {
+    currentIdentity: HostedMemberIdentityState | null;
+    member: HostedMemberCoreState;
+    preparedControlRoot: PreparedHostedDomainRootForWeb;
+  };
   now?: Date;
   onAcceptedMemberLocked?: (input: {
     acceptedMemberId: string;
@@ -4817,6 +5092,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber: string;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
+  preparedOwnerNotification?: PreparedHostedFamilyOwnerNotification;
   text: string | null | undefined;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
@@ -4861,11 +5137,20 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     });
   }
 
-  const member = await ensureHostedMemberForPhoneTx({
-    phoneNumber: input.phoneNumber,
-    phoneNumberVerifiedAt: now,
-    prisma: input.tx,
-  });
+  const member = input.acceptedMember
+    ? await bindHostedMemberPhoneToPreparedMemberTx({
+        currentIdentity: input.acceptedMember.currentIdentity,
+        member: input.acceptedMember.member,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: now,
+        preparedControlRoot: input.acceptedMember.preparedControlRoot,
+        prisma: input.tx,
+      })
+    : await ensureHostedMemberForPhoneTx({
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: now,
+        prisma: input.tx,
+      });
 
   return acceptHostedFamilyInviteTx({
     acceptedMemberId: member.id,
@@ -4877,6 +5162,9 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     phoneNumber: input.phoneNumber,
     ...(input.preparedCryptoDomainRoots
       ? { preparedCryptoDomainRoots: input.preparedCryptoDomainRoots }
+      : {}),
+    ...(input.preparedOwnerNotification
+      ? { preparedOwnerNotification: input.preparedOwnerNotification }
       : {}),
     requirePhoneBinding: !isFullyUnbound,
     tx: input.tx,
@@ -4899,6 +5187,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber?: string | null;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
+  preparedOwnerNotification?: PreparedHostedFamilyOwnerNotification;
   requirePhoneBinding?: boolean;
   requireWebBinding?: boolean;
   telegramUsername?: string | null;
@@ -4970,7 +5259,34 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
+  let preparedOwnerNotificationRoute:
+    | HostedExecutionAssistantNotificationRoute
+    | null
+    | undefined;
+  if (input.preparedOwnerNotification) {
+    assertPreparedHostedFamilyOwnerNotificationTarget({
+      invite,
+      prepared: input.preparedOwnerNotification,
+    });
+    await revalidatePreparedHostedFamilyOwnerNotificationRootsTx({
+      prepared: input.preparedOwnerNotification,
+      tx: input.tx,
+    });
+    if (!(await tryLockHostedFamilyPreparedOwnerRowTx({
+        ownerMemberId: invite.group.ownerMemberId,
+        tx: input.tx,
+      }))) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+    preparedOwnerNotificationRoute =
+      await revalidatePreparedHostedFamilyOwnerNotificationTx({
+        invite,
+        prepared: input.preparedOwnerNotification,
+        tx: input.tx,
+      });
+  } else {
+    await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
+  }
   await lockHostedMemberRow(input.tx, input.acceptedMemberId);
   const existingGroupMembership = await input.tx.hostedAccountGroupMembership.findFirst({
     select: { id: true },
@@ -5092,10 +5408,32 @@ export async function acceptHostedFamilyInviteTx(input: {
     acceptedMemberId: input.acceptedMemberId,
     invite,
     now,
+    ...(input.preparedOwnerNotification
+      ? {
+          prepared: input.preparedOwnerNotification,
+          preparedRoute: preparedOwnerNotificationRoute,
+        }
+      : {}),
     tx: input.tx,
   });
 
   return membership;
+}
+
+async function tryLockHostedFamilyPreparedOwnerRowTx(input: {
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  // Direct Linq already owns the invitee member. Never wait here on the
+  // opposite Family owner -> invitee order used by Web acceptance; a fresh
+  // preparation attempt can retry after the current owner transaction ends.
+  const rows = await input.tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "hosted_member"
+    WHERE "id" = ${input.ownerMemberId}
+    FOR UPDATE SKIP LOCKED
+  `;
+  return rows.length === 1;
 }
 
 async function readHostedFamilyInviteActivationReplayResultTx(input: {
@@ -5126,13 +5464,24 @@ async function notifyHostedFamilyOwnerOfInviteClaimTx(input: {
   acceptedMemberId: string;
   invite: HostedAccountGroupInviteSnapshot;
   now: Date;
+  prepared?: PreparedHostedFamilyOwnerNotification;
+  preparedRoute?: HostedExecutionAssistantNotificationRoute | null;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  const route = await resolveHostedFamilyChatNotificationRouteTx({
-    memberId: input.invite.group.ownerMemberId,
-    tx: input.tx,
-  });
-  await appendHostedFamilyChatNotificationTx({
+  const ownerMemberId = input.invite.group.ownerMemberId;
+  let route: HostedExecutionAssistantNotificationRoute | null;
+  if (input.prepared) {
+    if (input.preparedRoute === undefined) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+    route = input.preparedRoute;
+  } else {
+    route = await resolveHostedFamilyChatNotificationRouteTx({
+      memberId: ownerMemberId,
+      tx: input.tx,
+    });
+  }
+  const appendInput = {
     memberId: input.invite.group.ownerMemberId,
     notification: buildHostedFamilyOwnerInviteAcceptedNotification({
       targetLabel: input.invite.targetLabel,
@@ -5141,7 +5490,21 @@ async function notifyHostedFamilyOwnerOfInviteClaimTx(input: {
     route,
     sourceEventId: `family-invite-claim:${input.invite.id}:${input.acceptedMemberId}`,
     tx: input.tx,
-  });
+  };
+  if (input.prepared) {
+    if (!route) {
+      return;
+    }
+    if (!input.prepared.preparedIngressRoot) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+    await appendHostedFamilyChatNotificationWithPreparedCryptoTx({
+      ...appendInput,
+      prepared: input.prepared.preparedIngressRoot,
+    });
+  } else {
+    await appendHostedFamilyChatNotificationTx(appendInput);
+  }
 }
 
 function buildHostedFamilyOwnerInviteAcceptedNotification(input: {

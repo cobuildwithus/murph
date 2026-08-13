@@ -39,7 +39,9 @@ export {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-telegram";
 export {
+  hostedMemberRoutingRecordsEqual,
   projectHostedMemberRoutingState,
+  readHostedMemberRoutingControlRootKeyIds,
   type HostedMemberRoutingLookupMatch,
   type HostedMemberRoutingLookupSnapshot,
   type HostedMemberRoutingRecord,

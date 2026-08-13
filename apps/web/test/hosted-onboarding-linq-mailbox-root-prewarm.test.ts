@@ -157,6 +157,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async (importOriginal) => {
   >();
   return {
     ...actual,
+    prepareHostedFamilyOwnerNotification: vi.fn(async () => null),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(async () => null),
   };
 });
@@ -430,6 +431,9 @@ function buildPrewarmPrisma() {
       calls.push("commit");
       return result;
     }),
+    hostedMemberIdentity: {
+      findUnique: vi.fn<() => Promise<unknown>>(async () => null),
+    },
     hostedMemberRouting: {
       findUnique: vi.fn<() => Promise<unknown>>(async () => null),
     },
@@ -1217,6 +1221,8 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan-conflict");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              identityRecord: null,
+              identityState: null,
               memberId: "member_direct_a",
               preparedControlRoot: {
                 domain: "control",
@@ -1225,6 +1231,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
               },
               preparedCryptoDomainRoots: new Map(),
               preparedFamilyInviteCode: null,
+              preparedFamilyOwnerNotification: null,
               preparedIngressRoot: {
                 domain: "ingress",
                 rootKeyId: "rk_1",
@@ -1247,6 +1254,8 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              identityRecord: null,
+              identityState: null,
               memberId: "member_direct_b",
               preparedControlRoot: {
                 domain: "control",
@@ -1255,6 +1264,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
               },
               preparedCryptoDomainRoots: new Map(),
               preparedFamilyInviteCode: null,
+              preparedFamilyOwnerNotification: null,
               preparedIngressRoot: {
                 domain: "ingress",
                 rootKeyId: "rk_1",

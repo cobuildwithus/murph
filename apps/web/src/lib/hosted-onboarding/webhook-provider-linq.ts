@@ -30,13 +30,21 @@ import {
   buildHostedFamilyDraftCheckoutConflictReplyText,
   buildHostedFamilyInviteAcceptedReplyText,
   HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
+  type PreparedHostedFamilyOwnerNotification,
   resolveHostedFamilyInviteTokenForInbound,
 } from "./family-plan";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
   ensureHostedMemberForPhoneResolutionTx,
 } from "./member-identity-service";
-import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
+import {
+  hostedMemberIdentityRecordsEqual,
+  lockHostedMemberIdentityStateTx,
+  lookupHostedMemberIdentityByPhoneNumber,
+  readHostedMemberIdentityRecord,
+  type HostedMemberIdentityRecord,
+  type HostedMemberIdentityState,
+} from "./hosted-member-identity-store";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
   type HostedMemberCoreState,
@@ -46,7 +54,9 @@ import {
   demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberCoreByPendingLinqParticipantContact,
   lookupHostedMemberRoutingByHomeLinqChatId,
+  hostedMemberRoutingRecordsEqual,
   readHostedMemberRoutingRecord,
+  readHostedMemberRoutingControlRootKeyIds,
   readHostedMemberRoutingState,
   type HostedMemberRoutingRecord,
   type HostedMemberRoutingStateSnapshot,
@@ -199,9 +209,6 @@ import {
 import {
   getHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
-import {
-  readHostedUserSecureBoxStringRootReference,
-} from "../hosted-crypto/secure-box";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
@@ -683,10 +690,13 @@ function hostedLinqDirectMailboxPreparationRequired(
 }
 
 interface PreparedHostedLinqDirectMailboxPayloadRoot {
+  identityRecord: HostedMemberIdentityRecord | null;
+  identityState: HostedMemberIdentityState | null;
   memberId: string;
   preparedControlRoot: PreparedHostedDomainRootForWeb;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyInviteCode: string | null;
+  preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
   preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
@@ -735,6 +745,27 @@ async function tryLockPreparedHostedLinqDirectMemberRowTx(input: {
   return lockedRows.length === 1;
 }
 
+async function revalidatePreparedHostedLinqDirectIdentityTx(input: {
+  memberId: string;
+  prepared: PreparedHostedLinqDirectMailboxPayloadRoot;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await lockHostedMemberIdentityStateTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const identityRecord = await readHostedMemberIdentityRecord({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (!hostedMemberIdentityRecordsEqual(
+    identityRecord,
+    input.prepared.identityRecord,
+  )) {
+    throw hostedLinqDirectMailboxPreparationRequired("member");
+  }
+}
+
 async function revalidatePreparedHostedLinqDirectRoutingTx(input: {
   chatId: string;
   contact: HostedLinqParticipantContact;
@@ -761,7 +792,7 @@ async function revalidatePreparedHostedLinqDirectRoutingTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  if (!hasSameHostedMemberRoutingRecord(
+  if (!hostedMemberRoutingRecordsEqual(
     routingRecord,
     input.prepared.routingRecord,
   )) {
@@ -856,67 +887,6 @@ async function revalidatePreparedHostedLinqDirectIngressRootTx(input: {
     }
     throw error;
   }
-}
-
-const HOSTED_MEMBER_ROUTING_RECORD_KEYS = [
-  "linqChatIdEncrypted",
-  "linqChatLookupKey",
-  "linqHomeLineAssignedAt",
-  "linqParticipantContactKind",
-  "linqParticipantContactLookupKey",
-  "linqRecipientPhoneEncrypted",
-  "linqRecipientPhoneLookupKey",
-  "memberId",
-  "pendingLinqChatIdEncrypted",
-  "pendingLinqChatLookupKey",
-  "pendingLinqParticipantContactEncrypted",
-  "pendingLinqParticipantContactKind",
-  "pendingLinqParticipantContactLookupKey",
-  "pendingLinqParticipantContactObservedAt",
-  "pendingLinqRecipientPhoneEncrypted",
-  "pendingLinqRecipientPhoneLookupKey",
-  "replyAliasLookupKey",
-  "telegramUserIdEncrypted",
-  "telegramUserLookupKey",
-] as const satisfies readonly (keyof HostedMemberRoutingRecord)[];
-
-function hasSameHostedMemberRoutingRecord(
-  current: HostedMemberRoutingRecord | null,
-  prepared: HostedMemberRoutingRecord | null,
-): boolean {
-  if (!current || !prepared) {
-    return current === prepared;
-  }
-  return HOSTED_MEMBER_ROUTING_RECORD_KEYS.every((key) => {
-    const currentValue = current[key];
-    const preparedValue = prepared[key];
-    return currentValue instanceof Date && preparedValue instanceof Date
-      ? currentValue.getTime() === preparedValue.getTime()
-      : currentValue === preparedValue;
-  });
-}
-
-export function readHostedMemberRoutingControlRootKeyIds(
-  routing: HostedMemberRoutingRecord | null,
-): string[] {
-  if (!routing) {
-    return [];
-  }
-  const encryptedValues = [
-    routing.linqChatIdEncrypted,
-    routing.linqRecipientPhoneEncrypted,
-    routing.pendingLinqChatIdEncrypted,
-    routing.pendingLinqParticipantContactEncrypted,
-    routing.pendingLinqRecipientPhoneEncrypted,
-    routing.telegramUserIdEncrypted,
-  ];
-  return [...new Set(encryptedValues.flatMap((value) => {
-    const reference = readHostedUserSecureBoxStringRootReference({
-      lane: "hosted-member-private-field",
-      value,
-    });
-    return reference ? [reference.rootKeyId] : [];
-  }))];
 }
 
 async function assertPreparedHostedLinqRootCached(input: {
@@ -1653,6 +1623,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
       })) {
         throw hostedLinqDirectMailboxPreparationRequired("member");
       }
+      await revalidatePreparedHostedLinqDirectIdentityTx({
+        memberId: existingMember.id,
+        prepared: preparedDirectMailboxControlAuthority,
+        prisma: input.prisma,
+      });
     } else {
       await lockHostedMemberRow(input.prisma, existingMember.id);
     }
@@ -1875,6 +1850,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
             || preparedDirectRoutingAuthority.preparedFamilyInviteCode
               !== familyInviteCode
             || !preparedDirectRoutingAuthority.preparedCryptoDomainRoots
+            || !preparedDirectRoutingAuthority.preparedFamilyOwnerNotification
           ) {
             throw hostedLinqDirectMailboxPreparationRequired("member");
           }
@@ -1889,6 +1865,16 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (participantContact.kind === "phone") {
     try {
       familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
+        ...(preparedFamilyCryptoDomainRoots && preparedDirectRoutingAuthority
+          ? {
+              acceptedMember: {
+                currentIdentity: preparedDirectRoutingAuthority.identityState,
+                member: existingMember!,
+                preparedControlRoot:
+                  preparedDirectRoutingAuthority.preparedControlRoot,
+              },
+            }
+          : {}),
         now: new Date(occurredAt),
         onAcceptedMemberLocked: async ({ acceptedMemberId }) => {
           const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
@@ -1963,6 +1949,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
         ...(preparedFamilyCryptoDomainRoots
           ? { preparedCryptoDomainRoots: preparedFamilyCryptoDomainRoots }
           : {}),
+        ...(preparedDirectRoutingAuthority?.preparedFamilyOwnerNotification
+          ? {
+              preparedOwnerNotification:
+                preparedDirectRoutingAuthority.preparedFamilyOwnerNotification,
+            }
+          : {}),
         text: summary.text,
         tx: input.prisma,
       });
@@ -1975,6 +1967,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
         && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
       ) {
         familyDraftCheckoutConflict = true;
+      } else if (error instanceof HostedDomainRootPreparationMismatchError) {
+        throw hostedLinqDirectMailboxPreparationRequired("member");
       } else if (!isExpectedHostedLinqFamilyInviteAcceptanceMiss(error)) {
         throw error;
       }
