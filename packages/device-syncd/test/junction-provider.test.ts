@@ -5,7 +5,10 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
-import { normalizeJunctionSnapshot } from "@murphai/importers/device-providers/junction";
+import {
+  buildJunctionDailyTimeseriesAggregateResourceId,
+  normalizeJunctionSnapshot,
+} from "@murphai/importers/device-providers/junction";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
@@ -8226,6 +8229,9 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
       canonicalEventDayKeys: [...new Set((normalized.events ?? []).flatMap((event) =>
         typeof event.dayKey === "string" ? [event.dayKey] : []
       ))],
+      canonicalEventExternalRefResourceIds: (normalized.events ?? []).flatMap((event) =>
+        event.externalRef?.resourceId ? [event.externalRef.resourceId] : []
+      ),
       canonicalSparseCalendarTargets,
       durableDeliveryAccepted: true,
     };
@@ -8394,7 +8400,16 @@ test("Junction sparse calendar refresh imports an authoritative empty source day
         normalizedImports.push(normalizeJunctionSnapshot(snapshot as Parameters<
           typeof normalizeJunctionSnapshot
         >[0], { defaultTimeZone: "America/New_York" }));
-        return { durableDeliveryAccepted: true };
+        return {
+          canonicalEventExternalRefResourceIds: [buildJunctionDailyTimeseriesAggregateResourceId({
+            dayKey: "2026-04-02",
+            resource: "water",
+            sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+            sourceProviderSlug: "garmin",
+            sourceType: "watch",
+          })],
+          durableDeliveryAccepted: true,
+        };
       },
     }),
     createJob("resource", {
@@ -8447,6 +8462,64 @@ test("Junction sparse calendar refresh imports an authoritative empty source day
     && url.includes("start_date=2026-04-02")
     && url.includes("end_date=2026-04-02")
   ));
+});
+
+test("Junction sparse calendar refresh rejects nonempty rows that apply no owned daily state", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { water: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              date: "2026-04-02",
+              sourceProviderSlug: "garmin",
+              sourceType: "watch",
+              value: "not-a-number",
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, { timeseriesResources: ["water"] });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        now: "2026-04-03T12:00:00.000Z",
+        importSnapshot: async () => ({
+          canonicalEventCount: 0,
+          canonicalEventExternalRefResourceIds: [],
+          durableDeliveryAccepted: true,
+        }),
+      }),
+      createJob("resource", {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_CALENDAR_REFRESH_DAILY_STATE_NOT_APPLIED"
+      && error.retryable,
+  );
 });
 
 test("Junction sparse calendar refresh retains an unavailable optional endpoint", async () => {

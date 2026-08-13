@@ -9,6 +9,7 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import { buildJunctionDailyTimeseriesAggregateResourceId } from "@murphai/importers/device-providers/junction";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -2442,7 +2443,19 @@ test("device sync service retains one accepted sparse calendar job until canonic
         if (importAttempts < 3) {
           throw new Error("Synthetic canonical calendar import failure.");
         }
-        return { events: [{ kind: "observation" }] };
+        return {
+          events: [{
+            externalRef: {
+              resourceId: buildJunctionDailyTimeseriesAggregateResourceId({
+                dayKey: "2026-07-08",
+                resource: "water",
+                sourceProviderSlug: "garmin",
+                sourceType: "watch",
+              }),
+            },
+            kind: "observation",
+          }],
+        };
       },
     },
     providers: [
@@ -2545,6 +2558,150 @@ test("device sync service retains one accepted sparse calendar job until canonic
     assert.equal(
       store.getJobById(invalidJob.id)?.lastErrorCode,
       "JUNCTION_CALENDAR_REFRESH_JOB_INVALID",
+    );
+  } finally {
+    close();
+  }
+});
+
+test("device sync service keeps calendar work dormant without account authority", async () => {
+  for (const accountState of [
+    { status: "active", setupPhase: "pending_link" },
+    { status: "disconnected", setupPhase: null },
+    { status: "reauthorization_required", setupPhase: null },
+  ] as const) {
+    const vaultRoot = await makeTempDirectory(`murph-device-syncd-calendar-dormant-${accountState.status}`);
+    const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`Unexpected request while authority is unavailable: ${readUrl(input)}`);
+    });
+    const { service, store, close } = createServiceFixture({
+      secret: "secret-for-tests",
+      config: {
+        vaultRoot,
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      },
+      providers: [createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: ["water"],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: providerRequests,
+      })],
+    });
+    try {
+      const account = store.upsertAccount({
+        provider: "junction",
+        externalAccountId: `junction-calendar-dormant-${accountState.status}`,
+        displayName: "Junction",
+        status: accountState.status,
+        setupPhase: accountState.setupPhase,
+        scopes: [],
+        credential: { kind: "provider_config", providerConfigKey: "junction" },
+        connectedAt: "2026-07-10T13:00:00.000Z",
+      });
+      const job = store.enqueueJob({
+        accountId: account.id,
+        provider: "junction",
+        kind: "resource",
+        payload: {
+          calendarRefreshDay: "2026-07-08",
+          resource: "water",
+          sourceProviderSlug: "garmin",
+        },
+        availableAt: "2026-07-10T13:00:00.000Z",
+      });
+      await service.runWorkerOnce();
+      const retained = store.getJobById(job.id);
+      assert.equal(retained?.status, "queued");
+      assert.equal(retained?.attempts, 1);
+      assert.equal(providerRequests.mock.calls.length, 0);
+    } finally {
+      close();
+    }
+  }
+});
+
+test("device sync service retains calendar work when its exact source is fenced", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-source-fenced");
+  const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
+    throw new Error(`Unexpected request while source is fenced: ${readUrl(input)}`);
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryBackfillDays: 2,
+      summaryResources: [],
+      timeseriesResources: ["water"],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      fetchImpl: providerRequests,
+    })],
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-source-fenced",
+      displayName: "Junction",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "junction-garmin",
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+      firstSeenAt: "2026-07-10T13:00:00.000Z",
+      lastSeenAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-07-08",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      availableAt: "2026-07-10T13:00:00.000Z",
+    });
+    await service.runWorkerOnce();
+    assert.equal(store.getJobById(job.id)?.status, "queued");
+    assert.equal(
+      store.getJobById(job.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE",
+    );
+    assert.equal(providerRequests.mock.calls.length, 0);
+
+    store.commitConnectionEstablished({
+      accountId: account.id,
+      jobs: [],
+      provider: "junction",
+      source: {
+        connectionId: account.id,
+        sourceInstanceKey: "junction-garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected",
+        firstSeenAt: "2026-07-10T14:00:00.000Z",
+        lastSeenAt: "2026-07-10T14:00:00.000Z",
+      },
+    });
+    assert.equal(
+      store.claimDueJob("worker-source-restored", "2026-07-10T14:00:00.000Z", 60_000)?.id,
+      job.id,
     );
   } finally {
     close();

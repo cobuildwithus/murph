@@ -172,6 +172,14 @@ export interface JunctionBloodPressureProviderRecordIdentityEvidence {
   readonly repairStableExternalRefResourceIds: readonly (string | null)[];
 }
 
+export interface JunctionDailyTimeseriesAggregateIdentity {
+  dayKey: string;
+  resource: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string | null;
+}
+
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
 type MealNutritionTotals = NonNullable<MealNutrition["totals"]>;
 type MealNutritionTotalKey = keyof MealNutritionTotals;
@@ -6215,13 +6223,43 @@ function buildStableTimeseriesResourceId(
   resourceContext: ResourceContext,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
-  return `${resourceContext.resourceSlug}-${shortHash([
-    resourceContext.resourceSlug,
-    resourceContext.sourceProviderSlug,
-    resourceContext.origin.sourceType,
-    resourceContext.origin.sourceInstanceId,
-    timestamp.observedAtRaw ?? timestamp.occurredAt,
+  return buildJunctionTimeseriesResourceId({
+    observedAtRaw: timestamp.observedAtRaw ?? timestamp.occurredAt,
+    resourceSlug: resourceContext.resourceSlug,
+    sourceInstanceId: resourceContext.origin.sourceInstanceId,
+    sourceProviderSlug: resourceContext.sourceProviderSlug,
+    sourceType: resourceContext.origin.sourceType,
+  });
+}
+
+function buildJunctionTimeseriesResourceId(input: {
+  observedAtRaw?: string;
+  resourceSlug: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string | null;
+}): string {
+  return `${input.resourceSlug}-${shortHash([
+    input.resourceSlug,
+    input.sourceProviderSlug,
+    input.sourceType,
+    input.sourceInstanceId,
+    input.observedAtRaw,
   ])}`;
+}
+
+export function buildJunctionDailyTimeseriesAggregateResourceId(
+  input: JunctionDailyTimeseriesAggregateIdentity,
+): string {
+  const resourceSlug = slugify(input.resource, "timeseries");
+  return buildJunctionTimeseriesResourceId({
+    observedAtRaw: `${input.dayKey}:${input.resource}:daily`,
+    resourceSlug,
+    sourceInstanceId: input.sourceInstanceId,
+    sourceProviderSlug: normalizeJunctionSourceProviderSlug(input.sourceProviderSlug)
+      ?? input.sourceProviderSlug,
+    sourceType: input.sourceType,
+  });
 }
 
 function shortHash(parts: readonly unknown[]): string {

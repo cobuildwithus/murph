@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-11
+Last verified: 2026-08-13
 
 ## Purpose
 
@@ -161,7 +161,13 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    affected date into one deduplicated existing `resource` job. Each job owns
    exactly one resource/provider date and retries that existing calendar-day
    importer independently, so a failed date, a later correction, or a runtime
-   yield cannot erase or restart accepted refresh work. Core rejects more than
+   yield cannot erase or restart accepted refresh work. Setup, account, source,
+   and credential-epoch transitions keep that same job dormant without
+   provider I/O and wake it when authority returns. A calendar job completes
+   only when the canonical import receipt names its exact source/resource/day
+   daily identity. A successful exact-source HTTP 200 empty response applies
+   an explicit zero through that identity; a nonempty response that normalizes
+   to no owned daily state stays retryable. Core rejects more than
    64 affected dates before its canonical write, and the provider repeats that
    bound before queue fanout. That path is the sole writer of their
    daily sums, so a UTC-normalized execution window cannot select the wrong provider
@@ -176,8 +182,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    order that set. Serialized complete-calendar imports reconcile those
    unversioned facts through the canonical event spine, where exact replays are
    no-ops and later non-empty set growth or removal remains revisionable. An
-   empty provider collection emits no aggregate tombstone, so it cannot delete
-   a previously published fact. Explicit
+   ordinary empty provider collection emits no aggregate tombstone, so it cannot
+   delete a previously published fact outside the exact-source calendar repair
+   exception above. Explicit
    provider revisions belong only to stable sparse interval identities. One
    versioned interval may supersede a pre-versioning baseline; after that, only
    a strictly newer revision may change it, while stale replay is a no-op and

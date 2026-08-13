@@ -9,7 +9,9 @@ import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   isJunctionSparseCalendarRefreshJob,
+  isJunctionSparseCalendarRefreshPayloadValid,
   isJunctionSparseCalendarRefreshTerminalFailureCode,
+  JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "./junction-resources.ts";
 import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
@@ -806,17 +808,64 @@ class DeviceSyncServiceController {
 
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
     const retainsAcceptedCalendarRefresh = isJunctionSparseCalendarRefreshJob(job);
+    const retainsAcceptedWork = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh;
+    const delayRetainedJobUntilAuthorityReturns = (code: string, message: string): void => {
+      const delayedAt = currentNow();
+      this.store.failJobIfOwned(
+        job.id,
+        this.workerId,
+        delayedAt,
+        code,
+        message,
+        addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
+        true,
+        true,
+      );
+    };
+
+    if (
+      retainsAcceptedCalendarRefresh
+      && !isJunctionSparseCalendarRefreshPayloadValid(job.payload)
+    ) {
+      failClaimedJob(
+        JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
+        "Junction calendar refresh job payload was invalid.",
+        null,
+        false,
+      );
+      return finishPass();
+    }
 
     if (
       storedAccount.status === "active"
       && isDeviceSyncConnectionSetupPending(storedAccount)
-      && !preservesAcceptedCompanionHrv
+      && !retainsAcceptedWork
     ) {
       failClaimedJob(
         "CONNECTION_SETUP_PENDING",
         "Device sync setup must finish before queued jobs can run.",
         null,
         false,
+      );
+      return finishPass();
+    }
+
+    if (
+      storedAccount.status === "active"
+      && isDeviceSyncConnectionSetupPending(storedAccount)
+      && retainsAcceptedCalendarRefresh
+    ) {
+      delayRetainedJobUntilAuthorityReturns(
+        "CONNECTION_SETUP_PENDING",
+        "Device sync setup must finish before retained calendar work can run.",
+      );
+      return finishPass();
+    }
+
+    if (storedAccount.status === "disconnected" && retainsAcceptedCalendarRefresh) {
+      delayRetainedJobUntilAuthorityReturns(
+        "ACCOUNT_DISCONNECTED",
+        "Device sync account must reconnect before retained calendar work can run.",
       );
       return finishPass();
     }
@@ -831,6 +880,14 @@ class DeviceSyncServiceController {
           jobId: job.id,
         });
       }
+      return finishPass();
+    }
+
+    if (storedAccount.status === "reauthorization_required" && retainsAcceptedCalendarRefresh) {
+      delayRetainedJobUntilAuthorityReturns(
+        "ACCOUNT_REAUTHORIZATION_REQUIRED",
+        "Device sync account must reauthorize before retained calendar work can run.",
+      );
       return finishPass();
     }
 
@@ -905,6 +962,7 @@ class DeviceSyncServiceController {
 
       if (!currentStoredAccount || (
         !preservesAcceptedCompanionHrv
+        && !retainsAcceptedCalendarRefresh
         && (
           currentStoredAccount.status !== "active"
           || currentStoredAccount.disconnectGeneration !== disconnectGeneration

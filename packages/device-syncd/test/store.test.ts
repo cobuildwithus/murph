@@ -3087,6 +3087,96 @@ test("device sync store reclaims an expired retained calendar lease on the same 
   }
 });
 
+test("device sync store preserves retained calendar work across account cleanup and wakes it on reconnect", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-retained-calendar-lifecycle");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-retained-calendar-lifecycle",
+      displayName: "Junction",
+      status: "active",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const retained = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-09T00:00:00.000Z",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      provider: "junction",
+    });
+    const ordinary = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      kind: "reconcile",
+      payload: {},
+      provider: "junction",
+    });
+
+    store.markPendingJobsDeadForAccount(
+      account.id,
+      "2026-04-07T01:00:00.000Z",
+      "ACCOUNT_DISCONNECTED",
+      "Disconnected.",
+    );
+    assert.equal(store.getJobById(retained.id)?.status, "queued");
+    assert.equal(store.getJobById(ordinary.id)?.status, "dead");
+
+    const claimedRetained = store.claimDueJob(
+      "worker-disconnected",
+      "2026-04-09T00:00:00.000Z",
+      60_000,
+    );
+    assert.equal(claimedRetained?.id, retained.id);
+    assert.equal(store.failJobIfOwned(
+      retained.id,
+      "worker-disconnected",
+      "2026-04-09T00:00:01.000Z",
+      "ACCOUNT_DISCONNECTED",
+      "Reconnect required.",
+      "2026-04-10T00:00:00.000Z",
+      true,
+      true,
+    ), true);
+
+    const database = openSqliteRuntimeDatabase(store.databasePath);
+    try {
+      assert.equal(markCredentialScopedPendingDeviceSyncJobsDeadForAccount(database, {
+        accountId: account.id,
+        code: "HOSTED_CONNECTION_EPOCH_REPLACED",
+        message: "Connection epoch changed.",
+        now: "2026-04-07T02:00:00.000Z",
+      }), 0);
+    } finally {
+      database.close();
+    }
+    assert.equal(store.getJobById(retained.id)?.status, "queued");
+
+    store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-retained-calendar-lifecycle",
+      displayName: "Junction",
+      status: "active",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-04-09T01:00:00.000Z",
+    });
+    assert.equal(
+      store.claimDueJob("worker-reconnected", "2026-04-09T01:00:00.000Z", 60_000)?.id,
+      retained.id,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("device sync store ignores expired exhausted running rows for dedupe and reaps them before lower-priority follow-up claims", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-final-attempt-dedupe");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

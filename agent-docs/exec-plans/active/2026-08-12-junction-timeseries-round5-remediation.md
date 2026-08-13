@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -58,9 +58,12 @@ Updated: 2026-08-12
 12. [x] Resolve round ten's cross-day receipt and transport-dedupe findings,
     then run round eleven against the exact pushed head.
 13. [x] Resolve round eleven's durable calendar-refresh finding.
-14. [ ] Resolve round twelve's retained-job and authoritative-empty-day
-    findings, obtain exact-head green CI and a ReviewGPT PASS, then merge and
-    retire the task worktree.
+14. [x] Resolve round twelve's retained-job and authoritative-empty-day
+    findings.
+15. [x] Resolve round thirteen's lifecycle-boundary and applied-daily-state
+    findings.
+16. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+    the task worktree.
 
 ## Decisions
 
@@ -152,6 +155,15 @@ Updated: 2026-08-12
   optional 404/422 endpoints remain retryable. Source identity travels on the
   bounded existing job payload, so this adds no schema, queue, service,
   scheduler, cursor, watermark, tombstone API, or second aggregate owner.
+- Round thirteen's two review-induced findings are accepted. Calendar repair
+  jobs now remain on the same retained queue row across setup, disconnect,
+  reauthorization, source fencing, and credential-epoch replacement. Authority
+  loss delays the job without provider I/O; reconnect wakes only rows delayed
+  for missing authority. Completion now requires the existing canonical import
+  receipt to contain the exact source/resource/day daily identity, so a
+  nonempty response that normalizes to no owned fact remains retryable. This
+  adds one lifecycle exception and one receipt assertion, not another queue,
+  store, service, scheduler, cursor, watermark, or aggregate owner.
 
 ## Verification
 
@@ -251,5 +263,12 @@ Updated: 2026-08-12
   package typechecks, importer build, 7-test changelog-fragment suite, docs
   drift, scenario integrity, and `git diff --check` after round-twelve
   remediation.
+- Round thirteen found that account/source lifecycle cleanup could still erase
+  retained calendar work and that a nonempty HTTP 200 response could complete
+  after normalization emitted no owned daily fact. Focused regressions now
+  prove dormant setup/disconnect/reauthorization handling without provider I/O,
+  source-fence retention and reconnect wake on the same job, account-cleanup
+  and credential-epoch preservation, exact daily receipt admission, retry for
+  invalid nonempty rows, and authoritative-empty success.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

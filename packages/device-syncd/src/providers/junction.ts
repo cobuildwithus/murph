@@ -9,6 +9,7 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import {
+  buildJunctionDailyTimeseriesAggregateResourceId,
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
@@ -162,6 +163,7 @@ export {
 };
 
 interface JunctionTimeseriesImportResult {
+  appliedDailyAggregateResourceIds?: readonly string[];
   yieldedAt: string | null;
 }
 
@@ -1800,11 +1802,13 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
+    const calendarRefreshDay = readJunctionSparseCalendarRefreshDay(job);
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     if (
-      sourceProviderSlug
+      !calendarRefreshDay
+      && sourceProviderSlug
       && !isJunctionSourceAdmittedForImport(
         context.account.sources ?? [],
         sourceProviderSlug,
@@ -1843,7 +1847,6 @@ export function createJunctionDeviceSyncProvider(
       return sourceProviders;
     };
 
-    const calendarRefreshDay = readJunctionSparseCalendarRefreshDay(job);
     if (calendarRefreshDay) {
       if (
         !resource
@@ -1854,6 +1857,23 @@ export function createJunctionDeviceSyncProvider(
           code: JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
           message: "Junction calendar refresh job did not name an admitted sparse resource.",
           retryable: false,
+        });
+      }
+      const currentSources = context.listConnectionSources
+        ? await context.listConnectionSources({ sourceProviderSlug: sourceProviderSlug ?? undefined })
+        : context.account.sources ?? [];
+      if (
+        !isJunctionSourceAdmittedForImport(
+          currentSources,
+          sourceProviderSlug,
+          context.connectionSourceAdmissionMode !== "listed_only",
+          "connected",
+        )
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE",
+          message: "Junction calendar source authority is temporarily unavailable.",
+          retryable: true,
         });
       }
       const sourceProviders = await loadAndProjectSourceProviders();
@@ -1869,6 +1889,21 @@ export function createJunctionDeviceSyncProvider(
         sourceProviderSlug,
         calendarSourceIdentity,
       );
+      const expectedDailyAggregateResourceId = buildJunctionDailyTimeseriesAggregateResourceId({
+        dayKey: calendarRefreshDay,
+        resource,
+        ...calendarSourceIdentity,
+      });
+      if (
+        !dailyImport.yieldedAt
+        && !dailyImport.appliedDailyAggregateResourceIds?.includes(expectedDailyAggregateResourceId)
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_CALENDAR_REFRESH_DAILY_STATE_NOT_APPLIED",
+          message: "Junction calendar refresh did not apply its owned daily state.",
+          retryable: true,
+        });
+      }
       const followUp = dailyImport.yieldedAt
         ? buildJunctionSparseCalendarRefreshJob({
             dayKey: calendarRefreshDay,
@@ -3081,9 +3116,11 @@ export function createJunctionDeviceSyncProvider(
   ): Promise<JunctionTimeseriesImportResult> {
     const requestedResources = resources ?? timeseriesResources;
     const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, context.now);
+    const appliedDailyAggregateResourceIds = new Set<string>();
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
       if (context.shouldYield?.()) {
         return {
+          appliedDailyAggregateResourceIds: [...appliedDailyAggregateResourceIds],
           yieldedAt: window.windowStart,
         };
       }
@@ -3147,7 +3184,7 @@ export function createJunctionDeviceSyncProvider(
         sourceProviders,
       );
       if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        await context.importSnapshot({
+        const receipt = await context.importSnapshot({
           provider: "junction",
           accountId: buildJunctionImportAccountId(context.account.externalAccountId),
           connectionId: context.account.id,
@@ -3159,9 +3196,13 @@ export function createJunctionDeviceSyncProvider(
           summaries: {},
           timeseries: preparedImport.snapshots,
         });
+        for (const resourceId of readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt) ?? []) {
+          appliedDailyAggregateResourceIds.add(resourceId);
+        }
       }
     }
     return {
+      appliedDailyAggregateResourceIds: [...appliedDailyAggregateResourceIds],
       yieldedAt: null,
     };
   }

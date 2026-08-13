@@ -1,5 +1,6 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
+import { normalizeJunctionProviderSlug } from "./config/connect-routes.ts";
 
 export { normalizeJunctionResourceName };
 /** Exact Junction connection-source owner for companion WHOOP HRV uploads. */
@@ -56,6 +57,23 @@ export function isJunctionSparseCalendarRefreshJob(input: {
   return input.provider === "junction"
     && input.kind === "resource"
     && typeof input.payload?.calendarRefreshDay === "string";
+}
+
+export function isJunctionSparseCalendarRefreshPayloadValid(
+  payload: Record<string, unknown> | null | undefined,
+): boolean {
+  const dayKey = payload?.calendarRefreshDay;
+  const parsedDay = typeof dayKey === "string"
+    ? new Date(`${dayKey}T00:00:00.000Z`)
+    : null;
+  const resource = normalizeJunctionResourceName(payload?.resource);
+  return typeof dayKey === "string"
+    && /^\d{4}-\d{2}-\d{2}$/u.test(dayKey)
+    && parsedDay !== null
+    && Number.isFinite(parsedDay.getTime())
+    && parsedDay.toISOString().slice(0, 10) === dayKey
+    && (resource === "caffeine" || resource === "water" || resource === "mindfulness_minutes")
+    && normalizeJunctionProviderSlug(payload?.sourceProviderSlug) !== null;
 }
 
 export function isJunctionRetainedAcceptedWorkJob(input: {
