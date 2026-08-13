@@ -35,12 +35,14 @@ vault. Deterministic Web authorization establishes who may ask, which member
 may answer, and which immutable permission applies. The models only produce and
 review the candidate disclosure inside that boundary.
 
-A separate one-time first-party path uses the newest accepted input in the
-current group turn as its sole source authority. `ask_current_sender` has no
-model-facing arguments. Trusted runtime code binds that exact input, and Web
-reopens its stored wake, preserves native reply evidence, resolves its author,
-and accepts only a flat message that explicitly asks Murph to consult that
-author's personal Murph. Web also fixes the audience before personal-model work:
+A separate one-time first-party path uses one exact accepted input in the
+current group turn as its sole source authority. `ask_current_sender` accepts
+only that opaque `message_ref`; multiple independent requests in the same turn
+can each be submitted. Trusted runtime code verifies the ref belongs to the
+accepted turn, and Web reopens its stored wake, preserves native reply evidence,
+resolves its author, and accepts only a flat message that explicitly asks Murph
+to consult that author's personal Murph. Web also fixes the audience before
+personal-model work:
 explicit private/direct/DM wording requires a current same-channel direct route;
 otherwise the originating group is the default. Conflicting audience wording,
 native replies, quotations, negative requests, unclear addressing, or
@@ -134,10 +136,11 @@ group.
 - The scheduled initial-turn group port comes from the existing scheduled
   group-tool factory, not the base runtime context. Ordinary notifications and
   manual, direct, unknown-audience, or local cron runs must not receive it.
-- For the one-time current-sender path, the model supplies only the
-  argument-free action. Runtime code binds the newest accepted group input, and
-  Web owns exact-source admission, sender derivation, fixed audience, fixed
-  permission, private-route admission, replay identity, and completion route.
+- For the one-time current-sender path, the model supplies only one opaque
+  `message_ref`. Runtime code requires that ref in the current accepted group
+  turn, and Web owns exact-source admission, sender derivation, fixed audience,
+  fixed permission, private-route admission, replay identity, and completion
+  route. Multiple valid refs in one turn remain independent.
   An accepted origin can produce at most one request and one authorized terminal
   experience. Legacy action names, origins, and destination fields are drain
   inputs only and never audience authority.

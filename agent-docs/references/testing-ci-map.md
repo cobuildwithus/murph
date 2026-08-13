@@ -753,8 +753,10 @@ keep the one-second presentation-only deadline and late-result rejection.
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
   assistant-tool policy, runtime mailbox routing, detached-process lifecycle,
   and Cloudflare runner-image confinement coverage. Current-sender synthetic
-  regressions prove the argument-free action binds the newest accepted input;
-  an earlier native reply cannot be selected from a mixed-sender batch; exact flat group and private commands are admitted; native
+  regressions prove the action accepts only an exact current-turn message ref,
+  admits two valid mixed-sender requests independently, and rejects a foreign
+  ref; an earlier native reply still fails exact-source admission; exact flat
+  group and private commands are admitted; native
   replies, conflicting audience wording, and unclear or context-dependent text
   are rejected; a missing direct route prevents private admission; and a route
   lost after admission produces one non-disclosing group terminal rather than

@@ -1,6 +1,6 @@
 # PR #1705 Current-Sender Replacement
 
-Status: Replacement implemented and focused proof complete; exact-head ReviewGPT and CI gates remain active.
+Status: Exact-message multi-request correction in progress; focused proof, authorized ReviewGPT round 8, exact-head CI, and merge remain active.
 Baseline: supplied snapshot at `fb965713898e0fb00afc215a69e93d16c8c6fb78`.
 Owner: Assistant Ask current-sender admission and completion owners.
 Risk: High — privacy-sensitive cross-runtime disclosure.
@@ -9,8 +9,8 @@ Risk: High — privacy-sensitive cross-runtime disclosure.
 
 Replace the failed model-selected origin and audience remediation with one trusted, auditable flow:
 
-- the model can only call argument-free `ask_current_sender`;
-- trusted current-turn state binds the newest accepted input;
+- the model can call `ask_current_sender` with only one opaque `message_ref`;
+- trusted current-turn state requires that ref to belong to the accepted group turn;
 - Web reloads that exact source and alone decides admission, sender, and fixed audience;
 - a private request requires a same-channel direct route before personal work;
 - the existing consented read and outgoing reviewer can only allow or deny the answer for that fixed audience;
@@ -21,8 +21,9 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 ## Invariants
 
 - One origin creates at most one canonical accepted request across replay and bounded legacy aliases.
+- Multiple valid origins in one accepted turn remain independent instead of collapsing to the newest message.
 - Linq native-reply and Telegram reply-context evidence remain admission authority.
-- Neither group nor personal model selects another member or an audience.
+- Neither group nor personal model supplies a member or an audience; Web derives both from the exact selected source.
 - Completion cannot change the persisted target kind.
 - Private reviewed text is delivered only by the exact current same-channel direct route.
 - Private delivery has a separate deterministic identity and cannot occupy the canonical group completion/fallback identity.
@@ -31,7 +32,8 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 
 ## Implementation
 
-- [x] Collapse the model action to argument-free `ask_current_sender` and bind the newest accepted input in trusted runtime scope.
+- [x] Limit `ask_current_sender` to one opaque current-turn `message_ref`, with no member, question, audience, destination, privacy, or route argument.
+- [x] Preserve independent simultaneous requests by allowing each valid accepted ref to reach Web exact-source admission.
 - [x] Make Web the deterministic exact-source admission owner and retain provider reply evidence.
 - [x] Derive and persist sender, target kind, and fixed permission before enqueue.
 - [x] Require private routing at admission and revalidate it at completion.
@@ -56,7 +58,15 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 - [x] ReviewGPT round 6 finding remediated: recognized leading confidentiality clauses select the same private authority as trailing clauses, while leading/trailing conflicts reject before enqueue.
 - [x] ReviewGPT round 7 finding remediated: one-to-one and singular/plural DM edge clauses select private authority, while unsupported bounded delivery directives reject instead of defaulting to the group.
 - [x] Hard-cap retrospective recorded in the owning execution plan; deletion, revert, split, and redesign were evaluated, with one full-snapshot continuation round recommended because the corrected sender/audience/terminal invariant is indivisible.
-- [ ] Explicit continuation decision before any round 8; exact pushed-head GitHub Actions and a later ReviewGPT `PASS` remain required.
+- [x] User explicitly authorized the correction, round 8, and shipping on 2026-08-12.
+- [x] Exact-message focused proof passes: Assistant Engine 91 tests, Web 19 tests,
+  and affected Assistant Engine/prepared Web typechecks.
+- [x] Complete first-provider requests measured through the real pinned Codex
+  App Server. The changed deferred group tool metadata is absent from the first
+  direct/group request, so base/head remain identical at 111,567 bytes / 24,330
+  tokens direct and 95,823 / 20,745 group with `gpt-tokenizer` 3.4.0
+  `o200k_harmony`; the temporary capture hook was removed.
+- [ ] Exact pushed-head GitHub Actions and a round-8 `PASS` remain required.
 
 ## Rollout And Removal
 

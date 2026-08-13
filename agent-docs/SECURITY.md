@@ -765,14 +765,15 @@ Last verified: 2026-08-12
 - Inbound message content written by the retention-capable owners has one receipt-anchored 14-day maximum across hosted mailbox ciphertext, vault capture text/raw fields, out-of-line text, parser bundles, SQLite/FTS projections, assistant input events, and user transcript entries. The deadline is inclusive and active or retryable work cannot extend it. Every new user transcript entry carries `contentReceivedAt`; retention must never infer a missing legacy receipt from transcript `createdAt`, an accepted-turn journal, or an input event because normal settled-snapshot cleanup may already have discarded that join. The phase-one rollout therefore preserves unstamped legacy transcript entries while re-arming existing snapshots once to queue cleanup of every carrier with trustworthy receipt evidence; the rollout remains incomplete until that queue drains. Only after both 14 complete days from verified stamping-capable runner convergence and phase-one drain completion may a separate phase-two migration re-arm those snapshots again and retire every remaining unstamped user entry. Postgres cleanup deletes sidecar payload ciphertext, clears inline payload fields, and retains only structural mailbox metadata. If a conversation message reaches the deadline without terminal handling, the existing mailbox row becomes a durable `policy_non_reply.content_expired` tombstone and the runtime records its existing suppression evidence before local content retirement; neither owner may silently delete accepted work or later resurrect it as replyable. Promoted canonical health facts, explicit user saves/pins, Murph replies, delivery evidence, and content-free structural/audit metadata are outside this inbound-message-content policy and retain their owning lifecycle.
 - The Cloudflare `runtime/ensure-processing` route accepts exactly two credentials: the Temporal orchestrator's web-callback signature and web's Vercel OIDC identity (the same identity already used by the browser-vault/status/deletion control routes). Authorization dispatches on the credential the caller presented and never falls through a failed signature to OIDC or vice versa. The web direct wake is a post-Temporal latency hint for eligible Linq and Assistant Ask request/completion mailbox appends, carries no message payload, mints diagnostics-only `web-ingress-` attempt ids, and grants web no authority it did not already exercise through the accepted Temporal signal; the `triggeredByWebDirect` diagnostic is derived from the authorizing credential, never from caller-supplied fields. Hosted R2 reads, writes, restores, presigns, and account deletion use one environment-selected ENAM bucket; authenticated callers cannot select a bucket, region, or presign target. The Assistant Ask child receives only the server-bound requester membership `participantId` as immutable identity context: first-person references require an exact `read_shared` participant match, while display names, handles, member order, and the opaque id itself are forbidden output authority.
 - Web is the sole target and audience authority for one-time current-sender
-  Assistant Ask. Trusted runtime code binds the argument-free
-  `ask_current_sender` action to the newest accepted input in the current group
-  turn. Web reopens that exact source, preserves Linq and Telegram native-reply
+  Assistant Ask. The `ask_current_sender` action accepts only an opaque
+  `message_ref` from the current accepted group turn, so each independent
+  requester can be submitted without granting target authority. Web reopens
+  that exact source, preserves Linq and Telegram native-reply
   evidence, revalidates the group route, resolves its author, and accepts only
-  a flat deterministic “ask my Murph” command. A model-provided origin from an
-  old runner is untrusted input to the same exact-source check; no model output
-  may select a sender, member, question, audience, destination, privacy mode, or
-  route.
+  a flat deterministic “ask my Murph” command. The selected ref and a
+  model-provided origin from an old runner are untrusted inputs to the same
+  exact-source check; no model output may select a sender, member, question,
+  audience, destination, privacy mode, or route.
 - Admission fixes the audience before personal-model work. Explicit positive
   private/direct/DM wording selects `current_sender`; otherwise group is the
   default. Native replies, quotations, context-dependent or negative wording,

@@ -418,6 +418,9 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('ask_current_sender'),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
     })
     .strict(),
   z
@@ -1007,6 +1010,7 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'ask_current_sender'
+      messageRef: string
     }
   | {
       action: 'ask_member'
@@ -4353,18 +4357,19 @@ async function executeGroupTool(input: {
   } else if (input.request.action === 'ask_current_sender') {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
-    const originAssistantInputId =
-      userActionScope?.acceptedInputIds.at(-1) ?? null
-    if (userActionScope?.conversationScope !== 'group' || !originAssistantInputId) {
+    if (
+      userActionScope?.conversationScope !== 'group'
+      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+    ) {
       return toolTextResult(
         false,
-        'current-sender request requires the newest accepted message in this group turn',
+        'current-sender request requires the selected accepted message in this group turn',
       )
     }
     request = {
       action: 'ask_current_sender',
       origin: {
-        assistantInputId: originAssistantInputId,
+        assistantInputId: input.request.messageRef,
         kind: 'accepted_input',
         sessionId: userActionScope.originSessionId,
       },
@@ -6255,7 +6260,7 @@ function parseGroupArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.group.input',
-        schemaRootKeys: ['action'],
+        schemaRootKeys: ['action', 'message_ref'],
         toolName: 'murph.group',
       }),
     }
@@ -6273,7 +6278,10 @@ function parseGroupArguments(
   if (parsed.data.action === 'ask_current_sender') {
     return {
       ok: true,
-      request: { action: 'ask_current_sender' },
+      request: {
+        action: 'ask_current_sender',
+        messageRef: parsed.data.message_ref,
+      },
     }
   }
   if (parsed.data.action === 'read_shared') {

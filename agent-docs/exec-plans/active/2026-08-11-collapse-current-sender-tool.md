@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -138,9 +138,9 @@ Updated: 2026-08-11
   map exactly. The hard seven-round cap is reached; after this fix the loop is
   paused pending the required cap retrospective and explicit continuation
   decision. The PR is not merge-ready without a later ReviewGPT pass.
-- Hard-cap retrospective: the original requirement remains one argument-free
-  personal read whose sender and audience are fixed by exact-source Web
-  authority before model work, with every accepted request converging to one
+- Hard-cap retrospective: the original requirement remains one exact-source
+  personal read whose sender and audience are fixed by Web authority before
+  model work, with every accepted request converging to one
   visible terminal. The immutable first-reviewed head carried 460 added/433
   deleted source lines, 697/317 test lines, and 232/76 docs lines; the current
   head carries 1,997/801 source, 2,023/1,722 tests, and 552/175 docs. Most growth
@@ -155,11 +155,33 @@ Updated: 2026-08-11
   no model turn, service, schema, queue, state owner, reconciliation path, or
   compatibility surface. Deleting or reverting would restore the original
   model-owned privacy boundary; splitting would separate an indivisible
-  admission/completion invariant. The recommended explicit continuation is one
-  full-snapshot round 8 after exact-head CI, solely to obtain the required PASS
-  on the corrected architecture.
-- Remaining work is the new exact-head final ReviewGPT round, CI, plan closure,
-  and merge-tree proof.
+  admission/completion invariant. The user then identified that newest-only
+  binding drops an earlier valid request from a mixed-sender turn. The bounded
+  correction restores one opaque `message_ref` argument while keeping sender,
+  question, audience, route, and personal-read authority in Web. Runtime accepts
+  only refs from the current accepted group turn, and Web independently reloads
+  and validates every selected source, so two valid requests can each proceed
+  without reviving model-owned identity or audience authority. The user
+  explicitly authorized this correction, one sensitive full-snapshot round 8,
+  and shipping on 2026-08-12.
+- Remaining work is focused proof, the exact-head final ReviewGPT round, CI,
+  plan closure, and merge-tree proof.
+- The exact-message correction passes the focused Assistant Engine schema and
+  execution suites (91 tests), the focused Web admission suite (19 tests), and
+  the affected Assistant Engine and prepared Web typechecks. The Web proof
+  admits two independent flat requests from one mixed-sender batch and keeps
+  their canonical request/member identities distinct.
+- Complete first-provider request capture used the pinned real Codex App
+  Server, local scripted Responses provider, `gpt-5.6-terra`, low reasoning,
+  production code mode, synthetic direct/group turns with the group tool
+  available, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. It serialized and
+  normalized `include`, `input`, `instructions`, `parallel_tool_calls`, `text`,
+  `tool_choice`, and `tools`, excluding model selection, reasoning, storage,
+  streaming, service-tier, account, cache, and transport metadata identically.
+  The deferred group description and schema are absent from the complete first
+  request, so base and head are identical: direct 111,567 bytes / 24,330 tokens;
+  group 95,823 bytes / 20,745 tokens. The temporary capture hook was removed
+  and verified absent.
 
 ## Verification
 

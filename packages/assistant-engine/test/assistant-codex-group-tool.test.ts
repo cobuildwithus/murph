@@ -153,19 +153,17 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema).not.toHaveProperty("required");
     expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].required).toEqual(["action"]);
     expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[0]).toMatchObject({
+      maxProperties: 2,
       properties: {
-        action: { enum: ["revoke_own_email_share"] },
+        action: {
+          enum: ["ask_current_sender", "revoke_own_email_share"],
+        },
         message_ref: {},
       },
       required: ["action", "message_ref"],
     });
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
-      maxProperties: 1,
-      properties: { action: { enum: ["ask_current_sender"] } },
-      required: ["action"],
-    });
     expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2].properties.action.enum,
+      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1].properties.action.enum,
     ).not.toContain("ask_current_sender");
     expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty(
       "response_destination",
@@ -268,11 +266,13 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("changed questions conflict");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("ask_current_sender has no arguments");
+      .toContain("ask_current_sender: exact Message ref only");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("host binds the newest accepted group input");
+      .toContain("host verifies accepted current-group input");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("Web fixes group versus same-channel private delivery before the personal read");
+      .toContain("Use once per request");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("Web derives sender/audience before personal read");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("accepted starts processing, not delivery");
     expect(MURPH_GROUP_TOOL.description)
@@ -518,7 +518,7 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("keeps ask_current_sender argument-free and message refs on exact-message actions", () => {
+  it("keeps ask_current_sender limited to one exact Message ref", () => {
     expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("messageRef");
     expect(GROUP_TOOL_INPUT_PROPERTIES.message_ref)
@@ -528,17 +528,21 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "ask_current_sender",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
     }))).toMatchObject({
       kind: "group",
-      request: { action: "ask_current_sender" },
+      request: {
+        action: "ask_current_sender",
+        messageRef: FRESH_ASSISTANT_INPUT_ID,
+      },
     });
     for (const invalid of [
       {
         action: "ask_current_sender",
-        message_ref: FRESH_ASSISTANT_INPUT_ID,
       },
       {
         action: "ask_current_sender",
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
         response_destination: "group",
       },
     ]) {

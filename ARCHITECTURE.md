@@ -354,10 +354,11 @@ ordinal identity; usage recording is best-effort and never controls disclosure.
 
 The current-sender Assistant Ask adapter is a single first-party, one-time
 personal-runtime request path, not a grant shortcut. The group model exposes
-exactly one argument-free action, `ask_current_sender`. Trusted runtime code
-binds it to the newest accepted input in the current non-direct group turn and
-sends only that server-owned origin. The model cannot supply a message ref,
-sender, member, question, audience, destination, privacy flag, or route.
+`ask_current_sender` with one opaque `message_ref`, allowing each independent
+request in a mixed-sender turn to be submitted once. Trusted runtime code
+accepts only a ref from the current non-direct group turn and sends that
+server-owned origin. The model cannot supply a sender, member, question,
+audience, destination, privacy flag, or route.
 
 Web is the sole admission owner. In one transaction it reopens the exact
 encrypted source wake, preserves native reply evidence, revalidates the live

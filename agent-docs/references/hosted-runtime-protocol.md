@@ -928,12 +928,13 @@ the request identity. Exact retries reuse that mailbox item, a changed question
 for the same grant conflicts, and another current grant in the same invocation
 is independent.
 
-The one-time current-sender adapter exposes exactly one model-facing action,
-`ask_current_sender`, with no message, member, question, audience, destination,
-or privacy argument. Trusted group-turn state binds that action to the newest
-accepted input in the current turn. Web reloads that exact source item and is
-the sole admission owner: it accepts only a flat, non-reply message whose exact
-text directly asks Murph to consult the author's personal Murph. Native Linq
+The one-time current-sender adapter exposes `ask_current_sender` with one opaque
+`message_ref` and no member, question, audience, destination, or privacy
+argument. Trusted group-turn state requires that ref to name an accepted input
+in the current turn, so independent simultaneous requests can each be
+submitted. Web reloads that exact source item and is the sole admission owner:
+it accepts only a flat, non-reply message whose exact text directly asks Murph
+to consult the author's personal Murph. Native Linq
 reply metadata and Telegram reply-context metadata remain authority evidence.
 Quoted, context-dependent, negative, unclearly addressed, or conflicting-
 audience requests fail before any personal read.

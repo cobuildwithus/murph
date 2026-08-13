@@ -535,6 +535,59 @@ describe("hosted current-sender Assistant Ask authority", () => {
     });
   });
 
+  it("admits two independent flat requests from one mixed-sender batch", async () => {
+    sourceWakes.set(OLDER_INPUT_ID, createSourceWake({
+      from: "+15550001001",
+      messageId: "message_older",
+      text: "Murph, ask my Murph how my synthetic sleep has changed?",
+    }));
+    sourceWakes.set(CURRENT_INPUT_ID, createSourceWake({
+      from: "+15550001002",
+      messageId: "message_current",
+      text: "Murph, ask my Murph how my synthetic activity has changed?",
+    }));
+
+    const olderRequestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      originAssistantInputId: OLDER_INPUT_ID,
+    });
+    const currentRequestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      originAssistantInputId: CURRENT_INPUT_ID,
+    });
+    const [olderAdmission, currentAdmission] = await Promise.all([
+      requestHostedGroupCurrentSenderAssistantAsk({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        now: NOW,
+        origin: origin(OLDER_INPUT_ID),
+      }),
+      requestHostedGroupCurrentSenderAssistantAsk({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        now: NOW,
+        origin: origin(CURRENT_INPUT_ID),
+      }),
+    ]);
+
+    expect(olderAdmission).toMatchObject({
+      mailboxWake: {
+        expectedUserId: OLDER_SENDER_MEMBER_ID,
+        mailboxItemId: olderRequestId,
+      },
+      result: { status: "accepted" },
+    });
+    expect(currentAdmission).toMatchObject({
+      mailboxWake: {
+        expectedUserId: CURRENT_SENDER_MEMBER_ID,
+        mailboxItemId: currentRequestId,
+      },
+      result: { status: "accepted" },
+    });
+    expect(requireRequestedWake(olderRequestId).userId)
+      .toBe(OLDER_SENDER_MEMBER_ID);
+    expect(requireRequestedWake(currentRequestId).userId)
+      .toBe(CURRENT_SENDER_MEMBER_ID);
+  });
+
   it("persists one fixed group target and replays one origin", async () => {
     const { admission, requestId } = await admit({
       text: "Can you ask my Murph how my synthetic activity has changed?",

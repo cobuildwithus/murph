@@ -1182,8 +1182,9 @@ Last verified: 2026-08-12
   admission owner, one mailbox lifecycle, one deterministic origin identity,
   ten-minute expiry, isolated personal read, existing fresh allow/deny reviewer,
   one canonical group completion/fallback identity, and one separate private
-  delivery identity. Trusted runtime code binds the argument-free
-  model action to the newest accepted group input. Web reloads that exact wake,
+  delivery identity. The model action accepts only an opaque accepted-message
+  ref from the current group turn, allowing independent requests in one batch
+  while granting no sender or audience authority. Web reloads that exact wake,
   preserves native-reply evidence, resolves its author, and deterministically
   admits only a flat explicit request to ask the author's Murph. It fixes group
   by default or `current_sender` only from explicit positive private/direct/DM
@@ -1221,7 +1222,7 @@ Last verified: 2026-08-12
   old action parsing, former request-id readers, and neutral-permission drain
   branch together.
 - Deploy in authority order: shared contracts and Web first, then the personal
-  runtime/assistant-engine bundle, then Cloudflare and the argument-free model
+  runtime/assistant-engine bundle, then Cloudflare and the exact-ref model
   catalog. The new body marker fails closed against old Web. Roll back the model
   catalog and Cloudflare first; retain new Web and runtime compatibility through
   the eleven-minute drain window. Post-deploy proof must cover canonical marked
