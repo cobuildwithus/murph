@@ -797,6 +797,10 @@ describe("hosted device-sync runtime", () => {
 
     try {
       const store = getStore(service);
+      const readNextJobWakeAtForAccount = vi.spyOn(
+        store,
+        "readNextJobWakeAtForAccount",
+      );
       const updateCount = HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT + 1;
       const localToHostedAccountIds = new Map<string, string>();
       const hostedToLocalAccountIds = new Map<string, string>();
@@ -889,6 +893,7 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(appliedRequests[1]?.updates.length, 1);
       assert.equal(maxActiveApplyCalls, 1);
+      assert.equal(readNextJobWakeAtForAccount.mock.calls.length, 0);
       assert.equal(
         appliedRequests[0]?.updates.every((update) => update.sources?.length === 64),
         true,
