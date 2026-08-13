@@ -14345,13 +14345,7 @@ test("Junction sparse-history continuation fetches one bounded 30-day window", a
   assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd);
 });
 
-test.each([
-  { canonicalEventCount: 1, label: "same-day aggregate rows", malformed: false },
-  { canonicalEventCount: 0, label: "malformed aggregate rows", malformed: true },
-])("Junction $label complete sparse history after bounded chunking", async ({
-  canonicalEventCount,
-  malformed,
-}) => {
+test("Junction same-day aggregate rows complete sparse history after bounded chunking", async () => {
   let timeseriesRequestCount = 0;
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
@@ -14376,12 +14370,10 @@ test.each([
         return createJsonResponse({
           groups: {
             garmin: [{
-              data: malformed
-                ? [{ start: url.searchParams.get("start_date"), value: "not-a-number" }]
-                : [
-                  { start: url.searchParams.get("start_date"), value: 0.095 },
-                  { start: url.searchParams.get("start_date"), value: 0.063 },
-                ],
+              data: [
+                { start: url.searchParams.get("start_date"), value: 0.095 },
+                { start: url.searchParams.get("start_date"), value: 0.063 },
+              ],
               source: { provider: "garmin", type: "watch" },
             }],
           },
@@ -14413,8 +14405,8 @@ test.each([
   };
   let metadata: Record<string, unknown> = {};
 
-  const expectedExecutionCount = malformed ? 5 : 6;
-  const expectedRequestCount = malformed ? 5 : 180;
+  const expectedExecutionCount = 6;
+  const expectedRequestCount = 180;
   for (let chunkIndex = 0; chunkIndex < expectedExecutionCount; chunkIndex += 1) {
     const now = new Date(
       Date.parse("2026-08-11T12:00:00.000Z") + chunkIndex * 60_000,
@@ -14424,7 +14416,7 @@ test.each([
       createJunctionJobContext({
         account: createAccount({ metadata, sources: [source] }),
         importSnapshot: async () => ({
-          canonicalEventCount,
+          canonicalEventCount: 1,
           durableDeliveryAccepted: true,
         }),
         now,
@@ -14452,61 +14444,329 @@ test.each([
       createStoredAccount({ metadata, sources: [source] }),
       "2026-08-20T12:00:00.000Z",
     ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
-    malformed,
+    false,
   );
 
-  if (!malformed) {
-    metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
-      metadata,
-      providerSlug: "garmin",
-    });
-    const repairJobs = executor.createScheduledJobs?.(
-      createStoredAccount({ metadata, sources: [source] }),
-      "2026-08-20T12:00:00.000Z",
-    ).jobs.filter((candidate) => candidate.payload?.resource === "caffeine") ?? [];
-    assert.equal(repairJobs.length, 1);
-    let repairJob: DeviceSyncJobRecord = {
-      ...createJob("resource", requireValue(repairJobs[0]).payload ?? {}),
-      dedupeKey: requireValue(repairJobs[0]).dedupeKey ?? null,
-    };
-    for (let chunkIndex = 0; chunkIndex < 6; chunkIndex += 1) {
-      const now = new Date(
-        Date.parse("2026-08-20T12:00:00.000Z") + chunkIndex * 60_000,
-      ).toISOString();
-      const result = await executeJunctionJob(
-        provider,
-        createJunctionJobContext({
-          account: createAccount({ metadata, sources: [source] }),
-          importSnapshot: async () => ({
-            canonicalEventCount,
-            durableDeliveryAccepted: true,
-          }),
-          now,
+  metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+    metadata,
+    providerSlug: "garmin",
+  });
+  const repairJobs = executor.createScheduledJobs?.(
+    createStoredAccount({ metadata, sources: [source] }),
+    "2026-08-20T12:00:00.000Z",
+  ).jobs.filter((candidate) => candidate.payload?.resource === "caffeine") ?? [];
+  assert.equal(repairJobs.length, 1);
+  let repairJob: DeviceSyncJobRecord = {
+    ...createJob("resource", requireValue(repairJobs[0]).payload ?? {}),
+    dedupeKey: requireValue(repairJobs[0]).dedupeKey ?? null,
+  };
+  for (let chunkIndex = 0; chunkIndex < 6; chunkIndex += 1) {
+    const now = new Date(
+      Date.parse("2026-08-20T12:00:00.000Z") + chunkIndex * 60_000,
+    ).toISOString();
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ metadata, sources: [source] }),
+        importSnapshot: async () => ({
+          canonicalEventCount: 1,
+          durableDeliveryAccepted: true,
         }),
-        repairJob,
-      );
-      metadata = mergeStoredDeviceSyncMetadataPatch(metadata, result.metadataPatch);
-      const continuation = result.scheduledJobs?.find((candidate) =>
-        candidate.payload?.resource === "caffeine"
-      );
-      if (chunkIndex < 5) {
-        const requiredContinuation = requireValue(continuation);
-        repairJob = {
-          ...createJob("resource", requiredContinuation.payload ?? {}),
-          dedupeKey: requiredContinuation.dedupeKey ?? null,
-        };
-      } else {
-        assert.equal(continuation, undefined);
-      }
-    }
-    assert.equal(
-      executor.createScheduledJobs?.(
-        createStoredAccount({ metadata, sources: [source] }),
-        "2026-08-26T12:00:00.000Z",
-      ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
-      false,
+        now,
+      }),
+      repairJob,
     );
+    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, result.metadataPatch);
+    const continuation = result.scheduledJobs?.find((candidate) =>
+      candidate.payload?.resource === "caffeine"
+    );
+    if (chunkIndex < 5) {
+      const requiredContinuation = requireValue(continuation);
+      repairJob = {
+        ...createJob("resource", requiredContinuation.payload ?? {}),
+        dedupeKey: requiredContinuation.dedupeKey ?? null,
+      };
+    } else {
+      assert.equal(continuation, undefined);
+    }
   }
+  assert.equal(
+    executor.createScheduledJobs?.(
+      createStoredAccount({ metadata, sources: [source] }),
+      "2026-08-26T12:00:00.000Z",
+    ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
+    false,
+  );
+});
+
+test("Junction exhausted malformed dates advance one lineage to later valid history", async () => {
+  const dayMs = 24 * 60 * 60_000;
+  const windowStart = "2026-08-01T00:00:00.000Z";
+  const malformedDays = new Set([
+    "2026-08-02T00:00:00.000Z",
+    "2026-08-04T00:00:00.000Z",
+  ]);
+  const requestsByDay = new Map<string, number>();
+  const importedDays: string[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 1,
+    summaryResources: [],
+    timeseriesBackfillDays: 5,
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-malformed-lineage",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (url.pathname === "/v2/introspect/historical_pull") {
+        return createJsonResponse({ data: [{
+          provider: { garmin: { not_pulled: [], pulled: {
+            caffeine: { days_with_data: 5, status: "success" },
+          } } },
+          user_id: "junction-user-1",
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+        const day = `${url.searchParams.get("start_date")}T00:00:00.000Z`;
+        requestsByDay.set(day, (requestsByDay.get(day) ?? 0) + 1);
+        return createJsonResponse({ groups: { garmin: [{
+          data: [{
+            start: day,
+            value: malformedDays.has(day) ? "not-a-number" : 0.095,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }] } });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+  const source = {
+    sourceProviderSlug: "garmin",
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { caffeine: true },
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: windowStart,
+    lastSeenAt: "2026-08-06T00:00:00.000Z",
+    lastDataAt: null,
+  };
+  const executor = requireValue(provider.jobExecutor);
+  const accountMetadata = {
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillWindowEnd: "2026-08-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-07-31T00:00:00.000Z",
+  };
+  const initial = requireValue(executor.createScheduledJobs?.(
+    createStoredAccount({ metadata: accountMetadata, sources: [source] }),
+    "2026-08-06T12:00:00.000Z",
+  ).jobs.find((candidate) => candidate.payload?.resource === "caffeine"));
+  let job: DeviceSyncJobRecord = {
+    ...createJob("resource", initial.payload ?? {}),
+    dedupeKey: initial.dedupeKey ?? null,
+  };
+  let metadata: Record<string, unknown> = accountMetadata;
+  let now = "2026-08-06T12:00:00.000Z";
+  const retryDelaysByDay = new Map<string, number[]>();
+  let executionCount = 0;
+
+  while (!hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    metadata,
+    "garmin",
+    "caffeine",
+    1,
+  )) {
+    executionCount += 1;
+    assert.ok(executionCount < 20);
+    const attemptedDay = String(job.payload.windowStart);
+    const executionNow = job.payload.windowEnd === "2026-08-06T00:00:00.000Z"
+      ? "2026-08-06T12:00:00.000Z"
+      : now;
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ metadata, sources: [source] }),
+        importSnapshot: async (snapshot) => {
+          const importedAt = typeof snapshot === "object" && snapshot
+            && "importedAt" in snapshot && typeof snapshot.importedAt === "string"
+            ? snapshot.importedAt
+            : null;
+          if (importedAt && !malformedDays.has(
+            new Date(Date.parse(importedAt) - dayMs).toISOString(),
+          )) {
+            importedDays.push(new Date(Date.parse(importedAt) - dayMs).toISOString());
+          }
+          return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+        },
+        now: executionNow,
+      }),
+      job,
+    );
+    const coveragePatchValues = Object.values(result.metadataPatch ?? {}).filter((value) =>
+      typeof value === "string" && value.startsWith("m1|")
+    );
+    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, result.metadataPatch);
+    const continuation = result.scheduledJobs?.find((candidate) =>
+      candidate.payload?.resource === "caffeine"
+    );
+    if (!continuation) {
+      assert.equal(coveragePatchValues.length, 1);
+      break;
+    }
+    assert.equal(continuation.dedupeKey, initial.dedupeKey);
+    const retryAttempts = Number(continuation.payload?.emptyBackfillAttempts ?? 0);
+    if (retryAttempts > 0 || malformedDays.has(attemptedDay)) {
+      assert.equal(continuation.payload?.historicalProviderRecordsSeen, true);
+    }
+    if (retryAttempts > 0 && continuation.availableAt) {
+      const retryDay = String(continuation.payload?.windowStart ?? attemptedDay);
+      retryDelaysByDay.set(retryDay, [
+        ...(retryDelaysByDay.get(retryDay) ?? []),
+        Date.parse(continuation.availableAt) - Date.parse(executionNow),
+      ]);
+    }
+    now = continuation.availableAt ?? now;
+    job = {
+      ...createJob("resource", continuation.payload ?? {}),
+      dedupeKey: continuation.dedupeKey ?? null,
+    };
+  }
+
+  const expectedRetryDelays = [
+    15 * 60_000,
+    60 * 60_000,
+    6 * 60 * 60_000,
+    24 * 60 * 60_000,
+  ];
+  for (const malformedDay of malformedDays) {
+    assert.deepEqual(retryDelaysByDay.get(malformedDay), expectedRetryDelays);
+    assert.equal(requestsByDay.get(malformedDay), 5);
+  }
+  assert.deepEqual(importedDays, [
+    "2026-08-01T00:00:00.000Z",
+    "2026-08-03T00:00:00.000Z",
+    "2026-08-05T00:00:00.000Z",
+  ]);
+  assert.equal(executionCount, 11);
+  const coverageValues = [
+    metadata.junctionBloodPressureHistoryBackfillCoverage,
+    metadata.junctionNoteHistoryBackfillCoverage,
+  ].filter((value) => value !== undefined);
+  assert.equal(coverageValues.length, 1);
+  assert.match(String(coverageValues[0]), /^m1\|/u);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    metadata,
+    "garmin",
+    "caffeine",
+    1,
+  ), true);
+  assert.equal(executor.createScheduledJobs?.(
+    createStoredAccount({ metadata, sources: [source] }),
+    "2026-08-07T12:00:00.000Z",
+  ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"), false);
+});
+
+test("Junction exhausted malformed date waits for historical pull readiness before coverage", async () => {
+  let historicalPullStatus = "scheduled";
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 1,
+    summaryResources: [],
+    timeseriesBackfillDays: 1,
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-readiness-gate",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (url.pathname === "/v2/introspect/historical_pull") {
+        return createJsonResponse({ data: [{
+          provider: { garmin: { not_pulled: [], pulled: {
+            caffeine: { days_with_data: 1, status: historicalPullStatus },
+          } } },
+          user_id: "junction-user-1",
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+        return createJsonResponse({ groups: { garmin: [{
+          data: [{ start: "2026-08-05T00:00:00.000Z", value: "not-a-number" }],
+          source: { provider: "garmin", type: "watch" },
+        }] } });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+  const source = {
+    sourceProviderSlug: "garmin",
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { caffeine: true },
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-08-05T00:00:00.000Z",
+    lastSeenAt: "2026-08-06T00:00:00.000Z",
+    lastDataAt: null,
+  };
+  const executor = requireValue(provider.jobExecutor);
+  const initial = requireValue(executor.createScheduledJobs?.(
+    createStoredAccount({ sources: [source] }),
+    "2026-08-06T12:00:00.000Z",
+  ).jobs.find((candidate) => candidate.payload?.resource === "caffeine"));
+  const saturatedJob: DeviceSyncJobRecord = {
+    ...createJob("resource", {
+      ...initial.payload,
+      emptyBackfillAttempts: 4,
+    }),
+    dedupeKey: initial.dedupeKey ?? null,
+  };
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [source] }),
+    now: "2026-08-06T12:00:00.000Z",
+  });
+
+  const pending = await executeJunctionJob(provider, context, saturatedJob);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    pending.metadataPatch ?? {},
+    "garmin",
+    "caffeine",
+    1,
+  ), false);
+  assert.equal(
+    pending.scheduledJobs?.some((candidate) => candidate.payload?.resource === "caffeine"),
+    true,
+  );
+
+  historicalPullStatus = "success";
+  const ready = await executeJunctionJob(provider, context, saturatedJob);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    ready.metadataPatch ?? {},
+    "garmin",
+    "caffeine",
+    1,
+  ), true);
 });
 
 test("Junction sparse aggregate import failures remain retryable without coverage", async () => {

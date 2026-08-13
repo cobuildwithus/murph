@@ -2147,7 +2147,7 @@ describe("hosted device-sync wakes", () => {
     expect([
       currentConnection.metadata.junctionBloodPressureHistoryBackfillCoverage,
       currentConnection.metadata.junctionNoteHistoryBackfillCoverage,
-    ].filter((value) => typeof value === "string" && /^m2\|/u.test(value))).toHaveLength(1);
+    ].filter((value) => typeof value === "string" && /^m1\|/u.test(value))).toHaveLength(1);
     expect(clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
       metadata: currentConnection.metadata,
       providerSlug: "garmin",

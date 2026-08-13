@@ -2275,27 +2275,80 @@ export function createJunctionDeviceSyncProvider(
           ? executionJob.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
           : undefined;
-        const dailyAggregateNeedsRetry =
+        const historicalProviderRecordsSeen = extendedHistoricalBackfill
+          ? executionJob.payload.historicalProviderRecordsSeen === true
+            || timeseriesImport.providerRecordCount > 0
+          : undefined;
+        const dailyAggregateHasUnacceptedRecords =
           extendedHistoricalPolicy?.completion === "daily_aggregate"
           && timeseriesImport.providerRecordCount > 0
           && timeseriesImport.acceptedProviderRecordCount
-            < timeseriesImport.providerRecordCount
-          && (
-            dailyAggregateRetryAttempts
-              < EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length
-          );
+            < timeseriesImport.providerRecordCount;
+        const dailyAggregateNeedsRetry =
+          dailyAggregateHasUnacceptedRecords
+          && dailyAggregateRetryAttempts
+            < EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
         if (
-          extendedHistoricalPolicy?.completion === "daily_aggregate"
-          && timeseriesImport.providerRecordCount > 0
-          && timeseriesImport.acceptedProviderRecordCount === 0
+          dailyAggregateHasUnacceptedRecords
           && dailyAggregateRetryAttempts
             >= EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length
         ) {
-          return withJunctionSkippedResourceMetadata(
-            context,
-            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
-            skippedOptionalResources,
-          );
+          const retryWindowStart = timeseriesImport.dailyAggregateRetryWindowStart;
+          const nextWindowStart = retryWindowStart
+            ? addMilliseconds(retryWindowStart, TIMESERIES_CHUNK_MS)
+            : null;
+          if (
+            nextWindowStart
+            && Date.parse(nextWindowStart) < Date.parse(executionWindow.windowEnd)
+          ) {
+            return withJunctionSkippedResourceMetadata(
+              context,
+              {
+                nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+                scheduledJobs: [buildExtendedTimeseriesBackfillJob({
+                  dedupeKey: job.dedupeKey,
+                  historicalProviderRecordsSeen,
+                  historicalRecordsSeen,
+                  historicalWindowStart,
+                  resource: effectiveResource,
+                  ...(sourceLifecycleEpoch === null ? {} : { sourceLifecycleEpoch }),
+                  sourceProviderSlug,
+                  windowEnd: executionWindow.windowEnd,
+                  windowStart: nextWindowStart,
+                })],
+              },
+              skippedOptionalResources,
+            );
+          }
+          if (
+            nextWindowStart
+            && Date.parse(nextWindowStart) >= Date.parse(executionWindow.windowEnd)
+          ) {
+            const terminalResult = withJunctionSkippedResourceMetadata(
+              context,
+              { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+              skippedOptionalResources,
+            );
+            const historicalPullReadiness = resolveJunctionHistoricalPullReadiness({
+              resource: effectiveResource,
+              snapshot: await loadJunctionHistoricalPullSnapshot(context),
+              sourceProviderSlug,
+            });
+            return withJunctionHistoricalCoverageVerification(
+              context,
+              executionJob,
+              executionWindow,
+              withJunctionExtendedTimeseriesBackfillFollowUp({
+                context,
+                historicalPullReadiness,
+                importResult: timeseriesImport,
+                job: executionJob,
+                resource: effectiveResource,
+                result: terminalResult,
+                window: executionWindow,
+              }),
+            );
+          }
         }
         if (dailyAggregateNeedsRetry) {
           const retryAttempts = dailyAggregateRetryAttempts + 1;
@@ -2309,6 +2362,7 @@ export function createJunctionDeviceSyncProvider(
                 availableAt: addMilliseconds(context.now, retryDelayMs),
                 dedupeKey: job.dedupeKey,
                 emptyBackfillAttempts: retryAttempts,
+                historicalProviderRecordsSeen,
                 historicalRecordsSeen,
                 historicalWindowStart,
                 resource: effectiveResource,
@@ -2341,7 +2395,7 @@ export function createJunctionDeviceSyncProvider(
             : encodeJunctionHistoricalUnresolvedProviderRecords(
                 historicalUnresolvedProviderRecords,
               );
-        const historicalProviderRecordsSeen =
+        const historicalUnresolvedProviderRecordsSeen =
           historicalUnresolvedProviderRecordCount === undefined
             ? undefined
             : historicalUnresolvedProviderRecordCount > 0;
@@ -2350,7 +2404,7 @@ export function createJunctionDeviceSyncProvider(
             context,
             buildYieldedJunctionJobResult({
               context,
-              historicalProviderRecordsSeen,
+              historicalProviderRecordsSeen: historicalUnresolvedProviderRecordsSeen,
               historicalRecordsSeen,
               historicalUnresolvedProviderRecordIdentitiesJson,
               historicalUnresolvedProviderRecordCount,

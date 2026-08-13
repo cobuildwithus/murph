@@ -60,7 +60,7 @@ export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
 export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionNoteHistoryBackfillCoverage";
 const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 2;
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 1;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX =
   `m${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION}|`;
 /** @deprecated Use the resource policy's historySemanticVersion. */
@@ -82,14 +82,6 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   "blood_pressure",
   "note",
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
-  "insulin_injection",
-  "carbohydrates",
-  "workout_duration",
-  "weight",
-  "fat",
-  "body_mass_index",
-  "lean_body_mass",
-  "waist_circumference",
 ] as const);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
   ["blood_pressure", 1],
@@ -97,14 +89,6 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<st
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
     (resource) => [resource, 1] as const,
   ),
-  ["insulin_injection", 1],
-  ["carbohydrates", 1],
-  ["workout_duration", 1],
-  ["weight", 1],
-  ["fat", 1],
-  ["body_mass_index", 1],
-  ["lean_body_mass", 1],
-  ["waist_circumference", 1],
 ]);
 const JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
@@ -151,11 +135,6 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_SLOTS = Object.freeze([
   "polar",
   "apple-health",
 ] as const);
-export const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS =
-  JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_SLOTS;
-export const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES = Object.freeze(
-  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.slice(0, 12),
-);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_ID_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_SLOTS,
 );
@@ -435,16 +414,6 @@ interface JunctionExtendedTimeseriesHistoryCoverageMatrix {
   bytes: Uint8Array;
 }
 
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS =
-  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.slice(0, 12);
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_VERSION_BY_NAME = new Map<string, number>(
-  JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.map((resource) => [resource, 1]),
-);
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH = Math.ceil(
-  JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY
-    * JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length
-    / 8,
-);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH = Math.ceil(
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY
     * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
@@ -463,7 +432,7 @@ if (
   || JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.size
     !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
   || JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length
-    + Math.ceil(JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 4 / 3)
+    + JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 2
     > DEVICE_SYNC_METADATA_MAX_STRING_LENGTH
 ) {
   throw new TypeError("Junction extended-history coverage exceeds its fixed metadata matrix.");
@@ -676,57 +645,23 @@ function encodeJunctionLegacyExtendedTimeseriesHistoryCoverage(
 function readJunctionExtendedTimeseriesHistoryCoverageMatrix(
   value: unknown,
 ): JunctionExtendedTimeseriesHistoryCoverageMatrix | null {
-  if (typeof value !== "string") {
+  if (
+    typeof value !== "string"
+    || !value.startsWith(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX)
+    || value.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length
+      + JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 2
+  ) {
     return null;
   }
-  if (value.startsWith("m1|")) {
-    if (value.length !== 3 + JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH * 2) {
-      return null;
-    }
-    const hex = value.slice(3);
-    if (!/^[0-9a-f]+$/u.test(hex)) {
-      return null;
-    }
-    const legacyBytes = new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH);
-    for (let index = 0; index < legacyBytes.length; index += 1) {
-      legacyBytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
-    }
-    const current = createEmptyJunctionExtendedTimeseriesHistoryCoverageMatrix();
-    for (let sourceSlot = 0; sourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY; sourceSlot += 1) {
-      for (let resourceSlot = 0; resourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length; resourceSlot += 1) {
-        const resource = JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS[resourceSlot];
-        if (
-          resource === undefined
-          || JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_VERSION_BY_NAME.get(resource)
-            !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(resource)
-        ) {
-          continue;
-        }
-        const legacyBit = sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length
-          + resourceSlot;
-        if (hasJunctionExtendedTimeseriesHistoryCoverageBit(legacyBytes, legacyBit)) {
-          setJunctionExtendedTimeseriesHistoryCoverageBit(
-            current.bytes,
-            sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
-              + resourceSlot,
-          );
-        }
-      }
-    }
-    return current;
-  }
-  if (!value.startsWith(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX)) {
+  const hex = value.slice(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length);
+  if (!/^[0-9a-f]+$/u.test(hex)) {
     return null;
   }
-  const encoded = value.slice(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length);
-  if (!/^[A-Za-z0-9_-]+$/u.test(encoded) || encoded.includes("=")) {
-    return null;
+  const bytes = new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
   }
-  const decoded = Buffer.from(encoded, "base64url");
-  return decoded.length === JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH
-      && decoded.toString("base64url") === encoded
-    ? { bytes: new Uint8Array(decoded) }
-    : null;
+  return { bytes };
 }
 
 function readJunctionExtendedTimeseriesHistoryCoverageMatrixVersion(
@@ -749,9 +684,9 @@ function encodeJunctionExtendedTimeseriesHistoryCoverageMatrix(
   if (coverage.bytes.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH) {
     return null;
   }
-  const encoded = `${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX}${
-    Buffer.from(coverage.bytes).toString("base64url")
-  }`;
+  const encoded = `${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX}${[...coverage.bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")}`;
   return encoded.length <= DEVICE_SYNC_METADATA_MAX_STRING_LENGTH ? encoded : null;
 }
 
@@ -892,7 +827,9 @@ function selectJunctionExtendedTimeseriesHistoryCoverageMetadataKey(
     );
   return candidates.find((metadataKey) =>
     typeof metadata[metadataKey] === "string"
-    && String(metadata[metadataKey]).startsWith("m2|")
+    && String(metadata[metadataKey]).startsWith(
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX,
+    )
     && readJunctionExtendedTimeseriesHistoryCoverageMatrix(metadata[metadataKey]) !== null
   )
     ?? candidates.find((metadataKey) =>

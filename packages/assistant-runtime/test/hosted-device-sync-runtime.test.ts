@@ -1569,7 +1569,7 @@ describe("hosted device-sync runtime", () => {
         [
           beforeReconnect.metadata.junctionBloodPressureHistoryBackfillCoverage,
           beforeReconnect.metadata.junctionNoteHistoryBackfillCoverage,
-        ].filter((value) => typeof value === "string" && /^m2\|/u.test(value)).length,
+        ].filter((value) => typeof value === "string" && /^m1\|/u.test(value)).length,
         1,
       );
       getStore(service).patchAccount(localAccountId, {
