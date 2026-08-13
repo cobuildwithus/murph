@@ -1374,6 +1374,31 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     );
   });
 
+  it("leaves companion activation route-less when every atomic claim loses", async () => {
+    const line = buildLine("+15550100001", {
+      proactiveConversationCount: 49,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(false);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        allowNoAssignableLine: true,
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: null,
+    });
+
+    expect(
+      mocks.claimHostedLinqProactiveConversationCapacityTx,
+    ).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx)
+      .not.toHaveBeenCalled();
+  });
+
   it("assigns a home line but suppresses the welcome when every line is at the hard cap", async () => {
     const dayUtc = startOfUtcDay(new Date());
     const firstLine = buildLine("+15550100001", {
@@ -1402,6 +1427,36 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       prisma: {} as never,
       recipientPhone: firstLine.phoneNumber,
     });
+  });
+
+  it("leaves companion activation route-less when every line is at the hard cap", async () => {
+    const dayUtc = startOfUtcDay(new Date());
+    const lines = [
+      buildLine("+15550100001", {
+        proactiveConversationCount: 50,
+        proactiveConversationDayUtc: dayUtc,
+      }),
+      buildLine("+15550100002", {
+        proactiveConversationCount: 50,
+        proactiveConversationDayUtc: dayUtc,
+      }),
+    ];
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue(lines);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        allowNoAssignableLine: true,
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: null,
+    });
+
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx)
+      .not.toHaveBeenCalled();
   });
 
   it("fails closed when activation has no usable pending thread and no configured home-line pool", async () => {

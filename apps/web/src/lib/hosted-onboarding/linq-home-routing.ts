@@ -590,6 +590,20 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     });
   }
 
+  // Companion activation may succeed without proactive capacity. When this
+  // member did not already own routing authority, leave the route empty so
+  // their first provider-attested inbound can bind the managed line they
+  // actually contacted instead of redirecting from an undisclosed fallback.
+  if (
+    input.allowNoAssignableLine
+    && authority.kind === "none"
+    && !target.proactiveConversationReserved
+  ) {
+    return {
+      welcomeRoute: null,
+    };
+  }
+
   await upsertHostedMemberHomeLinqRecipientPhoneTx({
     clearPending: true,
     homeLineAssignedAt: target.homeLineAssignedAt,

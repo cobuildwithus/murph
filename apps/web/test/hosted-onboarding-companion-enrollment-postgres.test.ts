@@ -60,15 +60,24 @@ describe.skipIf(!runPostgresProof)(
     it.each([
       {
         expectedMailboxCount: 2,
+        expectedRoute: true,
         expectedWelcomeCount: 1,
-        lineAvailable: true,
+        lineState: "available" as const,
         name: "routes one welcome",
       },
       {
         expectedMailboxCount: 1,
+        expectedRoute: false,
         expectedWelcomeCount: 0,
-        lineAvailable: false,
+        lineState: "missing" as const,
         name: "activates without a welcome when no line is assignable",
+      },
+      {
+        expectedMailboxCount: 1,
+        expectedRoute: false,
+        expectedWelcomeCount: 0,
+        lineState: "at_cap" as const,
+        name: "activates route-less when the available line is at its proactive cap",
       },
     ])("$name and replays without duplicate state or email", async (scenario) => {
       if (!databaseUrl) {
@@ -82,6 +91,8 @@ describe.skipIf(!runPostgresProof)(
       const memberPhone = "+15551230001";
       const linePhone = "+15551230002";
       const now = new Date("2026-08-12T18:00:00.000Z");
+      const currentDayUtc = new Date();
+      currentDayUtc.setUTCHours(0, 0, 0, 0);
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const restoreEnvironment = configureLocalCryptoForTest();
       const lineLookupKey = requirePhoneLookupKey(linePhone);
@@ -96,7 +107,7 @@ describe.skipIf(!runPostgresProof)(
       });
 
       try {
-        if (scenario.lineAvailable) {
+        if (scenario.lineState !== "missing") {
           await prisma.hostedLinqLine.create({
             data: {
               assignmentWeight: 1_000_000,
@@ -104,6 +115,12 @@ describe.skipIf(!runPostgresProof)(
               egressPolicy: "enabled",
               healthStatus: "healthy",
               maxNewConversationsPerDay: 50,
+              ...(scenario.lineState === "at_cap"
+                ? {
+                    proactiveConversationCount: 50,
+                    proactiveConversationDayUtc: currentDayUtc,
+                  }
+                : {}),
               phoneNumberEncrypted:
                 encryptHostedLinqLinePhoneNumber(linePhone),
               phoneNumberHint: "*** test",
@@ -225,7 +242,7 @@ describe.skipIf(!runPostgresProof)(
           select: { linqRecipientPhoneLookupKey: true },
           where: { memberId },
         })).resolves.toEqual(
-          scenario.lineAvailable
+          scenario.expectedRoute
             ? { linqRecipientPhoneLookupKey: lineLookupKey }
             : null,
         );
@@ -255,24 +272,35 @@ describe.skipIf(!runPostgresProof)(
         expect(boundaries.signalMailboxAppend).toHaveBeenCalledTimes(2);
         expect(boundaries.sendSignupWelcomeEmail).not.toHaveBeenCalled();
 
-        if (!scenario.lineAvailable) {
-          await prisma.hostedLinqLine.create({
-            data: {
-              assignmentWeight: 1_000_000,
-              configuredAt: new Date(now.getTime() + 120_000),
-              egressPolicy: "enabled",
-              healthStatus: "warning",
-              maxNewConversationsPerDay: 50,
-              phoneNumberEncrypted:
-                encryptHostedLinqLinePhoneNumber(linePhone),
-              phoneNumberHint: "*** test",
-              phoneNumberLookupKey: lineLookupKey,
-              providerReputationStatus: "HEALTHY",
-              providerServiceStatus: "ACTIVE",
-              source: "test",
-            },
-          });
-          lineCreated = true;
+        if (!scenario.expectedRoute) {
+          if (scenario.lineState === "missing") {
+            await prisma.hostedLinqLine.create({
+              data: {
+                assignmentWeight: 1_000_000,
+                configuredAt: new Date(now.getTime() + 120_000),
+                egressPolicy: "enabled",
+                healthStatus: "warning",
+                maxNewConversationsPerDay: 50,
+                phoneNumberEncrypted:
+                  encryptHostedLinqLinePhoneNumber(linePhone),
+                phoneNumberHint: "*** test",
+                phoneNumberLookupKey: lineLookupKey,
+                providerReputationStatus: "HEALTHY",
+                providerServiceStatus: "ACTIVE",
+                source: "test",
+              },
+            });
+            lineCreated = true;
+          } else {
+            await prisma.hostedLinqLine.update({
+              data: {
+                healthStatus: "warning",
+                providerReputationStatus: "HEALTHY",
+                providerServiceStatus: "ACTIVE",
+              },
+              where: { phoneNumberLookupKey: lineLookupKey },
+            });
+          }
 
           const firstInbound = buildCompanionFirstInboundEvent({
             chatId: `chat_companion_first_inbound_${fixtureId}`,
