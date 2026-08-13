@@ -2724,6 +2724,103 @@ describe('assistant channels runtime seam', () => {
     )).toHaveLength(1)
   })
 
+  it.each([
+    {
+      input: {
+        message: 'm',
+        target: 'chat_oversized_private_image',
+        targetKind: 'thread' as const,
+      },
+      operation: 'send_message',
+    },
+    {
+      input: {
+        fromPhoneNumber: '+15550000',
+        message: 'm',
+        target: '+15550001',
+        targetKind: 'participant' as const,
+      },
+      operation: 'create_chat',
+    },
+  ])('rejects oversized final Linq text before private media work for $operation', async ({
+    input,
+    operation,
+  }) => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const loadVaultImage = vi.fn().mockResolvedValue(bytes)
+
+    await expect(sendLinqMessage({
+      ...input,
+      media: [{
+        alt: 'x'.repeat(9_998),
+        contentType: 'image/png',
+        filename: 'oversized.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/oversized.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: bytes.byteLength,
+        source: 'gpt-image-2',
+      }],
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      loadVaultImage,
+    })).rejects.toMatchObject({
+      code: 'LINQ_INVALID_INPUT',
+      context: {
+        operation,
+        requestAttachmentMediaPartCount: 1,
+        requestMediaPartCount: 1,
+        requestMessageLength: 10_001,
+        requestPublicUrlMediaPartCount: 0,
+        retryable: false,
+      },
+      deliveryMayHaveSucceeded: false,
+      retryable: false,
+    })
+
+    expect(loadVaultImage).not.toHaveBeenCalled()
+    expect(runtimeMocks.uploadLinqAttachment).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+    expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
+  })
+
+  it('allows exactly 10,000 rendered Linq characters before private media work', async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const loadVaultImage = vi.fn().mockResolvedValue(bytes)
+    runtimeMocks.uploadLinqAttachment.mockResolvedValue({
+      attachmentId: 'attachment_exact_text_limit',
+    })
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'message_exact_text_limit' },
+    })
+
+    await expect(sendLinqMessage({
+      media: [{
+        alt: 'x'.repeat(9_997),
+        contentType: 'image/png',
+        filename: 'exact-limit.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/exact-limit.png',
+        sha256: 'b'.repeat(64),
+        sizeBytes: bytes.byteLength,
+        source: 'gpt-image-2',
+      }],
+      message: 'm',
+      target: 'chat_exact_text_limit',
+      targetKind: 'thread',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      loadVaultImage,
+    })).resolves.toMatchObject({
+      providerMessageId: 'message_exact_text_limit',
+    })
+
+    expect(loadVaultImage).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.uploadLinqAttachment).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.sendLinqChatMessage.mock.calls.at(-1)?.[0]?.message)
+      .toHaveLength(10_000)
+  })
+
   it('keeps an image description exactly once when the message already contains it', async () => {
     const alternative = 'Direction context unavailable · mover sentiment is neutral.'
     runtimeMocks.sendLinqChatMessage.mockResolvedValue({

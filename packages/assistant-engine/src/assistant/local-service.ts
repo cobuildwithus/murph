@@ -2343,6 +2343,7 @@ function resolveInitialAcceptedTurnInputItems(input: {
 
   return [
     {
+      acceptedAt: input.userTurn.turnCreatedAt,
       id: resolveDefaultInitialAcceptedTurnInputId({
         input: input.input,
         userTurn: input.userTurn,

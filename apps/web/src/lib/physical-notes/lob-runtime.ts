@@ -3,6 +3,7 @@ import "server-only";
 import { Buffer } from "node:buffer";
 
 import type {
+  HostedPhysicalNoteFailureReason,
   HostedPhysicalNoteRecipient,
 } from "@murphai/hosted-execution/physical-notes";
 
@@ -19,6 +20,7 @@ export type LobPhysicalNoteCreateResult =
     }
   | {
       kind: "definite_failure";
+      reason: HostedPhysicalNoteFailureReason;
       status: number;
     }
   | {
@@ -111,9 +113,13 @@ export function createLobPhysicalNoteRuntime(input: {
       }
 
       if (!response.ok) {
-        return response.status >= 500
+        return response.status === 408 || response.status >= 500
           ? { kind: "ambiguous_failure" }
-          : { kind: "definite_failure", status: response.status };
+          : {
+              kind: "definite_failure",
+              reason: await readLobFailureReason(response),
+              status: response.status,
+            };
       }
 
       let payload: unknown;
@@ -199,6 +205,75 @@ function readLobLetterId(value: unknown): string | null {
   return typeof id === "string" && /^ltr_[A-Za-z0-9]+$/u.test(id)
     ? id
     : null;
+}
+
+async function readLobFailureReason(
+  response: Response,
+): Promise<HostedPhysicalNoteFailureReason> {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return "unknown";
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return "unknown";
+  }
+  const error = Reflect.get(payload, "error");
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return "unknown";
+  }
+  const code = Reflect.get(error, "code");
+  if (typeof code !== "string") {
+    return "unknown";
+  }
+
+  switch (code.toLowerCase()) {
+    case "address_length_exceeds_limit":
+    case "failed_deliverability_strictness":
+      return "recipient_address";
+    case "file_size_exceeds_limit":
+    case "invalid_image_dpi":
+      return "artwork";
+    case "billing_address_required":
+    case "custom_envelope_inventory_depleted":
+    case "email_required":
+    case "feature_limit_reached":
+    case "foreign_return_address":
+    case "invalid_api_key":
+    case "invalid_country_covid":
+    case "invalid_file_download_time":
+    case "invalid_file_url":
+    case "not_found":
+    case "payment_method_unverified":
+    case "publishable_key_not_allowed":
+    case "rate_limit_exceeded":
+    case "unauthorized":
+    case "unauthorized_token":
+      return "service_unavailable";
+    case "bad_request":
+    case "conflict":
+    case "file_pages_below_min":
+    case "file_pages_exceed_max":
+    case "inconsistent_page_dimensions":
+    case "invalid":
+    case "invalid_file":
+    case "invalid_file_dimensions":
+    case "invalid_international_feature":
+    case "invalid_perforation_return_envelope":
+    case "invalid_template_html":
+    case "mail_use_type_can_not_be_null":
+    case "merge_variable_required":
+    case "merge_variable_whitespace":
+    case "pdf_encrypted":
+    case "special_characters_restricted":
+    case "unembedded_fonts":
+    case "unrecognized_endpoint":
+    case "unsupported_lob_version":
+      return "request_invalid";
+    default:
+      return "unknown";
+  }
 }
 
 function readLobLetterLookup(value: unknown): LobPhysicalNoteLookupResult | null {

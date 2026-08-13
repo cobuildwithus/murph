@@ -157,14 +157,14 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('resolves live authority lazily after the tool call')
     expect(section).not.toContain('explicit current visibility of a consented shared metric')
     expect(section).not.toContain('call exact-scope `read_shared` once first')
-    expect(section).not.toContain('granted plus missing means not currently visible')
+    expect(section).not.toContain('`pending` means permission is active')
     expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
     expect(section).toContain('never infer their departure, score, diagnostics, or permission')
     expect(section).toContain('or call the standings complete')
     expect(section).toContain("an exact `Sender:` handle must appear in exactly one returned member's `currentTurnHandles`")
     expect(section).toContain('Scheduled and detached reads have no current-turn handles')
     expect(section).not.toContain('For running-challenge standings')
-    expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
+    expect(section).toContain('`not_granted`, `pending`, `missing`, and `available`')
     expect(prompt).toContain('Deep/REM is stored, not rechecked')
     expect(prompt).toContain('New access uses v1')
     expect(prompt).toContain(
@@ -284,7 +284,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('canonical event zone (vault fallback)')
     expect(prompt).toContain('explicit current visibility of a consented shared metric')
     expect(prompt).toContain('call exact-scope `read_shared` once first')
-    expect(prompt).toContain('granted plus missing means not currently visible, cause unknown')
+    expect(prompt).toContain('`pending` means permission is active')
+    expect(prompt).toContain('never score or count it as zero, missing, disconnected, or non-consenting')
+    expect(prompt).toContain('never offer consent again for that scope')
+    expect(prompt).toContain('granted plus `missing` means there are no currently visible shared records')
     expect(prompt).toContain('unrelated "now"/"yet" questions')
     expect(prompt).toContain(
       'no timestamp/route/location/HR/provider ID',

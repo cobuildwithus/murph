@@ -61,6 +61,8 @@ vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", async () => {
 
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
 import {
+  hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
   PrismaDeviceSyncControlPlaneStore,
   type HostedConnectionRecord,
 } from "@/src/lib/device-sync/prisma-store";
@@ -1943,6 +1945,86 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     ]);
   });
 
+  it("uses an id-and-status-only member projection for companion status", async () => {
+    const findMany = vi.fn(async () => [{
+      id: "dsc_123",
+      status: "active",
+    }]);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: { findMany },
+      } as never,
+    });
+
+    await expect(store.listMemberConnectionStatuses({
+      limit: 32,
+      provider: "junction",
+      status: "not_disconnected",
+      userId: "user-123",
+    })).resolves.toEqual([{
+      id: "dsc_123",
+      status: "active",
+    }]);
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 33,
+      select: {
+        id: true,
+        status: true,
+      },
+      where: {
+        provider: "junction",
+        status: { not: "disconnected" },
+        userId: "user-123",
+      },
+    });
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when companion status connection authority exceeds its bound", async () => {
+    const findMany = vi.fn(async () =>
+      Array.from({ length: 33 }, (_, index) => ({
+        id: `dsc_${String(index).padStart(2, "0")}`,
+        status: "active",
+      }))
+    );
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: { findMany },
+      } as never,
+    });
+
+    await expect(store.listMemberConnectionStatuses({
+      limit: 32,
+      provider: "junction",
+      status: "not_disconnected",
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "MEMBER_CONNECTION_STATUS_SNAPSHOT_SATURATED",
+      httpStatus: 503,
+      retryable: false,
+    });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 33 }));
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps redacted runtime SQL projections free of every device ciphertext", () => {
+    expect(hostedConnectionRecordArgs.select).toMatchObject({
+      accessTokenEncrypted: true,
+      externalAccountIdEncrypted: true,
+      refreshTokenEncrypted: true,
+    });
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "accessTokenEncrypted",
+    );
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "externalAccountIdEncrypted",
+    );
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "refreshTokenEncrypted",
+    );
+  });
+
   it("keeps webhook-ingress external-account lookups on the durable Prisma owner", async () => {
     const connection = createConnection({
       id: "dsc_123",
@@ -2251,6 +2333,177 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
     expect(findFirst).not.toHaveBeenCalled();
     expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it("persists a prepared runtime token write and clears only an obsolete refresh lease", async () => {
+    const record = {
+      ...createConnection({
+        credentialKind: "provider_config",
+        providerConfigKey: "legacy-profile",
+        refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+        refreshLeaseOwner: "agent-refresh:obsolete",
+        refreshLeaseTokenVersion: 1,
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: { profile: "legacy" },
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const written = {
+      ...createConnection({
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        providerConfigKey: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        refreshTokenEncrypted: "sealed-refresh-token",
+        tokenVersion: 3,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn(async () => written);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    const result = await store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshTokenEncrypted: "sealed-refresh-token",
+        rootKeyId: "device-root-active",
+        tokenVersion: 3,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+        credentialKind: "oauth_tokens",
+        credentialMetadataJson: {},
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        providerConfigKey: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        refreshTokenEncrypted: "sealed-refresh-token",
+        tokenVersion: 3,
+      },
+      where: { id: record.id },
+    }));
+    expect(result).toBe(written);
+  });
+
+  it("persists a prepared runtime token clear without changing credential ownership", async () => {
+    const record = {
+      ...createConnection({
+        accessTokenEncrypted: "enc:access-token",
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "enc:acct_456",
+        keyVersion: "v1",
+        refreshTokenEncrypted: "enc:refresh-token",
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const written = {
+      ...createConnection({
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn(async () => written);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    const result = await store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: null,
+        refreshTokenEncrypted: null,
+        rootKeyId: "device-root-active",
+        tokenVersion: null,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: null,
+        providerConfigKey: null,
+        refreshTokenEncrypted: null,
+        tokenVersion: null,
+      },
+      where: { id: record.id },
+    }));
+    expect(result).toBe(written);
+  });
+
+  it("rejects a prepared runtime token write while the current refresh lease is active", async () => {
+    const record = {
+      ...createConnection({
+        refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+        refreshLeaseOwner: "agent-refresh:active",
+        refreshLeaseTokenVersion: 2,
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn();
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    await expect(store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: null,
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshTokenEncrypted: "sealed-refresh-token",
+        rootKeyId: "device-root-active",
+        tokenVersion: 3,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    })).rejects.toMatchObject({
+      code: "TOKEN_REFRESH_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("preserves the stored external account binding across token clears, tokenless reads, and retokenization", async () => {
