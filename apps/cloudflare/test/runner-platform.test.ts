@@ -5879,6 +5879,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
+        connectionId: "dsc_123",
         limit: 1,
         stagedDirtyAcks: [
           {
@@ -5913,6 +5914,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const pending = await platform.deviceSyncPort!.fetchDirtyStates({
+      connectionId: "dsc_123",
       limit: 1,
       stagedDirtyAcks: [
         {
@@ -5937,6 +5939,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.url).toBe("https://web.example.test/api/internal/device-sync/runtime/dirty-pending");
     expect(request.method).toBe("POST");
     await expect(request.text()).resolves.toBe(JSON.stringify({
+      connectionId: "dsc_123",
       limit: 1,
       stagedDirtyAcks: [
         {

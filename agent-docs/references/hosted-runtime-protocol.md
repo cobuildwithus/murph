@@ -2025,7 +2025,9 @@ The machine-local job store projects its earliest queued-job continuation
 through the runtime-owned workspace `nextWakeAt` while the runner is warm. The
 hosted provider scheduler runs only for the account mapped by a connection
 mailbox wake; a retained job wake and a generic runtime timer cannot admit
-provider cadence. The connection-specific encrypted system-mailbox item remains
+provider cadence. Only that connection mailbox wake may fetch its exact
+Web-owned dirty row or claim its account's local jobs; a generic runtime timer
+does neither. The connection-specific encrypted system-mailbox item remains
 pending while that account has queued or running work. Before checkpoint
 publication, the runtime queries those actual job rows and replaces the item's
 job hints with every unfinished kind, manifest-shaped payload/window, dedupe

@@ -249,10 +249,15 @@ export function claimDueDeviceSyncJob(
   workerId: string,
   now: string,
   leaseMs: number,
+  accountId?: string,
 ): DeviceSyncJobRecord | null {
   return withImmediateTransaction(database, () => {
     deadLetterExpiredExhaustedDeviceSyncJobs(database, now);
 
+    const accountPredicate = accountId ? "and candidate.account_id = ?" : "";
+    const claimParameters = accountId
+      ? [now, now, COMPANION_HRV_RMSSD_RESOURCE, now, accountId]
+      : [now, now, COMPANION_HRV_RMSSD_RESOURCE, now];
     const row = database.prepare(`
       select *
       from device_job as candidate
@@ -282,9 +287,10 @@ export function claimDueDeviceSyncJob(
           and blocking.lease_expires_at is not null
           and blocking.lease_expires_at > ?
       )
+      ${accountPredicate}
       order by candidate.priority desc, candidate.available_at asc, candidate.created_at asc, candidate.id asc
       limit 1
-    `).get(now, now, COMPANION_HRV_RMSSD_RESOURCE, now) as StoredJobRow | undefined;
+    `).get(...claimParameters) as StoredJobRow | undefined;
 
     if (!row) {
       return null;

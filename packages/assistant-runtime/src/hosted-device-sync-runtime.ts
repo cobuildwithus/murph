@@ -72,6 +72,7 @@ import {
 export { fetchCompleteHostedDeviceSyncRuntimeSnapshot };
 
 export interface HostedDeviceSyncRuntimeSyncState {
+  dirtyWorkRemaining?: boolean;
   hostedToLocalAccountIds: Map<string, string>;
   localToHostedAccountIds: Map<string, string>;
   observedTokenVersions: Map<string, number | null>;
@@ -120,6 +121,7 @@ interface HostedDirtyDeviceSyncJob {
 
 interface HostedDirtyDeviceSyncApplyResult {
   ack: HostedDeviceSyncRuntimeDirtyAck;
+  deferredJobCount: number;
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
 }
 
@@ -305,7 +307,10 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       return state;
     }
   }
-  if (input.skipDirtyPendingFetch !== true) {
+  if (
+    input.skipDirtyPendingFetch !== true
+    && resolveHostedDeviceSyncWakeLocalAccountId({ state, wake: input.wake })
+  ) {
     const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
       deviceSyncPort: client,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
@@ -316,9 +321,34 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     });
     state.pendingDirtyAcks = dirtyState.acks;
     state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
+    state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
   }
 
   return state;
+}
+
+export async function applyHostedPendingDirtyDeviceSyncStateForWake(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  service: DeviceSyncService;
+  signal?: AbortSignal | null;
+  stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  if (!resolveHostedDeviceSyncWakeLocalAccountId(input)) {
+    return;
+  }
+  const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
+    deviceSyncPort: input.deviceSyncPort,
+    hostedToLocalAccountIds: input.state.hostedToLocalAccountIds,
+    signal: input.signal ?? null,
+    service: input.service,
+    stagedDirtyAcks: input.stagedDirtyAcks ?? null,
+    wake: input.wake,
+  });
+  input.state.pendingDirtyAcks = dirtyState.acks;
+  input.state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
+  input.state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
 }
 
 function isTerminalHostedPrivacyScrub(
@@ -466,6 +496,7 @@ function createEmptyHostedDeviceSyncRuntimeSyncState(
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null = null,
 ): HostedDeviceSyncRuntimeSyncState {
   return {
+    dirtyWorkRemaining: false,
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
@@ -726,6 +757,23 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     };
   }
 
+  if (input.state.dirtyWorkRemaining) {
+    return {
+      retryAt: new Date(
+        Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
+      ).toISOString(),
+      wake: {
+        ...input.wake,
+        hint: {
+          ...(input.wake.hint ?? {}),
+          jobs: [],
+          nextReconcileAt: account.nextReconcileAt ?? null,
+          reason: "retained_dirty_remainder",
+        },
+      },
+    };
+  }
+
   if (wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON) {
     return null;
   }
@@ -776,9 +824,17 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   wake: HostedRuntimeEvent;
 }): Promise<{
   acks: HostedDeviceSyncRuntimeDirtyAck[];
+  hasMoreForWake: boolean;
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
 }> {
+  const wakeConnectionId = input.wake.kind === "device-sync.wake"
+    ? resolveHostedDeviceSyncWakeContext(input.wake).connectionId
+    : null;
+  if (!wakeConnectionId) {
+    return { acks: [], hasMoreForWake: false, pendingDirtyPayloadJobs: [] };
+  }
   const pending = await input.deviceSyncPort.fetchDirtyStates({
+    connectionId: wakeConnectionId,
     limit: HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
     ...(input.signal ? { signal: input.signal } : {}),
     ...(input.stagedDirtyAcks && input.stagedDirtyAcks.length > 0
@@ -787,8 +843,12 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   });
   const acks: HostedDeviceSyncRuntimeDirtyAck[] = [];
   const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
+  let hasMoreForWake = pending.hasMore;
 
   for (const dirtyState of pending.items) {
+    if (!wakeConnectionId || dirtyState.connectionId !== wakeConnectionId) {
+      continue;
+    }
     const applied = applyHostedDirtyDeviceSyncState({
       dirtyState,
       hostedToLocalAccountIds: input.hostedToLocalAccountIds,
@@ -800,10 +860,11 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
     if (applied) {
       acks.push(applied.ack);
       pendingDirtyPayloadJobs.push(...applied.pendingDirtyPayloadJobs);
+      hasMoreForWake = hasMoreForWake || applied.deferredJobCount > 0;
     }
   }
 
-  return { acks, pendingDirtyPayloadJobs };
+  return { acks, hasMoreForWake, pendingDirtyPayloadJobs };
 }
 
 function applyHostedDirtyDeviceSyncState(input: {
@@ -869,11 +930,19 @@ function applyHostedDirtyDeviceSyncState(input: {
       });
       return null;
     }
+    const admittedJobs = limitHostedDirtyDeviceSyncJobsForAccount({
+      accountId: localAccountId,
+      jobs: acceptedCompanionHrvJobs,
+      store,
+    });
+    const processedRevision = admittedJobs.length === acceptedCompanionHrvJobs.length
+      ? input.dirtyState.dirtyRevision
+      : input.dirtyState.processedRevision;
     const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
       accountId: localAccountId,
       connectionId: input.dirtyState.connectionId,
-      jobs: acceptedCompanionHrvJobs,
-      processedRevision: input.dirtyState.dirtyRevision,
+      jobs: admittedJobs,
+      processedRevision,
       provider: account.provider,
       store,
     });
@@ -889,12 +958,13 @@ function applyHostedDirtyDeviceSyncState(input: {
         nextWakeAt: input.nextWakeAt,
         ...withHostedDirtyPayloadAckIds(
           input.dirtyState,
-          pendingDirtyPayloadJobs.flatMap((job) =>
+          acceptedCompanionHrvJobs.flatMap((job) =>
             job.dirtyPayloadId ? [job.dirtyPayloadId] : []
           ),
         ),
-        processedRevision: input.dirtyState.dirtyRevision,
+        processedRevision,
       },
+      deferredJobCount: acceptedCompanionHrvJobs.length - admittedJobs.length,
       pendingDirtyPayloadJobs,
     };
   }
@@ -909,11 +979,19 @@ function applyHostedDirtyDeviceSyncState(input: {
     return null;
   }
 
+  const admittedJobs = limitHostedDirtyDeviceSyncJobsForAccount({
+    accountId: localAccountId,
+    jobs: dirtyJobs,
+    store,
+  });
+  const processedRevision = admittedJobs.length === dirtyJobs.length
+    ? input.dirtyState.dirtyRevision
+    : input.dirtyState.processedRevision;
   const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
     accountId: localAccountId,
     connectionId: input.dirtyState.connectionId,
-    jobs: dirtyJobs,
-    processedRevision: input.dirtyState.dirtyRevision,
+    jobs: admittedJobs,
+    processedRevision,
     provider: account.provider,
     store,
   });
@@ -924,14 +1002,31 @@ function applyHostedDirtyDeviceSyncState(input: {
       nextWakeAt: input.nextWakeAt,
       ...withHostedDirtyPayloadAckIds(
         input.dirtyState,
-        pendingDirtyPayloadJobs.flatMap((job) =>
+        dirtyJobs.flatMap((job) =>
           job.dirtyPayloadId ? [job.dirtyPayloadId] : []
         ),
       ),
-      processedRevision: input.dirtyState.dirtyRevision,
+      processedRevision,
     },
+    deferredJobCount: dirtyJobs.length - admittedJobs.length,
     pendingDirtyPayloadJobs,
   };
+}
+
+function limitHostedDirtyDeviceSyncJobsForAccount(input: {
+  accountId: string;
+  jobs: readonly HostedDirtyDeviceSyncJob[];
+  store: HostedRuntimeDeviceSyncStore;
+}): readonly HostedDirtyDeviceSyncJob[] {
+  const pendingCount = input.store.listPendingJobsForAccount(
+    input.accountId,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+  ).length;
+  const availableSlots = Math.max(
+    0,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingCount,
+  );
+  return input.jobs.slice(0, availableSlots);
 }
 
 function withHostedDirtyPayloadAckIds(
@@ -1080,9 +1175,6 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
   >();
   const completedByAck = new Map<string, Set<string>>();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
-  const trackedDirtyJobIds = new Set(
-    input.state.pendingDirtyPayloadJobs.map((pending) => pending.jobId),
-  );
   for (const pending of input.state.pendingDirtyPayloadJobs) {
     const job = store.getJobById(pending.jobId);
     const isCompanionHrv = job ? isJunctionCompanionHrvRmssdJob(job) : false;
@@ -1093,17 +1185,7 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
         isCompanionHrv
         || store.getAccountById(job.accountId)?.status === "active"
       );
-    // Provider execution may atomically finish a dirty seed and enqueue
-    // follow-up jobs. Other pending dirty seeds already have their own Web
-    // owners, but an untracked child does not, so retain this seed until every
-    // such child is terminal and a cold replacement can safely replay it.
-    const hasUntrackedPendingAccountWork = job
-      ? store.listPendingJobsForAccount(
-          job.accountId,
-          HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-        ).some((candidate) => !trackedDirtyJobIds.has(candidate.id))
-      : false;
-    if (!completed || hasUntrackedPendingAccountWork) {
+    if (!completed) {
       remaining.push(pending);
       continue;
     }

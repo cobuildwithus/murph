@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   detectWearableStorageMigrationCandidates: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   fetchCompleteHostedDeviceSyncRuntimeSnapshot: vi.fn(),
+  applyHostedPendingDirtyDeviceSyncStateForWake: vi.fn(),
   initInboxRuntime: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
@@ -90,6 +91,8 @@ vi.mock("@murphai/core", () => ({
 }));
 
 vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
+  applyHostedPendingDirtyDeviceSyncStateForWake:
+    mocks.applyHostedPendingDirtyDeviceSyncStateForWake,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot:
     mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   promoteHostedCompletedDirtyPayloadAcks:
@@ -357,7 +360,7 @@ beforeEach(async () => {
   });
   mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue(null);
   mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValue("local_scheduled_account");
-  mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue(null);
+  mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue("local_scheduled_account");
   mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
@@ -1756,7 +1759,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
       expect.objectContaining({
-        skipDirtyPendingFetch: false,
+        skipDirtyPendingFetch: true,
         stagedDirtyAcks: [
           {
             connectionId: "dsc_123",
@@ -2322,6 +2325,7 @@ describe("runHostedDeviceSyncPass", () => {
       };
       mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
       mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValueOnce(null);
+      mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValueOnce(null);
 
       const result = await runHostedDeviceSyncPass(
         {
@@ -2339,7 +2343,7 @@ describe("runHostedDeviceSyncPass", () => {
 
       assert.equal(result.nextWakeAt, null);
       expect(runSchedulerOnce).not.toHaveBeenCalled();
-      expect(service.drainWorker).toHaveBeenCalledWith(100);
+      expect(service.drainWorker).not.toHaveBeenCalled();
       expect(service.close).toHaveBeenCalledTimes(1);
     });
   });
@@ -2420,7 +2424,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(100);
+    expect(drainWorker).toHaveBeenCalledWith(100, "local_scheduled_account");
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -3501,7 +3505,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
@@ -3548,7 +3552,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(100);
-    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
@@ -5631,7 +5635,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
-    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
     expect(shouldYieldDeviceSync).toHaveBeenCalled();
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
   });

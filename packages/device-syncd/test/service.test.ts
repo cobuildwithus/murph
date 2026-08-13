@@ -7063,6 +7063,84 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
   close();
 });
 
+test("account-scoped worker draining never claims another account's higher-priority job", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-account-scoped-worker");
+  const executedExternalAccounts: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        createScheduledJobs: undefined,
+        async executeJob(context) {
+          executedExternalAccounts.push(context.account.externalAccountId);
+          return {};
+        },
+      }),
+    ],
+  });
+
+  try {
+    const first = store.upsertAccount({
+      connectedAt: "2026-08-13T00:00:00.000Z",
+      tokens: {
+        accessToken: "first-access-token",
+        accessTokenEncrypted: encryptStoredAccessToken(
+          "demo",
+          "account-first",
+          "first-access-token",
+        ),
+      },
+      displayName: "First",
+      externalAccountId: "account-first",
+      provider: "demo",
+      scopes: [],
+      status: "active",
+    });
+    const second = store.upsertAccount({
+      connectedAt: "2026-08-13T00:00:00.000Z",
+      tokens: {
+        accessToken: "second-access-token",
+        accessTokenEncrypted: encryptStoredAccessToken(
+          "demo",
+          "account-second",
+          "second-access-token",
+        ),
+      },
+      displayName: "Second",
+      externalAccountId: "account-second",
+      provider: "demo",
+      scopes: [],
+      status: "active",
+    });
+    const firstJob = store.enqueueJob({
+      accountId: first.id,
+      kind: "resource",
+      payload: { resource: "first" },
+      priority: 10,
+      provider: "demo",
+    });
+    const secondJob = store.enqueueJob({
+      accountId: second.id,
+      kind: "resource",
+      payload: { resource: "second" },
+      priority: 100,
+      provider: "demo",
+    });
+
+    assert.equal(await service.drainWorker(1, first.id), 1);
+    assert.deepEqual(executedExternalAccounts, ["account-first"]);
+    assert.equal(store.getJobById(firstJob.id)?.status, "succeeded");
+    assert.equal(store.getJobById(secondJob.id)?.status, "queued");
+  } finally {
+    close();
+  }
+});
+
 test("device sync store next wake reads scheduled reconciles and queued jobs without providers", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-store-next-wake");
   const stateDatabasePath = path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH);

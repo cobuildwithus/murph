@@ -681,8 +681,9 @@ Last verified: 2026-08-12
   schedule consumed by the global due-reconcile sweep. While a runner is warm,
   an earlier queued-job wake reaches Temporal through the existing workspace
   `nextWakeAt`. Hosted provider scheduling runs only for the account named by a
-  connection mailbox wake; a generic runtime timer may drain Web-owned dirty
-  work but cannot admit provider cadence. The connection-specific encrypted
+  connection mailbox wake; only that wake may fetch its exact Web-owned dirty
+  row or claim its account's local jobs. A generic runtime timer admits neither
+  dirty work, provider cadence, nor unrelated-account jobs. The connection-specific encrypted
   mailbox item stays pending while that account has queued or running work and
   is narrowed before checkpoint publication from the actual job rows to each
   manifest-safe payload/window, dedupe identity, priority, next retry time, and

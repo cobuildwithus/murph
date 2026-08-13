@@ -25,6 +25,7 @@ import type {
   HostedMaintenanceMetrics,
 } from "./models.ts";
 import {
+  applyHostedPendingDirtyDeviceSyncStateForWake,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   reconcileHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
@@ -156,6 +157,7 @@ export async function runHostedDeviceSyncPass(
 
   const secret = deviceSyncConfig?.secret ?? null;
   let syncState: HostedDeviceSyncRuntimeSyncState = {
+    dirtyWorkRemaining: false,
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
@@ -192,7 +194,7 @@ export async function runHostedDeviceSyncPass(
         signal: options.signal ?? null,
         service,
         snapshot: preloadedSnapshot,
-        skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
+        skipDirtyPendingFetch: true,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
       });
       controlPlaneSynced = true;
@@ -230,6 +232,25 @@ export async function runHostedDeviceSyncPass(
       await service.runSchedulerOnce(schedulerAccountId);
     }
 
+    const wakeLocalAccountId = resolveHostedDeviceSyncWakeLocalAccountId({
+      state: syncState,
+      wake,
+    });
+    if (
+      wakeLocalAccountId
+      && options.skipDirtyPendingFetch !== true
+      && deviceSyncPort
+    ) {
+      await applyHostedPendingDirtyDeviceSyncStateForWake({
+        deviceSyncPort,
+        service,
+        signal: options.signal ?? null,
+        stagedDirtyAcks: options.stagedDirtyAcks ?? null,
+        state: syncState,
+        wake,
+      });
+    }
+
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
@@ -242,6 +263,7 @@ export async function runHostedDeviceSyncPass(
     }
 
     processedJobs = await drainHostedDeviceSyncWorker({
+      accountId: wakeLocalAccountId,
       service,
       shouldYield,
     });
@@ -281,11 +303,6 @@ export async function runHostedDeviceSyncPass(
       state: syncState,
       wake,
     });
-    const wakeLocalAccountId = resolveHostedDeviceSyncWakeLocalAccountId({
-      state: syncState,
-      wake,
-    });
-
     if (secret && controlPlaneSynced) {
       await reconcileHostedDeviceSyncControlPlaneState({
         deferNextReconcileAtForLocalAccountId: wakeRecovery
@@ -674,11 +691,18 @@ function remainingHostedDeviceSyncDeadlineMs(
 }
 
 async function drainHostedDeviceSyncWorker(input: {
+  accountId: string | null;
   service: DeviceSyncService;
   shouldYield?: (() => boolean) | null;
 }): Promise<number> {
+  if (!input.accountId) {
+    return 0;
+  }
   if (!input.shouldYield) {
-    return await input.service.drainWorker(HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+    return await input.service.drainWorker(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      input.accountId,
+    );
   }
 
   let processedJobs = 0;
@@ -686,7 +710,7 @@ async function drainHostedDeviceSyncWorker(input: {
     if (input.shouldYield()) {
       break;
     }
-    const processed = await input.service.drainWorker(1);
+    const processed = await input.service.drainWorker(1, input.accountId);
     if (processed <= 0) {
       break;
     }

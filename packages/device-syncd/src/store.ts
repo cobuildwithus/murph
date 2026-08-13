@@ -496,8 +496,13 @@ export class SqliteDeviceSyncStore {
     return readNextDeviceSyncJobWakeAtForAccount(this.database, accountId);
   }
 
-  claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {
-    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs);
+  claimDueJob(
+    workerId: string,
+    now: string,
+    leaseMs: number,
+    accountId?: string,
+  ): DeviceSyncJobRecord | null {
+    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs, accountId);
   }
 
   listDueJobBatchCandidates(input: {

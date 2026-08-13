@@ -764,6 +764,7 @@ export class PrismaHostedDirtyConnectionStore {
   }
 
   async listPendingDirtyConnectionsForUser(input: {
+    connectionId?: string;
     limit: number;
     stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[];
     userId: string;
@@ -783,6 +784,9 @@ export class PrismaHostedDirtyConnectionStore {
       select "connection_id"
       from "device_sync_dirty_connection"
       where "user_id" = ${input.userId}
+        ${input.connectionId
+          ? Prisma.sql`and "connection_id" = ${input.connectionId}`
+          : Prisma.empty}
         and (
           "dirty_revision" > "processed_revision"
           or exists(

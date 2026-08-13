@@ -129,7 +129,6 @@ const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
   "inclusive",
   "exact",
 ] as const);
-
 class DeviceSyncJobExecutionCancelledError extends Error {
   constructor(readonly accountId: string, readonly jobId: string) {
     super(`Device sync job ${jobId} is no longer active for account ${accountId}.`);
@@ -205,10 +204,10 @@ export interface DeviceSyncService {
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
   runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]>;
-  runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
+  runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
-  drainWorker(limit?: number): Promise<number>;
+  drainWorker(limit?: number, accountId?: string): Promise<number>;
 }
 
 const defaultDeviceSyncClock: DeviceSyncClock = Object.freeze({
@@ -729,14 +728,16 @@ class DeviceSyncServiceController {
     }) ?? [];
   }
 
-  async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
+  async runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null> {
     const result = await this.runWorkerPassOnce({
+      accountId,
       maxJobRows: Number.POSITIVE_INFINITY,
     });
     return result?.job ?? null;
   }
 
   private async runWorkerPassOnce(input: {
+    accountId?: string;
     maxJobRows: number;
   }): Promise<{
     job: DeviceSyncJobRecord;
@@ -755,7 +756,12 @@ class DeviceSyncServiceController {
     }
 
     const now = this.nowIso();
-    const job = this.store.claimDueJob(this.workerId, now, this.workerLeaseMs);
+    const job = this.store.claimDueJob(
+      this.workerId,
+      now,
+      this.workerLeaseMs,
+      input.accountId,
+    );
     const currentNow = (): string => this.nowIso();
 
     if (!job) {
@@ -1276,12 +1282,13 @@ class DeviceSyncServiceController {
     }
   }
 
-  async drainWorker(limit = this.workerBatchSize): Promise<number> {
+  async drainWorker(limit = this.workerBatchSize, accountId?: string): Promise<number> {
     const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
     let processedJobRows = 0;
 
     while (processedJobRows < maxJobRows) {
       const result = await this.runWorkerPassOnce({
+        accountId,
         maxJobRows: maxJobRows - processedJobRows,
       });
 
@@ -1683,8 +1690,8 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
     runSchedulerOnce: (accountId) => controller.runSchedulerOnce(accountId),
-    runWorkerOnce: () => controller.runWorkerOnce(),
-    drainWorker: (limit) => controller.drainWorker(limit),
+    runWorkerOnce: (accountId) => controller.runWorkerOnce(accountId),
+    drainWorker: (limit, accountId) => controller.drainWorker(limit, accountId),
   } satisfies DeviceSyncService);
   return service;
 }
