@@ -9,8 +9,9 @@ import {
 import { buildHostedExecutionMemberActionCompletedWake } from "@murphai/hosted-execution";
 
 import {
-  appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxWakeByDedupeKey,
+  runWithPreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 
 const MEMBER_ACTION_COMPLETED_EVENT_PREFIX = "member.action.completed:";
@@ -33,17 +34,23 @@ export async function recordMemberActionOutcome(input: {
 }): Promise<RecordMemberActionOutcomeResult> {
   const outcome = parseMemberActionOutcomeV1(input.outcome);
   const eventId = memberActionCompletedEventId(outcome.actionId);
-  const appended = await input.prisma.$transaction((tx) =>
-    appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedExecutionMemberActionCompletedWake({
-        eventId,
-        memberId: input.memberId,
-        occurredAt: outcome.completedAt,
-        outcome,
-      }),
-      tx,
-    })
-  );
+  const appended = await runWithPreparedHostedMailboxItemAppendCrypto({
+    append: (prepared) =>
+      input.prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildHostedExecutionMemberActionCompletedWake({
+            eventId,
+            memberId: input.memberId,
+            occurredAt: outcome.completedAt,
+            outcome,
+          }),
+          prepared,
+          tx,
+        })
+      ),
+    prisma: input.prisma,
+    userId: input.memberId,
+  });
 
   return {
     dedupeConflict: appended.dedupeConflict,

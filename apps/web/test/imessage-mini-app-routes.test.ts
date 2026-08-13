@@ -21,7 +21,7 @@ const ACTIVE_SESSION = {
 const MESSAGES_TOKEN = `hbds_imessage_${"a".repeat(43)}`;
 
 const mocks = vi.hoisted(() => ({
-  appendHostedMailboxEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
   assertActiveHostedMemberAccessAllowed: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxWakeByDedupeKey: vi.fn(),
   requirePrivyMemberAuthFromBearerToken: vi.fn(),
   revokeAgentSession: vi.fn(),
+  runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
   transactionQuery: vi.fn(async () => []),
@@ -75,8 +76,11 @@ vi.mock("@/src/lib/device-sync/prisma-store/agent-sessions", () => ({
   },
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
+  runWithPreparedHostedMailboxItemAppendCrypto:
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto,
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
@@ -123,7 +127,7 @@ describe("iMessage mini-app routes", () => {
       status: "active",
       session: ACTIVE_SESSION,
     });
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockResolvedValue({
       dedupeConflict: false,
       duplicate: false,
       inserted: true,
@@ -133,6 +137,9 @@ describe("iMessage mini-app routes", () => {
         laneSeq: "7",
       },
     });
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
+      async (input) => await input.append({ prepared: "mailbox-crypto" }),
+    );
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member-1",
@@ -346,12 +353,18 @@ describe("iMessage mini-app routes", () => {
       prisma: transactionClient,
     });
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).toHaveBeenCalledWith({
+      append: expect.any(Function),
+      prisma,
+      userId: "member-1",
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
         kind: "member.action.requested",
         userId: "member-1",
       }),
+      prepared: { prepared: "mailbox-crypto" },
       tx: transactionClient,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
@@ -364,7 +377,9 @@ describe("iMessage mini-app routes", () => {
       mailboxItemId: "mailbox-action-1",
       prisma,
     });
-    expect(invocationOrder(mocks.appendHostedMailboxEnvelopeTx)).toBeLessThan(
+    expect(
+      invocationOrder(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx),
+    ).toBeLessThan(
       invocationOrder(mocks.signalHostedMailboxAppendRuntime),
     );
     await expect(response.json()).resolves.toEqual({
@@ -394,11 +409,11 @@ describe("iMessage mini-app routes", () => {
       error: { code: "HOSTED_ACCESS_REQUIRED" },
     });
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
   });
 
   it("re-signals an exact duplicate action with the original stable timestamp", async () => {
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockResolvedValueOnce({
       dedupeConflict: false,
       duplicate: true,
       inserted: false,
@@ -418,8 +433,9 @@ describe("iMessage mini-app routes", () => {
     ));
 
     expect(response.status).toBe(202);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({ occurredAt: body.requestedAt }),
+      prepared: { prepared: "mailbox-crypto" },
       tx: transactionClient,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
@@ -518,7 +534,7 @@ describe("iMessage mini-app routes", () => {
   });
 
   it("rejects an action-id collision without signaling the runtime", async () => {
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockResolvedValueOnce({
       dedupeConflict: true,
       duplicate: true,
       inserted: false,

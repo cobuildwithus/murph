@@ -7,7 +7,8 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+  runWithPreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import {
   signalHostedMailboxAppendRuntime,
@@ -33,28 +34,34 @@ export async function submitMemberAction(input: {
   prisma: PrismaClient;
   request: MemberActionRequestV1;
 }): Promise<SubmitMemberActionResult> {
-  const appended = await input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
-    await assertActiveHostedMemberAccessAllowed({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    await assertHostedHistoricalLaunchConsentGranted({
-      memberId: input.memberId,
-      prisma: tx,
-    });
+  const appended = await runWithPreparedHostedMailboxItemAppendCrypto({
+    append: (prepared) =>
+      input.prisma.$transaction(async (tx) => {
+        await lockHostedMemberRow(tx, input.memberId);
+        await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
+        await assertActiveHostedMemberAccessAllowed({
+          memberId: input.memberId,
+          prisma: tx,
+        });
+        await assertHostedHistoricalLaunchConsentGranted({
+          memberId: input.memberId,
+          prisma: tx,
+        });
 
-    return appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedExecutionMemberActionRequestedWake({
-        eventId: `member.action.requested:${input.request.actionId}`,
-        memberId: input.memberId,
-        occurredAt: input.request.requestedAt,
-        request: input.request,
-      }),
-      tx,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+        return appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: buildHostedExecutionMemberActionRequestedWake({
+            eventId: `member.action.requested:${input.request.actionId}`,
+            memberId: input.memberId,
+            occurredAt: input.request.requestedAt,
+            request: input.request,
+          }),
+          prepared,
+          tx,
+        });
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS),
+    prisma: input.prisma,
+    userId: input.memberId,
+  });
 
   if (!appended.dedupeConflict) {
     await signalHostedMailboxAppendRuntime({

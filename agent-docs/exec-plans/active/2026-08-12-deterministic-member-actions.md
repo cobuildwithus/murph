@@ -86,6 +86,9 @@ Messages extension as the first action family.
   not an unchanged retry.
 - Admission rejects duplicate exercise or set mutation coordinates, keeping one
   action batch single-valued across exact replay.
+- Admission and outcome recording reuse the mailbox owner's prepared-crypto
+  boundary: provider work finishes before their transactions, while root drift
+  retries the full preparation once through the existing fresh-cache owner.
 
 ## Verification
 
