@@ -19,6 +19,7 @@ import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import {
   createDeviceSyncService,
+  resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
 } from "../src/service.ts";
 import {
@@ -1816,7 +1817,7 @@ test("device sync service starts and stops its timers, closes owned stores, and 
   }
 });
 
-test("device sync service scheduler queues due active jobs and skips unsupported or inactive accounts", async () => {
+test("device sync service scheduler can scope cadence admission to one due account", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler");
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
@@ -1879,6 +1880,20 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     connectedAt: "2026-03-17T10:00:00.000Z",
     nextReconcileAt: "2026-03-17T11:00:00.000Z",
   });
+  const otherDueAccounts = Array.from({ length: 100 }, (_, index) =>
+    store.upsertAccount({
+      provider: "scheduled",
+      externalAccountId: `scheduled-other-${index}`,
+      displayName: `Other scheduled ${index}`,
+      scopes: ["offline"],
+      tokens: {
+        accessToken: `other-scheduled-access-${index}`,
+        accessTokenEncrypted: `enc:other-scheduled-access-${index}`,
+      },
+      connectedAt: "2026-03-17T10:00:00.000Z",
+      nextReconcileAt: "2026-03-17T11:00:00.000Z",
+    })
+  );
   store.upsertAccount({
     provider: "scheduled",
     externalAccountId: "scheduled-future",
@@ -1917,13 +1932,20 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     nextReconcileAt: "2026-03-17T11:00:00.000Z",
   });
 
-  await service.runSchedulerOnce();
+  await service.runSchedulerOnce(dueActive.id);
 
   const scheduledJobs = listJobKindsForAccountForTesting(store, dueActive.id);
   const unsupportedAccount = store.getAccountByExternalAccount("unsupported", "unsupported-1");
   assert.ok(unsupportedAccount);
   assert.deepEqual(scheduledJobs, ["scheduled-refresh"]);
   assert.equal(store.getAccountById(dueActive.id)?.nextReconcileAt, "2026-03-17T12:30:00.000Z");
+  for (const otherDueActive of otherDueAccounts) {
+    assert.equal(countJobsForAccountForTesting(store, otherDueActive.id), 0);
+    assert.equal(
+      store.getAccountById(otherDueActive.id)?.nextReconcileAt,
+      "2026-03-17T11:00:00.000Z",
+    );
+  }
   assert.equal(countJobsForAccountForTesting(store, unsupportedAccount.id), 0);
   assert.equal(countJobsForAccountForTesting(store, disconnected.id), 0);
 
@@ -7041,6 +7063,84 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
   close();
 });
 
+test("account-scoped worker draining never claims another account's higher-priority job", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-account-scoped-worker");
+  const executedExternalAccounts: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        createScheduledJobs: undefined,
+        async executeJob(context) {
+          executedExternalAccounts.push(context.account.externalAccountId);
+          return {};
+        },
+      }),
+    ],
+  });
+
+  try {
+    const first = store.upsertAccount({
+      connectedAt: "2026-08-13T00:00:00.000Z",
+      tokens: {
+        accessToken: "first-access-token",
+        accessTokenEncrypted: encryptStoredAccessToken(
+          "demo",
+          "account-first",
+          "first-access-token",
+        ),
+      },
+      displayName: "First",
+      externalAccountId: "account-first",
+      provider: "demo",
+      scopes: [],
+      status: "active",
+    });
+    const second = store.upsertAccount({
+      connectedAt: "2026-08-13T00:00:00.000Z",
+      tokens: {
+        accessToken: "second-access-token",
+        accessTokenEncrypted: encryptStoredAccessToken(
+          "demo",
+          "account-second",
+          "second-access-token",
+        ),
+      },
+      displayName: "Second",
+      externalAccountId: "account-second",
+      provider: "demo",
+      scopes: [],
+      status: "active",
+    });
+    const firstJob = store.enqueueJob({
+      accountId: first.id,
+      kind: "resource",
+      payload: { resource: "first" },
+      priority: 10,
+      provider: "demo",
+    });
+    const secondJob = store.enqueueJob({
+      accountId: second.id,
+      kind: "resource",
+      payload: { resource: "second" },
+      priority: 100,
+      provider: "demo",
+    });
+
+    assert.equal(await service.drainWorker(1, first.id), 1);
+    assert.deepEqual(executedExternalAccounts, ["account-first"]);
+    assert.equal(store.getJobById(firstJob.id)?.status, "succeeded");
+    assert.equal(store.getJobById(secondJob.id)?.status, "queued");
+  } finally {
+    close();
+  }
+});
+
 test("device sync store next wake reads scheduled reconciles and queued jobs without providers", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-store-next-wake");
   const stateDatabasePath = path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH);
@@ -7066,6 +7166,7 @@ test("device sync store next wake reads scheduled reconciles and queued jobs wit
       }),
       "2026-03-17T12:00:00.000Z",
     );
+    assert.equal(resolveDeviceSyncStoreNextJobWakeAt({ vaultRoot }), null);
 
     store.enqueueJob({
       accountId: account.id,
@@ -7085,7 +7186,7 @@ test("device sync store next wake reads scheduled reconciles and queued jobs wit
     );
 
     assert.equal(
-      resolveDeviceSyncStoreNextWakeAt({
+      resolveDeviceSyncStoreNextJobWakeAt({
         stateDatabasePath,
         vaultRoot: "/unused-vault-root",
       }),

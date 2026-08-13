@@ -1,0 +1,10 @@
+{
+  "id": "workout-import-inspect",
+  "command": "vault-cli workout import inspect <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/sample-imports/workouts/strong.csv"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/workout-import-csv",
+  "purpose": "Registers the non-mutating Strong fixture and inspect command for scenario-integrity coverage; executable Strong and Hevy planning proof lives in focused importer tests."
+}
