@@ -113,6 +113,19 @@ const VALID_DAILY_METRIC_RECORD = {
   recordKey: "2026-07-03",
 };
 
+const VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD = {
+  data: {
+    date: "2026-07-03",
+    metricKey: "deep-sleep-minutes",
+    recordedAt: "2026-07-03T07:01:00.000Z",
+    unit: "minutes",
+    value: 88,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03.garmin",
+  source: { label: "Garmin", source: "garmin" },
+};
+
 const VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD = {
   data: {
     date: "2026-07-03",
@@ -1147,6 +1160,64 @@ describe("daily metric vault-share delivery records", () => {
         ).toThrow(/value must be between/u);
       }
     }
+  });
+
+  it("preserves each source-tagged sleep stage's recorded time", () => {
+    for (const [projectionScope, metricKey] of [
+      [DEEP_SLEEP_SCOPE, "deep-sleep-minutes"],
+      [DEEP_SLEEP_SOURCES_SCOPE, "deep-sleep-minutes"],
+      [REM_SLEEP_SCOPE, "rem-sleep-minutes"],
+      [REM_SLEEP_SOURCES_SCOPE, "rem-sleep-minutes"],
+    ] as const) {
+      const record = {
+        ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD,
+        data: {
+          ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data,
+          metricKey,
+        },
+      };
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: projectionScope.projectionKind,
+        records: [record],
+      }).records).toEqual([record]);
+
+      const recordWithoutProviderTime = {
+        ...record,
+        data: { ...record.data, recordedAt: null },
+      };
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: projectionScope.projectionKind,
+        records: [recordWithoutProviderTime],
+      }).records).toEqual([recordWithoutProviderTime]);
+    }
+  });
+
+  it("rejects missing, malformed, or misplaced source-recorded times", () => {
+    const { recordedAt: _recordedAt, ...missingRecordedAtData } =
+      VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data;
+    for (const data of [
+      missingRecordedAtData,
+      { ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data, recordedAt: "not-a-time" },
+      {
+        ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data,
+        recordedAt: "2999-01-01T00:00:00.000Z",
+      },
+    ]) {
+      expect(() => parseHostedVaultShareDeliverRequest({
+        projectionKind: DEEP_SLEEP_SCOPE.projectionKind,
+        records: [{ ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD, data }],
+      })).toThrow(/recordedAt|must not be in the future/u);
+    }
+
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records: [{
+        ...VALID_DAILY_METRIC_RECORD,
+        data: { ...VALID_DAILY_METRIC_RECORD.data, recordedAt: null },
+        recordKey: "2026-07-03.garmin",
+        source: { label: "Garmin", source: "garmin" },
+      }],
+    })).toThrow(/does not accept recordedAt/u);
   });
 
   it("parses every bounded public sleep source with one canonical selection", () => {

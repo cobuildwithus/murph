@@ -543,6 +543,7 @@ export interface HostedVaultShareDailyMetricData {
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
   projectedAt?: string;
   provisional?: true;
+  recordedAt?: string | null;
   sources?: HostedVaultShareSleepMetricSource[];
   sourcesDisagree?: boolean;
   unit: string | null;
@@ -1557,6 +1558,11 @@ function parseHostedVaultShareDailyMetricData(
 
   const sourceAware = spec.sourceMode === "all-public-sleep-sources"
     && context.source === undefined;
+  const sourceTaggedSleepStage = context.source !== undefined
+    && (
+      spec.metricKey === "deep-sleep-minutes"
+      || spec.metricKey === "rem-sleep-minutes"
+    );
   if (sourceAware) {
     assertObjectKeys(
       data,
@@ -1584,6 +1590,27 @@ function parseHostedVaultShareDailyMetricData(
       );
     }
   }
+  if (
+    sourceTaggedSleepStage
+    && !Object.prototype.hasOwnProperty.call(data, "recordedAt")
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} source-tagged data recordedAt must be a timestamp or null.`,
+    );
+  }
+  if (!sourceTaggedSleepStage && data.recordedAt !== undefined) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} does not accept recordedAt.`,
+    );
+  }
+  const recordedAt = sourceTaggedSleepStage
+    ? data.recordedAt === null
+      ? null
+      : requireHostedVaultShareNonFutureTimestamp(
+          data.recordedAt,
+          `Vault share ${spec.projectionKind} data recordedAt`,
+        )
+    : undefined;
 
   const sourceAwareData = sourceAware
     ? parseHostedVaultShareSleepMetricSources(data, spec, {
@@ -1596,6 +1623,7 @@ function parseHostedVaultShareDailyMetricData(
     date,
     metricKey,
     ...(metricSemantics === undefined ? {} : { metricSemantics }),
+    ...(sourceTaggedSleepStage ? { recordedAt } : {}),
     ...sourceAwareData,
     unit,
     value: valueNumber,

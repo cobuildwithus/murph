@@ -1659,6 +1659,7 @@ describe("murph.group dynamic tool", () => {
               data: {
                 date: "2026-07-18",
                 metricKey: "deep-sleep-minutes",
+                recordedAt: "2026-07-18T06:58:00.000Z",
                 unit: "minutes",
                 value: 64,
               },
@@ -1670,6 +1671,7 @@ describe("murph.group dynamic tool", () => {
               data: {
                 date: "2026-07-18",
                 metricKey: "deep-sleep-minutes",
+                recordedAt: "2026-07-18T07:01:00.000Z",
                 unit: "minutes",
                 value: 88,
               },
@@ -1681,6 +1683,7 @@ describe("murph.group dynamic tool", () => {
               data: {
                 date: "2026-07-18",
                 metricKey: "deep-sleep-minutes",
+                recordedAt: null,
                 unit: "minutes",
                 value: 112,
               },
@@ -1726,15 +1729,21 @@ describe("murph.group dynamic tool", () => {
               records: [
                 expect.not.objectContaining({ source: expect.anything() }),
                 expect.objectContaining({
-                  data: expect.objectContaining({ value: 64 }),
+                  data: expect.objectContaining({
+                    recordedAt: "2026-07-18T06:58:00.000Z",
+                    value: 64,
+                  }),
                   source: { label: "fitbit", source: "fitbit" },
                 }),
                 expect.objectContaining({
-                  data: expect.objectContaining({ value: 88 }),
+                  data: expect.objectContaining({
+                    recordedAt: "2026-07-18T07:01:00.000Z",
+                    value: 88,
+                  }),
                   source: { label: "Garmin", source: "garmin" },
                 }),
                 expect.objectContaining({
-                  data: expect.objectContaining({ value: 112 }),
+                  data: expect.objectContaining({ recordedAt: null, value: 112 }),
                   source: { label: "Oura", source: "oura" },
                 }),
               ],
@@ -5663,6 +5672,7 @@ describe("murph.group email actions", () => {
     const requestedScopes = [
       { projectionKind: "steps-days.v0" as const },
       { projectionKind: "sleep-times.v0" as const },
+      { projectionKind: "deep-sleep-sources-days.v1" as const },
     ];
     const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
       if (request.action !== "prepare_email") {
@@ -5691,6 +5701,10 @@ describe("murph.group email actions", () => {
                 {
                   projectionScopeKey: "sleep-times.v0",
                   shareId: "share-eligible-sleep-hidden",
+                },
+                {
+                  projectionScopeKey: "deep-sleep-sources-days.v1",
+                  shareId: "share-eligible-deep-sleep-hidden",
                 },
               ],
               hasEmail: true,
@@ -5735,7 +5749,11 @@ describe("murph.group email actions", () => {
           values: { steps: 9_100, workouts: 3 },
         }),
       ],
-      requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+      requestedProjectionScopeKeys: [
+        "steps-days.v0",
+        "sleep-times.v0",
+        "deep-sleep-sources-days.v1",
+      ],
       status: "ok",
     }));
     const request = readMurphDynamicToolRequest(groupToolCall({
@@ -5781,6 +5799,36 @@ describe("murph.group email actions", () => {
           {
             participantId: "participant_eligible",
             projections: {
+              "deep-sleep-sources-days.v1": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [
+                  {
+                    data: {
+                      date: "2026-08-09",
+                      metricKey: "deep-sleep-minutes",
+                      recordedAt: "2026-08-09T06:58:00.000Z",
+                      unit: "minutes",
+                      value: 64,
+                    },
+                    occurredAt: "2026-08-09T00:00:00.000Z",
+                    recordKey: "2026-08-09.fitbit",
+                    source: { label: "fitbit", source: "fitbit" },
+                  },
+                  {
+                    data: {
+                      date: "2026-08-09",
+                      metricKey: "deep-sleep-minutes",
+                      recordedAt: "2026-08-09T07:01:00.000Z",
+                      unit: "minutes",
+                      value: 88,
+                    },
+                    occurredAt: "2026-08-09T00:00:00.000Z",
+                    recordKey: "2026-08-09.garmin",
+                    source: { label: "Garmin", source: "garmin" },
+                  },
+                ],
+                status: "available",
+              },
               "sleep-times.v0": {
                 grantedAt: "2026-08-01T12:00:00.000Z",
                 records: [{
@@ -5854,7 +5902,11 @@ describe("murph.group email actions", () => {
         missingVerifiedEmailCount: 1,
         recipientCount: 2,
         referenceAt: "2026-08-10T13:00:00.000Z",
-        requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+        requestedProjectionScopeKeys: [
+          "steps-days.v0",
+          "sleep-times.v0",
+          "deep-sleep-sources-days.v1",
+        ],
         status: "ok",
       },
     });
@@ -5867,6 +5919,7 @@ describe("murph.group email actions", () => {
       "member_partial_scope",
       "share-eligible-steps-hidden",
       "share-eligible-sleep-hidden",
+      "share-eligible-deep-sleep-hidden",
       "share-missing-email-hidden",
       "share-partial-steps-hidden",
       "participant_missing_email",
@@ -5995,6 +6048,41 @@ function sharedEmailMember(input: {
     memberId: input.memberId,
     participantId: input.participantId,
     projections: [
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
+        projectionScope: {
+          projectionKind: "deep-sleep-sources-days.v1" as const,
+        },
+        projectionScopeKey: "deep-sleep-sources-days.v1",
+        records: [
+          {
+            data: {
+              date: "2026-08-09",
+              metricKey: "deep-sleep-minutes" as const,
+              recordedAt: "2026-08-09T06:58:00.000Z",
+              unit: "minutes",
+              value: 64,
+            },
+            occurredAt: "2026-08-09T00:00:00.000Z",
+            recordKey: "2026-08-09.fitbit",
+            source: { label: "fitbit", source: "fitbit" },
+          },
+          {
+            data: {
+              date: "2026-08-09",
+              metricKey: "deep-sleep-minutes" as const,
+              recordedAt: "2026-08-09T07:01:00.000Z",
+              unit: "minutes",
+              value: 88,
+            },
+            occurredAt: "2026-08-09T00:00:00.000Z",
+            recordKey: "2026-08-09.garmin",
+            source: { label: "Garmin", source: "garmin" },
+          },
+        ],
+      },
       {
         dataStatus: "available" as const,
         grantedAt: "2026-08-01T12:00:00.000Z",

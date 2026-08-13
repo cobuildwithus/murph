@@ -124,7 +124,9 @@ type MetricSourceOwnerPoint = Pick<
 type MetricSourceRevisionPoint = MetricSourceOwnerPoint & Pick<
   MetricSeriesPoint,
   "observedAt" | "pointIds"
->;
+> & {
+  recordedAt?: string | null;
+};
 
 type PublicSourceProjectionPoint = {
   source?: HostedVaultShareDataSource;
@@ -135,6 +137,7 @@ type DailyMetricProjectionPoint = MetricSourceRevisionPoint & Pick<
   "context" | "date" | "grain" | "metricKey" | "sourceLabel" | "statistic" | "unit" | "value"
 > & PublicSourceProjectionPoint & {
   provisional?: boolean;
+  recordedAt?: string | null;
   sources?: readonly HostedVaultShareSleepMetricSource[];
 };
 
@@ -768,17 +771,33 @@ function selectPublicSourceMetricSeries(input: {
   if (pointsBySource.size > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
     return null;
   }
+  const preservesRecordedAt = input.metricKey === "deep-sleep-minutes"
+    || input.metricKey === "rem-sleep-minutes";
 
-  return [...pointsBySource.values()].flatMap(({ points, source }) =>
-    selectMetricSeries({
+  return [...pointsBySource.values()].flatMap(({ points, source }) => {
+    const pointById = new Map(points.map((point) => [point.id, point]));
+    return selectMetricSeries({
       duplicatePolicy: "selection-policy",
       from: input.cutoffDate,
       grain: "day",
       metricKey: input.metricKey,
       points,
       statistic: "value",
-    }).rows.map((row) => ({ ...row, source }))
-  );
+    }).rows.map((row) => ({
+      ...row,
+      ...(preservesRecordedAt
+        ? {
+            recordedAt: row.pointIds?.length === 1
+              ? readContextString(
+                  pointById.get(row.pointIds[0] ?? "")?.context,
+                  "recordedAt",
+                ) ?? null
+              : null,
+          }
+        : {}),
+      source,
+    }));
+  });
 }
 
 function uniqueMetricPointsByPublicSource(
@@ -1236,6 +1255,10 @@ export function selectProjectableDailyMetricDays(
       continue;
     }
     const projectedAt = new Date(nowMs).toISOString();
+    const sourceTaggedSleepStage = source !== undefined && (
+      spec.metricKey === "deep-sleep-minutes"
+      || spec.metricKey === "rem-sleep-minutes"
+    );
 
     records.push({
       data: {
@@ -1255,6 +1278,9 @@ export function selectProjectableDailyMetricDays(
             }
           : {}),
         ...(point.provisional ? { provisional: true } : {}),
+        ...(sourceTaggedSleepStage
+          ? { recordedAt: point.recordedAt ?? null }
+          : {}),
         unit: sanitizeProjectionUnit(point.unit),
         value,
       },
@@ -2576,6 +2602,7 @@ function deriveMetricSeriesPointSourceRevision(
     observedAt: point.observedAt ?? null,
     ownerKey,
     pointIds: sortedStrings(point.pointIds ?? []),
+    ...(point.recordedAt === undefined ? {} : { recordedAt: point.recordedAt }),
   });
 }
 

@@ -1245,6 +1245,9 @@ describe("selectProjectableDailyMetricDays", () => {
           data: {
             date: ACTIVITY_DAY.date,
             metricKey,
+            recordedAt: metricKey === "deep-sleep-minutes"
+              ? "2026-07-03T07:01:00.000Z"
+              : "2026-07-03T07:02:00.000Z",
             unit: "minutes",
             value,
           },
@@ -1272,6 +1275,9 @@ describe("selectProjectableDailyMetricDays", () => {
         expect(selected[0]?.data).toMatchObject({
           date: ACTIVITY_DAY.date,
           metricKey,
+          recordedAt: metricKey === "deep-sleep-minutes"
+            ? "2026-07-03T07:01:00.000Z"
+            : "2026-07-03T07:02:00.000Z",
           value,
         });
         expect(selected[0]?.data).not.toHaveProperty("provisional");
@@ -1375,6 +1381,7 @@ describe("selectProjectableDailyMetricDays", () => {
           data: expect.objectContaining({
             date: ACTIVITY_DAY.date,
             metricKey: "deep-sleep-minutes",
+            recordedAt: "2026-07-03T06:58:00.000Z",
             unit: "minutes",
             value: 64,
           }),
@@ -1382,12 +1389,18 @@ describe("selectProjectableDailyMetricDays", () => {
           source: { label: "fitbit", source: "fitbit" },
         }),
         expect.objectContaining({
-          data: expect.objectContaining({ value: 88 }),
+          data: expect.objectContaining({
+            recordedAt: "2026-07-03T07:01:00.000Z",
+            value: 88,
+          }),
           recordKey: `${ACTIVITY_DAY.date}.garmin`,
           source: { label: "Garmin", source: "garmin" },
         }),
         expect.objectContaining({
-          data: expect.objectContaining({ value: 112 }),
+          data: expect.objectContaining({
+            recordedAt: "2026-07-03T07:04:00.000Z",
+            value: 112,
+          }),
           recordKey: `${ACTIVITY_DAY.date}.oura`,
           source: { label: "Oura", source: "oura" },
         }),
@@ -1407,6 +1420,44 @@ describe("selectProjectableDailyMetricDays", () => {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
     }
+  });
+
+  it("reprojects a source-tagged sleep stage when its provider time changes", () => {
+    const point = {
+      date: ACTIVITY_DAY.date,
+      grain: "day" as const,
+      metricKey: "deep-sleep-minutes",
+      observedAt: `${ACTIVITY_DAY.date}T07:00:00.000Z`,
+      pointIds: ["point-deep-garmin"],
+      recordedAt: `${ACTIVITY_DAY.date}T07:01:00.000Z`,
+      recordIds: ["record-deep-garmin"],
+      source: GARMIN_SOURCE,
+      sourceFamily: "event" as const,
+      sourceKind: "observation" as const,
+      statistic: "value" as const,
+      unit: "minutes",
+      value: 88,
+    };
+    const spec = requireDailyMetricSpec("deep-sleep-sources-days.v1");
+    const first = selectProjectableDailyMetricDays(
+      [point],
+      spec,
+      nowMs,
+      utcDateKey(nowMs),
+    )[0];
+    const changedRecordedAt = `${ACTIVITY_DAY.date}T07:02:00.000Z`;
+    const changed = selectProjectableDailyMetricDays(
+      [{ ...point, recordedAt: changedRecordedAt }],
+      spec,
+      nowMs,
+      utcDateKey(nowMs),
+    )[0];
+
+    expect(first?.data).toMatchObject({ recordedAt: point.recordedAt });
+    expect(changed?.data).toMatchObject({ recordedAt: changedRecordedAt });
+    expect(first?.sourceRevision).toMatch(SOURCE_REVISION_PATTERN);
+    expect(changed?.sourceRevision).toMatch(SOURCE_REVISION_PATTERN);
+    expect(changed?.sourceRevision).not.toBe(first?.sourceRevision);
   });
 
   it.each([

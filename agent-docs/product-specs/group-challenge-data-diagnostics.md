@@ -147,6 +147,9 @@ never attributed to a wearable or aggregator. Murph-derived meal totals use
 `murph` / `Murph`. The producer admits at most eight public sources and seven
 member-local civil dates, fails closed above the complete 56-record bound, and
 never truncates or chooses one source to represent another.
+Source-tagged Deep and REM records also carry that provider's bounded
+`recordedAt` timestamp, or `null` when unavailable; their `occurredAt` remains
+the synthetic UTC midnight used only for civil-date identity.
 
 The same source-preserving rule applies across steps, sleep duration and times,
 sleep stages, activity metrics and selectors, workout-day summaries, heart-rate

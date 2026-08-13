@@ -1098,6 +1098,9 @@ function projectHostedGroupSourceAwareSleepRecordsToLegacy(
         ...("provisional" in record.data && record.data.provisional === true
           ? { provisional: true }
           : {}),
+        ...(record.source && "recordedAt" in record.data
+          ? { recordedAt: record.data.recordedAt }
+          : {}),
         unit: record.data.unit,
         value: record.data.value,
       },

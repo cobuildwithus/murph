@@ -586,25 +586,41 @@ describe("heart-rate-zones-days.v0 snapshot bounds", () => {
 });
 
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
-  it("reads the replacement snapshot written from the current personal workspace", async () => {
-    const memberId = "member_projected_steps";
+  it("reads source-recorded sleep times from the encrypted replacement snapshot", async () => {
+    const memberId = "member_projected_sleep";
     const date = new Date(Date.now() - 24 * 60 * 60 * 1_000)
       .toISOString()
       .slice(0, 10);
-    const record: HostedVaultShareDeliveryRecord = {
-      data: {
-        date,
-        metricKey: "steps",
-        unit: "count",
-        value: 9_123,
+    const records: HostedVaultShareDeliveryRecord[] = [
+      {
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          recordedAt: `${date}T06:58:00.000Z`,
+          unit: "minutes",
+          value: 64,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: `${date}.fitbit`,
+        source: { label: "fitbit", source: "fitbit" },
       },
-      occurredAt: `${date}T00:00:00.000Z`,
-      recordKey: date,
-    };
+      {
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          recordedAt: `${date}T07:01:00.000Z`,
+          unit: "minutes",
+          value: 88,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: `${date}.garmin`,
+        source: { label: "Garmin", source: "garmin" },
+      },
+    ];
     const row = shareRow({
-      id: "share_projected_steps",
+      id: "share_projected_sleep",
       memberId,
-      projectionScope: STEPS_SCOPE,
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
     });
     let projectionSnapshotCiphertext: string | null = null;
     const plaintextByCiphertext = new Map<string, string>();
@@ -617,7 +633,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         return plaintext;
       },
       encrypt(input) {
-        const ciphertext = "ciphertext_projected_steps";
+        const ciphertext = "ciphertext_projected_sleep";
         plaintextByCiphertext.set(ciphertext, input.value);
         return ciphertext;
       },
@@ -638,7 +654,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       deviceConnection: { findMany: vi.fn().mockResolvedValue([]) },
       hostedGroup: {
         findUnique: vi.fn().mockResolvedValue({
-          members: [{ id: "participant_projected_steps", memberId }],
+          members: [{ id: "participant_projected_sleep", memberId }],
         }),
       },
       hostedVaultShare: {
@@ -659,20 +675,20 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
 
     await expect(replaceHostedVaultShareProjectionSnapshot({
       prisma,
-      records: [record],
+      records,
       share: {
         destinationMemberId: row.destinationMemberId,
         grantorMemberId: row.grantorMemberId,
         id: row.id,
-        projectionKind: STEPS_SCOPE.projectionKind,
-        projectionScope: STEPS_SCOPE,
+        projectionKind: DEEP_SLEEP_SOURCES_SCOPE.projectionKind,
+        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
         projectionScopeKey: row.projectionScopeKey,
       },
       sourceWorkspaceVersion: "7",
     })).resolves.toBe("replaced");
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
       prisma,
-      projectionScopes: [STEPS_SCOPE],
+      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
       runtimeMemberId: RUNTIME_MEMBER_ID,
     });
 
@@ -680,7 +696,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     if (result.status !== "ok") {
       throw new Error("Expected the projected group snapshot to be readable.");
     }
-    expect(result.members[0]?.projections[0]?.records).toEqual([record]);
+    expect(result.members[0]?.projections[0]?.records).toEqual(records);
   });
 
   it("reports an active readable grant as pending until its first snapshot materializes", async () => {
@@ -1134,6 +1150,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           data: {
             date,
             metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T06:58:00.000Z`,
             unit: "minutes",
             value: 64,
           },
@@ -1146,6 +1163,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           data: {
             date,
             metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T07:01:00.000Z`,
             unit: "minutes",
             value: 88,
           },
@@ -1192,6 +1210,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           data: {
             date,
             metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T06:58:00.000Z`,
             unit: "minutes",
             value: 64,
           },
@@ -1203,6 +1222,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           data: {
             date,
             metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T07:01:00.000Z`,
             unit: "minutes",
             value: 88,
           },
@@ -1212,7 +1232,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         },
       ],
     });
-    expect(JSON.stringify(result)).not.toMatch(/projectedAt|recordedAt|selected|sourcesDisagree|sourceRevision/u);
+    expect(JSON.stringify(result)).not.toMatch(/projectedAt|selected|sourcesDisagree|sourceRevision/u);
   });
 
   it("prefers an exact v0 sleep grant over a v1 compatibility fallback", async () => {

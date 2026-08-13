@@ -642,6 +642,10 @@ civil-date scopes closed. Public source identity is part of every existing
 health scope, including active v0 grants; scope keys and grant/revoke controls
 do not change, and each member-facing permission describes the source-aware
 share in one short sentence.
+Each source-tagged Deep or REM record separately carries that provider's
+validated `recordedAt` timestamp or `null`; the record's synthetic UTC-midnight
+`occurredAt` remains its civil-date identity and is never substituted for the
+provider time.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
 `pending` parser/model status before Web emits `pending`, exact seven-day consent
 copy, or fresh projection work. Deploy Web before any backfill clears a legacy
@@ -650,7 +654,8 @@ snapshot.
 The source-tagged snapshot shape is a consumer-first rolling change. Deploy Web
 first so its delivery parser, encrypted snapshot bound, direct reader, v1-to-v0
 compatibility path, ordinary group tool, and group-email path accept and retain
-the additive source fields and larger complete record sets. Then deploy the
+the additive source fields, sleep-stage provider times, and larger complete
+record sets. Then deploy the
 Cloudflare Worker/runner producer with immediate convergence. During the bounded
 window, new Web accepts old unsourced snapshots. Old Web must not receive a new
 source-tagged snapshot because its closed parser would reject the additive
