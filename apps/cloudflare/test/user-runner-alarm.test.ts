@@ -6719,6 +6719,99 @@ describe("HostedUserRunner execution coordination", () => {
     expect(storageList).toHaveBeenCalledTimes(4);
   });
 
+  it("schedules both persisted previous-session candidates when replacement ownership is lost", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T02:00:00.000Z"));
+    let sql!: TestSqlStorageLike;
+    let orphanCandidateWrites = 0;
+    let ownershipRevoked = false;
+    const storageList = vi.fn();
+    const harness = createRunnerHarness({
+      onStorageList: storageList,
+      onStoragePut: ({ key }) => {
+        if (!key.startsWith(workspaceSnapshotOrphanCandidateStoragePrefix())) {
+          return;
+        }
+        orphanCandidateWrites += 1;
+        if (orphanCandidateWrites !== 2) {
+          return;
+        }
+        ownershipRevoked = true;
+        sql.exec(
+          `UPDATE runner_meta
+           SET active_attempt_id = ?,
+               active_generation = ?,
+               active_workspace_version = ?
+           WHERE singleton = 1`,
+          "attempt_2",
+          10,
+          "5",
+        );
+      },
+    });
+    sql = harness.sql;
+    await activateWorkspaceSnapshotSessionOwner({ runner: harness.runner, sql });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    const previousObjectKey =
+      `${workspacePrefix}snapshot_owner_loss_previous.snapshot.enc`;
+    const replacedObjectKey =
+      `${workspacePrefix}snapshot_owner_loss_replaced.snapshot.enc`;
+    const replacedSnapshotRef = createWorkspaceSnapshotV2RefForTest({
+      objectKey: replacedObjectKey,
+      snapshotId: "snapshot_owner_loss_replaced",
+    });
+    const previousSession = {
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: previousObjectKey,
+        replacedSnapshotRef,
+        snapshotId: "snapshot_owner_loss_previous",
+      }),
+      createdAt: "2026-04-27T01:30:00.000Z",
+      expiresAt: "2026-04-27T01:40:00.000Z",
+    };
+    harness.storageValues.set(
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
+      previousSession,
+    );
+
+    await expect(harness.runner.createHostedWorkspaceSnapshotUploadSession({
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: `${workspacePrefix}snapshot_owner_loss_next.snapshot.enc`,
+        snapshotId: "snapshot_owner_loss_next",
+      }),
+      createdAt: "2026-04-27T02:00:00.000Z",
+      expiresAt: "2026-04-27T02:10:00.000Z",
+    })).resolves.toBeNull();
+
+    expect(orphanCandidateWrites).toBe(2);
+    expect(ownershipRevoked).toBe(true);
+    expect(harness.storageValues.get(
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
+    )).toEqual(previousSession);
+    expect(harness.storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(replacedSnapshotRef.snapshotId),
+    )).toEqual({
+      createdAt: previousSession.createdAt,
+      objectKey: replacedObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: replacedSnapshotRef.snapshotId,
+      userId: TEST_USER_ID,
+    });
+    expect(harness.storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(previousSession.snapshotId),
+    )).toEqual({
+      createdAt: "2026-04-27T02:00:00.000Z",
+      objectKey: previousObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: previousSession.snapshotId,
+      userId: TEST_USER_ID,
+    });
+    expect(harness.alarms).toEqual(["2026-04-27T02:35:00.000Z"]);
+    expect(storageList).not.toHaveBeenCalled();
+  });
+
   it("retains both previous-current orphan records while scheduling their earliest eligibility", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T02:00:00.000Z"));
@@ -7103,6 +7196,7 @@ function createRunnerHarness(input: {
   onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
   onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
+  onStoragePut?: (input: { key: string; value: unknown }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   platformAiUsageAllowed?: boolean | (() => boolean);
   prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
@@ -7122,6 +7216,7 @@ function createRunnerHarness(input: {
   const durable = createDurableObjectState({
     alarmDeleteError: input.alarmDeleteError,
     onStorageList: input.onStorageList,
+    onStoragePut: input.onStoragePut,
   });
   const invocationResults = [...(input.invocationResults ?? [])];
   const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
@@ -7398,6 +7493,7 @@ class DelayedGetMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
 function createDurableObjectState(input: {
   alarmDeleteError?: Error;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
+  onStoragePut?: (input: { key: string; value: unknown }) => Promise<void> | void;
 } = {}): {
   alarms: string[];
   state: DurableObjectStateLike;
@@ -7437,6 +7533,7 @@ function createDurableObjectState(input: {
     },
     put: async <T>(key: string, value: T): Promise<void> => {
       values.set(key, value);
+      await input.onStoragePut?.({ key, value });
     },
     setAlarm: async (scheduledTime) => {
       const date = scheduledTime instanceof Date
