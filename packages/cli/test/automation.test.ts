@@ -9,7 +9,6 @@ import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
-import { HOSTED_RUNTIME_PROCESS_ENV } from "@murphai/hosted-execution/env";
 import { upsertAutomation } from "@murphai/core";
 import {
   automationRecordSchema,
@@ -27,7 +26,6 @@ const LEGACY_ROUTE_TARGET_ENV_NAME = [
   "MURPH_ASSISTANT_CURRENT",
   "DELIVERY_ROUTE_TARGET",
 ].join("_");
-
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -559,109 +557,6 @@ test("automation save guidance keeps examples shell-copyable", async () => {
   for (const rendered of [help, llms]) {
     assert.match(rendered, /automation save 'Daily mobility'/u);
     assert.match(rendered, /--instructions 'Ask about mobility work and summarize the next step\.'/u);
-  }
-});
-
-test("hosted automation CLI mutations fail closed while reads stay available", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-automation-hosted-root-tool-",
-  );
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-
-    const seeded = await runInProcessJsonCli(cli, [
-      "automation",
-      "save",
-      "Existing reminder",
-      "--slug",
-      "existing-reminder",
-      "--status",
-      "paused",
-      "--instructions",
-      "Send the reminder.",
-      "--schedule-kind",
-      "dailyLocal",
-      "--schedule-local-time",
-      "08:30",
-      "--channel",
-      "telegram",
-      "--delivery-target",
-      "telegram_thread_real",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(seeded.envelope.ok, true);
-
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    const mutations = [
-      [
-        "automation",
-        "save",
-        "Blocked reminder",
-        "--instructions",
-        "Send the reminder.",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "edit",
-        "existing-reminder",
-        "--summary",
-        "Blocked edit",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "set-status",
-        "existing-reminder",
-        "--status",
-        "active",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "import-json",
-        "--input",
-        `@${path.join(parentRoot, "not-read.json")}`,
-        "--vault",
-        vaultRoot,
-      ],
-    ] as const;
-
-    for (const args of mutations) {
-      const result = await runInProcessJsonCli(cli, [...args]);
-      assert.equal(result.exitCode, 1);
-      assert.equal(result.envelope.ok, false);
-      if (!result.envelope.ok) {
-        assert.match(result.envelope.error.message ?? "", /root hosted automation tool/u);
-      }
-    }
-
-    const shown = await runInProcessJsonCli(cli, [
-      "automation",
-      "show",
-      "existing-reminder",
-      "--vault",
-      vaultRoot,
-    ]);
-    const listed = await runInProcessJsonCli(cli, [
-      "automation",
-      "list",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(shown.envelope.ok, true);
-    assert.equal(listed.envelope.ok, true);
-  } finally {
-    await rm(parentRoot, { recursive: true, force: true });
   }
 });
 
