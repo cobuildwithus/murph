@@ -66,6 +66,7 @@ import {
 } from "../public-account.ts";
 import {
   assertValidJunctionClientUserIdSecret,
+  buildJunctionDeviceSyncRuntimeDescriptor,
   normalizeJunctionDeviceSyncRuntimeConfig,
 } from "../configured-provider-runtime-descriptors.ts";
 import {
@@ -401,7 +402,6 @@ function resolveJunctionExtendedTimeseriesBackfillPolicy(
   return policy.history === "extended" ? policy : null;
 }
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
-const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
@@ -427,7 +427,12 @@ export function createJunctionDeviceSyncProvider(
 ): DeviceSyncProvider {
   const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
   const client = new JunctionClient(toClientConfig(config));
-  const { providerFilter, summaryResources, timeseriesResources } = runtimeConfig;
+  const {
+    providerFilter,
+    reconcileIntervalMs,
+    summaryResources,
+    timeseriesResources,
+  } = runtimeConfig;
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const extendedTimeseriesBackfillDays = config.timeseriesBackfillDays ?? summaryBackfillDays;
@@ -436,7 +441,6 @@ export function createJunctionDeviceSyncProvider(
   );
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
   const pushSourceRecoveryEnabled = config.pushSourceRecoveryEnabled === true;
-  const reconcileIntervalMs = config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
   const webhookTimestampToleranceMs =
     config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS;
 
@@ -3595,7 +3599,7 @@ export function createJunctionDeviceSyncProvider(
 
   return {
     provider: "junction",
-    descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+    descriptor: buildJunctionDeviceSyncRuntimeDescriptor(config),
     credentialPolicy: {
       kind: "provider_config",
       providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,

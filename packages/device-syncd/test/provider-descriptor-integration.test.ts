@@ -95,6 +95,20 @@ describe("device-sync providers", () => {
     });
   });
 
+  it("reports the normalized Junction reconcile interval", () => {
+    const baselineWindows = { ...JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows };
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_junction-test",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      reconcileIntervalMs: 1,
+      region: "us",
+    });
+
+    expect(provider.descriptor.sync?.windows.reconcileIntervalMs).toBe(60_000);
+    expect(JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
+  });
+
   it("applies Oura runtime overrides onto the shared descriptor shape", () => {
     const baselineScopes = [...OURA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []];
     const baselineWindows = { ...OURA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows };

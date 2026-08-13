@@ -701,6 +701,81 @@ Last verified: 2026-08-12
   is recorded with a system-mailbox checkpoint handoff; once that cadence is
   due, only a connection mailbox wake may admit it, so a generic runtime timer
   cannot self-rearm from stale local cadence.
+- A successful hosted checkpoint gets one best-effort, wake-raced vault-share
+  projection opportunity before device-sync dirty acknowledgement or the next
+  complete device-sync-only maintenance prefix. A conversation wake preempts
+  immediately and leaves acknowledgement replayable. Projection errors remain
+  fail-soft to the completed personal import and foreground reply, but they do
+  not consume the existing dirty or system-mailbox recording obligation; that
+  owner reuses its bounded device-sync continuation before acknowledgement.
+  Active-scope resolution is a side-effect-free network read and receives the
+  owning invocation's abort signal. Once
+  scopes resolve, the runtime materializes all selected records before releasing
+  its restored-vault ownership; a wake during those bounded local reads is
+  observed after capture drains, and the capture is discarded without delivery.
+  Delivery remains owned by the same invocation. Once immutable delivery
+  starts, foreground conversation work may proceed without waiting for
+  publication. The first foreground preemption marks the remaining captured
+  scopes deferred: the current scope reaches a terminal boundary, no later scope
+  starts, and the partial offer reports preempted rather than aggregating its
+  successful prefix as complete. That stop bit belongs only to the active
+  delivery promise; after it settles, a later opportunity starts unpreempted and
+  the existing dirty or recording owner retries every undispatched scope before
+  acknowledgement. The same between-scope predicate observes exact host abort
+  and shutdown before every scope, so those owner-ending conditions drain an
+  active request but never admit a request that has not started. The invocation
+  starts no second projection and does not release its
+  runner ownership until the real proxy-to-Web response is terminal. Web owns a
+  finite effect deadline for each delivery, stops admitting destination
+  replacements on deadline or request cancellation, and gives the final
+  database transaction only the remaining deadline. The runtime creates one
+  absolute effect deadline and forwards it unchanged to the proxy and Web;
+  neither hop restarts the budget. Runtime-to-proxy and proxy-to-Web transport
+  timeouts add a fixed settlement margin. The proxy marks a response only after
+  receiving the actual Web response. A transport failure or unmarked
+  proxy-local response remains ambiguous, so invocation ownership stays
+  occupied until the absolute effect-deadline-plus-margin boundary; a marked
+  Web response settles immediately. Web returns the terminal scope-failure code
+  only when an explicitly typed missing ingress-root envelope proves one
+  destination is unavailable independently of later scopes. The same sequential
+  owner records an aggregate error and continues those scopes, preventing that
+  destination from starving a healthy suffix while retaining the dirty or
+  recording retry obligation. Unknown crypto/provider failures, access queries,
+  database or transaction errors, deadline exhaustion, an unmarked response,
+  transport loss, and owner-ending conditions stop the undispatched suffix.
+  Abort, shutdown, and normal
+  finalization join that same owner before a successor invocation or the
+  existing continuation may retry. No projection stage continues detached.
+  Every delivery carries the committed source
+  workspace version bound to those bytes. Web
+  encrypts first, then briefly locks that existing workspace row before the
+  final share replacement; a delivery older than the current checkpoint becomes
+  a no-op, so wake-raced work cannot finish last or read successor-owned
+  vault state.
+  This ordering adds no projection retry queue, group wake fanout, persisted
+  projection watermark, or second freshness owner.
+- The composed maximum for one projection opportunity is one active-scope read,
+  at most 98 sequential projectable-scope deliveries from the closed registry,
+  and at most 25 sequential share-replacement transactions per delivery under
+  the existing grant cap: 2,450 replacement transactions at maximum admitted
+  cardinality. There is at most one active scope-resolution or delivery request
+  per opportunity. One destination's typed missing-root failure continues to
+  later scopes sequentially and leaves the aggregate attempt failed. An unknown
+  or shared-infrastructure error stops the remaining destinations and scopes,
+  bounding a dependency outage to the current failed replacement attempt.
+  Deadline exhaustion, foreground wake, exact host abort, or shutdown finishes
+  only the already-started scope; and the
+  existing continuation cannot retry until that request reaches its server-owned
+  terminal boundary. Repeated
+  wakes may admit conversation work but cannot start another projection. Each
+  replacement adds one source-workspace row lock/check at its final write
+  boundary. The runtime starts no concurrent per-scope or per-share transactions,
+  and publication wakes no destination group runtime. Ordinary load is
+  proportional only to scopes and destinations with active grants. Boundary
+  tests derive the 98-scope and 25-destination composition from the owning
+  registries, prove ordered peak-one delivery/replacement work, and assert the
+  per-replacement encryption, two access checks, source lock, and exact-generation
+  update.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

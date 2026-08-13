@@ -7025,6 +7025,30 @@ test("Junction scheduled polling uses stable closed-day windows", () => {
   assert.equal(derivedBackfill?.dedupeKey, second?.jobs[1]?.dedupeKey);
 });
 
+test("Junction reconcile cadence cannot schedule faster than once per minute", () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    { reconcileIntervalMs: 1 },
+  );
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+
+  const scheduled = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
+      },
+    }),
+    "2026-04-03T12:34:56.000Z",
+  );
+
+  assert.equal(scheduled?.nextReconcileAt, "2026-04-03T12:35:56.000Z");
+});
+
 test("Junction scheduled pass repairs legacy coverage and honors current or future terminal status", () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

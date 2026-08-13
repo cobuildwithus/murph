@@ -84,21 +84,48 @@ note.
 
 Web owns the sole durable `HostedPhysicalNote` row. It stores only operational
 facts: beneficiary, request identity and fingerprint, provider id, status,
-complimentary offer code, configured provider cost, pricing version, and
-timestamps. It never stores the postal address, image URL, artwork, prompt, or
-note text.
+complimentary offer code, configured provider cost, pricing version, one
+provider-neutral failure reason, and timestamps. The failure reason is limited
+to recipient address, artwork, service availability, invalid Murph request,
+prior-note unresolved or accepted state, or unknown. It never stores the postal
+address, image URL, artwork, prompt, note text, or Lob's freeform error message.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
 content is a collision rather than a second effect. Accepted replays resolve
 from the durable row even after the temporary artwork capability expires; an
 existing uncertain send remains pending rather than being rewritten. After that
-replay check, Web constructs the provider runtime and a later request may repair
-one stale complimentary claim against Lob. Confirmed acceptance finalizes the
-stale row, confirmed absence releases its claim, and an indeterminate lookup
-changes nothing. The current request then validates the artwork lifetime,
-reasserts final group authority, observes caller cancellation, and follows its
-ordinary member-locked admission, provider effect, replay, and response path.
+replay check, exact same-key recovery is row-scoped: it reconciles that row
+independently of whichever older unresolved row controls new-effect admission.
+This supports multiple unresolved rows durably admitted by earlier Web versions
+without allowing another provider effect. Web otherwise treats every `starting`
+row as a member-wide unresolved-effect guard. Replaying that same request key
+never calls Lob create again, even if the temporary artwork URL changed. Exact
+current-row replay performs one bounded metadata lookup immediately so accepted
+evidence can finalize the original row after local commit failure. Recent absent
+or indeterminate evidence remains pending; only aged proven absence uses the
+existing unknown transition. Every other unresolved row keeps its independent
+admission authority, so new effects remain blocked until all such rows are
+terminal. A distinct request
+is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
+explicit request may, after the 23-hour provider window, reconcile the guarded
+row through Lob's exact-metadata lookup. Recent or indeterminate evidence keeps
+both rows blocked. Confirmed acceptance finalizes the guarded row, including
+the original paid usage when applicable, narrows the current blocker to
+`prior_note_accepted`, and creates no new provider effect. Confirmed absence
+marks the guarded row and current blocker `unknown` and releases any
+complimentary claim; the blocked request remains unsent, so only a later new
+explicit request may enter ordinary admission.
+
+The same blocker narrowing happens when the original provider call completes
+after a distinct request has already committed its blocker. Ordinary acceptance
+atomically moves every blocker created behind that in-flight member effect to
+`prior_note_accepted`. A successful definite-rejection transition atomically
+moves them to `unknown`, because the blocked requests may have different
+recipients or artwork and cannot inherit the source rejection category. If the
+rejection compare-and-set loses to acceptance, only the acceptance finalizer
+settles the blockers. Exact blocker replay therefore never remains in the
+present-tense unresolved state after the source reaches a terminal result.
 
 `memberId + complimentaryOfferCode` atomically admits one complimentary note per
 direct member or synthetic group member. A definite provider rejection releases
@@ -107,11 +134,50 @@ blindly resent after Lob's idempotency window. Once admitted, the provider call
 uses its own bounded timeout rather than caller cancellation, preventing a
 durable reservation with no matching provider attempt.
 
-For paid notes, `starting` rows from the current allowance period reserve their
-already-frozen provider cost under the same member lock used by allowance
-admission. Older ambiguous rows remain auditable but do not reduce a new
-period's capacity. Concurrent sends therefore cannot each spend the same
-remaining capacity, and no second balance owner is needed.
+For a definite rejection, Web maps only Lob's allowlisted structured error code
+to the bounded failure reason and persists it before responding. Lob's
+human-readable message is untrusted, may contain address details, and never
+enters durable state or assistant context. Replays return the same safe reason.
+A pre-migration failed row without one remains ambiguous because old Web also
+terminalized HTTP 408. It joins current `starting` rows in the same
+oldest-first, member-wide unresolved-effect guard. The member-locked admission
+re-reads that guard instead of trusting a row selected before the lock and
+repeats the same bounded check immediately
+before ordinary reservation. Resolving one row can therefore never hide a
+second unresolved row or admit another provider effect. A recent same-key
+legacy replay stays pending without lookup; an aged replay may use the exact
+metadata lookup, and indeterminate evidence still stays pending. A different current request
+is first recorded under its own request key as an unsent
+`prior_note_unresolved` failure, then at most one older row is reconciled.
+Proven absence narrows the current row to `unknown`. If an older legacy row is
+proven accepted, Web restores it without another send or an unsupported
+historical charge, and the current row is durably narrowed to
+`prior_note_accepted`, so the reply says both that the earlier note is headed to
+print and that the current request was not submitted, without claiming the two
+requests share a recipient; it does not invite another send or promise an
+automatic investigation or follow-up. Recovery also preserves
+`prior_note_accepted` on the accepted legacy row for exact-row replay only; the
+terminal accepted row is not an unresolved-effect guard and cannot suppress a
+later separately authorized request. Accepted-row replay is read-only because
+ordinary paid acceptance commits its usage in the same transaction, while
+restored legacy acceptance must never reconstruct erased historical billing
+evidence. An accepted replay carrying `prior_note_accepted` therefore says only
+that the earlier submission was accepted and the replay sent nothing else; it
+omits paid, complimentary, and cost claims. The blocked current request remains
+terminal and replay-stable, while a later distinct request uses ordinary
+access, complimentary, and paid-usage admission. The current reply and every
+replay therefore identify the current row and cannot turn that suppressed
+request into a new provider effect. The assistant tells the
+person whether to check the address, regenerate the artwork, or wait for Murph
+to fix its printing setup or request. It never guesses from an unknown reason
+or retries an ambiguous outcome.
+
+For paid notes, the same member lock and unresolved-effect guard admit at most
+one `starting` physical note at a time. Distinct concurrent requests are
+persisted as unsent blockers instead of reaching allowance admission. The
+allowance gate can therefore compare the frozen provider cost directly with
+the existing remaining balance; it needs no pending-cost aggregate or second
+balance owner.
 
 ## Provider boundary
 
@@ -176,6 +242,22 @@ state, or mixed-version protocol. Deploy the Cloudflare Worker and runner bundle
 with the ordinary fingerprint convergence check; an older warm runner simply
 retains the prior ask-for-address behavior.
 
+The Cloudflare physical-note Web-control port preserves HTTP 408 as uncertainty
+instead of translating it into a definite failed response. A gateway or caller
+timeout can occur after Web consumed the POST and Lob accepted the note, so only
+Web's categorized JSON response can authorize “nothing was sent” recovery copy.
+For replay-safe transport loss or 5xx, the existing control transport performs
+at most one immediate exact Web replay with the identical body and request key
+inside the original overall deadline. It never replays HTTP 408 or caller
+cancellation. This bounded transport replay may recover the stored failure or
+acceptance before the assistant answers; “do not retry” still forbids another
+provider effect or any later model/user retry. Only a successfully parsed replay
+may replace the first result. If the replay also fails—including because mutable
+route or participant authority now rejects it—the original ambiguous failure
+remains authoritative and reaches the assistant's existing `pending` result.
+Caller cancellation remains authoritative. This prevents a replay-time 4xx from
+becoming false proof that an already-accepted note was not sent.
+
 The original physical-note deployment order remains: deploy the Prisma migration
 and Web route/service first, with live sending off.
 Then deploy Cloudflare and the assistant runtime/tool surface with
@@ -186,3 +268,25 @@ one Lob test-mode proof before enabling the Cloudflare capability. Set
 active, then enable live sending. The older runtime simply lacks the tool during
 a Web-first compatibility window; a new runtime against an old Web deployment
 would expose a route that does not exist and is therefore the unsafe order.
+
+The additive actionable-rejection rollout is producer-first within the
+already-live physical-note route: deploy Web's additive Prisma migration and
+response producer before Cloudflare and the runner bundle. That installs Web's
+HTTP 408 ambiguity correction before any recovery can authorize a later
+explicit request. During the mixed-version interval an older strict runner
+rejects a categorized failure response and the assistant fails closed to
+`pending` without retry; responses without a definite printer rejection remain
+unchanged.
+Then deploy Cloudflare and the runner bundle with `container_rollout=immediate`
+and require the managed-container smoke to prove the exact new runner-bundle
+fingerprint. Verify one synthetic rejection category, provider-side and
+control-plane HTTP 408 ambiguity,
+one legacy-null resolution, and one accepted test-mode note after both sides
+converge. Once current Web can persist categorized failures or the
+`prior_note_accepted` no-send authority, that Web artifact is a hard rollback
+floor. A normal recovery rolls Cloudflare back first and forward-fixes Web;
+never roll Web below the floor while physical-note sending remains enabled.
+If an emergency requires an older Web artifact, first disable
+`HOSTED_PHYSICAL_NOTES_ENABLED`, converge and drain every runner that could call
+the route, and keep the capability off until compatible Web and runner
+artifacts are restored.
