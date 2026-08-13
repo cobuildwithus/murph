@@ -75,27 +75,16 @@ Current providers:
   one-day window, then reads Junction's dedicated per-workout stream endpoint
   serially and caps each stream at 100,000 points. The exact production assembly has
   48 production timeseries resources: 13 wide and 35 dense, including 34 ordinary
-  dense resources plus `workout_stream`. At the current 100-page collection ceiling
-  and three-attempt GET policy, one closed dense day is bounded to 3,532 / 10,596
-  logical GETs / network attempts. The full timeseries ceilings are 57,248 / 171,744
-  per attempt and 286,240 / 858,720 across five attempts for the 14-day backfill
-  plus six 30-day wide windows, and 26,024 / 78,072 per attempt and 130,120 /
-  390,360 across five attempts for the seven-day reconcile plus one wide window.
-  Each reduced resource is imported before the existing job payload marks its exact
-  resource name complete. Retryable failures replace only that bounded payload on
-  the same leased row; cooperative preemption creates the existing immediate
-  successor only after strict window, resource, or workout progress. Within the
-  active coordinate, insertion and reordering cannot skip a newly configured
-  resource, while malformed or removed resource identities fail closed. Pagination
-  remains in memory, so a handled retry or cooperative continuation can replay at
-  most the single unfinished resource (up to 100 grouped GETs, or the
-  bounded workout index and remaining streams), never an earlier completed resource.
-  The current window/day coordinate and at-most-32 workout identities clear only
-  after every configured resource for that window/day completes. This adds no
-  control-database collection path, pooled transaction, or vault persistence.
-  Resource progress stores only versioned resource names; neither it nor any import
-  path retains waveform/stream points, provider envelopes, grouped rows, or evidence
-  whose size scales with sample count.
+  dense resources plus `workout_stream`. A full-job continuation owns one resource
+  and one closed UTC day. An ordinary collection permits at most three sequential
+  pages with one attempt and an eight-second timeout per page, limiting provider
+  wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
+  hour; daily aggregates remain day-atomic. Workout streams use the same bounded
+  three-page index and carry only at-most-32 completed workout identities between
+  serial stream reads. Each reduced unit is imported before the scalar
+  resource/window cursor advances. Pagination remains in memory, and no provider
+  row, vendor page cursor, waveform sample, or workout point enters job state. This
+  adds no control-database collection path, pooled transaction, or vault persistence.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day

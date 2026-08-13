@@ -257,6 +257,7 @@ describe("deviceSyncProviderManifests", () => {
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
         timeseriesPhase: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
         workoutStreamCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
@@ -266,6 +267,7 @@ describe("deviceSyncProviderManifests", () => {
       payload: {
         timeseriesPhase: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
         workoutStreamCursor: { kind: "string", includeInHostedHint: true },
       },
     });
