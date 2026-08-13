@@ -357,20 +357,22 @@ personal-runtime request path, not a grant shortcut. The group model exposes
 `ask_current_sender` with one opaque `message_ref`, allowing each independent
 request in a mixed-sender turn to be submitted once. Trusted runtime code
 accepts only a ref from the current non-direct group turn and sends that
-server-owned origin. The model cannot supply a sender, member, question,
-audience, destination, privacy flag, or route.
+server-owned origin. The model infers group, private, or genuine audience
+ambiguity for that exact ref. It cannot supply a sender, member, question,
+destination address, or route.
 
 Web is the sole admission owner. In one transaction it reopens the exact
 encrypted source wake, preserves native reply evidence, revalidates the live
 group route, resolves the source author through the canonical channel identity
-index, and applies a small deterministic command-family predicate to the exact
-untruncated text. Admission accepts only a flat message that explicitly asks
-Murph to ask the author's personal Murph. Native replies, quoted or
-context-dependent wording, negative requests, unclear addressing, and
-conflicting group/private wording fail before personal-model work. Explicit
-private/direct/DM wording fixes `current_sender`; otherwise the group is the
-fixed default. A private request must also resolve a current same-channel
-direct-member route before enqueue or it returns immediate recovery guidance.
+index, and binds the inferred audience to that source. A group read first
+requires a trusted notice delivered against the same exact accepted message.
+A private request must resolve a current same-channel direct-member route before
+enqueue or it returns immediate recovery guidance. Genuine audience ambiguity
+stores one ten-minute group-and-sender clarification pointer containing only
+the exact original input/session, causal sequence, expiry, and resolution. Its
+replacement is causally monotonic, and only a later exact input from the same
+sender may resume the original request. Failed admission rolls the provisional
+claim back.
 
 The canonical deterministic request id binds the group runtime and exact
 accepted input, while the existing target kind and permission digest persist
@@ -405,9 +407,10 @@ dialect, and intermediate request-id alias are absent. Already-accepted former
 request id, target kind, and permission digest. After all old runners are
 recycled, wait the ten-minute request TTL plus the one-minute detached-queue
 retry margin (eleven minutes total), then remove the old action parser, former
-request-id readers, and neutral-permission drain branch together. This path
-adds no model turn, classifier, service, queue, workflow, table, grant, route
-selector, or reconciliation owner.
+request-id readers, and neutral-permission drain branch together. This path adds
+no classifier turn, service, queue, workflow, grant, route selector, or
+reconciliation owner. Its one clarification table reuses existing retention and
+account-deletion owners.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most

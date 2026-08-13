@@ -361,6 +361,103 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
+    it("keeps concurrent same-sender clarification creation causally monotonic", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 5 });
+      const now = new Date();
+      let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
+
+      try {
+        fixture = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          priorQuestion: "Could my Murph answer the earlier question?",
+          prisma,
+          question: "Could my Murph answer the newer question?",
+        });
+        if (!fixture.priorAssistantInputId) {
+          throw new Error("Expected two synthetic clarification sources.");
+        }
+        const olderOrigin = {
+          assistantInputId: fixture.priorAssistantInputId,
+          kind: "accepted_input" as const,
+          sessionId: "session_synthetic_older_clarification",
+        };
+        const [older, newer] = await Promise.all([
+          requestHostedGroupCurrentSenderAssistantAsk({
+            groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+            mode: "clarification",
+            now,
+            origin: olderOrigin,
+            prisma,
+          }),
+          requestHostedGroupCurrentSenderAssistantAsk({
+            groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+            mode: "clarification",
+            now,
+            origin: fixture.origin,
+            prisma,
+          }),
+        ]);
+        expect([older.result.status, newer.result.status]).toContain(
+          "clarification_required",
+        );
+        await expect(prisma.hostedGroupCurrentSenderClarification.findUnique({
+          where: {
+            groupRuntimeMemberId_targetMemberId: {
+              groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+              targetMemberId: fixture.senderMemberId,
+            },
+          },
+        })).resolves.toMatchObject({
+          originAssistantInputId: fixture.assistantInputId,
+          originSessionId: fixture.origin.sessionId,
+        });
+
+        await prisma.hostedGroupCurrentSenderClarification.update({
+          data: {
+            resolvedAudience: "group",
+            resolvedByAssistantInputId: fixture.priorAssistantInputId,
+          },
+          where: {
+            groupRuntimeMemberId_targetMemberId: {
+              groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+              targetMemberId: fixture.senderMemberId,
+            },
+          },
+        });
+        const resolvedBeforeReplay = await prisma.hostedGroupCurrentSenderClarification
+          .findUniqueOrThrow({
+            where: {
+              groupRuntimeMemberId_targetMemberId: {
+                groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+                targetMemberId: fixture.senderMemberId,
+              },
+            },
+          });
+        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "clarification",
+          now,
+          origin: fixture.origin,
+          prisma,
+        })).resolves.toMatchObject({
+          result: { status: "unavailable" },
+        });
+        await expect(prisma.hostedGroupCurrentSenderClarification.findUnique({
+          where: {
+            groupRuntimeMemberId_targetMemberId: {
+              groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+              targetMemberId: fixture.senderMemberId,
+            },
+          },
+        })).resolves.toEqual(resolvedBeforeReplay);
+      } finally {
+        if (fixture) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
     it("binds a natural clarification response to its exact sender and original message under concurrency", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 6 });
       const now = new Date();

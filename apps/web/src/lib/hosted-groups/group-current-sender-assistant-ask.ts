@@ -386,26 +386,10 @@ async function createHostedGroupCurrentSenderClarification(input: {
         "current_sender_unavailable",
       );
     }
-    const expiresAt = new Date(
-      input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-    );
-    await tx.hostedGroupCurrentSenderClarification.upsert({
-      create: {
-        expiresAt,
-        groupRuntimeMemberId: source.groupRuntimeMemberId,
-        originAssistantInputId: input.origin.assistantInputId,
-        originSessionId: input.origin.sessionId,
-        sourceCausalSeq: BigInt(source.causalSeq),
-        targetMemberId: source.targetMemberId,
-      },
-      update: {
-        expiresAt,
-        originAssistantInputId: input.origin.assistantInputId,
-        originSessionId: input.origin.sessionId,
-        resolvedAudience: null,
-        resolvedByAssistantInputId: null,
-        sourceCausalSeq: BigInt(source.causalSeq),
-      },
+    await acquireHostedCurrentSenderAssistantAskLocksTx(tx, [
+      `clarification:${source.groupRuntimeMemberId}:${source.targetMemberId}`,
+    ]);
+    const existing = await tx.hostedGroupCurrentSenderClarification.findUnique({
       where: {
         groupRuntimeMemberId_targetMemberId: {
           groupRuntimeMemberId: source.groupRuntimeMemberId,
@@ -413,6 +397,63 @@ async function createHostedGroupCurrentSenderClarification(input: {
         },
       },
     });
+    const sourceCausalSeq = BigInt(source.causalSeq);
+    const expiresAt = new Date(
+      input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+    );
+    if (existing) {
+      if (
+        existing.sourceCausalSeq > sourceCausalSeq
+        || (
+          existing.sourceCausalSeq === sourceCausalSeq
+          && (
+            existing.originAssistantInputId !== input.origin.assistantInputId
+            || existing.originSessionId !== input.origin.sessionId
+          )
+        )
+      ) {
+        return unavailableHostedCurrentSenderAdmission(
+          "newer_clarification_pending",
+        );
+      }
+      if (existing.sourceCausalSeq === sourceCausalSeq) {
+        return existing.resolvedByAssistantInputId === null
+          ? {
+              mailboxWake: null,
+              result: { status: "clarification_required" },
+            }
+          : unavailableHostedCurrentSenderAdmission(
+              "clarification_already_resolved",
+            );
+      }
+      await tx.hostedGroupCurrentSenderClarification.update({
+        data: {
+          expiresAt,
+          originAssistantInputId: input.origin.assistantInputId,
+          originSessionId: input.origin.sessionId,
+          resolvedAudience: null,
+          resolvedByAssistantInputId: null,
+          sourceCausalSeq,
+        },
+        where: {
+          groupRuntimeMemberId_targetMemberId: {
+            groupRuntimeMemberId: source.groupRuntimeMemberId,
+            targetMemberId: source.targetMemberId,
+          },
+        },
+      });
+    } else {
+      await tx.hostedGroupCurrentSenderClarification.create({
+        data: {
+          expiresAt,
+          groupRuntimeMemberId: source.groupRuntimeMemberId,
+          originAssistantInputId: input.origin.assistantInputId,
+          originSessionId: input.origin.sessionId,
+          sourceCausalSeq,
+          targetMemberId: source.targetMemberId,
+        },
+      });
+    }
     return {
       mailboxWake: null,
       result: { status: "clarification_required" },

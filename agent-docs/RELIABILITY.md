@@ -1184,12 +1184,17 @@ Last verified: 2026-08-12
   one canonical group completion/fallback identity, and one separate private
   delivery identity. The model action accepts only an opaque accepted-message
   ref from the current group turn, allowing independent requests in one batch
-  while granting no sender or audience authority. Web reloads that exact wake,
-  preserves native-reply evidence, resolves its author, and deterministically
-  admits only a flat explicit request to ask the author's Murph. It fixes group
-  by default or `current_sender` only from explicit positive private/direct/DM
-  wording. Conflicting, negative, quoted, reply-bound, context-dependent, or
-  unclear requests enqueue no personal read.
+  while granting no sender or route authority. The conversational model infers
+  group, private, or genuine audience ambiguity for that exact ref. Web reloads
+  the exact wake, preserves native-reply evidence, resolves its author, binds
+  the inferred audience, and requires the same source's trusted group notice or
+  current same-channel private route before admission.
+- Ambiguity persists one ten-minute group/sender pointer to the original exact
+  input/session and causal sequence, without copied question text. Creation is
+  serialized and causally monotonic: older work cannot replace newer work, and
+  exact replay cannot reopen a resolved pointer. Continuation accepts only a
+  later exact input from the same sender. Claim and ordinary admission share one
+  database-only transaction, so unavailable admission rolls the claim back.
 - Admission persists the fixed audience through `group_sender` or
   `group_sender_private` plus the matching fixed permission digest. Private
   admission first resolves a current same-channel direct route. Prepare and

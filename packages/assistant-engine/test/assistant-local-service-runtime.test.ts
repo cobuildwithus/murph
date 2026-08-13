@@ -3946,6 +3946,43 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       threadIsDirect: true,
     },
   })
+  const earlierHostedInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:00.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Earlier accepted group message',
+      },
+      conversation: {
+        accountId: 'identity-1',
+        actorId: 'actor_earlier',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T09:59:59.000Z',
+      receivedAt: '2026-04-22T09:59:59.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'message-event-earlier',
+        threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: 'iMessage',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_active_turn_event_earlier',
+        laneSeq: '0',
+      }),
+    },
+  })
   const hostedInput = await upsertAssistantInputEvent({
     vault: context.vaultRoot,
     now: new Date('2026-04-22T10:00:01.000Z'),
@@ -3955,12 +3992,12 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         text: 'Event-backed follow up',
       },
       conversation: {
-        accountId: 'acct_1',
+        accountId: 'identity-1',
         actorId: 'actor_1',
         actorIsSelf: false,
         source: 'linq',
         threadId: 'thread-1',
-        threadIsDirect: true,
+        threadIsDirect: false,
       },
       occurredAt: '2026-04-22T10:00:00.000Z',
       receivedAt: '2026-04-22T10:00:00.000Z',
@@ -3968,6 +4005,14 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         channel: 'linq',
         messageId: 'message-event-steer',
         threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: 'iMessage',
       },
       sourceRef: createHostedMailboxSourceRef({
         eventId: 'evt_active_turn_event_steer',
@@ -4027,7 +4072,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       }
     },
   )
-  const sharedPlan = createDirectSharedPlan()
+  const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'linq'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
@@ -4035,6 +4080,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       persistUserPromptOnFailure: false,
     },
     realAcceptedInputPersistence: true,
+    realMessageTargetSelection: true,
     session,
   })
   const { notifyAssistantActiveTurnInputAvailable } = await import(
@@ -4044,6 +4090,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     async (progressInput) => {
       await progressInput.dependencies?.sendLinq?.({
         message: progressInput.text,
+        replyToMessageId: progressInput.input.deliveryReplyToMessageId,
         target: 'thread-1',
         targetKind: 'thread',
       })
@@ -4079,6 +4126,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         deliveryContextOrdinal: 1,
         required: true,
         source: 'system',
+        targetInputId: earlierHostedInput.inputId,
       },
     )
     requiredProgressDelivered.resolve()
@@ -4100,6 +4148,19 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   })
 
   const resultPromise = sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: earlierHostedInput.inputId,
+            version: earlierHostedInput.schema,
+          },
+          id: earlierHostedInput.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
     activeTurnInput,
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
@@ -4140,12 +4201,16 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     )
   expect(
     journalAfterRequiredProgress?.providerRequests[0]?.acceptedInputIds,
-  ).toEqual(['initial', hostedInput.inputId])
+  ).toEqual([earlierHostedInput.inputId, hostedInput.inputId])
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
   expect(progressDeliveryDependencies.sendLinq).toHaveBeenCalledWith(
     expect.objectContaining({
-      acceptedAssistantInputIds: ['initial', hostedInput.inputId],
+      acceptedAssistantInputIds: [
+        earlierHostedInput.inputId,
+        hostedInput.inputId,
+      ],
       message: 'Checking the live-steered follow up.',
+      replyToMessageId: 'message-event-earlier',
     }),
   )
   providerRelease.resolve()
@@ -4160,10 +4225,13 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     context.vaultRoot,
     'turn-1',
   )
-  expect(journal?.inputIds).toEqual(['initial', hostedInput.inputId])
+  expect(journal?.inputIds).toEqual([
+    earlierHostedInput.inputId,
+    hostedInput.inputId,
+  ])
   expect(journal?.providerRequests).toHaveLength(1)
   expect(journal?.providerRequests[0]?.acceptedInputIds).toEqual([
-    'initial',
+    earlierHostedInput.inputId,
     hostedInput.inputId,
   ])
 })

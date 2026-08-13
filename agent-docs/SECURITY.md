@@ -769,19 +769,20 @@ Last verified: 2026-08-12
   `message_ref` from the current accepted group turn, so each independent
   requester can be submitted without granting target authority. Web reopens
   that exact source, preserves Linq and Telegram native-reply
-  evidence, revalidates the group route, resolves its author, and accepts only
-  a flat deterministic “ask my Murph” command. The selected ref and a
-  model-provided origin from an old runner are untrusted inputs to the same
-  exact-source check; no model output may select a sender, member, question,
-  audience, destination, privacy mode, or route.
-- Admission fixes the audience before personal-model work. Explicit positive
-  private/direct/DM wording selects `current_sender`; otherwise group is the
-  default. Native replies, quotations, context-dependent or negative wording,
-  unclear addressing, and conflicting group/private wording authorize no
-  personal read. Private admission also requires a current same-channel
+  evidence, revalidates the group route, and resolves its author. The selected
+  ref and a model-provided origin from an old runner are untrusted inputs to the
+  same exact-source check; no model output may select a sender, member,
+  question, destination address, or route.
+- The conversational model infers group, private, or genuine audience
+  ambiguity for one exact accepted ref. Admission fixes that audience before
+  personal-model work. Group admission first requires a trusted notice bound to
+  the same source ref. Private admission requires a current same-channel
   `direct-member` route. The existing requested-wake target kind and permission
   digest persist the audience, and the personal candidate plus fresh outgoing
-  reviewer may only allow or deny disclosure under that fixed permission.
+  reviewer may only allow or deny disclosure under that fixed permission. An
+  ambiguity stores only a short-lived group/sender pointer to the original
+  input/session and causal sequence; replacement is causally monotonic, another
+  sender cannot claim it, and failed admission rolls back its claim.
 - A successful current-sender completion cannot change audience.
   `assistant.ask.completed` is the group path and remains bound to the exact
   origin request and synthetic group runtime. Linq and Telegram carry its exact

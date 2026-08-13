@@ -20,8 +20,9 @@ const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
   hostedGroupCurrentSenderClarificationFindUnique: vi.fn(),
+  hostedGroupCurrentSenderClarificationCreate: vi.fn(),
+  hostedGroupCurrentSenderClarificationUpdate: vi.fn(),
   hostedGroupCurrentSenderClarificationUpdateMany: vi.fn(),
-  hostedGroupCurrentSenderClarificationUpsert: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   lookupHostedGroupParticipantMemberByHandle: vi.fn(),
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
@@ -42,9 +43,10 @@ const fakeTx = {
     findUnique: mocks.hostedThreadContainerFindUnique,
   },
   hostedGroupCurrentSenderClarification: {
+    create: mocks.hostedGroupCurrentSenderClarificationCreate,
     findUnique: mocks.hostedGroupCurrentSenderClarificationFindUnique,
+    update: mocks.hostedGroupCurrentSenderClarificationUpdate,
     updateMany: mocks.hostedGroupCurrentSenderClarificationUpdateMany,
-    upsert: mocks.hostedGroupCurrentSenderClarificationUpsert,
   },
 };
 
@@ -382,22 +384,28 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue(null);
-    mocks.hostedGroupCurrentSenderClarificationUpsert.mockImplementation(
-      async ({ create, update, where }: {
-        create: Record<string, unknown>;
-        update: Record<string, unknown>;
+    mocks.hostedGroupCurrentSenderClarificationCreate.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => {
+        const key = `${data.groupRuntimeMemberId}:${data.targetMemberId}`;
+        const next = {
+          ...data,
+          resolvedAudience: null,
+          resolvedByAssistantInputId: null,
+        };
+        pendingClarifications.set(key, next);
+        return next;
+      },
+    );
+    mocks.hostedGroupCurrentSenderClarificationUpdate.mockImplementation(
+      async ({ data, where }: {
+        data: Record<string, unknown>;
         where: { groupRuntimeMemberId_targetMemberId: {
           groupRuntimeMemberId: string;
           targetMemberId: string;
         } };
       }) => {
         const key = `${where.groupRuntimeMemberId_targetMemberId.groupRuntimeMemberId}:${where.groupRuntimeMemberId_targetMemberId.targetMemberId}`;
-        const row = pendingClarifications.get(key);
-        const next = row ? { ...row, ...update } : {
-          ...create,
-          resolvedAudience: null,
-          resolvedByAssistantInputId: null,
-        };
+        const next = { ...pendingClarifications.get(key), ...data };
         pendingClarifications.set(key, next);
         return next;
       },
@@ -602,6 +610,81 @@ describe("hosted current-sender Assistant Ask authority", () => {
     ).toMatchObject({
       resolvedAudience: "current_sender",
       resolvedByAssistantInputId: retryResponseInputId,
+    });
+  });
+
+  it("keeps same-sender clarification replacement causally monotonic", async () => {
+    sourceWakes.set(OLDER_INPUT_ID, createSourceWake({
+      text: "Can my Murph answer the earlier question?",
+    }));
+    sourceWakes.set(CURRENT_INPUT_ID, createSourceWake({
+      text: "Can my Murph answer the newer question?",
+    }));
+
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "clarification",
+      now: NOW,
+      origin: origin(CURRENT_INPUT_ID),
+    })).resolves.toMatchObject({
+      result: { status: "clarification_required" },
+    });
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "clarification",
+      now: NOW,
+      origin: origin(OLDER_INPUT_ID),
+    })).resolves.toMatchObject({
+      result: { status: "unavailable" },
+    });
+    expect(
+      pendingClarifications.get(
+        `${GROUP_RUNTIME_MEMBER_ID}:${CURRENT_SENDER_MEMBER_ID}`,
+      ),
+    ).toMatchObject({
+      originAssistantInputId: CURRENT_INPUT_ID,
+      sourceCausalSeq: 2n,
+    });
+  });
+
+  it("does not reopen a resolved clarification on exact replay", async () => {
+    sourceWakes.set(CURRENT_INPUT_ID, createSourceWake({
+      text: "Can my Murph answer this?",
+    }));
+    await requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "clarification",
+      now: NOW,
+      origin: origin(),
+    });
+    const responseInputId = `ain_${"d".repeat(32)}`;
+    sourceWakes.set(responseInputId, createSourceWake({
+      occurredAt: "2026-07-27T19:59:59.500Z",
+      text: "Here is fine.",
+    }));
+    await requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "group",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "continuation",
+      now: NOW,
+      origin: origin(responseInputId),
+    });
+
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "clarification",
+      now: NOW,
+      origin: origin(),
+    })).resolves.toMatchObject({
+      result: { status: "unavailable" },
+    });
+    expect(
+      pendingClarifications.get(
+        `${GROUP_RUNTIME_MEMBER_ID}:${CURRENT_SENDER_MEMBER_ID}`,
+      ),
+    ).toMatchObject({
+      resolvedAudience: "group",
+      resolvedByAssistantInputId: responseInputId,
     });
   });
 

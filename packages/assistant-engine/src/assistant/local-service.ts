@@ -700,15 +700,18 @@ export async function sendAssistantMessageLocal(
                 const deliveryContextOrdinal =
                   progressInput.deliveryContextOrdinal ?? 0
                 const { targetInputId, ...untargetedProgressInput } = progressInput
+                if (targetInputId) {
+                  await beforeHostedToolExecution(deliveryContextOrdinal)
+                }
                 const resolvedProgressInput = targetInputId
                   ? {
                       ...untargetedProgressInput,
                       input:
                         await applyAssistantAcceptedMessageTargetToDeliveryInput({
                           acceptedInputIds:
-                            acceptedInputIdsByDeliveryContextOrdinal[
-                              deliveryContextOrdinal
-                            ] ?? [],
+                            resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                              deliveryContextOrdinal,
+                            ),
                           action: 'native-reply',
                           input: progressInput.input,
                           session: progressInput.session,
