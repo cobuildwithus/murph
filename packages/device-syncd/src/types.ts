@@ -744,7 +744,7 @@ export interface ProviderSnapshotImportReceipt {
 
 export interface ProviderSnapshotCanonicalCoverageEvidence {
   coverageBoundary: string;
-  coverageReadyAt?: string;
+  coverageFinalizedAt?: string;
   resource: string;
   sourceProviderSlug: string;
 }

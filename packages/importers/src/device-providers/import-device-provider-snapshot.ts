@@ -309,9 +309,20 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
       resultRecord.events.filter(isEventRecord),
       {
         defaultTimeZone: resolvedDefaultTimeZone,
+        providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
       },
     ),
   } as TResult;
+}
+
+function resolveJunctionCoverageProviderPulledAt(input: unknown): string | undefined {
+  const request = deviceProviderSnapshotImportSchema.safeParse(input);
+  if (!request.success || request.data.provider !== "junction") {
+    return undefined;
+  }
+  const providerPulledAt = readPlainObject(request.data.snapshot)
+    ?.canonicalCoverageProviderPulledAt;
+  return typeof providerPulledAt === "string" ? providerPulledAt : undefined;
 }
 
 function readPlainObject(value: unknown): Record<string, unknown> | null {

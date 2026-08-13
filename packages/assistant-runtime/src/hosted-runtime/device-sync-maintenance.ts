@@ -222,31 +222,6 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
-    if (secret && controlPlaneSynced) {
-      const completedFitbitCutover = await completeHostedDeviceSyncFitbitMigrations({
-        deviceSyncPort,
-        legacyAccess: "active",
-        platform: options.runtimeLogPlatform ?? null,
-        service,
-        signal: options.signal ?? null,
-        state: syncState,
-      });
-      if (completedFitbitCutover) {
-        const nextWakeAt = resolveHostedDeviceSyncYieldRetryAt();
-        deferHostedPendingDirtyPayloadAcksUntil({ nextWakeAt, state: syncState });
-        const stagedDirtyAcks = listHostedDeviceSyncDirtyProcessedRecords({ state: syncState });
-        return {
-          nextWakeAt,
-          postCheckpointRecord: resolveHostedDeviceSyncDirtyPostCheckpointRecord({
-            state: syncState,
-          }),
-          processedJobs: 0,
-          skipped: false,
-          ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
-        };
-      }
-    }
-
     await service.runSchedulerOnce();
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
@@ -302,7 +277,6 @@ export async function runHostedDeviceSyncPass(
       });
       await completeHostedDeviceSyncFitbitMigrations({
         deviceSyncPort,
-        legacyAccess: "terminal",
         platform: options.runtimeLogPlatform ?? null,
         service,
         signal: options.signal ?? null,
@@ -380,15 +354,14 @@ export async function runHostedDeviceSyncPass(
 
 async function completeHostedDeviceSyncFitbitMigrations(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
-  legacyAccess: "active" | "terminal";
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   service: DeviceSyncService;
   signal: AbortSignal | null;
   state: HostedDeviceSyncRuntimeSyncState;
-}): Promise<boolean> {
+}): Promise<void> {
   const completeFitbitMigration = input.deviceSyncPort?.completeFitbitMigration;
   if (!completeFitbitMigration) {
-    return false;
+    return;
   }
 
   const {
@@ -416,12 +389,6 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
       continue;
     }
     const legacyAccessTerminal = isGoogleHealthFitbitMigrationLegacyTerminal(legacy);
-    if (
-      (input.legacyAccess === "active" && legacyAccessTerminal)
-      || (input.legacyAccess === "terminal" && !legacyAccessTerminal)
-    ) {
-      continue;
-    }
     const successor = sources.find((source) =>
       normalizeJunctionProviderSlug(source.sourceProviderSlug)
         === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
@@ -442,7 +409,6 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
       ? isGoogleHealthFitbitMigrationLegacyCoverageReady({
           legacyAccessTerminal,
           legacySummary: legacy.resourceAvailabilitySummary,
-          now: new Date().toISOString(),
           successorSummary: successor.resourceAvailabilitySummary,
         })
       : false;
@@ -468,7 +434,6 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
     scheduleHostedDeviceSyncFitbitMigrationRetry(store, deferred.localAccountId);
   }
 
-  let completed = false;
   for (const candidate of attempts) {
     try {
       const outcome = await completeFitbitMigration.call(input.deviceSyncPort, {
@@ -477,8 +442,6 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
       });
       if (outcome.status === "pending") {
         scheduleHostedDeviceSyncFitbitMigrationRetry(store, candidate.localAccountId);
-      } else {
-        completed = true;
       }
     } catch (error) {
       if (input.signal?.aborted) {
@@ -504,7 +467,6 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
       }
     }
   }
-  return completed;
 }
 
 function scheduleHostedDeviceSyncFitbitMigrationRetry(

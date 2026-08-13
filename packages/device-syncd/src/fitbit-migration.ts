@@ -20,8 +20,8 @@ export const DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY =
 export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX =
   "canonicalCoverageBoundary_";
 
-export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_READY_AT_KEY_PREFIX =
-  "canonicalCoverageReadyAt_";
+export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX =
+  "canonicalCoverageFinalizedAt_";
 
 export const DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE =
   "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED";
@@ -65,7 +65,7 @@ export function isDeviceSyncSourceResourceAvailabilityMetadataKey(
       DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
     )
     || key.startsWith(
-      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_READY_AT_KEY_PREFIX,
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX,
     );
 }
 
@@ -78,12 +78,12 @@ export function buildDeviceSyncSourceCanonicalCoverageBoundaryKey(
     : null;
 }
 
-export function buildDeviceSyncSourceCanonicalCoverageReadyAtKey(
+export function buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey(
   resource: string,
 ): string | null {
   const normalized = resource.trim();
   return /^[A-Za-z][A-Za-z0-9_-]{0,38}$/u.test(normalized)
-    ? `${DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_READY_AT_KEY_PREFIX}${normalized}`
+    ? `${DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX}${normalized}`
     : null;
 }
 
@@ -96,11 +96,11 @@ export function readDeviceSyncSourceCanonicalCoverageBoundary(
   return normalizeJunctionCanonicalCoverageBoundary(resource, value);
 }
 
-export function readDeviceSyncSourceCanonicalCoverageReadyAt(
+export function readDeviceSyncSourceCanonicalCoverageFinalizedAt(
   summary: Record<string, unknown> | null | undefined,
   resource: string,
 ): string | null {
-  const key = buildDeviceSyncSourceCanonicalCoverageReadyAtKey(resource);
+  const key = buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey(resource);
   const value = key ? summary?.[key] : undefined;
   if (typeof value !== "string") {
     return null;
@@ -127,7 +127,6 @@ export function isGoogleHealthFitbitMigrationLegacyTerminal(source: {
 export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
   legacyAccessTerminal?: boolean;
   legacySummary: Record<string, unknown> | null | undefined;
-  now?: string;
   successorSummary: Record<string, unknown> | null | undefined;
 }): boolean {
   const producedLegacyResources = [...DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES]
@@ -151,10 +150,9 @@ export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
     input.legacyAccessTerminal !== true
     && producedLegacyResources.some((resource) =>
       isJunctionDailyCanonicalCoverageResource(resource)
-      && !hasDeviceSyncSourceCanonicalCoverageReadyAtElapsed(
+      && !hasDeviceSyncSourceCanonicalCoverageFinalized(
         input.legacySummary,
         resource,
-        input.now,
       )
     )
   ) {
@@ -171,16 +169,11 @@ export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
     );
 }
 
-function hasDeviceSyncSourceCanonicalCoverageReadyAtElapsed(
+function hasDeviceSyncSourceCanonicalCoverageFinalized(
   summary: Record<string, unknown> | null | undefined,
   resource: string,
-  now: string | undefined,
 ): boolean {
-  const readyAt = readDeviceSyncSourceCanonicalCoverageReadyAt(summary, resource);
-  const nowMs = typeof now === "string" ? Date.parse(now) : Number.NaN;
-  return readyAt !== null
-    && Number.isFinite(nowMs)
-    && nowMs >= Date.parse(readyAt);
+  return readDeviceSyncSourceCanonicalCoverageFinalizedAt(summary, resource) !== null;
 }
 
 export function countAvailableDeviceSyncSourceResources(

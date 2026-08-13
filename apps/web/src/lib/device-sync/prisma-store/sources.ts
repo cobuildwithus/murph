@@ -6,8 +6,10 @@ import type {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
+  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   readDeviceSyncSourceCanonicalCoverageBoundary,
+  readDeviceSyncSourceCanonicalCoverageFinalizedAt,
 } from "@murphai/device-syncd/fitbit-migration";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
@@ -625,6 +627,19 @@ function sanitizeSummaryScalar(
     }
     const resource = key.slice(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX.length);
     return readDeviceSyncSourceCanonicalCoverageBoundary(
+      { [key]: normalized },
+      resource,
+    ) ?? undefined;
+  }
+
+  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX)) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const resource = key.slice(
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX.length,
+    );
+    return readDeviceSyncSourceCanonicalCoverageFinalizedAt(
       { [key]: normalized },
       resource,
     ) ?? undefined;

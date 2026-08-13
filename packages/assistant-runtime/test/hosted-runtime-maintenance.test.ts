@@ -1791,7 +1791,7 @@ describe("runHostedDeviceSyncPass", () => {
     ).toBeLessThan(completeFitbitMigration.mock.invocationCallOrder[0]!);
   });
 
-  it("completes a ready active Fitbit cutover before scheduling another legacy import", async () => {
+  it("completes a ready active Fitbit cutover only after scheduled imports are drained and published", async () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const service = {
@@ -1813,7 +1813,7 @@ describe("runHostedDeviceSyncPass", () => {
           resourceAvailabilitySummary: {
             activity: true,
             canonicalCoverageBoundary_activity: "2026-08-11",
-            canonicalCoverageReadyAt_activity: "2026-08-12T04:00:00.000Z",
+            canonicalCoverageFinalizedAt_activity: "2026-08-12T04:00:01.000Z",
           },
           sourceProviderSlug: "fitbit",
           status: "connected",
@@ -1863,11 +1863,20 @@ describe("runHostedDeviceSyncPass", () => {
       connectionId: "hosted_fitbit",
       signal: null,
     });
-    expect(runSchedulerOnce).not.toHaveBeenCalled();
-    expect(drainWorker).not.toHaveBeenCalled();
-    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(runSchedulerOnce.mock.invocationCallOrder[0]).toBeLessThan(
+      drainWorker.mock.invocationCallOrder[0]!,
+    );
+    expect(drainWorker.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.reconcileHostedDeviceSyncControlPlaneState.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.reconcileHostedDeviceSyncControlPlaneState.mock.invocationCallOrder[0],
+    ).toBeLessThan(completeFitbitMigration.mock.invocationCallOrder[0]!);
     expect(result).toEqual({
-      nextWakeAt: "2026-08-12T04:00:31.000Z",
+      nextWakeAt: null,
       postCheckpointRecord: null,
       processedJobs: 0,
       skipped: false,

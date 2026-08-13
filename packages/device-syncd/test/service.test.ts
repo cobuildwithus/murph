@@ -8,7 +8,10 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import {
+  importDeviceProviderSnapshot,
+  prepareDeviceProviderSnapshotImport,
+} from "@murphai/importers";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -1310,7 +1313,13 @@ test("device sync service reports canonical counts separately from durable deliv
               events: [{ kind: "activity" }, { kind: "sleep" }],
               junctionCanonicalCoverage: [{
                 coverageBoundary: "2026-08-11",
+                coverageFinalizedAt: "2026-08-12T05:00:00.000Z",
                 resource: "activity",
+                sourceProviderSlug: "fitbit",
+              }, {
+                coverageBoundary: "2026-08-11",
+                coverageFinalizedAt: "2026-08-12T05:00:00Z",
+                resource: "hrv",
                 sourceProviderSlug: "fitbit",
               }],
             }
@@ -1343,7 +1352,12 @@ test("device sync service reports canonical counts separately from durable deliv
         durableDeliveryAccepted: true,
         junctionCanonicalCoverage: [{
           coverageBoundary: "2026-08-11",
+          coverageFinalizedAt: "2026-08-12T05:00:00.000Z",
           resource: "activity",
+          sourceProviderSlug: "fitbit",
+        }, {
+          coverageBoundary: "2026-08-11",
+          resource: "hrv",
           sourceProviderSlug: "fitbit",
         }],
       },
@@ -1353,6 +1367,181 @@ test("device sync service reports canonical counts separately from durable deliv
         durableDeliveryAccepted: true,
       },
     ]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service persists a closed Fitbit day through the real importer receipt", async () => {
+  const now = new Date("2026-08-12T05:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-fitbit-final-coverage");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      importDeviceProviderSnapshot: (input) => importDeviceProviderSnapshot(input, {
+        corePort: {
+          importDeviceBatch(payload: { events?: unknown[] }) {
+            return { events: payload.events ?? [] };
+          },
+        },
+        defaultTimeZone: "America/New_York",
+      }),
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: ["activity"],
+      timeseriesResources: [],
+      fetchImpl: async (input) => {
+        const url = readUrl(input);
+        if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-final") {
+          return createJsonResponse({
+            providers: [{
+              id: "provider-fitbit-final",
+              name: "Fitbit",
+              resource_availability: { activity: true },
+              slug: "fitbit",
+              status: "connected",
+            }, {
+              id: "provider-google-health-final",
+              name: "Google Health",
+              resource_availability: { activity: true },
+              slug: "google_health",
+              status: "connected",
+            }],
+          });
+        }
+        if (url.startsWith(
+          "https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-final",
+        )) {
+          return createJsonResponse({
+            data: [{
+              connectionId: "provider-fitbit-final",
+              date: "2026-08-11",
+              id: "fitbit-closed-day",
+              sourceProviderSlug: "fitbit",
+              steps: 4321,
+            }, {
+              connectionId: "provider-fitbit-final",
+              date: "2026-08-12",
+              id: "fitbit-open-day",
+              sourceProviderSlug: "fitbit",
+              steps: 123,
+            }],
+          });
+        }
+        throw new Error(`Unexpected Junction request during Fitbit final coverage test: ${url}`);
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-final",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "fitbit",
+      sourceProviderSlug: "fitbit",
+      status: "connected",
+      resourceAvailabilitySummary: {
+        activity: true,
+        canonicalCoverageBoundary_activity: "2026-08-10",
+        canonicalCoverageFinalizedAt_activity: "2026-08-11T05:00:00.000Z",
+      },
+      lastSeenAt: now.toISOString(),
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "google_health",
+      sourceProviderSlug: "google_health",
+      status: "connected",
+      resourceAvailabilitySummary: { activity: true },
+      lastSeenAt: now.toISOString(),
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.activity.created",
+        objectId: "fitbit-provisional-day",
+        occurredAt: "2026-08-11T23:00:00.000Z",
+        resource: "activity",
+        resourceCategory: "summary",
+        sourceProviderSlug: "fitbit",
+        webhookDataJson: JSON.stringify({
+          connectionId: "provider-fitbit-final",
+          date: "2026-08-11",
+          id: "fitbit-provisional-day",
+          sourceProviderSlug: "fitbit",
+          steps: 4000,
+        }),
+        windowStart: "2026-08-11T00:00:00.000Z",
+        windowEnd: "2026-08-12T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+    });
+
+    await service.runWorkerOnce();
+
+    const provisionalFitbit = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.equal(
+      provisionalFitbit?.resourceAvailabilitySummary?.canonicalCoverageBoundary_activity,
+      "2026-08-11",
+    );
+    assert.equal(
+      provisionalFitbit?.resourceAvailabilitySummary?.canonicalCoverageFinalizedAt_activity,
+      null,
+    );
+
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-08-05T00:00:00.000Z",
+        windowEnd: "2026-08-12T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+    });
+
+    await service.runWorkerOnce();
+
+    const fitbit = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.equal(
+      fitbit?.resourceAvailabilitySummary?.canonicalCoverageBoundary_activity,
+      "2026-08-11",
+    );
+    assert.equal(
+      fitbit?.resourceAvailabilitySummary?.canonicalCoverageFinalizedAt_activity,
+      "2026-08-12T05:00:00.000Z",
+    );
   } finally {
     close();
   }

@@ -61,14 +61,14 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
-  buildDeviceSyncSourceCanonicalCoverageReadyAtKey,
+  buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE,
   isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isDeviceSyncSourceResourceAvailabilityMetadataKey,
   readDeviceSyncSourceCanonicalCoverageBoundary,
-  readDeviceSyncSourceCanonicalCoverageReadyAt,
+  readDeviceSyncSourceCanonicalCoverageFinalizedAt,
 } from "../fitbit-migration.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
@@ -222,6 +222,7 @@ interface JunctionHistoricalUnresolvedProviderRecords {
 
 interface PreparedJunctionImportSnapshot {
   canonicalCoverageFence?: JunctionSnapshotInput["canonicalCoverageFence"];
+  canonicalCoverageDailyClosedOnlySourceProviderSlug?: string;
   connections: Array<Record<string, unknown>>;
   sourceProviders: readonly JunctionProviderConnection[];
   snapshots: Record<string, unknown[]>;
@@ -1165,6 +1166,9 @@ export function createJunctionDeviceSyncProvider(
         windowEnd: summaryWindow.windowEnd,
         connections: importConnections,
         canonicalCoverageFence: preparedSummaryImport.canonicalCoverageFence,
+        canonicalCoverageDailyClosedOnlySourceProviderSlug:
+          preparedSummaryImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+        canonicalCoverageProviderPulledAt: context.now,
         summaries: importSummaries,
         timeseries: {},
       };
@@ -2218,6 +2222,9 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: window.windowEnd,
       connections: preparedImport.connections,
       canonicalCoverageFence: preparedImport.canonicalCoverageFence,
+      canonicalCoverageDailyClosedOnlySourceProviderSlug:
+        preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+      canonicalCoverageProviderPulledAt: context.now,
       summaries: preparedImport.snapshots,
       timeseries: {},
     };
@@ -2942,6 +2949,9 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: executionWindowEnd,
             connections: preparedImport.connections,
             canonicalCoverageFence: preparedImport.canonicalCoverageFence,
+            canonicalCoverageDailyClosedOnlySourceProviderSlug:
+              preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+            canonicalCoverageProviderPulledAt: context.now,
             summaries: {},
             timeseries: preparedImport.snapshots,
           };
@@ -3060,6 +3070,9 @@ export function createJunctionDeviceSyncProvider(
           windowEnd: window.windowEnd,
           connections: preparedImport.connections,
           canonicalCoverageFence: preparedImport.canonicalCoverageFence,
+          canonicalCoverageDailyClosedOnlySourceProviderSlug:
+            preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+          canonicalCoverageProviderPulledAt: context.now,
           summaries: {},
           timeseries: preparedImport.snapshots,
         };
@@ -4858,6 +4871,8 @@ function prepareJunctionImportSnapshotForSources(
 
   return {
     canonicalCoverageFence: buildJunctionGoogleHealthCanonicalCoverageFence(currentSources),
+    canonicalCoverageDailyClosedOnlySourceProviderSlug:
+      resolveJunctionFitbitMigrationClosedDailySource(currentSources),
     connections: sanitizeJunctionImportConnections(sourceProviders),
     sourceProviders,
     snapshots: sanitizeJunctionImportSnapshots(
@@ -4872,6 +4887,22 @@ function prepareJunctionImportSnapshotForSources(
       options,
     ),
   };
+}
+
+function resolveJunctionFitbitMigrationClosedDailySource(
+  sources: readonly JunctionImportAdmissionSource[],
+): string | undefined {
+  const activeFitbit = sources.some((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && source.status !== "disconnected"
+  );
+  const activeGoogleHealth = sources.some((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    && source.status !== "disconnected"
+  );
+  return activeFitbit && activeGoogleHealth
+    ? JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    : undefined;
 }
 
 function filterJunctionImportSnapshots(
@@ -4920,7 +4951,7 @@ async function recordAcceptedJunctionFitbitCoverage(
 
   const coverageByResource = new Map<string, {
     coverageBoundary: string;
-    coverageReadyAt?: string;
+    coverageFinalizedAt?: string;
   }>();
   for (const evidence of canonicalCoverage) {
     if (
@@ -4940,9 +4971,9 @@ async function recordAcceptedJunctionFitbitCoverage(
       : evidence.coverageBoundary;
     coverageByResource.set(evidence.resource, {
       coverageBoundary,
-      coverageReadyAt: coverageBoundary === evidence.coverageBoundary
-        ? evidence.coverageReadyAt
-        : existing?.coverageReadyAt,
+      coverageFinalizedAt: coverageBoundary === evidence.coverageBoundary
+        ? evidence.coverageFinalizedAt
+        : existing?.coverageFinalizedAt,
     });
   }
 
@@ -4987,26 +5018,26 @@ async function recordAcceptedJunctionFitbitCoverage(
       resourceAvailabilitySummary[key] = coverage.coverageBoundary;
       changed = true;
     }
-    const readyAtKey = buildDeviceSyncSourceCanonicalCoverageReadyAtKey(resource);
-    if (!readyAtKey) {
+    const finalizedAtKey = buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey(resource);
+    if (!finalizedAtKey) {
       continue;
     }
-    const existingReadyAt = readDeviceSyncSourceCanonicalCoverageReadyAt(
+    const existingFinalizedAt = readDeviceSyncSourceCanonicalCoverageFinalizedAt(
       resourceAvailabilitySummary,
       resource,
     );
     if (coverageAdvanced) {
-      resourceAvailabilitySummary[readyAtKey] = coverage.coverageReadyAt ?? null;
+      resourceAvailabilitySummary[finalizedAtKey] = coverage.coverageFinalizedAt ?? null;
       continue;
     }
     if (
       existingCoverage !== coverage.coverageBoundary
-      || !coverage.coverageReadyAt
-      || existingReadyAt
+      || !coverage.coverageFinalizedAt
+      || existingFinalizedAt
     ) {
       continue;
     }
-    resourceAvailabilitySummary[readyAtKey] = coverage.coverageReadyAt;
+    resourceAvailabilitySummary[finalizedAtKey] = coverage.coverageFinalizedAt;
     changed = true;
   }
 
@@ -8138,7 +8169,7 @@ function readProviderSnapshotCanonicalEventExternalRefResourceIds(
 
 function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly {
   coverageBoundary: string;
-  coverageReadyAt?: string;
+  coverageFinalizedAt?: string;
   resource: string;
   sourceProviderSlug: string;
 }[] {
@@ -8162,11 +8193,11 @@ function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly
     ) {
       return [];
     }
-    const coverageReadyAt = toIsoTimestampIfValid(evidence.coverageReadyAt);
+    const coverageFinalizedAt = toIsoTimestampIfValid(evidence.coverageFinalizedAt);
     return [{
       coverageBoundary,
-      ...(coverageReadyAt
-        ? { coverageReadyAt }
+      ...(coverageFinalizedAt
+        ? { coverageFinalizedAt }
         : {}),
       resource,
       sourceProviderSlug: evidence.sourceProviderSlug,

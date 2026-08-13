@@ -299,6 +299,7 @@ function createCanonicalImportReceipt(
       })),
       {
         defaultTimeZone,
+        providerPulledAt: snapshot.canonicalCoverageProviderPulledAt,
       },
     ),
   };
@@ -12167,8 +12168,8 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   );
   assert.equal(
     upserts.at(-1)?.resourceAvailabilitySummary
-      ?.canonicalCoverageReadyAt_activity,
-    "2026-08-12T04:00:00.000Z",
+      ?.canonicalCoverageFinalizedAt_activity,
+    null,
   );
 
   upserts.length = 0;
@@ -12186,8 +12187,8 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   );
   assert.equal(
     upserts.at(-1)?.resourceAvailabilitySummary
-      ?.canonicalCoverageReadyAt_activity,
-    "2026-08-12T04:00:00.000Z",
+      ?.canonicalCoverageFinalizedAt_activity,
+    null,
   );
 });
 
@@ -12238,11 +12239,26 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
     sourceProviderSlug: "fitbit",
     resourceAvailabilitySummary: { activity: true },
   });
+  const googleHealth = createConnectionSource({
+    id: "src-google-health-mixed-coverage",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "google_health",
+    })),
+    sourceProviderSlug: "google_health",
+    resourceAvailabilitySummary: { activity: true },
+  });
   const recordedCoverage: string[] = [];
+  const recordedFinalization: string[] = [];
+  const importedSnapshots: JunctionSnapshotInput[] = [];
   let importCount = 0;
   const context = createJunctionJobContext({
-    account: createAccount({ sources: [summarizeConnectionSource(legacyFitbit)] }),
+    account: createAccount({
+      sources: [summarizeConnectionSource(legacyFitbit), summarizeConnectionSource(googleHealth)],
+    }),
     importSnapshot: async (snapshot) => {
+      assertJunctionSnapshotInput(snapshot);
+      importedSnapshots.push(snapshot);
       importCount += 1;
       return createCanonicalImportReceipt(
         snapshot,
@@ -12250,7 +12266,10 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
         importCount === 1 ? "America/New_York" : "UTC",
       );
     },
-    listConnectionSources: async () => [summarizeConnectionSource(legacyFitbit)],
+    listConnectionSources: async () => [
+      summarizeConnectionSource(legacyFitbit),
+      summarizeConnectionSource(googleHealth),
+    ],
     now: "2026-08-13T01:00:00.000Z",
     upsertConnectionSource: (input) => {
       const next = createConnectionSource({ ...legacyFitbit, ...input });
@@ -12258,6 +12277,11 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
         ?.canonicalCoverageBoundary_activity;
       if (typeof coverage === "string") {
         recordedCoverage.push(coverage);
+      }
+      const finalizedAt = next.resourceAvailabilitySummary
+        ?.canonicalCoverageFinalizedAt_activity;
+      if (typeof finalizedAt === "string") {
+        recordedFinalization.push(finalizedAt);
       }
       legacyFitbit = next;
       return next;
@@ -12272,9 +12296,21 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
   await executeJunctionJob(provider, context, job);
 
   assert.deepEqual([...new Set(recordedCoverage)], ["2026-08-10"]);
+  assert.deepEqual([...new Set(recordedFinalization)], ["2026-08-13T01:00:00.000Z"]);
   assert.equal(
     legacyFitbit.resourceAvailabilitySummary?.canonicalCoverageBoundary_activity,
     "2026-08-10",
+  );
+  assert.equal(
+    legacyFitbit.resourceAvailabilitySummary?.canonicalCoverageFinalizedAt_activity,
+    "2026-08-13T01:00:00.000Z",
+  );
+  assert.equal(
+    importedSnapshots.every((snapshot) =>
+      snapshot.canonicalCoverageDailyClosedOnlySourceProviderSlug === "fitbit"
+      && snapshot.canonicalCoverageProviderPulledAt === "2026-08-13T01:00:00.000Z"
+    ),
+    true,
   );
 });
 

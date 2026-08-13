@@ -1167,10 +1167,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   publishes successor verification, then requests one exact-connection cutover;
   Web rechecks its durable source rows and owns the fenced targeted provider
   revoke. Device sync advances a per-resource legacy coverage boundary only
-  after the corresponding canonical import is durably accepted. Daily
-  boundaries carry the exact provider-local next-midnight instant and remain
-  ineligible for active-provider cutover until that instant has elapsed; the
-  hosted pass checks that readiness before scheduling another legacy import.
+  after the corresponding canonical import is durably accepted. Every accepted
+  daily fact immediately advances its overlap fence, but an active-provider
+  cutover remains ineligible until a fresh Junction pull performed after that
+  provider-local day closed canonically accepts the day again. Inline payloads
+  and replays cannot supply that finalization proof. The hosted pass schedules
+  and drains provider work, publishes the resulting source authority, and only
+  then checks cutover readiness. Explicit terminal provider loss waives the
+  unobtainable finalization proof while retaining the last accepted boundary.
   Cutover requires a boundary for every overlapping temporal successor
   resource, and post-cutover Google Health imports admit only records whose
   interval end or daily coverage end is beyond that resource's boundary; the

@@ -634,10 +634,14 @@ Last verified: 2026-08-11
   published successor history/resource/freshness evidence and each overlapping
   temporal resource has a durable canonical legacy-coverage boundary. Web
   rechecks those durable rows before the targeted provider revoke. Boundary
-  markers advance only after accepted canonical delivery. A daily marker is
-  paired with its provider-local next-midnight instant and cannot authorize an
-  active-provider cutover before that instant; once elapsed, the hosted pass
-  attempts cutover before scheduling another legacy import. Post-cutover imports
+  markers advance only after accepted canonical delivery. An active daily
+  boundary becomes cutover-final only when a fresh Junction provider pull made
+  after the provider-local day closed canonically accepts that day again;
+  inline payloads and replays can advance the overlap fence but cannot finalize
+  it. The hosted pass schedules and drains provider work, publishes the source
+  authority, and then attempts eligible cutover. Explicit terminal provider
+  loss waives only the finalization proof that can no longer be obtained and
+  retains the accepted fence. Post-cutover imports
   compare daily coverage ends and interval ends per resource so delayed daily
   records and straddling sessions cannot be lost to a wall-clock fence.
   Provider failure restores legacy Fitbit and writes only the retry

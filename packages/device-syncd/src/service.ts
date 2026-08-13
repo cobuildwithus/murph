@@ -2156,8 +2156,17 @@ function readCanonicalDeviceImportJunctionCoverage(
     ) {
       return [];
     }
+    const coverageFinalizedAt = typeof evidence.coverageFinalizedAt === "string"
+      && Number.isFinite(Date.parse(evidence.coverageFinalizedAt))
+      && new Date(Date.parse(evidence.coverageFinalizedAt)).toISOString()
+        === evidence.coverageFinalizedAt
+      ? evidence.coverageFinalizedAt
+      : null;
     return [{
       coverageBoundary,
+      ...(coverageFinalizedAt
+        ? { coverageFinalizedAt }
+        : {}),
       resource,
       sourceProviderSlug: evidence.sourceProviderSlug,
     }];

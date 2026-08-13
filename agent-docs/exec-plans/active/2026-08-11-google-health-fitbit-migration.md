@@ -139,13 +139,21 @@ Updated: 2026-08-13
     and browser polling must span automatic `cutover_ready` processing without
     continuing after completion or a retry-required failure. Both were
     remediated and the exact head was sent through a full-snapshot round 11.
-18. In progress: final round 11 found the closed-boundary suppression still left
+18. Completed: final round 11 found the closed-boundary suppression still left
     the preceding day as the fence, so an active cutover could admit the current
     Google Health day after Fitbit had already written it. Pair every accepted
     daily boundary with its exact provider-local next-midnight readiness instant,
     require that instant to elapse for active-provider cutover, and attempt the
-    cutover before the hosted scheduler can import the next legacy day. Push and
-    continue the explicitly authorized final-gate loop to a valid pass.
+    cutover before the hosted scheduler can import the next legacy day. That
+    correction was pushed and the explicitly authorized final-gate loop continued.
+19. In progress: final round 12 found that the readiness instant was stripped at
+    both the real device-sync receipt bridge and Web source-summary sanitizer.
+    More importantly, elapsed midnight did not prove the accepted current-day
+    Fitbit aggregate was final because pre-scheduler cutover prevented a fresh
+    post-close provider pull. Replace time-only readiness with end-to-end durable
+    proof that a fresh Junction pull performed after the provider-local day
+    closed canonically accepted the day, run active cutover only after scheduled
+    work is drained and published, then push and continue to a valid pass.
 
 ## Decisions
 
@@ -178,13 +186,16 @@ Updated: 2026-08-13
   existing list-before-revoke operation resumes. Provider absence finalizes the
   fence, active failure restores the existing retry marker, and an unprobeable
   outcome retains the renewed bounded claim. Do not add a lease table or worker.
-- Publish every durably accepted daily fact as its canonical day boundary and
-  pair it with the exact instant when the next provider-local day begins. An
-  active legacy source cannot cut over until every produced daily resource's
-  readiness instant has elapsed; explicit terminal provider state waives only
-  the elapsed-time gate, not the durable boundary. The hosted pass attempts an
-  eligible active cutover before scheduling the next legacy import. Interval
-  resources keep their accepted instant boundary and need no day-ready marker.
+- Publish every durably accepted daily fact as its canonical day boundary so the
+  overlap fence advances immediately. Mark that boundary cutover-final only when
+  a fresh Junction provider pull made after the provider-local day closed
+  canonically accepts the day again; inline webhook payloads and replays cannot
+  finalize it. An active legacy source cannot cut over until every produced
+  daily resource has this finalization proof. Explicit terminal provider state
+  waives only proof that can no longer be obtained, not the durable boundary.
+  The hosted pass schedules and drains provider work, publishes source authority,
+  and then attempts cutover. Interval resources keep their accepted instant
+  boundary and need no daily finalization marker.
 
 ## Verification
 
@@ -264,15 +275,23 @@ Updated: 2026-08-13
   now persists the accepted day plus a timezone/DST-exact readiness instant,
   fails closed if that instant is unavailable, and cuts over before another
   eligible legacy scheduler pass. Focused importer, device-sync, and hosted
-  runtime proofs cover daily readiness, terminal waiver, and pre-scheduler
-  ordering. All 160 importer, 243 device-sync, 84 hosted-runtime maintenance,
+  runtime proofs covered daily readiness, terminal waiver, and pre-scheduler
+  ordering before round twelve replaced that incomplete authority. All 160
+  importer, 243 device-sync, 84 hosted-runtime maintenance,
   and 367 affected Web tests pass; all four affected typechecks and the three
   affected package builds pass.
+- Final round-twelve finding was reproduced at both lossy authority boundaries
+  and in hosted ordering. The correction carries canonical post-close
+  provider-pull finalization through importer receipt, local source summary, and
+  Web persistence; inline payloads and replays remain provisional, and active
+  cutover runs only after scheduler, drain, reconcile, and durable publication.
+  Initial focused proof passes all 161 importer tests, 348 device-sync tests, 84
+  hosted-runtime maintenance tests, and 9 Web source-store tests.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Commit and push the round-eleven remediation, then continue the user-authorized
+- Commit and push the round-twelve remediation, then continue the user-authorized
   ReviewGPT loop against that exact head until it reaches a valid pass.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict

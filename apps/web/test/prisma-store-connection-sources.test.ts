@@ -399,6 +399,8 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
         activity: true,
         canonicalCoverageBoundary_activity: "2026-08-12",
         canonicalCoverageBoundary_sleep: "2026-08-12T00:00:00Z",
+        canonicalCoverageFinalizedAt_activity: "2026-08-13T01:00:00.000Z",
+        canonicalCoverageFinalizedAt_sleep: "2026-08-13T01:00:00Z",
       },
       lastSeenAt: "2026-08-12T00:00:00.000Z",
     });
@@ -406,6 +408,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     expect(covered.resourceAvailabilitySummary).toEqual({
       activity: true,
       canonicalCoverageBoundary_activity: "2026-08-12",
+      canonicalCoverageFinalizedAt_activity: "2026-08-13T01:00:00.000Z",
     });
   });
 

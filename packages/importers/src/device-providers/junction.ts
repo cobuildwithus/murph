@@ -136,6 +136,8 @@ export interface JunctionSnapshotInput {
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
   canonicalCoverageFence?: JunctionCanonicalCoverageFence;
+  canonicalCoverageDailyClosedOnlySourceProviderSlug?: string;
+  canonicalCoverageProviderPulledAt?: string;
 }
 
 export interface JunctionCanonicalCoverageFence {
@@ -163,13 +165,14 @@ export interface JunctionBloodPressureProviderRecordIdentityEvidence {
 
 export interface JunctionCanonicalCoverageEvidence {
   readonly coverageBoundary: string;
-  readonly coverageReadyAt?: string;
+  readonly coverageFinalizedAt?: string;
   readonly resource: string;
   readonly sourceProviderSlug: string;
 }
 
 export interface JunctionCanonicalCoverageDerivationOptions {
   readonly defaultTimeZone?: string;
+  readonly providerPulledAt?: string;
 }
 
 export interface JunctionCanonicalCoverageEvent {
@@ -248,6 +251,8 @@ const junctionSnapshotSchema = z.object({
     coverageBoundaryByResource: z.record(z.string(), z.string().nullable()),
     sourceProviderSlug: z.string(),
   }).strict().optional(),
+  canonicalCoverageDailyClosedOnlySourceProviderSlug: z.string().optional(),
+  canonicalCoverageProviderPulledAt: z.string().optional(),
 }).catchall(z.unknown());
 
 const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
@@ -1026,6 +1031,11 @@ export function normalizeJunctionSnapshot(
     context,
     snapshot.canonicalCoverageFence,
   );
+  applyJunctionClosedDailyCoverageAdmission(
+    context,
+    snapshot.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+    snapshot.canonicalCoverageProviderPulledAt ?? importedAt,
+  );
 
   return makeNormalizedDeviceBatch({
     provider: "junction",
@@ -1047,12 +1057,43 @@ export function normalizeJunctionSnapshot(
   });
 }
 
+function applyJunctionClosedDailyCoverageAdmission(
+  context: NormalizationContext,
+  sourceProviderSlug: string | undefined,
+  observedAt: string | undefined,
+): void {
+  const normalizedSourceProviderSlug = normalizeJunctionSourceProviderSlug(sourceProviderSlug);
+  if (!normalizedSourceProviderSlug) {
+    return;
+  }
+
+  const observedAtMs = typeof observedAt === "string" ? Date.parse(observedAt) : Number.NaN;
+  const openDayKey = context.defaultTimeZone && Number.isFinite(observedAtMs)
+    ? toLocalDayKey(observedAtMs, context.defaultTimeZone)
+    : null;
+  const admittedEvents = context.events.filter((event) => {
+    if (
+      normalizeJunctionSourceProviderSlug(event.dataOrigin?.sourceProviderSlug)
+        !== normalizedSourceProviderSlug
+    ) {
+      return true;
+    }
+    const evidence = resolveJunctionCanonicalCoverageEvidence(event);
+    if (!evidence || !isJunctionDailyCanonicalCoverageResource(evidence.resource)) {
+      return true;
+    }
+    return openDayKey !== null && evidence.coverageBoundary < openDayKey;
+  });
+  context.events.splice(0, context.events.length, ...admittedEvents);
+}
+
 /**
  * Derives provider cutover coverage only from the canonical events returned by
  * the committed vault import. This deliberately does not replay raw Junction
  * normalization: the stored event owns the canonical provider day or interval.
- * Daily coverage carries the exact instant after its provider-local day closes;
- * interval coverage remains anchored to its accepted end.
+ * Daily coverage becomes final only when a provider pull performed after its
+ * local day closed accepts that day. Inline payloads can advance the fence but
+ * cannot finalize it. Interval coverage remains anchored to its accepted end.
  */
 export function deriveJunctionCanonicalCoverageEvidence(
   events: readonly JunctionCanonicalCoverageEvent[],
@@ -1064,17 +1105,18 @@ export function deriveJunctionCanonicalCoverageEvidence(
     if (!evidence) {
       continue;
     }
-    const coverageReadyAt = options
+    const coverageFinalizedAt = options
         && isJunctionDailyCanonicalCoverageResource(evidence.resource)
-      ? resolveJunctionProviderDayReadyAt(
+      ? resolveJunctionProviderDayFinalizedAt(
           evidence.coverageBoundary,
           options.defaultTimeZone,
+          options.providerPulledAt,
         )
       : undefined;
-    const resolvedEvidence = coverageReadyAt
+    const resolvedEvidence = coverageFinalizedAt
       ? {
           ...evidence,
-          coverageReadyAt,
+          coverageFinalizedAt,
         }
       : evidence;
 
@@ -1093,8 +1135,8 @@ export function deriveJunctionCanonicalCoverageEvidence(
         existing?.coverageBoundary === resolvedEvidence.coverageBoundary
           ? {
               ...resolvedEvidence,
-              coverageReadyAt:
-                existing.coverageReadyAt ?? resolvedEvidence.coverageReadyAt,
+              coverageFinalizedAt:
+                existing.coverageFinalizedAt ?? resolvedEvidence.coverageFinalizedAt,
             }
           : resolvedEvidence,
       );
@@ -1107,15 +1149,24 @@ export function deriveJunctionCanonicalCoverageEvidence(
   );
 }
 
-function resolveJunctionProviderDayReadyAt(
+function resolveJunctionProviderDayFinalizedAt(
   dayKey: string,
   defaultTimeZone: string | undefined,
+  providerPulledAt: string | undefined,
 ): string | undefined {
-  if (!defaultTimeZone) {
+  if (!defaultTimeZone || !providerPulledAt) {
     return undefined;
   }
 
   try {
+    const providerPulledAtMs = Date.parse(providerPulledAt);
+    if (!Number.isFinite(providerPulledAtMs)) {
+      return undefined;
+    }
+    const normalizedProviderPulledAt = new Date(providerPulledAtMs).toISOString();
+    if (normalizedProviderPulledAt !== providerPulledAt) {
+      return undefined;
+    }
     const nextDayKey = addDaysToIsoDate(dayKey, 1);
     const nominalNextDayMs = Date.parse(`${nextDayKey}T00:00:00.000Z`);
     let lowerBoundMs = nominalNextDayMs - 36 * 60 * 60_000;
@@ -1135,7 +1186,9 @@ function resolveJunctionProviderDayReadyAt(
         lowerBoundMs = midpointMs;
       }
     }
-    return new Date(upperBoundMs).toISOString();
+    return providerPulledAtMs >= upperBoundMs
+      ? normalizedProviderPulledAt
+      : undefined;
   } catch {
     return undefined;
   }
@@ -2633,8 +2686,16 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
     return {};
   }
 
-  const { canonicalCoverageFence: _canonicalCoverageFence, ...sanitizedSnapshot } = sanitized;
+  const {
+    canonicalCoverageFence: _canonicalCoverageFence,
+    canonicalCoverageDailyClosedOnlySourceProviderSlug:
+      _canonicalCoverageDailyClosedOnlySourceProviderSlug,
+    canonicalCoverageProviderPulledAt: _canonicalCoverageProviderPulledAt,
+    ...sanitizedSnapshot
+  } = sanitized;
   void _canonicalCoverageFence;
+  void _canonicalCoverageDailyClosedOnlySourceProviderSlug;
+  void _canonicalCoverageProviderPulledAt;
 
   return stripUndefined({
     ...sanitizedSnapshot,
