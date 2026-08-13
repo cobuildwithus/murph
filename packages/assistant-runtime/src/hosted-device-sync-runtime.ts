@@ -125,6 +125,11 @@ interface HostedDirtyDeviceSyncApplyResult {
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
 }
 
+interface HostedDirtyDeviceSyncAdmissionResult {
+  admittedJobCount: number;
+  pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
+}
+
 type HostedRuntimeDeviceSyncStore = ReturnType<typeof requireHostedRuntimeDeviceSyncStore>;
 type HostedAccountHydrationInput = Parameters<HostedRuntimeDeviceSyncStore["hydrateHostedAccount"]>[0];
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
@@ -930,22 +935,17 @@ function applyHostedDirtyDeviceSyncState(input: {
       });
       return null;
     }
-    const admittedJobs = limitHostedDirtyDeviceSyncJobsForAccount({
-      accountId: localAccountId,
-      jobs: acceptedCompanionHrvJobs,
-      store,
-    });
-    const processedRevision = admittedJobs.length === acceptedCompanionHrvJobs.length
-      ? input.dirtyState.dirtyRevision
-      : input.dirtyState.processedRevision;
-    const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
+    const admission = admitHostedDirtyDeviceSyncJobsForAccount({
       accountId: localAccountId,
       connectionId: input.dirtyState.connectionId,
-      jobs: admittedJobs,
-      processedRevision,
+      jobs: acceptedCompanionHrvJobs,
+      processedRevision: input.dirtyState.dirtyRevision,
       provider: account.provider,
       store,
     });
+    const processedRevision = admission.admittedJobCount === acceptedCompanionHrvJobs.length
+      ? input.dirtyState.dirtyRevision
+      : input.dirtyState.processedRevision;
     markHostedTerminalDeviceSyncJobsDead({
       accountId: localAccountId,
       now: input.wake.occurredAt,
@@ -964,8 +964,11 @@ function applyHostedDirtyDeviceSyncState(input: {
         ),
         processedRevision,
       },
-      deferredJobCount: acceptedCompanionHrvJobs.length - admittedJobs.length,
-      pendingDirtyPayloadJobs,
+      deferredJobCount: acceptedCompanionHrvJobs.length - admission.admittedJobCount,
+      pendingDirtyPayloadJobs: admission.pendingDirtyPayloadJobs.map((pending) => ({
+        ...pending,
+        processedRevision,
+      })),
     };
   }
 
@@ -979,22 +982,17 @@ function applyHostedDirtyDeviceSyncState(input: {
     return null;
   }
 
-  const admittedJobs = limitHostedDirtyDeviceSyncJobsForAccount({
-    accountId: localAccountId,
-    jobs: dirtyJobs,
-    store,
-  });
-  const processedRevision = admittedJobs.length === dirtyJobs.length
-    ? input.dirtyState.dirtyRevision
-    : input.dirtyState.processedRevision;
-  const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
+  const admission = admitHostedDirtyDeviceSyncJobsForAccount({
     accountId: localAccountId,
     connectionId: input.dirtyState.connectionId,
-    jobs: admittedJobs,
-    processedRevision,
+    jobs: dirtyJobs,
+    processedRevision: input.dirtyState.dirtyRevision,
     provider: account.provider,
     store,
   });
+  const processedRevision = admission.admittedJobCount === dirtyJobs.length
+    ? input.dirtyState.dirtyRevision
+    : input.dirtyState.processedRevision;
 
   return {
     ack: {
@@ -1008,25 +1006,79 @@ function applyHostedDirtyDeviceSyncState(input: {
       ),
       processedRevision,
     },
-    deferredJobCount: dirtyJobs.length - admittedJobs.length,
-    pendingDirtyPayloadJobs,
+    deferredJobCount: dirtyJobs.length - admission.admittedJobCount,
+    pendingDirtyPayloadJobs: admission.pendingDirtyPayloadJobs.map((pending) => ({
+      ...pending,
+      processedRevision,
+    })),
   };
 }
 
-function limitHostedDirtyDeviceSyncJobsForAccount(input: {
+function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   accountId: string;
+  connectionId: string;
   jobs: readonly HostedDirtyDeviceSyncJob[];
+  processedRevision: string;
+  provider: string;
   store: HostedRuntimeDeviceSyncStore;
-}): readonly HostedDirtyDeviceSyncJob[] {
-  const pendingCount = input.store.listPendingJobsForAccount(
+}): HostedDirtyDeviceSyncAdmissionResult {
+  const pendingJobs = input.store.listPendingJobsForAccount(
     input.accountId,
     HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-  ).length;
-  const availableSlots = Math.max(
-    0,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingCount,
   );
-  return input.jobs.slice(0, availableSlots);
+  let availableSlots = Math.max(
+    0,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingJobs.length,
+  );
+  const jobIdsByDedupeKey = new Map<string, string>();
+  for (const job of pendingJobs) {
+    if (job.provider === input.provider && job.dedupeKey) {
+      jobIdsByDedupeKey.set(job.dedupeKey, job.id);
+    }
+  }
+  const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
+  let admittedJobCount = 0;
+
+  for (const job of input.jobs) {
+    const dedupeKey = job.input.dedupeKey;
+    let jobId = dedupeKey ? jobIdsByDedupeKey.get(dedupeKey) ?? null : null;
+    if (!jobId) {
+      if (availableSlots === 0) {
+        continue;
+      }
+      const enqueued = input.store.enqueueJob({
+        accountId: input.accountId,
+        availableAt: job.input.availableAt,
+        dedupeKey,
+        kind: job.input.kind,
+        maxAttempts: job.input.maxAttempts,
+        payload: job.input.payload ?? {},
+        priority: job.input.priority ?? 0,
+        provider: input.provider,
+      });
+      jobId = enqueued.id;
+      availableSlots -= 1;
+      if (dedupeKey) {
+        jobIdsByDedupeKey.set(dedupeKey, jobId);
+      }
+    }
+    admittedJobCount += 1;
+    const timing = buildHostedDeviceSyncImportTiming({
+      provider: input.provider,
+      resource: job.resource,
+    });
+    if (job.dirtyPayloadId || "timing" in timing) {
+      pendingDirtyPayloadJobs.push({
+        connectionId: input.connectionId,
+        dirtyPayloadId: job.dirtyPayloadId,
+        jobId,
+        processedRevision: input.processedRevision,
+        ...timing,
+      });
+    }
+  }
+
+  return { admittedJobCount, pendingDirtyPayloadJobs };
 }
 
 function withHostedDirtyPayloadAckIds(
@@ -1090,41 +1142,6 @@ function buildHostedDirtyDeviceSyncJobs(
     input: hostedDirtyResourceToDeviceSyncJobInput(resource, dirtyState, occurredAt),
     resource,
   }));
-}
-
-function enqueueHostedDirtyDeviceSyncJobs(input: {
-  accountId: string;
-  connectionId: string;
-  jobs: readonly HostedDirtyDeviceSyncJob[];
-  processedRevision: string;
-  provider: string;
-  store: HostedRuntimeDeviceSyncStore;
-}): HostedDeviceSyncRuntimeDirtyPayloadJob[] {
-  return input.jobs.flatMap((job) => {
-    const enqueued = input.store.enqueueJob({
-      accountId: input.accountId,
-      availableAt: job.input.availableAt,
-      dedupeKey: job.input.dedupeKey,
-      kind: job.input.kind,
-      maxAttempts: job.input.maxAttempts,
-      payload: job.input.payload ?? {},
-      priority: job.input.priority ?? 0,
-      provider: input.provider,
-    });
-    const timing = buildHostedDeviceSyncImportTiming({
-      provider: input.provider,
-      resource: job.resource,
-    });
-    return job.dirtyPayloadId || "timing" in timing
-      ? [{
-          connectionId: input.connectionId,
-          dirtyPayloadId: job.dirtyPayloadId,
-          jobId: enqueued.id,
-          processedRevision: input.processedRevision,
-          ...timing,
-        }]
-      : [];
-  });
 }
 
 function buildHostedDeviceSyncImportTiming(

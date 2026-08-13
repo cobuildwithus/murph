@@ -3976,6 +3976,316 @@ describe("hosted device-sync runtime", () => {
     assert.equal(pendingIndexes.size, 0);
   });
 
+  test("a cold-restored full dirty page relinks every retained job before completion", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-relink-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-relink-restored-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const baseProvider = createFakeProvider();
+    const stravaProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Strava",
+        provider: "strava",
+      },
+    };
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const connectionId = "hosted_strava_dirty_relink";
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "strava-dirty-relink",
+      provider: "strava",
+    });
+    const dirtyResources = Array.from({ length: 100 }, (_, index) => ({
+      count: 1,
+      dirtyPayloadId: `dsp_dirty_relink_${index}`,
+      jobKind: "resource" as const,
+      payload: {
+        eventType: "activity.create",
+        occurredAt: "2026-04-04T10:00:00.000Z",
+        resourceId: `strava-dirty-relink-activity-${index}`,
+        resourceType: "activity",
+      },
+      resource: "activity",
+      resourceCategory: "activity",
+      sourceProviderSlug: "strava",
+      windowEnd: null,
+      windowStart: null,
+    }));
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "100",
+      dirtyResources,
+      eventCount: "100",
+      provider: "strava",
+    });
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during sync");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during sync");
+      },
+      async fetchDirtyStates(input = {}) {
+        assert.equal(input.connectionId, connectionId);
+        return {
+          hasMore: false,
+          items: [dirtyState],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+    const initialWake = buildDirtyDeviceSyncWake(
+      connectionId,
+      "2026-04-04T10:00:00.000Z",
+      "strava",
+    );
+    let firstClosed = false;
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake: initialWake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(firstAccountId);
+      const firstJobs = readJobsForAccount(firstService, firstAccountId);
+      assert.equal(firstJobs.length, 100);
+      const firstJobIds = new Set(firstJobs.map((job) => job.id));
+      assert.equal(firstState.pendingDirtyPayloadJobs.length, 100);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: initialWake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.wake.hint?.jobs?.length, 100);
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+
+      const restoredStore = getStore(restoredService);
+      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
+      assert.equal(restoredJobs.length, 100);
+      assert.equal(restoredState.pendingDirtyPayloadJobs.length, 100);
+      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      assert.ok(restoredJobs.every((job) => !firstJobIds.has(job.id)));
+      assert.equal(await restoredService.drainWorker(100, restoredAccountId), 100);
+
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.equal(restoredState.pendingDirtyPayloadJobs.length, 0);
+      assert.deepEqual(
+        new Set(restoredState.pendingDirtyAcks[0]?.processedDirtyPayloadIds),
+        new Set(dirtyResources.map((resource) => resource.dirtyPayloadId)),
+      );
+      assert.equal(readJobsForAccount(restoredService, restoredAccountId).length, 100);
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("cold dirty admission relinks retained identities and bounds only new jobs", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-mixed-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-mixed-restored-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const baseProvider = createFakeProvider();
+    const stravaProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Strava",
+        provider: "strava",
+      },
+    };
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const connectionId = "hosted_strava_dirty_mixed";
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "strava-dirty-mixed",
+      provider: "strava",
+    });
+    const buildResource = (index: number, dirtyPayloadId = `dsp_dirty_mixed_${index}`) => ({
+      count: 1,
+      dirtyPayloadId,
+      jobKind: "resource" as const,
+      payload: {
+        eventType: "activity.create",
+        occurredAt: "2026-04-04T10:00:00.000Z",
+        resourceId: `strava-dirty-mixed-activity-${index}`,
+        resourceType: "activity",
+      },
+      resource: "activity",
+      resourceCategory: "activity",
+      sourceProviderSlug: "strava",
+      windowEnd: null,
+      windowStart: null,
+    });
+    const retainedResources = Array.from({ length: 60 }, (_, index) => buildResource(index));
+    const restoredResources = [
+      ...retainedResources,
+      buildResource(0, "dsp_dirty_mixed_alias"),
+      ...Array.from({ length: 40 }, (_, index) => buildResource(index + 60)),
+      buildResource(100),
+    ];
+    let currentDirtyResources = retainedResources;
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during sync");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during sync");
+      },
+      async fetchDirtyStates(input = {}) {
+        assert.equal(input.connectionId, connectionId);
+        return {
+          hasMore: false,
+          items: [buildDirtyState({
+            connectionId,
+            dirtyRevision: "101",
+            dirtyResources: currentDirtyResources,
+            eventCount: String(currentDirtyResources.length),
+            provider: "strava",
+          })],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+    const initialWake = buildDirtyDeviceSyncWake(
+      connectionId,
+      "2026-04-04T10:00:00.000Z",
+      "strava",
+    );
+    let firstClosed = false;
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake: initialWake,
+      });
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: initialWake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.wake.hint?.jobs?.length, 60);
+      const retainedHints = recovery.wake.hint?.jobs ?? [];
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+      currentDirtyResources = restoredResources;
+
+      const restoredStore = getStore(restoredService);
+      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
+      assert.equal(restoredJobs.length, 100);
+      assert.equal(restoredState.pendingDirtyPayloadJobs.length, 101);
+      assert.equal(restoredState.dirtyWorkRemaining, true);
+      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      for (const hint of retainedHints) {
+        const restored = restoredJobs.find((job) => job.dedupeKey === hint.dedupeKey);
+        assert.equal(restored?.availableAt, hint.availableAt);
+        assert.equal(restored?.maxAttempts, hint.maxAttempts);
+      }
+      const relinkedJobIds = restoredState.pendingDirtyPayloadJobs
+        .filter((pending) =>
+          pending.dirtyPayloadId === "dsp_dirty_mixed_0"
+          || pending.dirtyPayloadId === "dsp_dirty_mixed_alias"
+        )
+        .map((pending) => pending.jobId);
+      assert.deepEqual(new Set(relinkedJobIds).size, 1);
+
+      assert.equal(await restoredService.drainWorker(100, restoredAccountId), 100);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.deepEqual(
+        new Set(restoredState.pendingDirtyAcks[0]?.processedDirtyPayloadIds),
+        new Set(restoredResources.slice(0, -1).map((resource) => resource.dirtyPayloadId)),
+      );
+      assert.equal(
+        restoredState.pendingDirtyAcks[0]?.processedDirtyPayloadIds?.includes(
+          "dsp_dirty_mixed_100",
+        ),
+        false,
+      );
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
   test("generic Strava payloads honor local retry timing and survive a cold restore", async () => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-strava-retry-first-",
