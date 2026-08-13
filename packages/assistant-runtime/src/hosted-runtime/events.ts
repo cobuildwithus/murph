@@ -303,11 +303,13 @@ async function executeHostedSystemWake(input: {
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
+        retainFollowUpWakeUntilCheckpoint: true,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         ...(input.shouldYieldDeviceSync
           ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
           : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
@@ -359,13 +361,22 @@ async function executeHostedSystemWake(input: {
     }
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":
-    case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":
     case "runtime.mailbox-lag-observed":
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "runtime-control",
+      });
+    case "runtime.maintenance-requested":
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: input.wake.eventId.startsWith(
+            "runtime-control:group-share-projection:",
+          )
+          ? { kind: "vault-share.projection" }
+          : null,
       });
     case "runtime.codex-auth-requested": {
       const { executeHostedCodexAuthWake } = await import(

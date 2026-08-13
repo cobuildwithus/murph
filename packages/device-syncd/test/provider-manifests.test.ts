@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/importers/device-providers/junction-resources";
+import {
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_TIMESERIES_RESOURCES,
+} from "@murphai/contracts";
 import {
   cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
@@ -11,6 +15,7 @@ import {
   deviceSyncProviderRuntimeVariableEnvKeys,
   getConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
   listDeviceSyncProviderCatalog,
   normalizeConfiguredDeviceSyncJobInput,
   normalizeConfiguredDeviceSyncJobRecord,
@@ -100,7 +105,9 @@ describe("deviceSyncProviderManifests", () => {
     expect(config).not.toHaveProperty("baseUrl");
   });
 
-  it("defaults Junction timeseries resources from the compact code-owned allowlist", () => {
+  it("activates the exact code-owned production timeseries list", () => {
+    expect([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES])
+      .toEqual([...JUNCTION_TIMESERIES_RESOURCES]);
     const configs = readConfiguredDeviceSyncProviderConfigs({
       JUNCTION_API_KEY: "sk_us_test_manifest",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
@@ -112,10 +119,102 @@ describe("deviceSyncProviderManifests", () => {
     if (!junctionConfig) {
       throw new Error("Expected Junction config to be present.");
     }
-    expect(junctionConfig).not.toHaveProperty("timeseriesResources");
+    expect(junctionConfig.timeseriesResources)
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
+    expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-5)).toEqual([
+      "steps",
+      "distance",
+      "calories_active",
+      "heartrate",
+      "weight",
+    ]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
-      .toEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
+  });
+
+  it("keeps exact Junction timeseries overrides truthful", () => {
+    const configs = readConfiguredDeviceSyncProviderConfigs({
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    });
+    const junctionConfig = configs.junction;
+    if (!junctionConfig) {
+      throw new Error("Expected Junction config to be present.");
+    }
+
+    expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([
+      "body_mass_index",
+      "carbohydrates",
+      "fat",
+      "forced_expiratory_volume_1",
+      "forced_vital_capacity",
+      "heart_rate_alert",
+      "inhaler_usage",
+      "insulin_injection",
+      "lean_body_mass",
+      "peak_expiratory_flow_rate",
+      "sleep_apnea_alert",
+      "waist_circumference",
+      "calories_basal",
+      "daylight_exposure",
+      "fall",
+      "floors_climbed",
+      "handwashing",
+      "stand_duration",
+      "stand_hour",
+      "uv_exposure",
+      "wheelchair_push",
+      "workout_distance",
+      "workout_duration",
+      "workout_swimming_stroke",
+      "electrocardiogram_voltage",
+      "workout_stream",
+    ]);
+    for (const resource of JUNCTION_OPT_IN_TIMESERIES_RESOURCES) {
+      expect(normalizeJunctionDeviceSyncRuntimeConfig({
+        ...junctionConfig,
+        timeseriesResources: [resource],
+      }).timeseriesResources).toEqual([resource]);
+    }
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: ["steps", "heart_rate", "body_weight"],
+    }).timeseriesResources).toEqual(["steps", "heartrate", "weight"]);
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: ["distance", "calories_active"],
+    }).timeseriesResources).toEqual(["distance", "calories_active"]);
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: [],
+    }).timeseriesResources).toEqual([]);
+    expect(() => normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: ["workout_heartrate"],
+    })).toThrow(/unsupported resource/u);
+  });
+
+  it.each([
+    [undefined, 3_600_000],
+    [0, 60_000],
+    [1, 60_000],
+    [59_999, 60_000],
+    [60_000, 60_000],
+    [123_000, 123_000],
+  ])("normalizes Junction reconcile interval %s to %i ms", (
+    reconcileIntervalMs,
+    expected,
+  ) => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      apiKey: "sk_us_test_manifest",
+      clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      environment: "sandbox",
+      reconcileIntervalMs,
+      region: "us",
+     }).reconcileIntervalMs).toBe(expected);
   });
 
   it("resolves Junction canonical base URLs from environment and region", () => {
@@ -156,8 +255,25 @@ describe("deviceSyncProviderManifests", () => {
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesPhase: { kind: "string", includeInHostedHint: true },
+        timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "reconcile")).toMatchObject({
+      payload: {
+        timeseriesPhase: { kind: "string", includeInHostedHint: true },
+        timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "resource")).toMatchObject({
+      payload: {
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
       },
     });
     expect(getConfiguredDeviceSyncProviderJobDefinition("oura", "resource")).toMatchObject({
@@ -465,6 +581,11 @@ describe("deviceSyncProviderManifests", () => {
   });
 
   it("shapes hosted hint payloads from the provider manifest", () => {
+    const workoutStreamCursor = JSON.stringify({
+      v: 1,
+      i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
+    });
+    const timeseriesResourceCursor = JSON.stringify({ v: 1, i: ["body_mass_index"] });
     expect(
       shapeHostedDeviceSyncJobHintPayload("junction", {
         kind: "backfill",
@@ -472,6 +593,9 @@ describe("deviceSyncProviderManifests", () => {
           emptyBackfillAttempts: 2,
           resources: ["profile"],
           timeseriesCursor: "2026-04-01T00:00:00.000Z",
+          timeseriesPhase: "wide",
+          timeseriesResourceCursor,
+          workoutStreamCursor,
           windowEnd: "2026-04-22T00:00:00.000Z",
           windowStart: "2026-01-22T00:00:00.000Z",
         },
@@ -479,6 +603,9 @@ describe("deviceSyncProviderManifests", () => {
     ).toEqual({
       emptyBackfillAttempts: 2,
       timeseriesCursor: "2026-04-01T00:00:00.000Z",
+      timeseriesPhase: "wide",
+      timeseriesResourceCursor,
+      workoutStreamCursor,
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-01-22T00:00:00.000Z",
     });
@@ -488,6 +615,7 @@ describe("deviceSyncProviderManifests", () => {
         kind: "resource",
         payload: {
           eventType: "daily.data.activity.created",
+          historicalBackfillVersion: 2,
           historicalProviderRecordsSeen: true,
           historicalUnresolvedProviderRecordIdentitiesJson:
             "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
@@ -504,6 +632,7 @@ describe("deviceSyncProviderManifests", () => {
       }),
     ).toEqual({
       eventType: "daily.data.activity.created",
+      historicalBackfillVersion: 2,
       historicalProviderRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson:
         "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
@@ -730,5 +859,41 @@ describe("deviceSyncProviderManifests", () => {
     expect(Object.isFrozen(ouraManifest.jobs.resource?.payload ?? {})).toBe(true);
     expect(Object.isFrozen(ouraManifest.jobs.resource?.payload.objectId ?? {})).toBe(true);
     expect(Object.isFrozen(ouraManifest.serializableFields)).toBe(true);
+  });
+});
+
+describe("Junction opt-in timeseries configuration", () => {
+  const baseConfig = {
+    apiKey: "sk_us_test_opt_in",
+    clientUserIdSecret: "junction-opt-in-secret",
+    environment: "sandbox" as const,
+    providerFilter: ["oura"],
+    region: "us" as const,
+  };
+
+  it("requests every canonical resource when configuration is omitted", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
+      .toEqual(JUNCTION_TIMESERIES_RESOURCES);
+  });
+
+  it("preserves an explicit only-opt-in list exactly", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["fat", "insulin_injection", "heart_rate_alert", "fat"],
+    }).timeseriesResources).toEqual(["fat", "insulin_injection", "heart_rate_alert"]);
+  });
+
+  it("preserves the existing dense and weight opt-ins exactly", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["steps", "weight"],
+    }).timeseriesResources).toEqual(["steps", "weight"]);
+  });
+
+  it("rejects unknown resource names", () => {
+    expect(() => normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["not_a_junction_resource"],
+    })).toThrow(/unsupported resource/u);
   });
 });

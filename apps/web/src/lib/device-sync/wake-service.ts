@@ -7,6 +7,9 @@ import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
+import {
+  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -82,9 +85,9 @@ import {
   toIsoTimestamp,
 } from "./shared";
 
-const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v2";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
-
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
@@ -411,6 +414,12 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    await resetHostedJunctionWeightHistoryCoverageForSource({
+      connection,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
   });
 }
 
@@ -690,6 +699,20 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             lastSeenAt: sourceStartedAt,
             tx,
           });
+          const connection = await input.store.getConnectionForUser(
+            input.userId,
+            input.connectionId,
+            tx,
+          );
+          if (!connection) {
+            connectionChangedDuringDisconnectError();
+          }
+          await resetHostedJunctionWeightHistoryCoverageForSource({
+            connection,
+            sourceProviderSlug,
+            store: input.store,
+            tx,
+          });
           return { complete: true as const, source: preparedSource };
         },
       );
@@ -750,6 +773,12 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    await resetHostedJunctionWeightHistoryCoverageForSource({
+      connection,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
     return {
       connectionId: input.connectionId,
       lastSeenAt: preparedSource.lastSeenAt,
@@ -757,6 +786,28 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       sourceProviderSlug,
     };
   });
+}
+
+async function resetHostedJunctionWeightHistoryCoverageForSource(input: {
+  connection: PublicDeviceSyncAccount;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata: input.connection.metadata,
+    providerSlug: input.sourceProviderSlug,
+    resource: "weight",
+    version: 1,
+  });
+  if (!metadata) {
+    return;
+  }
+
+  await input.store.syncDurableConnectionState({
+    ...input.connection,
+    metadata,
+  }, input.tx);
 }
 
 /**
@@ -2173,7 +2224,7 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
   return [
     "device-sync",
     "scheduled-reconcile",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA,
     input.connectionId,
     input.expectedConnectedAt,
     input.nextReconcileAt,
@@ -2501,7 +2552,7 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   return [
     "device-sync",
     "dirty",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA,
     input.userId,
     input.provider,
     input.connectionId,

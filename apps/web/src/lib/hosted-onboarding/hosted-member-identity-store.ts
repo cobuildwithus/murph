@@ -22,7 +22,12 @@ import {
   type HostedOnboardingReadClient,
   normalizeNullableString,
 } from "./shared";
-import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "../hosted-crypto/domain-root-store";
+import {
+  provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
+import type { PreparedHostedWebEncryptionRoot } from "../hosted-web/encryption";
 
 export interface HostedMemberIdentityState {
   maskedPhoneNumberHint: string | null;
@@ -66,7 +71,8 @@ export interface HostedMemberIdentityWriteInput {
   memberId: string;
   phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
-  prisma: HostedOnboardingReadClient;
+  preparedControlRoot?: PreparedHostedDomainRootForWeb;
+  prisma: Prisma.TransactionClient;
   phoneNumber: string | null;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
@@ -84,9 +90,11 @@ export async function prepareHostedMemberIdentityWrite(input: Omit<
   HostedMemberIdentityWriteInput,
   "prisma"
 > & { prisma: PrismaClient }): Promise<PreparedHostedMemberIdentityWrite> {
-  await ensureHostedMemberIdentityControlRootTx({
-    memberId: input.memberId,
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
     prisma: input.prisma,
+    reason: "hosted-member.identity-private-fields",
+    userId: input.memberId,
   });
   const mutation = await buildHostedMemberIdentityMutationData(input);
   return {
@@ -182,6 +190,50 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   return resolveHostedMemberIdentityLookup(identityRecords, "phoneNumber", input.prisma);
 }
 
+/**
+ * Reads only blind-index ownership for conflict suppression. Callers that need
+ * no private identity fields must not decrypt a second member under their
+ * transaction-local prepared-root scope.
+ */
+export async function lookupHostedMemberIdByPhoneNumber(input: {
+  phoneNumber: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
+
+  if (phoneLookupKeys.length === 0) {
+    return null;
+  }
+
+  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
+    where: {
+      phoneLookupKey: {
+        in: phoneLookupKeys,
+      },
+    },
+    select: {
+      memberId: true,
+    },
+  });
+  const memberIds = new Set(identityRecords.map((identity) => identity.memberId));
+
+  if (memberIds.size > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: memberIds.size,
+        matchedBy: "phoneNumber",
+      },
+      httpStatus: 500,
+      message:
+        "Hosted member identity lookup matched multiple accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+      retryable: true,
+    });
+  }
+
+  return memberIds.values().next().value ?? null;
+}
+
 export async function readHostedMemberIdentity(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -198,8 +250,9 @@ export async function readHostedMemberIdentity(input: {
 export async function upsertHostedMemberIdentity(
   input: HostedMemberIdentityWriteInput,
 ): Promise<HostedMemberIdentityState> {
-  await ensureHostedMemberIdentityControlRootTx({
+  const preparedRoot = await resolveHostedMemberIdentityControlRootTx({
     memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
     prisma: input.prisma,
   });
 
@@ -207,8 +260,8 @@ export async function upsertHostedMemberIdentity(
     where: {
       memberId: input.memberId,
     },
-    create: await buildHostedMemberIdentityCreateData(input),
-    update: await buildHostedMemberIdentityUpdateData(input),
+    create: await buildHostedMemberIdentityCreateData(input, preparedRoot),
+    update: await buildHostedMemberIdentityUpdateData(input, preparedRoot),
   });
 
   return projectHostedMemberIdentityState(identity, input.prisma);
@@ -217,13 +270,14 @@ export async function upsertHostedMemberIdentity(
 export async function tryCreateHostedMemberIdentity(
   input: HostedMemberIdentityWriteInput,
 ): Promise<boolean> {
-  await ensureHostedMemberIdentityControlRootTx({
+  const preparedRoot = await resolveHostedMemberIdentityControlRootTx({
     memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
     prisma: input.prisma,
   });
 
   const result = await input.prisma.hostedMemberIdentity.createMany({
-    data: await buildHostedMemberIdentityCreateData(input),
+    data: await buildHostedMemberIdentityCreateData(input, preparedRoot),
     skipDuplicates: true,
   });
 
@@ -245,7 +299,7 @@ export async function writeHostedMemberSignupPhoneState(
     data.signupPhoneCodeSentAt = input.signupPhoneCodeSentAt;
   }
   if (input.signupPhoneNumber !== undefined) {
-    await ensureHostedMemberIdentityControlRootTx({
+    await resolveHostedMemberIdentityControlRootTx({
       memberId: input.memberId,
       prisma: input.prisma,
     });
@@ -367,23 +421,29 @@ async function resolveHostedMemberIdentityLookup(
 
 async function buildHostedMemberIdentityCreateData(
   input: HostedMemberIdentityWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
 ): Promise<Prisma.HostedMemberIdentityUncheckedCreateInput> {
   return {
     memberId: input.memberId,
-    ...(await buildHostedMemberIdentityMutationData(input)),
+    ...(await buildHostedMemberIdentityMutationData(input, preparedRoot)),
   };
 }
 
 async function buildHostedMemberIdentityUpdateData(
   input: HostedMemberIdentityWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
 ): Promise<Prisma.HostedMemberIdentityUncheckedUpdateInput> {
-  return buildHostedMemberIdentityMutationData(input);
+  return buildHostedMemberIdentityMutationData(input, preparedRoot);
 }
 
-async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentityWriteInput) {
+async function buildHostedMemberIdentityMutationData(
+  input: HostedMemberIdentityWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
+) {
   const privateColumns = await buildHostedMemberIdentityPrivateColumns({
     memberId: input.memberId,
     phoneNumber: input.phoneNumber,
+    preparedRoot,
     prisma: input.prisma,
     privyUserId: input.privyUserId,
     signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
@@ -401,14 +461,34 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
   };
 }
 
-async function ensureHostedMemberIdentityControlRootTx(input: {
+async function resolveHostedMemberIdentityControlRootTx(input: {
   memberId: string;
+  preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<PreparedHostedWebEncryptionRoot | undefined> {
+  if (input.preparedControlRoot) {
+    if (
+      input.preparedControlRoot.domain !== "control"
+      || input.preparedControlRoot.userId !== input.memberId
+    ) {
+      throw new TypeError(
+        "Prepared hosted member identity root does not match the member.",
+      );
+    }
+    const prepared = await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: input.preparedControlRoot,
+      tx: input.prisma,
+    });
+    return {
+      preparedRoot: prepared.root,
+      preparedRootKeyId: prepared.rootKeyId,
+    };
+  }
   await provisionActiveHostedDomainRootEnvelopeForUserOnly({
     domain: "control",
     prisma: input.prisma,
     reason: "hosted-member.identity-private-fields",
     userId: input.memberId,
   });
+  return undefined;
 }

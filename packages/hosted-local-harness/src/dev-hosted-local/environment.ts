@@ -43,7 +43,7 @@ const HOSTED_LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
 const HOSTED_LOCAL_WEB_WRAP_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
 const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX =
-  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/local-";
+  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/";
 const HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY =
   "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const HOSTED_LOCAL_CONTACT_PRIVACY_KEY_VERSION = "v1";
@@ -508,7 +508,8 @@ function buildHostedLocalAuthoritySignKeyVersion(publicKeyPem: string): string {
     .update(normalizePublicKeyPem(publicKeyPem))
     .digest("hex")
     .slice(0, 16);
-  return `${HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX}${publicKeyFingerprint}`;
+  const keyVersion = BigInt(`0x${publicKeyFingerprint}`) + 1n;
+  return `${HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX}${keyVersion}`;
 }
 
 function buildHostedAuthorityVerifyKeyringJson(input: {

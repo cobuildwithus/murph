@@ -171,7 +171,7 @@ export function deriveDurationMinutesFromTimestamps(
 
 export function buildWorkoutTitle(
   activityType: string,
-  durationMinutes: number,
+  durationMinutes?: number,
   routineName?: string,
 ): string {
   if (typeof routineName === 'string' && routineName.trim().length > 0) {
@@ -179,6 +179,7 @@ export function buildWorkoutTitle(
   }
 
   const label = formatActivityLabel(activityType)
+  if (durationMinutes === undefined) return label
   return `${durationMinutes}-minute ${label.toLowerCase()}`
 }
 

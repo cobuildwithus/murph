@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 50,
+  "item": {
+    "id": "lighter-homepage-topic-labels",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Quieter homepage details",
+    "summary": "The floating health topics around the homepage hero are lighter again, keeping the main message in focus.",
+    "details": "People, hover feedback, and keyboard focus remain visually distinct.",
+    "relevanceTags": ["homepage", "design"],
+    "sourcePullRequests": [1774]
+  }
+}

@@ -6,6 +6,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
   writeFile,
@@ -26,7 +27,9 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphMemberWorkspacePermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
@@ -52,6 +55,9 @@ import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
   countAssistantCliSurfaceHotPathProofs,
   parseHostedRunnerSmokeInput,
@@ -64,6 +70,7 @@ const FINNISH_DRY_SAUNA_KEY =
 const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
 const DEVICE_SYNC_CONFIG_RUNTIME_MODULE: string = "@murphai/device-syncd/config";
 const JUNCTION_SDK_RUNTIME_PATH = "/app/node_modules/@junction-api/sdk";
+const JUNCTION_SDK_VITALS_RUNTIME_MODULE: string = "@junction-api/sdk/vitals";
 const CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS = 45_000;
 const CODEX_SHELL_ENV_PROBE_TIMEOUT_MS = 90_000;
 const PDF_SMOKE_EXPECTED_TEXT = "Murph hosted PDF smoke fixture";
@@ -78,6 +85,10 @@ const CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID =
   "vault_01K11111111111111111111111";
 const CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG =
   "hosted-smoke-pull-up-baseline-reminder";
+const CODEX_MEMBER_WORKSPACE_SMOKE_SEED_SLUG =
+  "hosted-smoke-member-workspace-seed";
+const CODEX_MEMBER_WORKSPACE_SMOKE_SUPPORT_SERIES_ID =
+  "experiment:hosted-smoke-member-workspace";
 
 async function main(): Promise<void> {
   const input = parseHostedRunnerSmokeInput(parseJsonValue(await readStandardInput()));
@@ -217,6 +228,22 @@ async function runSmokeChecks(input: {
       hostedCodexConfig.groupReadSecretEnvironmentDenied,
     codexGroupReadSiblingRootReadDenied:
       hostedCodexConfig.groupReadSiblingRootReadDenied,
+    codexMemberWorkspaceAutomationMutationDeniedCount:
+      hostedCodexConfig.memberWorkspaceAutomationMutationDeniedCount,
+    codexMemberWorkspaceAutomationReadProofCount:
+      hostedCodexConfig.memberWorkspaceAutomationReadProofCount,
+    codexMemberWorkspaceAutomationTreeUnchanged:
+      hostedCodexConfig.memberWorkspaceAutomationTreeUnchanged,
+    codexMemberWorkspaceLocalMutationProofCount:
+      hostedCodexConfig.memberWorkspaceLocalMutationProofCount,
+    codexMemberWorkspacePermissionProfileAttested:
+      hostedCodexConfig.memberWorkspacePermissionProfileAttested,
+    codexMemberWorkspacePreloadBypassDenied:
+      hostedCodexConfig.memberWorkspacePreloadBypassDenied,
+    codexMemberWorkspaceTempWriteAllowed:
+      hostedCodexConfig.memberWorkspaceTempWriteAllowed,
+    codexMemberWorkspaceVaultWriteAllowed:
+      hostedCodexConfig.memberWorkspaceVaultWriteAllowed,
     codexHostedCliSurfaceContractBytes: assistantCliSurface.contractBytes,
     codexHostedCliSurfaceHotPathProofCount: assistantCliSurface.hotPathProofCount,
     codexHostedConfigShellEnvironmentPolicyAllowlisted:
@@ -537,18 +564,15 @@ async function runDeviceSyncRuntimeSmoke(): Promise<void> {
     );
   }
 
-  try {
-    await access(JUNCTION_SDK_RUNTIME_PATH);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw error;
+  await access(JUNCTION_SDK_RUNTIME_PATH);
+  const junctionVitals = await import(JUNCTION_SDK_VITALS_RUNTIME_MODULE) as {
+    VitalsClient?: unknown;
+  };
+  if (typeof junctionVitals.VitalsClient !== "function") {
+    throw new Error(
+      "Hosted runner smoke could not load the external Junction SDK vitals runtime.",
+    );
   }
-
-  throw new Error(
-    "Hosted runner smoke found the Junction SDK runtime after production pruning.",
-  );
 }
 
 async function runCodexPreflight(): Promise<{
@@ -633,6 +657,14 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   groupReadRuntimeReadDenied: boolean;
   groupReadSecretEnvironmentDenied: boolean;
   groupReadSiblingRootReadDenied: boolean;
+  memberWorkspaceAutomationMutationDeniedCount: number;
+  memberWorkspaceAutomationReadProofCount: number;
+  memberWorkspaceAutomationTreeUnchanged: boolean;
+  memberWorkspaceLocalMutationProofCount: number;
+  memberWorkspacePermissionProfileAttested: boolean;
+  memberWorkspacePreloadBypassDenied: boolean;
+  memberWorkspaceTempWriteAllowed: boolean;
+  memberWorkspaceVaultWriteAllowed: boolean;
   murphPathBytes: number;
   pythonVersion: string;
   schemaVaultOptionHidden: boolean;
@@ -709,6 +741,22 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
     groupReadSecretEnvironmentDenied:
       shellProbe.groupReadSecretEnvironmentDenied,
     groupReadSiblingRootReadDenied: shellProbe.groupReadSiblingRootReadDenied,
+    memberWorkspaceAutomationMutationDeniedCount:
+      shellProbe.memberWorkspaceAutomationMutationDeniedCount,
+    memberWorkspaceAutomationReadProofCount:
+      shellProbe.memberWorkspaceAutomationReadProofCount,
+    memberWorkspaceAutomationTreeUnchanged:
+      shellProbe.memberWorkspaceAutomationTreeUnchanged,
+    memberWorkspaceLocalMutationProofCount:
+      shellProbe.memberWorkspaceLocalMutationProofCount,
+    memberWorkspacePermissionProfileAttested:
+      shellProbe.memberWorkspacePermissionProfileAttested,
+    memberWorkspacePreloadBypassDenied:
+      shellProbe.memberWorkspacePreloadBypassDenied,
+    memberWorkspaceTempWriteAllowed:
+      shellProbe.memberWorkspaceTempWriteAllowed,
+    memberWorkspaceVaultWriteAllowed:
+      shellProbe.memberWorkspaceVaultWriteAllowed,
     murphPathBytes: shellProbe.murphPathBytes,
     pythonVersion: shellProbe.pythonVersion,
     schemaVaultOptionHidden: shellProbe.schemaVaultOptionHidden,
@@ -738,6 +786,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "",
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     "[skills]",
     "include_instructions = false",
     "",
@@ -778,6 +827,14 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   groupReadRuntimeReadDenied: boolean;
   groupReadSecretEnvironmentDenied: boolean;
   groupReadSiblingRootReadDenied: boolean;
+  memberWorkspaceAutomationMutationDeniedCount: number;
+  memberWorkspaceAutomationReadProofCount: number;
+  memberWorkspaceAutomationTreeUnchanged: boolean;
+  memberWorkspaceLocalMutationProofCount: number;
+  memberWorkspacePermissionProfileAttested: boolean;
+  memberWorkspacePreloadBypassDenied: boolean;
+  memberWorkspaceTempWriteAllowed: boolean;
+  memberWorkspaceVaultWriteAllowed: boolean;
   murphPathBytes: number;
   pythonVersion: string;
   schemaVaultOptionHidden: boolean;
@@ -1007,9 +1064,16 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       vaultRoot: input.vaultRoot,
       workspaceRoot: input.workspaceRoot,
     });
+    const memberWorkspaceProof = await runCodexMemberWorkspacePermissionProbe({
+      execCommand,
+      sendRequest,
+      vaultRoot: input.vaultRoot,
+      workspaceRoot: input.workspaceRoot,
+    });
 
     return {
       ...groupReadProof,
+      ...memberWorkspaceProof,
       murphPathBytes: environmentProbe.murphPathBytes,
       pythonVersion,
       schemaVaultOptionHidden: vaultCliProof.schemaVaultOptionHidden,
@@ -1026,6 +1090,436 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     child.kill("SIGKILL");
     rejectPendingRequests(new Error("Codex app-server shell env probe was stopped."));
   }
+}
+
+async function runCodexMemberWorkspacePermissionProbe(input: {
+  execCommand: (
+    label: string,
+    command: readonly string[],
+    options?: CodexCommandExecOptions,
+  ) => Promise<CodexCommandExecResult>;
+  sendRequest: (
+    label: string,
+    method: string,
+    params: unknown,
+    timeoutMs: number,
+  ) => Promise<Record<string, unknown>>;
+  vaultRoot: string;
+  workspaceRoot: string;
+}): Promise<CodexMemberWorkspacePermissionProof> {
+  const vaultCliCommand = (await resolveCommandPath("vault-cli")).trim();
+  const automationRoot = path.join(input.vaultRoot, "bank", "automations");
+  const preloadPath = path.join(
+    tmpdir(),
+    `murph-member-workspace-preload-${process.pid}.cjs`,
+  );
+  const preloadMarkerPath = path.join(
+    tmpdir(),
+    `murph-member-workspace-preload-${process.pid}.marker`,
+  );
+  const tempWritePath = path.join(
+    tmpdir(),
+    `murph-member-workspace-temp-${process.pid}.txt`,
+  );
+  const vaultWritePath = path.join(
+    input.vaultRoot,
+    "raw",
+    "smoke",
+    "member-workspace-write.txt",
+  );
+  const importPath = path.join(
+    tmpdir(),
+    `murph-member-workspace-import-${process.pid}.json`,
+  );
+  const deniedSaveSlug = "hosted-smoke-member-workspace-denied-save";
+  const importedSlug = "hosted-smoke-member-workspace-import";
+  const saveArgs = buildMemberWorkspaceAutomationSaveArgs({
+    slug: deniedSaveSlug,
+    supportSeriesId: null,
+    title: "Hosted smoke member workspace save",
+  });
+  const seedSaveArgs = buildMemberWorkspaceAutomationSaveArgs({
+    slug: CODEX_MEMBER_WORKSPACE_SMOKE_SEED_SLUG,
+    supportSeriesId: CODEX_MEMBER_WORKSPACE_SMOKE_SUPPORT_SERIES_ID,
+    title: "Hosted smoke member workspace seed",
+  });
+  const editArgs = [
+    "automation",
+    "edit",
+    CODEX_MEMBER_WORKSPACE_SMOKE_SEED_SLUG,
+    "--summary",
+    "Member workspace edit proof.",
+    "--format",
+    "json",
+  ] as const;
+  const setStatusArgs = [
+    "automation",
+    "set-status",
+    CODEX_MEMBER_WORKSPACE_SMOKE_SEED_SLUG,
+    "--status",
+    "archived",
+    "--format",
+    "json",
+  ] as const;
+  const reconcileArgs = [
+    "automation",
+    "reconcile-support-series",
+    CODEX_MEMBER_WORKSPACE_SMOKE_SUPPORT_SERIES_ID,
+    "--format",
+    "json",
+  ] as const;
+  const importedPayload = createMemberWorkspaceAutomationImportPayload({
+    slug: importedSlug,
+    title: "Hosted smoke member workspace import",
+  });
+  const importArgs = [
+    "automation",
+    "import-json",
+    "--input",
+    `@${importPath}`,
+    "--format",
+    "json",
+  ] as const;
+
+  await runTextCommand(vaultCliCommand, [...seedSaveArgs]);
+  const automationTreeBefore = await hashDirectoryTree(automationRoot);
+
+  const threadStart = await input.sendRequest(
+    "member-workspace-thread-start",
+    "thread/start",
+    {
+      approvalPolicy: "never",
+      config: {
+        include_environment_context: false,
+        include_permissions_instructions: false,
+        "features.request_permissions_tool": false,
+      },
+      cwd: input.vaultRoot,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [input.vaultRoot],
+    },
+    CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
+  );
+  assertCodexMemberWorkspaceThreadAttestation(threadStart.result, {
+    vaultRoot: input.vaultRoot,
+  });
+
+  const commandResult = await input.execCommand(
+    "member-workspace-permission-probe",
+    [
+      "node",
+      "-e",
+      buildCodexMemberWorkspacePermissionProbeScript(),
+      JSON.stringify({
+        importPath,
+        importedPayload,
+        mutationArgs: [saveArgs, editArgs, setStatusArgs, reconcileArgs, importArgs],
+        preloadMarkerPath,
+        preloadPath,
+        readArgs: [
+          [
+            "automation",
+            "list",
+            "--text",
+            "Hosted smoke member workspace seed",
+            "--limit",
+            "10",
+            "--format",
+            "json",
+          ],
+          [
+            "automation",
+            "show",
+            CODEX_MEMBER_WORKSPACE_SMOKE_SEED_SLUG,
+            "--format",
+            "json",
+          ],
+        ],
+        seedSlug: CODEX_MEMBER_WORKSPACE_SMOKE_SEED_SLUG,
+        tempWritePath,
+        vaultCliCommand,
+        vaultRoot: input.vaultRoot,
+        vaultWritePath,
+      }),
+    ],
+    {
+      cwd: input.vaultRoot,
+      permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+    },
+  );
+  const proof = parseCodexMemberWorkspacePermissionProof(commandResult.stdout);
+  const automationTreeAfter = await hashDirectoryTree(automationRoot);
+  if (automationTreeAfter !== automationTreeBefore) {
+    throw new Error(
+      "Hosted runner smoke member-workspace profile changed bank/automations.",
+    );
+  }
+
+  let localMutationProofCount = 0;
+  for (const [label, args] of [
+    ["member-workspace-local-save", saveArgs],
+    ["member-workspace-local-edit", editArgs],
+    ["member-workspace-local-set-status", setStatusArgs],
+    ["member-workspace-local-reconcile", reconcileArgs],
+    ["member-workspace-local-import", importArgs],
+  ] as const) {
+    const output = await runTextCommand(vaultCliCommand, [...args]);
+    parseJsonFromCommandStdout(output, label);
+    localMutationProofCount += 1;
+  }
+
+  return {
+    ...proof,
+    memberWorkspaceAutomationTreeUnchanged: true,
+    memberWorkspaceLocalMutationProofCount: assertMinimumProofCount(
+      localMutationProofCount,
+      HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
+      "member-workspace local mutation",
+    ),
+    memberWorkspacePermissionProfileAttested: true,
+  };
+}
+
+function buildMemberWorkspaceAutomationSaveArgs(input: {
+  slug: string;
+  supportSeriesId: string | null;
+  title: string;
+}): readonly string[] {
+  return [
+    "automation",
+    "save",
+    input.title,
+    "--slug",
+    input.slug,
+    "--instructions",
+    "Run the hosted member-workspace permission smoke proof.",
+    "--schedule-kind",
+    "dailyLocal",
+    "--schedule-local-time",
+    "08:30",
+    "--channel",
+    "telegram",
+    "--delivery-target",
+    "agentmail:hosted-member-workspace-smoke",
+    "--identity-id",
+    "identity_hosted_member_workspace_smoke",
+    "--participant-id",
+    "participant_hosted_member_workspace_smoke",
+    "--thread-id",
+    "thread_hosted_member_workspace_smoke",
+    ...(input.supportSeriesId === null
+      ? []
+      : ["--support-series-id", input.supportSeriesId]),
+    "--format",
+    "json",
+  ];
+}
+
+function createMemberWorkspaceAutomationImportPayload(input: {
+  slug: string;
+  title: string;
+}): Record<string, unknown> {
+  return {
+    continuityPolicy: "preserve",
+    instructions: "Run the hosted member-workspace import permission proof.",
+    route: {
+      channel: "telegram",
+      deliveryTarget: "agentmail:hosted-member-workspace-import-smoke",
+      identityId: "identity_hosted_member_workspace_import_smoke",
+      participantId: "participant_hosted_member_workspace_import_smoke",
+      threadId: "thread_hosted_member_workspace_import_smoke",
+    },
+    schedule: {
+      kind: "dailyLocal",
+      localTime: "09:15",
+    },
+    slug: input.slug,
+    status: "active",
+    tags: [],
+    title: input.title,
+  };
+}
+
+function assertCodexMemberWorkspaceThreadAttestation(
+  value: unknown,
+  input: {
+    vaultRoot: string;
+  },
+): void {
+  const result = readObject(value, "Codex member-workspace thread/start result");
+  const activePermissionProfile = readObject(
+    result.activePermissionProfile,
+    "Codex member-workspace thread/start result.activePermissionProfile",
+  );
+  const runtimeWorkspaceRoots = readArray(
+    result.runtimeWorkspaceRoots,
+    "Codex member-workspace thread/start result.runtimeWorkspaceRoots",
+  );
+  const rootsMatch = runtimeWorkspaceRoots.length === 1
+    && typeof runtimeWorkspaceRoots[0] === "string"
+    && path.resolve(runtimeWorkspaceRoots[0]) === path.resolve(input.vaultRoot);
+
+  if (
+    activePermissionProfile.id !== MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
+    || result.approvalPolicy !== "never"
+    || typeof result.cwd !== "string"
+    || path.resolve(result.cwd) !== path.resolve(input.vaultRoot)
+    || !rootsMatch
+  ) {
+    throw new Error(
+      "Codex app-server did not attest the requested member-workspace execution context.",
+    );
+  }
+}
+
+function buildCodexMemberWorkspacePermissionProbeScript(): string {
+  return `
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const input = JSON.parse(process.argv[1]);
+fs.rmSync(input.preloadMarkerPath, { force: true });
+fs.writeFileSync(input.tempWritePath, "member workspace temp write\\n", { mode: 0o600 });
+fs.mkdirSync(path.dirname(input.vaultWritePath), { recursive: true });
+fs.writeFileSync(input.vaultWritePath, "member workspace vault write\\n", { mode: 0o600 });
+fs.writeFileSync(input.importPath, JSON.stringify(input.importedPayload) + "\\n", { mode: 0o600 });
+fs.writeFileSync(input.preloadPath, [
+  'const fs = require("node:fs");',
+  'const { syncBuiltinESMExports } = require("node:module");',
+  'const originalExistsSync = fs.existsSync;',
+  'fs.existsSync = (candidate) => String(candidate) === "/app/.murph-hosted-runner-image" ? false : originalExistsSync(candidate);',
+  'syncBuiltinESMExports();',
+  'fs.appendFileSync(' + JSON.stringify(input.preloadMarkerPath) + ', "1");',
+].join("\\n") + "\\n", { mode: 0o600 });
+const run = (args) => spawnSync(
+  input.vaultCliCommand,
+  args,
+  {
+    cwd: input.vaultRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, "--require=" + input.preloadPath]
+        .filter(Boolean)
+        .join(" "),
+      VAULT: input.vaultRoot,
+    },
+  },
+);
+const readResults = input.readArgs.map((args) => run(args));
+const mutationResults = input.mutationArgs.map((args) => run(args));
+const readProofCount = readResults.filter(
+  (result) => result.status === 0 && String(result.stdout).includes(input.seedSlug),
+).length;
+const mutationDeniedCount = mutationResults.filter(
+  (result) => result.status !== 0,
+).length;
+const preloadCount = fs.readFileSync(input.preloadMarkerPath, "utf8").length;
+process.stdout.write(JSON.stringify({
+  memberWorkspaceAutomationMutationDeniedCount: mutationDeniedCount,
+  memberWorkspaceAutomationReadDiagnostics: readResults.map((result) => ({
+    status: result.status,
+    signal: result.signal,
+    stdout: String(result.stdout).slice(0, 512),
+    stderr: String(result.stderr).slice(0, 512),
+  })),
+  memberWorkspaceAutomationReadProofCount: readProofCount,
+  memberWorkspacePreloadBypassDenied:
+    mutationDeniedCount === input.mutationArgs.length
+    && preloadCount === input.readArgs.length + input.mutationArgs.length,
+  memberWorkspaceTempWriteAllowed:
+    fs.readFileSync(input.tempWritePath, "utf8") === "member workspace temp write\\n",
+  memberWorkspaceVaultWriteAllowed:
+    fs.readFileSync(input.vaultWritePath, "utf8") === "member workspace vault write\\n",
+}));
+`;
+}
+
+function parseCodexMemberWorkspacePermissionProof(
+  stdout: string,
+): Omit<
+  CodexMemberWorkspacePermissionProof,
+  "memberWorkspaceAutomationTreeUnchanged"
+  | "memberWorkspaceLocalMutationProofCount"
+  | "memberWorkspacePermissionProfileAttested"
+> {
+  const record = readObject(
+    parseJsonFromCommandStdout(stdout, "member-workspace-permission-probe"),
+    "Codex member-workspace permission proof",
+  );
+  const mutationDeniedCount = readNonNegativeNumber(
+    record.memberWorkspaceAutomationMutationDeniedCount,
+    "Codex member-workspace permission proof.memberWorkspaceAutomationMutationDeniedCount",
+  );
+  const readProofCount = readNonNegativeNumber(
+    record.memberWorkspaceAutomationReadProofCount,
+    "Codex member-workspace permission proof.memberWorkspaceAutomationReadProofCount",
+  );
+  if (
+    mutationDeniedCount <
+      HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT
+  ) {
+    throw new Error(
+      "Codex member-workspace permission proof did not deny every automation mutation route.",
+    );
+  }
+  if (
+    readProofCount <
+      HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT
+  ) {
+    const diagnostics = JSON.stringify(
+      record.memberWorkspaceAutomationReadDiagnostics ?? null,
+    ).slice(0, 2_048);
+    throw new Error(
+      `Codex member-workspace permission proof did not preserve automation reads. count=${readProofCount} diagnostics=${diagnostics}`,
+    );
+  }
+  for (const field of [
+    "memberWorkspacePreloadBypassDenied",
+    "memberWorkspaceTempWriteAllowed",
+    "memberWorkspaceVaultWriteAllowed",
+  ] as const) {
+    if (record[field] !== true) {
+      throw new Error(`Codex member-workspace permission proof.${field} must be true.`);
+    }
+  }
+
+  return {
+    memberWorkspaceAutomationMutationDeniedCount: mutationDeniedCount,
+    memberWorkspaceAutomationReadProofCount: readProofCount,
+    memberWorkspacePreloadBypassDenied: true,
+    memberWorkspaceTempWriteAllowed: true,
+    memberWorkspaceVaultWriteAllowed: true,
+  };
+}
+
+async function hashDirectoryTree(root: string): Promise<string> {
+  const entries: string[] = [];
+  const visit = async (directory: string, relativeDirectory: string): Promise<void> => {
+    const children = await readdir(directory, { withFileTypes: true });
+    children.sort((left, right) => left.name.localeCompare(right.name));
+    for (const child of children) {
+      const relativePath = path.posix.join(relativeDirectory, child.name);
+      const absolutePath = path.join(directory, child.name);
+      if (child.isDirectory()) {
+        entries.push(`directory:${relativePath}`);
+        await visit(absolutePath, relativePath);
+        continue;
+      }
+      if (!child.isFile()) {
+        throw new Error(
+          `Hosted runner smoke automation tree contains unsupported entry ${relativePath}.`,
+        );
+      }
+      const contents = await readFile(absolutePath);
+      entries.push(
+        `file:${relativePath}:${createHash("sha256").update(contents).digest("hex")}`,
+      );
+    }
+  };
+
+  await visit(root, "");
+  return sha256Hex(entries.join("\n"));
 }
 
 async function runCodexGroupReadPermissionProbe(input: {
@@ -1963,6 +2457,17 @@ interface CodexCommandExecResult {
 interface CodexCommandExecOptions {
   cwd?: string;
   permissionProfile?: string;
+}
+
+interface CodexMemberWorkspacePermissionProof {
+  memberWorkspaceAutomationMutationDeniedCount: number;
+  memberWorkspaceAutomationReadProofCount: number;
+  memberWorkspaceAutomationTreeUnchanged: boolean;
+  memberWorkspaceLocalMutationProofCount: number;
+  memberWorkspacePermissionProfileAttested: boolean;
+  memberWorkspacePreloadBypassDenied: boolean;
+  memberWorkspaceTempWriteAllowed: boolean;
+  memberWorkspaceVaultWriteAllowed: boolean;
 }
 
 interface CodexGroupReadPermissionProof {

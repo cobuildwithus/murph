@@ -1285,14 +1285,9 @@ test('sendLinqMessage keeps raw Linq error text out of user-facing errors', asyn
             LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
             LINQ_API_TOKEN: 'linq-token',
           },
-          fetchImplementation: async () => ({
-            ok: false,
+          fetchImplementation: async () => new Response('Plain Linq failure', {
+            headers: { 'content-type': 'text/plain' },
             status: 400,
-            json: async () => {
-              throw new Error('invalid json')
-            },
-            text: async () => 'Plain Linq failure',
-            arrayBuffer: async () => new ArrayBuffer(0),
           }),
         },
       ),
@@ -1311,10 +1306,16 @@ test('sendLinqMessage keeps raw Linq error text out of user-facing errors', asyn
         operation: 'send_message',
         path: '/chats/[chat]/messages',
         provider: 'linq',
+        requestAttachmentMediaPartCount: 0,
         requestBodyShape: 'object:message|message:parts',
+        requestMediaPartCount: 0,
         requestMessageLength: 'Queued the Linq reply.'.length,
         requestMessagePartCount: 1,
+        requestPublicUrlMediaPartCount: 0,
+        requestTextPartCount: 1,
         responseBodyKind: 'text',
+        responseBodySha256:
+          'da7d00e0c46925b2155166ece27e101541b4a22b97ac223cd4749b880e59a0da',
         responseBodyTextLength: 'Plain Linq failure'.length,
         retryable: false,
         status: 400,

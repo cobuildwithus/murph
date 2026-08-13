@@ -1,6 +1,7 @@
 export {
   configuredDeviceSyncProviderKeys,
   hasConfiguredDeviceSyncProviderConfigs,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
   listConfiguredDeviceSyncProviderNames,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredJunctionDeviceSyncProviderConfig,

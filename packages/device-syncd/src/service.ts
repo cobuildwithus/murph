@@ -6,6 +6,7 @@ import {
 } from "./provider-job-definitions.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -76,6 +77,21 @@ import type {
 
 export { SqliteDeviceSyncStore } from "./store.ts";
 
+export function resolveDeviceSyncStoreNextJobWakeAt(input: {
+  stateDatabasePath?: string | null;
+  vaultRoot: string;
+}): string | null {
+  const store = new SqliteDeviceSyncStore(
+    input.stateDatabasePath ?? defaultStateDatabasePath(input.vaultRoot),
+  );
+
+  try {
+    return store.readNextJobWakeAt();
+  } finally {
+    store.close();
+  }
+}
+
 export function resolveDeviceSyncStoreNextWakeAt(input: {
   stateDatabasePath?: string | null;
   vaultRoot: string;
@@ -114,7 +130,6 @@ const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
   "inclusive",
   "exact",
 ] as const);
-
 class DeviceSyncJobExecutionCancelledError extends Error {
   constructor(readonly accountId: string, readonly jobId: string) {
     super(`Device sync job ${jobId} is no longer active for account ${accountId}.`);
@@ -187,12 +202,13 @@ export interface DeviceSyncService {
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
   queueManualReconcile(accountId: string): QueueManualReconcileResult;
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
+  getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
-  runSchedulerOnce(): Promise<void>;
-  runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
+  runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]>;
+  runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
-  drainWorker(limit?: number): Promise<number>;
+  drainWorker(limit?: number, accountId?: string): Promise<number>;
 }
 
 const defaultDeviceSyncClock: DeviceSyncClock = Object.freeze({
@@ -702,14 +718,20 @@ class DeviceSyncServiceController {
     return nextWakeAt;
   }
 
-  async runSchedulerOnce(): Promise<void> {
-    await this.schedulerMutex.runIfIdle(async () => {
+  getNextJobWakeAt(): string | null {
+    return this.store.readNextJobWakeAt();
+  }
+
+  async runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]> {
+    return await this.schedulerMutex.runIfIdle(async () => {
       const now = this.nowIso();
+      const queuedJobs: DeviceSyncJobRecord[] = [];
 
       try {
         for (const account of this.store.listAccounts()) {
           if (
-            account.status !== "active"
+            (accountId !== undefined && account.id !== accountId)
+            || account.status !== "active"
             || isDeviceSyncConnectionSetupPending(account)
             || !account.nextReconcileAt
             || Date.parse(account.nextReconcileAt) > Date.parse(now)
@@ -726,7 +748,7 @@ class DeviceSyncServiceController {
           }
 
           const schedule = jobExecutor.createScheduledJobs(account, now);
-          this.enqueueJobs(account, schedule.jobs);
+          queuedJobs.push(...this.enqueueJobs(account, schedule.jobs));
           this.store.patchAccount(account.id, {
             nextReconcileAt: schedule.nextReconcileAt ?? null,
           });
@@ -737,17 +759,20 @@ class DeviceSyncServiceController {
           error: summarizeError(error),
         });
       }
-    });
+      return queuedJobs;
+    }) ?? [];
   }
 
-  async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
+  async runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null> {
     const result = await this.runWorkerPassOnce({
+      accountId,
       maxJobRows: Number.POSITIVE_INFINITY,
     });
     return result?.job ?? null;
   }
 
   private async runWorkerPassOnce(input: {
+    accountId?: string;
     maxJobRows: number;
   }): Promise<{
     job: DeviceSyncJobRecord;
@@ -766,7 +791,12 @@ class DeviceSyncServiceController {
     }
 
     const now = this.nowIso();
-    const job = this.store.claimDueJob(this.workerId, now, this.workerLeaseMs);
+    const job = this.store.claimDueJob(
+      this.workerId,
+      now,
+      this.workerLeaseMs,
+      input.accountId,
+    );
     const currentNow = (): string => this.nowIso();
 
     if (!job) {
@@ -1127,9 +1157,21 @@ class DeviceSyncServiceController {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
         nextReconcileAt?: string | null;
+        preserveLastSyncCompletedAt?: boolean;
       } = {
         localConnectionRevision,
       };
+
+      if (
+        provider.provider === "junction"
+        && shouldPreserveJunctionLastSyncCompletedAt({
+          activeJobs,
+          scheduledJobs: result.scheduledJobs ?? [],
+          syncSucceededAt: now,
+        })
+      ) {
+        successOptions.preserveLastSyncCompletedAt = true;
+      }
 
       if (Object.prototype.hasOwnProperty.call(result, "metadataPatch")) {
         successOptions.metadataPatch = result.metadataPatch;
@@ -1183,7 +1225,39 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
-      const failure = normalizeExecutionError(error);
+      const timeseriesProgress = error instanceof JunctionTimeseriesProgressError
+        ? error
+        : null;
+      const failure = normalizeExecutionError(timeseriesProgress?.failure ?? error);
+      const replacementPayload = timeseriesProgress
+        ? normalizeConfiguredDeviceSyncJobRecord(
+            provider.provider,
+            {
+              ...job,
+              payload: {
+                ...job.payload,
+                ...(job.kind === "backfill"
+                  ? {
+                      timeseriesCursor: timeseriesProgress.windowStart,
+                      timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                      timeseriesResourceCursor:
+                        timeseriesProgress.timeseriesResourceCursor ?? undefined,
+                    }
+                  : job.kind === "reconcile"
+                    ? {
+                        timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                        timeseriesResourceCursor:
+                          timeseriesProgress.timeseriesResourceCursor ?? undefined,
+                        windowStart: timeseriesProgress.windowStart,
+                      }
+                    : { windowStart: timeseriesProgress.windowStart }),
+                workoutStreamCursor:
+                  timeseriesProgress.workoutStreamCursor ?? undefined,
+              },
+            },
+            "retry progress",
+          ).payload
+        : undefined;
       const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
         && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
       const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
@@ -1214,6 +1288,7 @@ class DeviceSyncServiceController {
             retryAt,
             retainedFailureRetryable,
             retainsAcceptedCompanionHrvUntilSuccess,
+            activeJob.id === job.id ? replacementPayload : undefined,
           );
         })
         .some(Boolean);
@@ -1287,12 +1362,13 @@ class DeviceSyncServiceController {
     }
   }
 
-  async drainWorker(limit = this.workerBatchSize): Promise<number> {
+  async drainWorker(limit = this.workerBatchSize, accountId?: string): Promise<number> {
     const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
     let processedJobRows = 0;
 
     while (processedJobRows < maxJobRows) {
       const result = await this.runWorkerPassOnce({
+        accountId,
         maxJobRows: maxJobRows - processedJobRows,
       });
 
@@ -1691,10 +1767,11 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
     disconnectAccount: (accountId, expectedConnectedAt) =>
       controller.disconnectAccount(accountId, expectedConnectedAt),
+    getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
-    runSchedulerOnce: () => controller.runSchedulerOnce(),
-    runWorkerOnce: () => controller.runWorkerOnce(),
-    drainWorker: (limit) => controller.drainWorker(limit),
+    runSchedulerOnce: (accountId) => controller.runSchedulerOnce(accountId),
+    runWorkerOnce: (accountId) => controller.runWorkerOnce(accountId),
+    drainWorker: (limit, accountId) => controller.drainWorker(limit, accountId),
   } satisfies DeviceSyncService);
   return service;
 }
@@ -2145,6 +2222,44 @@ function toPlainRecord(value: unknown): Record<string, unknown> | null {
 function readCanonicalDeviceImportEventCount(value: unknown): number {
   const record = toPlainRecord(value);
   return record && Array.isArray(record.events) ? record.events.length : 0;
+}
+
+function shouldPreserveJunctionLastSyncCompletedAt(input: {
+  activeJobs: readonly DeviceSyncJobRecord[];
+  scheduledJobs: readonly DeviceSyncJobInput[];
+  syncSucceededAt: string;
+}): boolean {
+  if (input.scheduledJobs.some(isFullDeviceSyncJob)) {
+    return true;
+  }
+
+  const currentClosedDayEnd = floorUtcDayTimestampIfValid(input.syncSucceededAt);
+  if (!currentClosedDayEnd) {
+    return true;
+  }
+
+  return !input.activeJobs.some((job) =>
+    isFullDeviceSyncJob(job)
+    && normalizeIsoTimestamp(job.payload.windowEnd) === currentClosedDayEnd
+  );
+}
+
+function isFullDeviceSyncJob(job: Pick<DeviceSyncJobInput, "kind">): boolean {
+  return job.kind === "backfill" || job.kind === "reconcile";
+}
+
+function floorUtcDayTimestampIfValid(value: string): string | null {
+  const normalized = normalizeIsoTimestamp(value);
+  return normalized ? `${normalized.slice(0, 10)}T00:00:00.000Z` : null;
+}
+
+function normalizeIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
 function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): string[] {

@@ -4,6 +4,9 @@ import {
   HostedBillingStatus,
   Prisma,
 } from "@prisma/client";
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   activeHostedThreadContainerParticipantWhere,
@@ -123,6 +126,17 @@ const hostedRuntimeAiBatchParticipantSelect =
         id: true,
       },
     },
+  });
+
+const hostedBatchMemberAccessSelect =
+  Prisma.validator<Prisma.HostedMemberSelect>()({
+    ...hostedMemberAccessSelect,
+    id: true,
+  });
+
+const hostedBatchParticipantAccessSelect =
+  Prisma.validator<Prisma.HostedThreadContainerParticipantSelect>()({
+    containerMemberId: true,
   });
 
 export type HostedMemberPersonAccessState = Prisma.HostedMemberGetPayload<{
@@ -314,6 +328,86 @@ export async function readActiveHostedMemberAccess(input: {
   }
 
   return hasActiveHostedMemberAccess(member);
+}
+
+/**
+ * Set-based form of the canonical active-access read for bounded candidate
+ * lists. It keeps owner and current-participant authority aligned with
+ * `readActiveHostedMemberAccess` without issuing one query per member.
+ */
+export async function readActiveHostedMemberAccessIds(input: {
+  memberIds: readonly string[];
+  now?: Date;
+  prisma?: Pick<
+    Prisma.TransactionClient,
+    "hostedMember" | "hostedThreadContainerParticipant"
+  >;
+}): Promise<Set<string>> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return new Set();
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const members = await prisma.hostedMember.findMany({
+    select: hostedBatchMemberAccessSelect,
+    where: {
+      id: { in: memberIds },
+    },
+  });
+  const containerMemberIds = members
+    .filter((member) =>
+      member.threadContainer !== null
+      && !isHostedMemberSuspended(member.suspendedAt)
+    )
+    .map((member) => member.id);
+  const participantRows = containerMemberIds.length === 0
+    ? []
+    : await prisma.hostedThreadContainerParticipant.findMany({
+        select: hostedBatchParticipantAccessSelect,
+        take:
+          containerMemberIds.length
+          * HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+          + 1,
+        where: {
+          ...activeHostedThreadContainerParticipantWhere({ now }),
+          containerMemberId: { in: containerMemberIds },
+          participant: activeHostedMemberAccessWhere(),
+        },
+      });
+  if (
+    participantRows.length
+      > containerMemberIds.length * HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
+  ) {
+    throw new Error("Hosted member access participant read exceeded its admitted bound.");
+  }
+  const participantBackedContainerIds = new Set(
+    participantRows.map((row) => row.containerMemberId),
+  );
+
+  const activeMemberIds = new Set<string>();
+  for (const member of members) {
+    if (isHostedMemberSuspended(member.suspendedAt)) {
+      continue;
+    }
+    if (!member.threadContainer) {
+      if (hasActiveHostedMemberAccess(member)) {
+        activeMemberIds.add(member.id);
+      }
+      continue;
+    }
+
+    const ownerActive = hasActiveHostedThreadContainerAccess({
+      container: member,
+      owner: member.threadContainer.owner,
+    });
+    if (ownerActive || participantBackedContainerIds.has(member.id)) {
+      activeMemberIds.add(member.id);
+    }
+  }
+
+  return activeMemberIds;
 }
 
 /**

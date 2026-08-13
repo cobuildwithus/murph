@@ -1446,7 +1446,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-nutrition-card"
-          title="iMessage nutrition card preview"
+          title="iMessage nutrition fallback parity"
         >
           <ImessageNutritionCardStudy />
         </Section>
@@ -1455,7 +1455,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage workout and compact table fallback states"
+          title="iMessage workout and compact-table fallback parity"
         >
           <ImessageCompactTableCardStudy />
         </Section>
@@ -1464,7 +1464,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-challenge-standings-card"
-          title="iMessage challenge standings card"
+          title="iMessage challenge-standings fallback parity"
         >
           <ImessageChallengeStandingsCardStudy />
         </Section>

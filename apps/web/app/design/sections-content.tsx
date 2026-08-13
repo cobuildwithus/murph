@@ -112,7 +112,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
-          data-design-state="soft-topic-labels-mobile-narrow-phone"
+          data-design-state="light-topic-labels-mobile-narrow-phone"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -572,7 +572,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source actions and disconnect lifecycle">
+      <StudySection title="Connect source availability, actions, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />

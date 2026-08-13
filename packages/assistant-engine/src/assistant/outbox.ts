@@ -164,6 +164,7 @@ export interface AssistantOutboxDispatchMessage {
 
 export interface AssistantOutboxDispatchReaction {
   actorId?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   deliveryIdempotencyKey?: string | null
@@ -274,6 +275,7 @@ export type AssistantOutboxCreateIntentInput = {
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   groupEmailAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
+  privateCompletionContinuitySessionId?: string | null
   replyToMessageId?: string | null
   sessionId: string
   subject?: string | null
@@ -484,6 +486,12 @@ export async function createAssistantOutboxIntent(
       answeredMailboxItemIds,
       reviewedAssistantAskCompletionExpiresAt:
         input.reviewedAssistantAskCompletionExpiresAt ?? undefined,
+      ...(input.privateCompletionContinuitySessionId === undefined
+        ? {}
+        : {
+            privateCompletionContinuitySessionId:
+              input.privateCompletionContinuitySessionId,
+          }),
       lastError: null,
     })
     const persistedIntent = assistantOutboxIntentSchema.parse(
@@ -1068,6 +1076,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         session: null,
       }
     }
+    dispatchFailureOwnerIntent = durableDeliveredIntent
 
     if (delivered.session) {
       await saveAssistantSession(input.vault, delivered.session)
@@ -1092,7 +1101,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         session: null,
       }
     }
-
     return {
       intent: sentIntent,
       deliveryError: null,
@@ -1219,6 +1227,7 @@ export async function deliverAssistantOutboxMessage(input: {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
+  privateCompletionContinuitySessionId?: string | null
   subject?: string | null
   replyToMessageId?: string | null
   signal?: AbortSignal
@@ -1252,6 +1261,12 @@ export async function deliverAssistantOutboxMessage(input: {
     identityId: input.identityId,
     media: input.media,
     message: input.message,
+    ...(input.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            input.privateCompletionContinuitySessionId,
+        }),
     ...(input.nativeReplyRequested === undefined
       ? {}
       : { nativeReplyRequested: input.nativeReplyRequested }),
@@ -1373,6 +1388,7 @@ function throwIfAssistantOutboxSignalAborted(signal?: AbortSignal): void {
 
 export async function deliverAssistantOutboxReaction(input: {
   actorId?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
@@ -1398,10 +1414,15 @@ export async function deliverAssistantOutboxReaction(input: {
     kind: 'message-reaction',
     reaction: input.reaction,
   }
+  const requestedAnsweredMailboxItemIds =
+    normalizeAssistantOutboxAnsweredMailboxItemIds(
+      input.answeredMailboxItemIds ?? [],
+    )
   const targetMessageId =
     normalizeRequiredReactionTargetMessageId(input.targetMessageId)
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,
@@ -1424,6 +1445,32 @@ export async function deliverAssistantOutboxReaction(input: {
     turnTrigger: input.turnTrigger ?? null,
     vault: input.vault,
   })
+
+  const coveredAnsweredMailboxItemIds = new Set(
+    intent.answeredMailboxItemIds,
+  )
+  if (
+    requestedAnsweredMailboxItemIds.some(
+      (mailboxItemId) => !coveredAnsweredMailboxItemIds.has(mailboxItemId),
+    )
+  ) {
+    const error = Object.assign(
+      new Error(
+        'The existing outbound delivery does not cover every requested input; retry after the current dispatch settles.',
+      ),
+      {
+        code: ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED_CODE,
+        retryable: true,
+      },
+    )
+    return {
+      kind: 'failed',
+      intent,
+      delivery: null,
+      deliveryError: normalizeAssistantDeliveryError(error),
+      session: null,
+    }
+  }
 
   if (intent.status === 'sent' && intent.delivery) {
     return {
@@ -1499,6 +1546,7 @@ async function sendAssistantOutboxDispatchIntent(input: AssistantOutboxDispatchM
   if (operation?.kind === 'message-reaction') {
     return sendAssistantOutboxDispatchReaction({
       actorId: input.actorId,
+      answeredMailboxItemIds: input.answeredMailboxItemIds,
       bindingDelivery: input.bindingDelivery,
       channel: input.channel,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
@@ -2372,6 +2420,8 @@ function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
       input.intent.status !== 'pending'
       && input.intent.status !== 'retryable'
     )
+    || input.intent.delivery !== null
+    || input.intent.deliveryConfirmationPending
   ) {
     return input.intent
   }

@@ -36,6 +36,7 @@ export function markSyncSucceededInTransaction(
     localConnectionRevision?: number | null;
     metadataPatch?: Record<string, unknown>;
     nextReconcileAt?: string | null;
+    preserveLastSyncCompletedAt?: boolean;
   } = {},
 ): boolean {
   const existing = getAccountById(database, accountId);
@@ -56,6 +57,9 @@ export function markSyncSucceededInTransaction(
   const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
     ? options.nextReconcileAt ?? null
     : existing.nextReconcileAt;
+  const lastSyncCompletedAt = options.preserveLastSyncCompletedAt === true
+    ? existing.lastSyncCompletedAt
+    : now;
 
   const connectionResult = database.prepare(`
     update device_connection
@@ -88,7 +92,7 @@ export function markSyncSucceededInTransaction(
     where account_id = ?
   `).run(
     nextReconcileAt,
-    now,
+    lastSyncCompletedAt,
     existing.localConnectionRevision + 1,
     now,
     accountId,
@@ -106,6 +110,7 @@ export function markSyncSucceeded(
     localConnectionRevision?: number | null;
     metadataPatch?: Record<string, unknown>;
     nextReconcileAt?: string | null;
+    preserveLastSyncCompletedAt?: boolean;
   } = {},
 ): boolean {
   return withImmediateTransaction(database, () =>

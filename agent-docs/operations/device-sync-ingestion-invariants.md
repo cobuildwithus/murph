@@ -188,6 +188,47 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    that sparse resources such as workouts or body measurements should contain a
    row, so those resources do not become absence obligations.
 
+   Junction timeseries history follows the exhaustive static policy beside the
+   provider executor. Dense daily aggregates (`blood_oxygen`, `stress_level`,
+   `hrv`, `respiratory_rate`, and `glucose`) retain the bounded 14-day initial
+   window. Sparse daily aggregates (`afib_burden`, `vo2_max`,
+   `heart_rate_recovery_one_minute`, body and basal temperature resources,
+   `sleep_breathing_disturbance`, `caffeine`, `water`, and
+   `mindfulness_minutes`) use the summary-history window, 180 days by default.
+   Every date-mode timeseries request owns one complete provider calendar date,
+   so offset timestamps on opposite sides of UTC midnight reach the importer
+   together during both migration and normal reconcile. A provider-bearing date
+   with any row rejected by the canonical aggregate parser retries only that
+   date on the existing bounded ladder before it becomes terminal.
+   Historical-pull status is re-read at the first date and before
+   coverage. Source matching canonicalizes supported connect-route aliases on
+   both the persisted and introspection sides before applying the status table:
+   A matching pulled entry owns contradictory envelopes: `success` permits
+   terminal empty history, nonterminal state waits, and explicit failure remains
+   uncovered. Explicit `not_pulled` is no obligation only without a pulled entry.
+   Unavailable, malformed, or unmatched introspection can close only after a
+   canonical historical observation. Before coverage closes, the
+   migration recomputes the live reconcile-window boundary and appends the
+   uncovered segment; delayed continuations repeat that same derivation, so
+   stable dedupe cannot freeze a middle gap.
+   Blood pressure and notes retain their existing extended policies. An
+   explicit timeseries-window override governs both classes.
+
+   Extended work is admitted only for a persisted connected source that
+   advertises the exact resource. Each `(source provider, resource)` migration
+   keeps the existing one-day fetch continuation and per-account serialization.
+   Rollout-added resources end at the current UTC day so existing connections
+   receive one migration; blood pressure remains anchored to source first-seen
+   time. Source-scoped completion is stored in connection metadata. All extended
+   timeseries resources share one fixed-width, versioned source-by-resource
+   matrix in an existing blood-pressure or note coverage slot. Its append-only
+   route slots cover every configured Junction source within the 256-character
+   scalar bound, and deployed blood-pressure and note values remain legacy read
+   inputs. An unrepresentable route fails before history egress instead of
+   advancing coverage. Blood pressure retains exact per-reading repair and notes
+   retain complete-fetch semantics. No second queue, retry store, or persisted
+   lifecycle owns this history.
+
    The importer is the sole owner of raw summary semantics. Historical coverage
    consumes the bounded `(source provider, resource)` normalization evidence
    emitted by the canonical adapter instead of maintaining a second metric

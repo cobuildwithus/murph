@@ -3,9 +3,8 @@ import {
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
-} from "@murphai/importers/device-providers/junction-resources";
+} from "@murphai/contracts";
 import {
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
@@ -171,12 +170,20 @@ const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_DEVICE_PROVIDER_DES
 const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
 const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 
+const JUNCTION_SYNC = requireDeviceProviderSyncDescriptor(
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+);
+
 const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   backfill: {
     payload: {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesPhase: stringJobField({ includeInHostedHint: true }),
+      timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
+      workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
@@ -184,6 +191,11 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      timeseriesCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesPhase: stringJobField({ includeInHostedHint: true }),
+      timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
+      workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
@@ -201,6 +213,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       eventType: stringJobField({ includeInHostedHint: true }),
       historicalBackfill: booleanJobField({ includeInHostedHint: true }),
+      historicalBackfillVersion: numberJobField({ includeInHostedHint: true }),
       historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalUnresolvedProviderRecordIdentitiesJson: stringJobField({ includeInHostedHint: true }),
@@ -212,6 +225,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       resourceCategory: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
+      workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
@@ -519,6 +533,7 @@ export function resolveConfiguredDeviceSyncProviderDescriptor(
 export interface NormalizedJunctionDeviceSyncRuntimeConfig {
   clientUserIdSecret: string;
   providerFilter: string[];
+  reconcileIntervalMs: number;
   summaryResources: string[];
   timeseriesResources: string[];
 }
@@ -531,10 +546,9 @@ export function buildConfiguredDeviceSyncProviderRuntimeDescriptor<
 ): DeviceProviderDescriptor {
   switch (provider) {
     case "junction":
-      normalizeJunctionDeviceSyncRuntimeConfig(
+      return buildJunctionDeviceSyncRuntimeDescriptor(
         config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
       );
-      return getConfiguredDeviceSyncProviderDescriptor("junction");
     case "oura":
       return buildOuraDeviceSyncRuntimeDescriptor(
         config as ConfiguredDeviceSyncProviderConfigByKey["oura"],
@@ -562,12 +576,15 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   );
   const timeseriesResources = normalizeOptionalJunctionResourceList(
     config.timeseriesResources,
-    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
-    JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
     "timeseries",
   );
   const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
+  const reconcileIntervalMs = Math.max(
+    60_000,
+    config.reconcileIntervalMs ?? JUNCTION_SYNC.windows.reconcileIntervalMs,
+  );
 
   if (providerFilter.length === 0) {
     throw new TypeError("Junction provider filter must include at least one hosted Link provider.");
@@ -576,8 +593,26 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   return {
     clientUserIdSecret,
     providerFilter,
+    reconcileIntervalMs,
     summaryResources,
     timeseriesResources,
+  };
+}
+
+export function buildJunctionDeviceSyncRuntimeDescriptor(
+  config: JunctionDeviceSyncProviderConfig,
+): DeviceProviderDescriptor {
+  const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
+
+  return {
+    ...getConfiguredDeviceSyncProviderDescriptor("junction"),
+    sync: {
+      ...JUNCTION_SYNC,
+      windows: {
+        ...JUNCTION_SYNC.windows,
+        reconcileIntervalMs: runtimeConfig.reconcileIntervalMs,
+      },
+    },
   };
 }
 
@@ -753,25 +788,25 @@ function normalizeOptionalJunctionResourceList(
   value: string[] | undefined,
   defaults: readonly string[],
   allowedResources: readonly string[],
-  knownResources: readonly string[],
   label: string,
 ): string[] {
-  const normalized = (value === undefined ? defaults : value)
-    .map(normalizeJunctionResourceName)
-    .filter((entry): entry is string => entry !== null);
   const allowedResourceSet = new Set<string>(allowedResources);
-  const knownResourceSet = new Set<string>([...allowedResources, ...knownResources]);
-  const unsupportedResources = normalized.filter((entry) => !knownResourceSet.has(entry));
+  const enabledResources: string[] = [];
+  const unsupportedResources: string[] = [];
+
+  for (const requestedResource of value === undefined ? defaults : value) {
+    const normalized = normalizeJunctionResourceName(requestedResource);
+    if (!normalized || !allowedResourceSet.has(normalized)) {
+      unsupportedResources.push(normalized ?? requestedResource);
+      continue;
+    }
+    enabledResources.push(normalized);
+  }
 
   if (unsupportedResources.length > 0) {
     throw new TypeError(
       `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
     );
-  }
-
-  const enabledResources = normalized.filter((entry) => allowedResourceSet.has(entry));
-  if (value !== undefined && value.length > 0 && enabledResources.length === 0) {
-    return [...new Set(defaults)];
   }
 
   return [...new Set(enabledResources)];

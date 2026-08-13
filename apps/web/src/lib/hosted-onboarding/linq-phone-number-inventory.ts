@@ -1,6 +1,11 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import type { PhoneNumberListResponse } from "@linqapp/sdk/resources/phone-numbers";
 
-import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import {
+  LinqApiTimeoutError,
+  readLinqApiErrorStatus,
+  runLinqApiRequest,
+} from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import {
   prepareHostedLinqLinePhones,
@@ -361,37 +366,38 @@ export async function listHostedLinqPhoneNumberInventory(input: {
 } = {}): Promise<HostedLinqProviderInventoryLine[]> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
 
-  let response: Response;
+  let payload: PhoneNumberListResponse;
   try {
-    response = await fetchLinqApi({
+    payload = await runLinqApiRequest({
       apiBaseUrl,
       apiToken,
-      method: "GET",
-      path: "phone_numbers",
+      request: (client) => client.phoneNumbers.list({ signal: input.signal }),
       signal: input.signal,
+      timeoutMessage: "Linq phone-number inventory sync timed out.",
     });
   } catch (error) {
     if (error instanceof LinqApiTimeoutError) {
       throw hostedOnboardingError({
+        cause: error,
         code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
         httpStatus: 502,
         message: "Linq phone-number inventory sync timed out.",
         retryable: true,
       });
     }
+    const status = readLinqApiErrorStatus(error);
+    if (status !== null) {
+      throw hostedOnboardingError({
+        cause: error,
+        code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
+        httpStatus: 502,
+        message: `Linq phone-number inventory sync failed with HTTP ${status}.`,
+        retryable: status === 429 || status >= 500,
+      });
+    }
     throw error;
   }
 
-  if (!response.ok) {
-    throw hostedOnboardingError({
-      code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
-      httpStatus: 502,
-      message: `Linq phone-number inventory sync failed with HTTP ${response.status}.`,
-      retryable: response.status === 429 || response.status >= 500,
-    });
-  }
-
-  const payload = await response.json();
   return requireHostedLinqPhoneNumberInventorySnapshot(payload, {
     maxLines: input.maxLines,
   });
