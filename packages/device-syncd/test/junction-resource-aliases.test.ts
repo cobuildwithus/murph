@@ -157,6 +157,18 @@ test("Junction webhooks canonicalize resource aliases before category inference"
     ["daily.data.peak_expiratory_flow_rate.created", "peak_expiratory_flow_rate", "timeseries"],
     ["daily.data.sleep_apnea_alert.created", "sleep_apnea_alert", "timeseries"],
     ["daily.data.waist_circumference.created", "waist_circumference", "timeseries"],
+    ["daily.data.calories_basal.created", "calories_basal", "timeseries"],
+    ["daily.data.daylight_exposure.created", "daylight_exposure", "timeseries"],
+    ["daily.data.fall.created", "fall", "timeseries"],
+    ["daily.data.floors_climbed.created", "floors_climbed", "timeseries"],
+    ["daily.data.handwashing.created", "handwashing", "timeseries"],
+    ["daily.data.stand_duration.created", "stand_duration", "timeseries"],
+    ["daily.data.stand_hour.created", "stand_hour", "timeseries"],
+    ["daily.data.uv_exposure.created", "uv_exposure", "timeseries"],
+    ["daily.data.wheelchair_push.created", "wheelchair_push", "timeseries"],
+    ["daily.data.workout_distance.created", "workout_distance", "timeseries"],
+    ["daily.data.workout_duration.created", "workout_duration", "timeseries"],
+    ["daily.data.workout_swimming_stroke.created", "workout_swimming_stroke", "timeseries"],
   ] as const;
 
   for (const [eventType, resource, resourceCategory] of cases) {

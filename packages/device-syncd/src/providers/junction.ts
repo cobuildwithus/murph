@@ -11,15 +11,23 @@ import {
   JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
   resolveJunctionTimeseriesResourcePolicy,
+  usesJunctionTimeseriesIntervalStartOwnership,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import {
+  JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
+  JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  buildJunctionBoundedFeatureIdentity,
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
+  reduceJunctionElectrocardiogramVoltageRecords,
+  reduceJunctionWorkoutStreamPayload,
+  resolveJunctionBoundedFeatureRecords,
   resolveJunctionWeightProviderRecordIdentity,
+  selectJunctionWorkoutStreamCandidates,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -31,6 +39,10 @@ import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import type { JunctionDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
+import {
+  JunctionTimeseriesProgressError,
+  type JunctionTimeseriesProgressPhase,
+} from "../junction-timeseries-progress.ts";
 import {
   isHostedRuntimeIdShapedDiagnosticToken,
   sanitizeHostedRuntimeDiagnosticText,
@@ -161,11 +173,29 @@ export {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 };
 
-type JunctionTimeseriesBackfillPhase = "dense" | "wide";
-
 interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
+
+interface JunctionResourceTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  madeProgress: boolean;
+  timeseriesResourceCursor: string | null;
+}
+
+interface JunctionWorkoutStreamImportResult extends JunctionTimeseriesImportResult {
+  madeProgress: boolean;
+  workoutStreamCursor: string | null;
+}
+
+interface JunctionDailyTimeseriesImportResult extends JunctionResourceTimeseriesImportResult {
+  workoutStreamCursor: string | null;
+}
+
+const JUNCTION_TIMESERIES_RESOURCE_PROGRESS_VERSION = 1;
+const JUNCTION_WORKOUT_STREAM_PROGRESS_VERSION = 1;
+const JUNCTION_ALLOWED_TIMESERIES_RESOURCE_SET = new Set<string>(
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+);
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalProviderRecordIdentities: readonly string[];
@@ -329,12 +359,6 @@ const JUNCTION_NOTE_HISTORY_BACKFILL_VERSION = 2;
 // Sparse summary-history resources are cheap enough to backfill across the
 // summary window. The contracts registry owns membership; the three legacy
 // resources retain their established per-resource coverage keys and override.
-const JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES = new Set<string>([
-  "steps",
-  "distance",
-  "calories_active",
-  "heartrate",
-]);
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -1025,15 +1049,29 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
   ): Promise<ProviderJobResult> {
     const skippedOptionalResources: JunctionSkippedOptionalResource[] = [];
+    const completedWorkoutStreamIdentities =
+      readJunctionWorkoutStreamCompletedIdentities(job);
 
     if (job.kind === "resource") {
-      return executeResourceJob(context, job, skippedOptionalResources);
+      return executeResourceJob(
+        context,
+        job,
+        skippedOptionalResources,
+        completedWorkoutStreamIdentities,
+      );
     }
 
     if (job.kind === JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND) {
       return executePushSourceRecoveryJob(context, job);
     }
 
+    const timeseriesPhase = readJunctionTimeseriesPhase(job);
+    const completedTimeseriesResources = readJunctionTimeseriesCompletedResources({
+      denseResources: denseTimeseriesResources,
+      job,
+      phase: timeseriesPhase,
+      wideResources: wideChunkTimeseriesResources,
+    });
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
@@ -1103,9 +1141,6 @@ export function createJunctionDeviceSyncProvider(
     const timeseriesCursor = job.kind === "backfill"
       ? readBackfillTimeseriesCursor(job, window)
       : null;
-    const timeseriesPhase = job.kind === "backfill"
-      ? readBackfillTimeseriesPhase(job)
-      : null;
     const wideTimeseriesImportStart = timeseriesCursor && timeseriesPhase === "wide"
       ? maxIsoTimestamp(wideTimeseriesWindowStart, timeseriesCursor)
       : wideTimeseriesWindowStart;
@@ -1151,10 +1186,10 @@ export function createJunctionDeviceSyncProvider(
         || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
       )
     ) {
-      // The existing backfill job owns one projection cursor. Run the
-      // longest-history projection first and carry only its coarse phase so a
-      // yield cannot advance past either sparse or dense history. This remains
-      // one job-level continuation, not per-resource state.
+      // The existing job payload owns the bounded phase/window coordinate and
+      // exact completed-resource set. Each reduced resource imports before its
+      // name advances, so cooperative continuation never replays an earlier
+      // resource and no provider rows or page-sized state become durable.
       const wideTimeseriesImport = wideChunkTimeseriesResources.length > 0
         && timeseriesPhase !== "dense"
         ? await importTimeseriesSparseSnapshots(
@@ -1164,8 +1199,12 @@ export function createJunctionDeviceSyncProvider(
             window.windowEnd,
             skippedOptionalResources,
             wideChunkTimeseriesResources,
+            undefined,
+            timeseriesPhase === "wide"
+              ? completedTimeseriesResources
+              : new Set(),
           )
-        : { yieldedAt: null };
+        : { madeProgress: false, timeseriesResourceCursor: null, yieldedAt: null };
       if (wideTimeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
           context,
@@ -1180,7 +1219,8 @@ export function createJunctionDeviceSyncProvider(
               timeseriesCursor: job.kind === "backfill"
                 ? wideTimeseriesImport.yieldedAt
                 : null,
-              timeseriesPhase: job.kind === "backfill" ? "wide" : null,
+              timeseriesPhase: "wide",
+              timeseriesResourceCursor: wideTimeseriesImport.timeseriesResourceCursor,
             }),
             profileMetadataPatch,
           ),
@@ -1196,8 +1236,19 @@ export function createJunctionDeviceSyncProvider(
             window.windowEnd,
             skippedOptionalResources,
             denseTimeseriesResources,
+            undefined,
+            completedWorkoutStreamIdentities,
+            timeseriesPhase === "dense"
+              ? completedTimeseriesResources
+              : new Set(),
+            wideTimeseriesImport.madeProgress,
           )
-        : { yieldedAt: null };
+        : {
+            madeProgress: false,
+            timeseriesResourceCursor: null,
+            workoutStreamCursor: null,
+            yieldedAt: null,
+          };
       if (denseTimeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
           context,
@@ -1212,10 +1263,11 @@ export function createJunctionDeviceSyncProvider(
               timeseriesCursor: job.kind === "backfill"
                 ? denseTimeseriesImport.yieldedAt
                 : null,
-              timeseriesPhase: job.kind === "backfill"
-                && wideChunkTimeseriesResources.length > 0
-                ? "dense"
-                : null,
+              timeseriesPhase: "dense",
+              timeseriesResourceCursor: denseTimeseriesImport.timeseriesResourceCursor,
+              workoutStreamCursor: denseTimeseriesResources.includes("workout_stream")
+                ? denseTimeseriesImport.workoutStreamCursor
+                : undefined,
             }),
             profileMetadataPatch,
           ),
@@ -1493,7 +1545,7 @@ export function createJunctionDeviceSyncProvider(
     if (timeseriesProbeWindow) {
       for (const resource of timeseriesResources) {
         const resourceResult = await runJunctionDiagnosticCall(() =>
-          client.listTimeseries({
+          fetchJunctionTimeseriesWindow(client, {
             resource,
             userId: context.account.externalAccountId,
             windowStart: timeseriesProbeWindow.windowStart,
@@ -1728,7 +1780,7 @@ export function createJunctionDeviceSyncProvider(
     const resourceCategory = endpoint;
     const resourceResult = await runJunctionDiagnosticCall(() =>
       resourceCategory === "timeseries"
-        ? client.listTimeseries({
+        ? fetchJunctionTimeseriesWindow(client, {
             resource: normalizedResource,
             sourceProviderSlug,
             userId: context.account.externalAccountId,
@@ -1751,9 +1803,7 @@ export function createJunctionDeviceSyncProvider(
         request: {
           configuredResource: isConfiguredJunctionResource(resourceCategory, normalizedResource),
           endpoint: resourceCategory,
-          endpointKind: resourceCategory === "timeseries"
-            ? "junction_timeseries_collection"
-            : "junction_summary_collection",
+          endpointKind: resolveJunctionDiagnosticEndpointKind(resourceCategory, normalizedResource),
           queryParameterNames: resolveJunctionDiagnosticResourceQueryParameterNames(
             resourceCategory,
             normalizedResource,
@@ -1773,6 +1823,7 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
+    completedWorkoutStreamIdentities: ReadonlySet<string>,
   ): Promise<ProviderJobResult> {
     const resourceName = normalizeString(job.payload.resource);
 
@@ -2071,7 +2122,11 @@ export function createJunctionDeviceSyncProvider(
             window,
           });
         }
-        if (JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES.has(effectiveResource)) {
+        const timeseriesPolicy = resolveJunctionTimeseriesResourcePolicy(effectiveResource);
+        if (
+          timeseriesPolicy?.enabledByDefault === false
+          && timeseriesPolicy.historyWindow === "dense_timeseries"
+        ) {
           const dailyImport = await importTimeseriesDailySnapshots(
             context,
             sourceProviders,
@@ -2080,6 +2135,7 @@ export function createJunctionDeviceSyncProvider(
             skippedOptionalResources,
             [effectiveResource],
             sourceProviderSlug,
+            completedWorkoutStreamIdentities,
           );
           return withJunctionSkippedResourceMetadata(
             context,
@@ -2089,6 +2145,9 @@ export function createJunctionDeviceSyncProvider(
                   job,
                   windowEnd: window.windowEnd,
                   windowStart: dailyImport.yieldedAt,
+                  workoutStreamCursor: effectiveResource === "workout_stream"
+                    ? dailyImport.workoutStreamCursor
+                    : undefined,
                 })
               : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
             skippedOptionalResources,
@@ -2711,32 +2770,6 @@ export function createJunctionDeviceSyncProvider(
     return { checked: true, records };
   }
 
-  async function fetchTimeseriesSnapshots(
-    context: ProviderJobContext,
-    windowStart: string,
-    windowEnd: string,
-    skippedOptionalResources: JunctionSkippedOptionalResource[],
-    resources: readonly string[] = timeseriesResources,
-    sourceProviderSlug?: string | null,
-    options: JunctionWindowFetchOptions = {},
-  ): Promise<Record<string, unknown[]>> {
-    const snapshots: Record<string, unknown[]> = {};
-
-    for (const resource of resources) {
-      snapshots[resource] = await fetchTimeseriesResourceInChunks(
-        context,
-        resource,
-        windowStart,
-        windowEnd,
-        skippedOptionalResources,
-        sourceProviderSlug,
-        options,
-      );
-    }
-
-    return snapshots;
-  }
-
   async function fetchTimeseriesResourceInChunks(
     context: ProviderJobContext,
     resource: string,
@@ -2768,13 +2801,13 @@ export function createJunctionDeviceSyncProvider(
         if (options.dateQueryFormat) {
           request.dateQueryFormat = options.dateQueryFormat;
         }
-        const chunkRecords = await client.listTimeseries(request);
+        const chunkRecords = await fetchJunctionTimeseriesWindow(client, request);
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
+            resource,
             chunkRecords,
             chunkWindowStart,
             chunkWindowEnd,
-            resource,
             options.dateQueryFormat,
           ),
         );
@@ -2803,6 +2836,9 @@ export function createJunctionDeviceSyncProvider(
       chunkStart = chunkEnd;
     }
 
+    if (resource === "electrocardiogram_voltage" || resource === "workout_stream") {
+      return resolveJunctionBoundedFeatureRecords(resource, records);
+    }
     return dedupeJunctionTimeseriesRecords(resource, records);
   }
 
@@ -2826,6 +2862,10 @@ export function createJunctionDeviceSyncProvider(
     let providerRecordsExamined = false;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
 
+    if (resources.length !== 1) {
+      throw new TypeError("Precise Junction timeseries imports require exactly one resource.");
+    }
+    const resource = resources[0]!;
     const preciseWindows = buildPreciseTimeseriesWindows(
       windowStart,
       windowEnd,
@@ -2841,15 +2881,17 @@ export function createJunctionDeviceSyncProvider(
       const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
       let timeseries: Record<string, unknown[]>;
       try {
-        timeseries = await fetchTimeseriesSnapshots(
-          context,
-          window.windowStart,
-          window.windowEnd,
-          skippedOptionalResources,
-          resources,
-          sourceProviderSlug,
-          { dateQueryFormat: "datetime" },
-        );
+        timeseries = {
+          [resource]: await fetchTimeseriesResourceInChunks(
+            context,
+            resource,
+            window.windowStart,
+            window.windowEnd,
+            skippedOptionalResources,
+            sourceProviderSlug,
+            { dateQueryFormat: "datetime" },
+          ),
+        };
       } catch (error) {
         if (
           options.preservePartialRetryableFailure === true
@@ -3058,46 +3100,85 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources: readonly string[],
     sourceProviderSlug?: string | null,
-  ): Promise<JunctionTimeseriesImportResult> {
+    completedTimeseriesResources: ReadonlySet<string> = new Set(),
+  ): Promise<JunctionResourceTimeseriesImportResult> {
     const chunkMs = resolveJunctionTimeseriesImportChunkMs(resources);
+    let resumeCompletedResources = new Set(completedTimeseriesResources);
+    let madeProgress = false;
+
     for (const window of buildPreciseTimeseriesWindows(windowStart, windowEnd, chunkMs)) {
-      if (context.shouldYield?.()) {
-        return { yieldedAt: window.windowStart };
-      }
-      const timeseries = await fetchTimeseriesSnapshots(
-        context,
-        window.windowStart,
-        window.windowEnd,
-        skippedOptionalResources,
-        resources,
-        sourceProviderSlug,
-        { dateQueryFormat: "datetime" },
-      );
-      if (!hasJunctionSnapshotRecords(timeseries)) {
-        continue;
+      const completedResources = new Set(resumeCompletedResources);
+      for (const resource of resources) {
+        if (completedResources.has(resource)) {
+          continue;
+        }
+        if (context.shouldYield?.()) {
+          if (madeProgress) {
+            return {
+              madeProgress: true,
+              timeseriesResourceCursor: encodeJunctionTimeseriesCompletedResources(completedResources),
+              yieldedAt: window.windowStart,
+            };
+          }
+          // A pre-existing cursor is not progress made by this execution. In
+          // production the maintenance abort throws here and releases the same
+          // row; test contexts without a signal may continue until they make a
+          // durable unit of progress.
+          context.throwIfAborted?.();
+        }
+
+        try {
+          await importJunctionTimeseriesResourceSnapshot({
+            context,
+            dateQueryFormat: "datetime",
+            resource,
+            skippedOptionalResources,
+            sourceProviderSlug,
+            sourceProviders,
+            windowEnd: window.windowEnd,
+            windowStart: window.windowStart,
+          });
+        } catch (error) {
+          const timeseriesResourceCursor =
+            encodeJunctionTimeseriesCompletedResources(completedResources);
+          if (isJunctionJobSignalAbort(error, context.signal)) {
+            if (madeProgress) {
+              return {
+                madeProgress: true,
+                timeseriesResourceCursor,
+                yieldedAt: window.windowStart,
+              };
+            }
+            throw error;
+          }
+          if (isRetryableDeviceSyncFailure(error)) {
+            throw new JunctionTimeseriesProgressError(
+              error,
+              window.windowStart,
+              null,
+              {
+                timeseriesPhase: "wide",
+                timeseriesResourceCursor,
+              },
+            );
+          }
+          throw error;
+        }
+        completedResources.add(resource);
+        madeProgress = true;
       }
 
-      const preparedImport = await prepareJunctionImportSnapshot(
-        context,
-        timeseries,
-        sourceProviders,
-      );
-      if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        continue;
-      }
-      await context.importSnapshot({
-        provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-        connectionId: context.account.id,
-        importedAt: window.windowEnd,
-        windowStart: window.windowStart,
-        windowEnd: window.windowEnd,
-        connections: preparedImport.connections,
-        summaries: {},
-        timeseries: preparedImport.snapshots,
-      });
+      // The completed-resource set is scoped to one exact window. Reaching the
+      // next window is itself strict progress, even when an incoming cursor
+      // already named every resource in this window.
+      resumeCompletedResources = new Set();
+      madeProgress = true;
     }
-    return { yieldedAt: null };
+    return {
+      madeProgress,
+      timeseriesResourceCursor: null,
+      yieldedAt: null,
+    };
   }
 
   async function importTimeseriesDailySnapshots(
@@ -3108,46 +3189,336 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
-  ): Promise<JunctionTimeseriesImportResult> {
+    completedWorkoutStreamIdentities: ReadonlySet<string> = new Set(),
+    completedTimeseriesResources: ReadonlySet<string> = new Set(),
+    allowImmediateYield = false,
+  ): Promise<JunctionDailyTimeseriesImportResult> {
+    const requestedResources = resources ?? timeseriesResources;
+    const includesWorkoutStream = requestedResources.includes("workout_stream");
+    const ordinaryResources = requestedResources.filter(
+      (resource) => resource !== "workout_stream",
+    );
+    let resumeWorkoutStreamIdentities = new Set(completedWorkoutStreamIdentities);
+    let resumeCompletedResources = new Set(completedTimeseriesResources);
+    let madeProgress = allowImmediateYield;
+
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
+      const completedResources = new Set(resumeCompletedResources);
+      let workoutStreamCursor = includesWorkoutStream
+        ? encodeJunctionWorkoutStreamCompletedIdentities(resumeWorkoutStreamIdentities)
+        : null;
+
       if (context.shouldYield?.()) {
-        return {
-          yieldedAt: window.windowStart,
-        };
+        if (madeProgress) {
+          return {
+            madeProgress: true,
+            timeseriesResourceCursor: encodeJunctionTimeseriesCompletedResources(completedResources),
+            workoutStreamCursor,
+            yieldedAt: window.windowStart,
+          };
+        }
+        context.throwIfAborted?.();
       }
-      const timeseries = await fetchTimeseriesSnapshots(
-        context,
-        window.windowStart,
-        window.windowEnd,
-        skippedOptionalResources,
-        resources,
-        sourceProviderSlug,
-        { dateQueryFormat: "date" },
-      );
-      if (!hasJunctionSnapshotRecords(timeseries)) {
+
+      if (includesWorkoutStream && !completedResources.has("workout_stream")) {
+        let workoutImport: JunctionWorkoutStreamImportResult;
+        try {
+          workoutImport = await importJunctionWorkoutStreamWindow({
+            allowImmediateYield: madeProgress,
+            completedIdentities: resumeWorkoutStreamIdentities,
+            context,
+            skippedOptionalResources,
+            sourceProviderSlug,
+            sourceProviders,
+            windowEnd: window.windowEnd,
+            windowStart: window.windowStart,
+          });
+        } catch (error) {
+          if (error instanceof JunctionTimeseriesProgressError) {
+            throw new JunctionTimeseriesProgressError(
+              error.failure,
+              error.windowStart,
+              error.workoutStreamCursor,
+              {
+                timeseriesPhase: "dense",
+                timeseriesResourceCursor: encodeJunctionTimeseriesCompletedResources(completedResources),
+              },
+            );
+          }
+          throw error;
+        }
+        workoutStreamCursor = workoutImport.workoutStreamCursor;
+        madeProgress ||= workoutImport.madeProgress;
+        if (workoutImport.yieldedAt) {
+          return {
+            madeProgress: true,
+            timeseriesResourceCursor: encodeJunctionTimeseriesCompletedResources(completedResources),
+            workoutStreamCursor,
+            yieldedAt: workoutImport.yieldedAt,
+          };
+        }
+        // A valid no-record workout index is terminal for this resource too.
+        // Mark the resource itself complete so a later ordinary-resource
+        // failure cannot replay the index merely because there are no workout
+        // identities to retain.
+        completedResources.add("workout_stream");
+        madeProgress = true;
+      }
+
+      for (const resource of ordinaryResources) {
+        if (completedResources.has(resource)) {
+          continue;
+        }
+        if (context.shouldYield?.()) {
+          if (madeProgress) {
+            return {
+              madeProgress: true,
+              timeseriesResourceCursor: encodeJunctionTimeseriesCompletedResources(completedResources),
+              workoutStreamCursor,
+              yieldedAt: window.windowStart,
+            };
+          }
+          context.throwIfAborted?.();
+        }
+
+        try {
+          await importJunctionTimeseriesResourceSnapshot({
+            context,
+            dateQueryFormat: "date",
+            resource,
+            skippedOptionalResources,
+            sourceProviderSlug,
+            sourceProviders,
+            windowEnd: window.windowEnd,
+            windowStart: window.windowStart,
+          });
+        } catch (error) {
+          const timeseriesResourceCursor =
+            encodeJunctionTimeseriesCompletedResources(completedResources);
+          if (isJunctionJobSignalAbort(error, context.signal)) {
+            if (madeProgress) {
+              return {
+                madeProgress: true,
+                timeseriesResourceCursor,
+                workoutStreamCursor,
+                yieldedAt: window.windowStart,
+              };
+            }
+            throw error;
+          }
+          if (isRetryableDeviceSyncFailure(error)) {
+            throw new JunctionTimeseriesProgressError(
+              error,
+              window.windowStart,
+              workoutStreamCursor,
+              {
+                timeseriesPhase: "dense",
+                timeseriesResourceCursor,
+              },
+            );
+          }
+          throw error;
+        }
+        completedResources.add(resource);
+        madeProgress = true;
+      }
+
+      resumeCompletedResources = new Set();
+      resumeWorkoutStreamIdentities = new Set();
+      madeProgress = true;
+    }
+    return {
+      madeProgress,
+      timeseriesResourceCursor: null,
+      workoutStreamCursor: null,
+      yieldedAt: null,
+    };
+  }
+
+  async function importJunctionTimeseriesResourceSnapshot(input: {
+    context: ProviderJobContext;
+    dateQueryFormat: JunctionDateQueryFormat;
+    resource: string;
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviderSlug?: string | null;
+    sourceProviders: readonly JunctionProviderConnection[];
+    windowEnd: string;
+    windowStart: string;
+  }): Promise<void> {
+    const records = await fetchTimeseriesResourceInChunks(
+      input.context,
+      input.resource,
+      input.windowStart,
+      input.windowEnd,
+      input.skippedOptionalResources,
+      input.sourceProviderSlug,
+      { dateQueryFormat: input.dateQueryFormat },
+    );
+    if (records.length === 0) {
+      return;
+    }
+
+    const preparedImport = await prepareJunctionImportSnapshot(
+      input.context,
+      { [input.resource]: records },
+      input.sourceProviders,
+    );
+    if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+      return;
+    }
+    await input.context.importSnapshot({
+      provider: "junction",
+      accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
+      connectionId: input.context.account.id,
+      importedAt: input.windowEnd,
+      windowStart: input.windowStart,
+      windowEnd: input.windowEnd,
+      connections: preparedImport.connections,
+      summaries: {},
+      timeseries: preparedImport.snapshots,
+    });
+  }
+
+  async function importJunctionWorkoutStreamWindow(input: {
+    allowImmediateYield: boolean;
+    completedIdentities: ReadonlySet<string>;
+    context: ProviderJobContext;
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviderSlug?: string | null;
+    sourceProviders: readonly JunctionProviderConnection[];
+    windowEnd: string;
+    windowStart: string;
+  }): Promise<JunctionWorkoutStreamImportResult> {
+    const policy = resolveJunctionTimeseriesResourcePolicy("workout_stream");
+    const maxWorkouts = policy?.maxRecordsPerWindow;
+    const maxSamples = policy?.maxSamplesPerRecord;
+    if (!maxWorkouts || !maxSamples) {
+      throw new TypeError("Junction workout_stream policy did not define bounded limits.");
+    }
+
+    let completedIdentities = new Set(input.completedIdentities);
+    let madeProgress = false;
+    const carryTerminalProgressOrThrow = (error: unknown): JunctionWorkoutStreamImportResult => {
+      if (isJunctionJobSignalAbort(error, input.context.signal)) {
+        if (input.allowImmediateYield || madeProgress) {
+          return {
+            madeProgress,
+            workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(
+              completedIdentities,
+            ),
+            yieldedAt: input.windowStart,
+          };
+        }
+        throw error;
+      }
+      if (isRetryableDeviceSyncFailure(error)) {
+        throw new JunctionTimeseriesProgressError(
+          error,
+          input.windowStart,
+          encodeJunctionWorkoutStreamCompletedIdentities(completedIdentities),
+        );
+      }
+      throw error;
+    };
+
+    let candidates: Awaited<ReturnType<typeof listJunctionWorkoutStreamCandidates>>;
+    try {
+      candidates = await listJunctionWorkoutStreamCandidates(client, {
+        resource: "workout_stream",
+        signal: input.context.signal ?? null,
+        sourceProviderSlug: input.sourceProviderSlug,
+        userId: input.context.account.externalAccountId,
+        windowEnd: input.windowEnd,
+        windowStart: input.windowStart,
+      });
+    } catch (error) {
+      return carryTerminalProgressOrThrow(error);
+    }
+    const candidateIdentities = new Set(candidates.map((candidate) => candidate.identity));
+    completedIdentities = new Set(
+      [...completedIdentities].filter((identity) => candidateIdentities.has(identity)),
+    );
+
+    for (const candidate of candidates) {
+      if (completedIdentities.has(candidate.identity)) {
+        continue;
+      }
+      if (input.context.shouldYield?.()) {
+        if (input.allowImmediateYield || madeProgress) {
+          return {
+            madeProgress,
+            workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(
+              completedIdentities,
+            ),
+            yieldedAt: input.windowStart,
+          };
+        }
+        input.context.throwIfAborted?.();
+      }
+
+      let feature: unknown;
+      try {
+        feature = await fetchJunctionWorkoutStreamFeature(
+          client,
+          candidate,
+          maxSamples,
+          input.context.signal ?? null,
+        );
+      } catch (error) {
+        const failure = classifyOptionalJunctionResourceFailure(
+          error,
+          "timeseries",
+          "workout_stream",
+          input.context.account.externalAccountId,
+        );
+        if (!failure) {
+          return carryTerminalProgressOrThrow(error);
+        }
+        logSkippedOptionalJunctionResource(
+          input.context,
+          "timeseries",
+          "workout_stream",
+          failure,
+        );
+        input.skippedOptionalResources.push({
+          ...failure,
+          resource: "workout_stream",
+          resourceCategory: "timeseries",
+        });
+        completedIdentities.add(candidate.identity);
+        madeProgress = true;
         continue;
       }
 
-      const preparedImport = await prepareJunctionImportSnapshot(
-        context,
-        timeseries,
-        sourceProviders,
-      );
-      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        await context.importSnapshot({
-          provider: "junction",
-          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-          connectionId: context.account.id,
-          importedAt: window.windowEnd,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-          connections: preparedImport.connections,
-          summaries: {},
-          timeseries: preparedImport.snapshots,
-        });
+      try {
+        const preparedImport = await prepareJunctionImportSnapshot(
+          input.context,
+          { workout_stream: [feature] },
+          input.sourceProviders,
+        );
+        if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+          await input.context.importSnapshot({
+            provider: "junction",
+            accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
+            connectionId: input.context.account.id,
+            importedAt: input.windowEnd,
+            windowStart: input.windowStart,
+            windowEnd: input.windowEnd,
+            connections: preparedImport.connections,
+            summaries: {},
+            timeseries: preparedImport.snapshots,
+          });
+        }
+      } catch (error) {
+        return carryTerminalProgressOrThrow(error);
       }
+      completedIdentities.add(candidate.identity);
+      madeProgress = true;
     }
+
     return {
+      madeProgress,
+      workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(completedIdentities),
       yieldedAt: null,
     };
   }
@@ -3295,13 +3666,29 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
-    timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
+    timeseriesPhase?: JunctionTimeseriesProgressPhase | null;
+    timeseriesResourceCursor?: string | null;
+    workoutStreamCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
     return {
-      ...(followUp ? { scheduledJobs: [followUp] } : {}),
+      ...(followUp
+        ? {
+            scheduledJobs: [{
+              ...followUp,
+              ...(input.timeseriesPhase !== undefined
+                || input.timeseriesResourceCursor !== undefined
+                || input.workoutStreamCursor !== undefined
+                ? {
+                    maxAttempts:
+                      input.job.maxAttempts - Math.max(input.job.attempts - 1, 0),
+                  }
+                : {}),
+            }],
+          }
+        : {}),
       nextReconcileAt: input.job.kind === "resource"
         ? clampWebhookJobNextReconcileAt(input.context)
         : addMilliseconds(input.context.now, reconcileIntervalMs),
@@ -3315,7 +3702,9 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
-    timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
+    timeseriesPhase?: JunctionTimeseriesProgressPhase | null;
+    timeseriesResourceCursor?: string | null;
+    workoutStreamCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
@@ -3342,17 +3731,36 @@ export function createJunctionDeviceSyncProvider(
           ...(emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}),
           timeseriesCursor: cursor,
           ...(input.timeseriesPhase ? { timeseriesPhase: input.timeseriesPhase } : {}),
+          ...(input.timeseriesResourceCursor
+            ? { timeseriesResourceCursor: input.timeseriesResourceCursor }
+            : {}),
+          ...(input.workoutStreamCursor
+            ? { workoutStreamCursor: input.workoutStreamCursor }
+            : {}),
         },
       };
     }
 
     if (input.job.kind === "reconcile") {
-      return buildExactWindowJob({
+      const followUp = buildExactWindowJob({
         kind: input.job.kind,
         priority: input.job.priority,
         windowEnd: input.windowEnd,
         windowStart: input.windowStart,
       });
+      return {
+        ...followUp,
+        payload: {
+          ...followUp.payload,
+          ...(input.timeseriesPhase ? { timeseriesPhase: input.timeseriesPhase } : {}),
+          ...(input.timeseriesResourceCursor
+            ? { timeseriesResourceCursor: input.timeseriesResourceCursor }
+            : {}),
+          ...(input.workoutStreamCursor
+            ? { workoutStreamCursor: input.workoutStreamCursor }
+            : {}),
+        },
+      };
     }
 
     if (input.job.kind !== "resource") {
@@ -3379,6 +3787,7 @@ export function createJunctionDeviceSyncProvider(
             : undefined,
       windowEnd: input.windowEnd,
       windowStart: input.windowStart,
+      workoutStreamCursor: input.workoutStreamCursor || undefined,
     });
     return {
       kind: "resource",
@@ -3516,6 +3925,102 @@ export function createJunctionDeviceSyncProvider(
       executeJob,
     },
   };
+}
+
+async function fetchJunctionTimeseriesWindow(
+  junctionClient: JunctionClient,
+  input: JunctionWindowInput,
+): Promise<unknown[]> {
+  const policy = resolveJunctionTimeseriesResourcePolicy(input.resource);
+  if (!policy) {
+    throw new TypeError(`Unknown Junction timeseries resource: ${input.resource}.`);
+  }
+
+  if (policy.fetchMode === "workout_stream") {
+    const maxSamples = policy.maxSamplesPerRecord;
+    if (!maxSamples) {
+      throw new TypeError("Junction workout_stream policy did not define bounded limits.");
+    }
+    const candidates = await listJunctionWorkoutStreamCandidates(junctionClient, input);
+    const features: unknown[] = [];
+    for (const candidate of candidates) {
+      features.push(await fetchJunctionWorkoutStreamFeature(
+        junctionClient,
+        candidate,
+        maxSamples,
+        input.signal ?? null,
+      ));
+    }
+    return features;
+  }
+
+  const records = await junctionClient.listTimeseries({
+    ...input,
+    maxRecords: input.maxRecords ?? policy.maxSamplesPerWindow,
+  });
+  if (policy.normalizationMode !== "ecg_recording_feature") {
+    return records;
+  }
+  if (!policy.maxRecordsPerWindow || !policy.maxSamplesPerWindow) {
+    throw new TypeError("Junction ECG voltage policy did not define bounded limits.");
+  }
+  return reduceJunctionElectrocardiogramVoltageRecords(records, {
+    maxRecordings: policy.maxRecordsPerWindow,
+    maxSamples: policy.maxSamplesPerWindow,
+  });
+}
+
+async function listJunctionWorkoutStreamCandidates(
+  junctionClient: JunctionClient,
+  input: JunctionWindowInput,
+) {
+  const maxWorkouts = resolveJunctionTimeseriesResourcePolicy("workout_stream")
+    ?.maxRecordsPerWindow;
+  if (!maxWorkouts) {
+    throw new TypeError("Junction workout_stream policy did not define a workout limit.");
+  }
+  const indexRecords = await junctionClient.listSummary({
+    resource: "workouts",
+    signal: input.signal ?? null,
+    sourceProviderSlug: input.sourceProviderSlug,
+    userId: input.userId,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+    maxRecords: maxWorkouts + 1,
+  });
+  const summaries = indexRecords.map((record) =>
+    withJunctionSourceProviderFallback(record, input.sourceProviderSlug)
+  );
+  return selectJunctionWorkoutStreamCandidates(summaries, maxWorkouts);
+}
+
+async function fetchJunctionWorkoutStreamFeature(
+  junctionClient: JunctionClient,
+  candidate: ReturnType<typeof selectJunctionWorkoutStreamCandidates>[number],
+  maxSamples: number,
+  signal: AbortSignal | null,
+): Promise<unknown> {
+  const stream = await junctionClient.getWorkoutStream({
+    signal,
+    workoutId: candidate.workoutId,
+  });
+  return reduceJunctionWorkoutStreamPayload({
+    maxSamples,
+    stream,
+    summary: candidate.summary,
+  });
+}
+
+function withJunctionSourceProviderFallback(
+  value: unknown,
+  sourceProviderSlug: string | null | undefined,
+): unknown {
+  const record = readPlainObject(value);
+  const normalizedSource = normalizeProviderSlug(sourceProviderSlug);
+  if (!record || !normalizedSource || resolveJunctionOrigin(record).sourceProviderSlug) {
+    return value;
+  }
+  return { ...record, sourceProviderSlug: normalizedSource };
 }
 
 function withJunctionSkippedResourceMetadata(
@@ -3663,7 +4168,7 @@ function classifyOptionalJunctionResourceFailure(
   };
 }
 
-function isRetryableDeviceSyncFailure(error: unknown): boolean {
+function isRetryableDeviceSyncFailure(error: unknown): error is DeviceSyncError {
   return isDeviceSyncError(error) && error.retryable;
 }
 
@@ -4246,7 +4751,7 @@ async function runJunctionDiagnosticMatrixRead(input: {
 }): Promise<Record<string, unknown>> {
   const response = await runJunctionDiagnosticCall(() =>
     input.category === "timeseries"
-      ? input.client.listTimeseries({
+      ? fetchJunctionTimeseriesWindow(input.client, {
           resource: input.resource,
           sourceProviderSlug: input.sourceProviderSlug,
           userId: input.account.externalAccountId,
@@ -4266,9 +4771,7 @@ async function runJunctionDiagnosticMatrixRead(input: {
     request: {
       configuredResource: input.configuredResource,
       endpoint: input.category,
-      endpointKind: input.category === "timeseries"
-        ? "junction_timeseries_collection"
-        : "junction_summary_collection",
+      endpointKind: resolveJunctionDiagnosticEndpointKind(input.category, input.resource),
       queryParameterNames: resolveJunctionDiagnosticResourceQueryParameterNames(
         input.category,
         input.resource,
@@ -4281,6 +4784,18 @@ async function runJunctionDiagnosticMatrixRead(input: {
     },
     response: describeJunctionDiagnosticRecords(response),
   };
+}
+
+function resolveJunctionDiagnosticEndpointKind(
+  category: "summary" | "timeseries",
+  resource: string,
+): string {
+  if (category === "summary") {
+    return "junction_summary_collection";
+  }
+  return resolveJunctionTimeseriesResourcePolicy(resource)?.fetchMode === "workout_stream"
+    ? "junction_workout_stream"
+    : "junction_timeseries_collection";
 }
 
 function resolveJunctionDiagnosticResourceQueryParameterNames(
@@ -5304,10 +5819,10 @@ function dedupeJunctionTimeseriesSnapshotRecords(
 }
 
 function filterJunctionTimeseriesRecordsToWindow(
+  resource: string,
   records: readonly unknown[],
   windowStart: string,
   windowEnd: string,
-  resource: string,
   dateQueryFormat: JunctionDateQueryFormat | undefined,
 ): unknown[] {
   const startMs = Date.parse(windowStart);
@@ -5316,12 +5831,18 @@ function filterJunctionTimeseriesRecordsToWindow(
     return [...records];
   }
 
+  const preferIntervalStart = usesJunctionTimeseriesIntervalStartOwnership(
+    resolveJunctionTimeseriesResourcePolicy(resource),
+  );
   return records.filter((record) => {
     const entry = readPlainObject(record);
     if (!entry) {
       return true;
     }
-    const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(entry);
+    const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(
+      entry,
+      preferIntervalStart,
+    );
     if (!rawTimestamp) {
       return true;
     }
@@ -5352,6 +5873,17 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
   const entry = readPlainObject(record);
   if (!entry) {
     return null;
+  }
+
+  if (
+    (resource === "electrocardiogram_voltage" && entry.schema === JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA)
+    || (resource === "workout_stream" && entry.schema === JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA)
+  ) {
+    return JSON.stringify([
+      "junction-bounded-timeseries-feature",
+      resource,
+      buildJunctionBoundedFeatureIdentity(resource, entry),
+    ]);
   }
 
   const origin = resolveJunctionOrigin(entry);
@@ -5520,8 +6052,14 @@ function junctionTimeseriesRecordValueIdentity(
   ];
 }
 
-function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
-  const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(record);
+function resolveJunctionTimeseriesRecordTimestamp(
+  record: Record<string, unknown>,
+  preferIntervalStart = false,
+): string | null {
+  const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(
+    record,
+    preferIntervalStart,
+  );
   return rawTimestamp
     ? toIsoTimestampIfValid(rawTimestamp) ?? rawTimestamp
     : null;
@@ -5529,7 +6067,11 @@ function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown
 
 function resolveJunctionTimeseriesRecordRawTimestamp(
   record: Record<string, unknown>,
+  preferIntervalStart = false,
 ): string | null {
+  const intervalKeys = preferIntervalStart
+    ? ["sessionStart", "session_start", "timeStart", "time_start", "start", "startAt", "start_at", "sessionEnd", "session_end", "timeEnd", "time_end", "end", "endAt", "end_at"]
+    : ["sessionEnd", "session_end", "timeEnd", "time_end", "end", "endAt", "end_at", "sessionStart", "session_start", "timeStart", "time_start", "start", "startAt", "start_at"];
   for (const key of [
     "observedAt",
     "observed_at",
@@ -5538,12 +6080,7 @@ function resolveJunctionTimeseriesRecordRawTimestamp(
     "time",
     "date",
     "day",
-    "end",
-    "endAt",
-    "end_at",
-    "start",
-    "startAt",
-    "start_at",
+    ...intervalKeys,
   ]) {
     const normalized = normalizeString(record[key]);
     if (!normalized) {
@@ -5657,12 +6194,90 @@ function resolveJobWindow(
   };
 }
 
-function readBackfillTimeseriesPhase(
+function readJunctionTimeseriesPhase(
   job: DeviceSyncJobRecord,
-): JunctionTimeseriesBackfillPhase | null {
-  return job.payload.timeseriesPhase === "wide" || job.payload.timeseriesPhase === "dense"
-    ? job.payload.timeseriesPhase
-    : null;
+): JunctionTimeseriesProgressPhase | null {
+  const phase = job.payload.timeseriesPhase;
+  if (phase === "wide" || phase === "dense") {
+    if (phase === "wide" && job.payload.workoutStreamCursor !== undefined) {
+      throw invalidJunctionTimeseriesResourceProgress();
+    }
+    return phase;
+  }
+  if (phase !== undefined) {
+    throw invalidJunctionTimeseriesResourceProgress();
+  }
+  if (job.payload.timeseriesResourceCursor !== undefined) {
+    throw invalidJunctionTimeseriesResourceProgress();
+  }
+  // Payloads created before resource-level progress existed can still carry a
+  // workout cursor. That cursor can only belong to the dense daily phase.
+  return job.payload.workoutStreamCursor === undefined ? null : "dense";
+}
+
+function readJunctionTimeseriesCompletedResources(input: {
+  denseResources: readonly string[];
+  job: DeviceSyncJobRecord;
+  phase: JunctionTimeseriesProgressPhase | null;
+  wideResources: readonly string[];
+}): ReadonlySet<string> {
+  if (
+    input.job.payload.workoutStreamCursor !== undefined
+    && !input.denseResources.includes("workout_stream")
+  ) {
+    throw invalidJunctionTimeseriesResourceProgress();
+  }
+
+  const encoded = input.job.payload.timeseriesResourceCursor;
+  if (encoded === undefined) {
+    return new Set();
+  }
+  if (typeof encoded !== "string" || encoded.length === 0 || input.phase === null) {
+    throw invalidJunctionTimeseriesResourceProgress();
+  }
+
+  const configuredResources = input.phase === "wide"
+    ? input.wideResources
+    : input.denseResources;
+  const configuredResourceSet = new Set(configuredResources);
+  if (configuredResourceSet.size !== configuredResources.length) {
+    throw new TypeError("Junction timeseries resource policy contained duplicates.");
+  }
+
+  let parsedValue: unknown;
+  try {
+    parsedValue = JSON.parse(encoded);
+  } catch {
+    throw invalidJunctionTimeseriesResourceProgress();
+  }
+  const parsed = readPlainObject(parsedValue);
+  const identities = parsed?.i;
+  if (
+    !parsed
+    || parsed.v !== JUNCTION_TIMESERIES_RESOURCE_PROGRESS_VERSION
+    || Object.keys(parsed).some((key) => key !== "i" && key !== "v")
+    || !Array.isArray(identities)
+    || identities.length === 0
+    || identities.length > configuredResources.length
+    || !identities.every(
+      (identity): identity is string =>
+        typeof identity === "string" && configuredResourceSet.has(identity),
+    )
+  ) {
+    throw invalidJunctionTimeseriesResourceProgress();
+  }
+
+  const sortedIdentities = [...identities].sort();
+  if (
+    new Set(sortedIdentities).size !== sortedIdentities.length
+    || JSON.stringify({
+      v: JUNCTION_TIMESERIES_RESOURCE_PROGRESS_VERSION,
+      i: sortedIdentities,
+    }) !== encoded
+  ) {
+    throw invalidJunctionTimeseriesResourceProgress();
+  }
+  return new Set(sortedIdentities);
 }
 
 function readBackfillTimeseriesCursor(
@@ -6345,6 +6960,145 @@ function readHistoricalBackfillCoverageVersion(metadata: Record<string, unknown>
 function readHistoricalBackfillJobEmptyAttempts(job: DeviceSyncJobRecord): number {
   const rawAttempts = job.payload.emptyBackfillAttempts;
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts > 0 ? rawAttempts : 0;
+}
+
+function encodeJunctionTimeseriesCompletedResources(
+  resources: ReadonlySet<string>,
+): string | null {
+  if (resources.size === 0) {
+    return null;
+  }
+  // Sorting canonicalizes the bounded set for exact validation only; resource
+  // membership, never lexical position, owns completion.
+  const sortedResources = [...resources].sort();
+  if (
+    sortedResources.length > JUNCTION_ALLOWED_TIMESERIES_RESOURCES.length
+    || !sortedResources.every(
+      (resource) =>
+        normalizeJunctionResourceName(resource) === resource
+        && JUNCTION_ALLOWED_TIMESERIES_RESOURCE_SET.has(resource),
+    )
+  ) {
+    throw new TypeError("Junction timeseries resource progress exceeded its policy.");
+  }
+  return JSON.stringify({
+    v: JUNCTION_TIMESERIES_RESOURCE_PROGRESS_VERSION,
+    i: sortedResources,
+  });
+}
+
+function readJunctionWorkoutStreamCompletedIdentities(
+  job: DeviceSyncJobRecord,
+): ReadonlySet<string> {
+  const encoded = job.payload.workoutStreamCursor;
+  if (encoded === undefined) {
+    return new Set();
+  }
+
+  const maxWorkouts = resolveJunctionTimeseriesResourcePolicy("workout_stream")
+    ?.maxRecordsPerWindow;
+  if (!maxWorkouts || typeof encoded !== "string" || encoded.length === 0) {
+    throw invalidJunctionWorkoutStreamProgress();
+  }
+
+  let parsedValue: unknown;
+  try {
+    parsedValue = JSON.parse(encoded);
+  } catch {
+    throw invalidJunctionWorkoutStreamProgress();
+  }
+
+  const parsed = readPlainObject(parsedValue);
+  const identities = parsed?.i;
+  if (
+    !parsed
+    || parsed.v !== JUNCTION_WORKOUT_STREAM_PROGRESS_VERSION
+    || Object.keys(parsed).some((key) => key !== "i" && key !== "v")
+    || !Array.isArray(identities)
+    || identities.length === 0
+    || identities.length > maxWorkouts
+    || !identities.every(isCanonicalJunctionWorkoutStreamCandidateIdentity)
+  ) {
+    throw invalidJunctionWorkoutStreamProgress();
+  }
+
+  const sortedIdentities = [...identities].sort();
+  if (
+    new Set(sortedIdentities).size !== sortedIdentities.length
+    || JSON.stringify({ v: JUNCTION_WORKOUT_STREAM_PROGRESS_VERSION, i: sortedIdentities })
+      !== encoded
+  ) {
+    throw invalidJunctionWorkoutStreamProgress();
+  }
+
+  return new Set(sortedIdentities);
+}
+
+function encodeJunctionWorkoutStreamCompletedIdentities(
+  identities: ReadonlySet<string>,
+): string | null {
+  if (identities.size === 0) {
+    return null;
+  }
+
+  const maxWorkouts = resolveJunctionTimeseriesResourcePolicy("workout_stream")
+    ?.maxRecordsPerWindow;
+  const sortedIdentities = [...identities].sort();
+  if (
+    !maxWorkouts
+    || sortedIdentities.length > maxWorkouts
+    || !sortedIdentities.every(isCanonicalJunctionWorkoutStreamCandidateIdentity)
+  ) {
+    throw new TypeError("Junction workout stream progress exceeded its identity contract.");
+  }
+
+  return JSON.stringify({
+    v: JUNCTION_WORKOUT_STREAM_PROGRESS_VERSION,
+    i: sortedIdentities,
+  });
+}
+
+function isCanonicalJunctionWorkoutStreamCandidateIdentity(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) {
+    return false;
+  }
+
+  let identity: unknown;
+  try {
+    identity = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(identity) || identity.length !== 4) {
+    return false;
+  }
+
+  const [sourceProviderSlug, sourceType, sourceInstanceId, stableId] = identity;
+  return isNonEmptyCanonicalIdentityPart(sourceProviderSlug)
+    && (sourceType === null || isNonEmptyCanonicalIdentityPart(sourceType))
+    && (sourceInstanceId === null || isNonEmptyCanonicalIdentityPart(sourceInstanceId))
+    && isNonEmptyCanonicalIdentityPart(stableId)
+    && JSON.stringify(identity) === value;
+}
+
+function isNonEmptyCanonicalIdentityPart(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.trim() === value;
+}
+
+function invalidJunctionTimeseriesResourceProgress(): DeviceSyncError {
+  return deviceSyncError({
+    code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+    message: "Junction timeseries resource continuation metadata was invalid.",
+    retryable: false,
+  });
+}
+
+function invalidJunctionWorkoutStreamProgress(): DeviceSyncError {
+  return deviceSyncError({
+    code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+    message: "Junction workout stream continuation metadata was invalid.",
+    retryable: false,
+  });
 }
 
 function readJunctionHistoricalUnresolvedProviderRecords(

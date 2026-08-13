@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "broader-connected-health-signals",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Recognize more connected-health signals",
+    "summary": "Connected health syncs now recognize more body-composition, respiratory, metabolic, cardiac, safety, accessibility, and workout signals.",
+    "details": "Murph keeps useful compact facts from these signals while reducing ECG waveforms and workout streams in memory instead of adding their historical sample arrays to the vault.",
+    "relevanceTags": ["wearables", "health-data", "accessibility"],
+    "sourcePullRequests": [1708, 1723, 1725]
+  }
+}

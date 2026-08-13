@@ -629,6 +629,7 @@ export class SqliteDeviceSyncStore {
     retryAt: string | null,
     retryable: boolean,
     retainUntilSuccess = false,
+    replacementPayload?: Record<string, unknown>,
   ): boolean {
     return failDeviceSyncJobIfOwned(this.database, {
       code,
@@ -637,6 +638,7 @@ export class SqliteDeviceSyncStore {
       now,
       retryAt,
       retryable,
+      ...(replacementPayload === undefined ? {} : { replacementPayload }),
       retainUntilSuccess,
       workerId,
     });

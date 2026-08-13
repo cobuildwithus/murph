@@ -6,21 +6,39 @@ export const JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET = "wearable-tags" as const
 // canonicalization never widens collection implicitly.
 export type JunctionTimeseriesNormalizationMode =
   | "daily_aggregate"
+  | "ecg_recording_feature"
   | "hourly_or_session_feature"
   | "note_tags"
   | "sparse_alert"
   | "sparse_intervention"
   | "sparse_observation"
-  | "sparse_reading";
+  | "sparse_reading"
+  | "workout_stream_feature";
+
+export type JunctionTimeseriesFetchMode = "grouped_timeseries" | "workout_stream";
 
 export type JunctionTimeseriesHistoryWindow = "dense_timeseries" | "summary_history";
 
 export interface JunctionTimeseriesResourcePolicy {
   readonly enabledByDefault: boolean;
   readonly fetchChunkDays: number;
+  readonly fetchMode?: JunctionTimeseriesFetchMode;
   readonly historyWindow: JunctionTimeseriesHistoryWindow;
+  readonly maxRecordsPerWindow?: number;
+  readonly maxSamplesPerRecord?: number;
+  readonly maxSamplesPerWindow?: number;
   readonly normalizationMode: JunctionTimeseriesNormalizationMode;
   readonly resource: string;
+}
+
+// Dense scalar records keep provider values atomic. A documented point
+// timestamp wins; otherwise the interval start owns the entire scalar and its
+// UTC day/hour bucket, with interval end used only as a final fallback.
+export function usesJunctionTimeseriesIntervalStartOwnership(
+  policy: Pick<JunctionTimeseriesResourcePolicy, "normalizationMode"> | null | undefined,
+): boolean {
+  return policy?.normalizationMode === "daily_aggregate"
+    || policy?.normalizationMode === "hourly_or_session_feature";
 }
 
 // Static, code-owned resource policy shared by config admission, fetch-window
@@ -62,6 +80,20 @@ export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
   { resource: "peak_expiratory_flow_rate", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
   { resource: "sleep_apnea_alert", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
   { resource: "waist_circumference", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "calories_basal", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "daylight_exposure", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "fall", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "floors_climbed", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "handwashing", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "stand_duration", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "stand_hour", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "uv_exposure", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "wheelchair_push", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "workout_distance", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "workout_duration", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "workout_swimming_stroke", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "electrocardiogram_voltage", enabledByDefault: false, normalizationMode: "ecg_recording_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1, maxRecordsPerWindow: 64, maxSamplesPerWindow: 100_000 },
+  { resource: "workout_stream", enabledByDefault: false, normalizationMode: "workout_stream_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1, fetchMode: "workout_stream", maxRecordsPerWindow: 32, maxSamplesPerRecord: 100_000 },
 ] as const satisfies readonly JunctionTimeseriesResourcePolicy[]);
 
 export type JunctionTimeseriesResource =
@@ -114,7 +146,8 @@ export function resolveJunctionTimeseriesResourcePolicy(
 // Every default summary resource is sparse event/daily-grain data: profile is
 // a single current snapshot per source, menstrual_cycle is roughly 13 cycles
 // per member-year with small dated sub-arrays, and electrocardiogram is a
-// bounded recording-summary resource. Raw ECG voltage remains excluded.
+// bounded recording-summary resource. Dense ECG voltage and workout streams
+// are separate exact opt-ins reduced before canonical persistence.
 export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
   "activity",
   "sleep",

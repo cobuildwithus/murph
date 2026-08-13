@@ -57,9 +57,13 @@ export function mergeHostedDeviceSyncProviderConfigs(input: {
           [provider]: base,
         })[provider]
       : undefined;
+    const codeOwnedConfig = provider === "junction" && input.base.junction
+      ? { timeseriesResources: input.base.junction.timeseriesResources }
+      : {};
     merged[provider] = {
       ...(serializableBase ?? {}),
       ...overlay,
+      ...codeOwnedConfig,
     } as never;
   }
 

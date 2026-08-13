@@ -177,6 +177,8 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesPhase: stringJobField({ includeInHostedHint: true }),
+      timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
+      workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
@@ -184,6 +186,9 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      timeseriesPhase: stringJobField({ includeInHostedHint: true }),
+      timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
+      workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
@@ -213,6 +218,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       resourceCategory: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
+      workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
