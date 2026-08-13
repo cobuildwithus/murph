@@ -353,12 +353,23 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       > "$review_gpt_pr_context_dir/pr.diff"
     git diff --name-only "$review_gpt_base_oid...$review_gpt_head_oid" \
       > "$review_gpt_pr_context_dir/changed-files.txt"
+    if git diff --quiet --no-renames \
+      "$review_gpt_base_oid...$review_gpt_head_oid" -- packages/health-commons/; then
+      :
+    else
+      review_gpt_health_commons_diff_status="$?"
+      if [[ "$review_gpt_health_commons_diff_status" != "1" ]]; then
+        echo "Error: could not determine whether the PR touches Health Commons." >&2
+        exit "$review_gpt_health_commons_diff_status"
+      fi
+      review_gpt_pr_touches_health_commons=1
+    fi
   else
     echo "Warning: local PR base/head commits are incomplete; falling back to gh pr diff." >&2
     gh pr diff "$review_gpt_pr_ref" --patch > "$review_gpt_pr_context_dir/pr.diff"
     gh pr diff "$review_gpt_pr_ref" --name-only > "$review_gpt_pr_context_dir/changed-files.txt"
-  fi
-  if grep -q '^packages/health-commons/' "$review_gpt_pr_context_dir/changed-files.txt"; then
+    # Without both commits, rename detection cannot reliably expose both paths.
+    # Retain the corpus rather than omit relevant context on an uncertain fallback.
     review_gpt_pr_touches_health_commons=1
   fi
 

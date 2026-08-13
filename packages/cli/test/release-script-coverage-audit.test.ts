@@ -3404,6 +3404,16 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       writeHarnessFile(harnessRoot, 'apps/demo/unrelated.ts', 'export const unrelated = true\n')
       writeHarnessFile(
         harnessRoot,
+        'packages/health-commons/content/sources/demo/moved.md',
+        'health source to move\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'packages/health-commons/content/sources/demo/sibling.md',
+        'unchanged health source\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
         'packages/demo/test/unrelated.test.ts',
         'export const unrelatedTest = true\n',
       )
@@ -3475,6 +3485,26 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
       })
       const healthCommonsHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
+
+      execFileSync(
+        'git',
+        [
+          'mv',
+          'packages/health-commons/content/sources/demo/moved.md',
+          'apps/demo/moved-health-source.md',
+        ],
+        { cwd: harnessRoot },
+      )
+      execFileSync('git', ['commit', '-q', '-m', 'move health source'], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsRenameOutHead = execFileSync('git', ['rev-parse', 'HEAD'], {
         cwd: harnessRoot,
         encoding: 'utf8',
       }).trim()
@@ -3674,6 +3704,51 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       ).toBe(0)
       expect(healthCommonsPreliminary.excludeGlobs).not.toContain(
         'packages/health-commons/content/sources/**',
+      )
+
+      execFileSync('git', ['checkout', '-q', '--detach', healthCommonsRenameOutHead], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsRenameOutPreliminary = invokePackager(
+        'health-commons-rename-out-preliminary',
+        healthCommonsRenameOutHead,
+        {
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+        },
+      )
+      expect(
+        healthCommonsRenameOutPreliminary.result.status,
+        healthCommonsRenameOutPreliminary.result.stderr,
+      ).toBe(0)
+      expect(healthCommonsRenameOutPreliminary.excludeGlobs).not.toContain(
+        'packages/health-commons/content/sources/**',
+      )
+      const healthCommonsRenameOutReal = invokePackager(
+        'health-commons-rename-out-real',
+        healthCommonsRenameOutHead,
+        {
+          COBUILD_AUDIT_CONTEXT_SCAN_SPECS: 'packages',
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+          TEST_REAL_PACKAGER_BIN: path.join(
+            repoRoot,
+            'node_modules',
+            '.bin',
+            'cobuild-package-audit-context',
+          ),
+        },
+      )
+      expect(
+        healthCommonsRenameOutReal.result.status,
+        healthCommonsRenameOutReal.result.stderr,
+      ).toBe(0)
+      expect(listZipEntries(healthCommonsRenameOutReal.zipPath)).toContain(
+        'packages/health-commons/content/sources/demo/sibling.md',
       )
       execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
         cwd: harnessRoot,
@@ -4251,7 +4326,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
-  }, 30_000)
+  }, 45_000)
 
   it('keeps audit bundles scoped while preserving durable agent docs', () => {
     const leanBundle = createAuditZip('package-audit-context.sh', 'murph-lean-audit')

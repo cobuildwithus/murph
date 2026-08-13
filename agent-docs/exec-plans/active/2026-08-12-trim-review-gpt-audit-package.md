@@ -37,8 +37,9 @@ Updated: 2026-08-12
 
 1. Risk: excluding the source corpus could hide relevant evidence from a Health
    Commons review.
-   Mitigation: derive relevance from the exact PR changed-file manifest and keep
-   the corpus whenever any Health Commons path changes.
+   Mitigation: derive relevance from a no-renames PR diff so both sides of a
+   rename remain visible, and keep the corpus whenever either side touches
+   Health Commons.
 2. Risk: broad binary exclusions could hide reviewable source assets.
    Mitigation: exclude only the known Web audio subtree and verify ordinary
    Health Commons source and test files remain packaged.
@@ -75,3 +76,8 @@ Updated: 2026-08-12
     36,222,640 bytes and 11,337 entries after, a 39.9% byte reduction.
   - ZIP inventory confirmed Web audio and the unrelated Health Commons source
     corpus are absent while Health Commons runtime code and tests remain.
+  - Preliminary ReviewGPT requested one correction: rename-out changes could be
+    represented by only their destination in the changed-file manifest. The
+    predicate now uses a no-renames diff, falls back to retaining the corpus when
+    local history is incomplete, and has real-ZIP proof that an unchanged corpus
+    sibling remains present after a Health Commons file is renamed elsewhere.
