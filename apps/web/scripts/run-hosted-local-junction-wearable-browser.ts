@@ -13,6 +13,7 @@ import {
 } from "./hosted-local-browser-process.ts";
 
 interface BrowserConfig {
+  disclosureSourceName: "Oura" | "Whoop";
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
@@ -111,6 +112,15 @@ async function main(): Promise<void> {
     await page.goto(config.startUrl, {
       waitUntil: "domcontentloaded",
     });
+
+    stage = "murph_vital_disclosure";
+    await page
+      .getByRole("dialog")
+      .getByRole("button", {
+        exact: true,
+        name: `Continue to ${config.disclosureSourceName}`,
+      })
+      .click({ timeout: config.timeoutMs });
 
     stage = "murph_connect_start";
     await page.waitForURL((url) => url.origin !== config.webOrigin, {
@@ -380,6 +390,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   }
 
   return {
+    disclosureSourceName: source === "oura" ? "Oura" : "Whoop",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,
       "MURPH_E2E_PROVIDER_EMAIL",
@@ -473,7 +484,7 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
       message = message.replaceAll(secret, "[redacted]");
     }
   }
-  message = message.replace(/https?:\/\/[^\s)]+/gu, (rawUrl) => {
+  message = message.replace(/https?:\/\/[^\s)"']+/gu, (rawUrl) => {
     try {
       const url = new URL(rawUrl);
       return `${url.origin}${url.pathname}`;

@@ -12,6 +12,10 @@ import {
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { describe, expect, it, vi } from "vitest";
 
+import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
+import {
+  buildHostedDeviceSyncScheduledReconcileWakeEventId,
+} from "@/src/lib/device-sync/wake-service";
 import {
   advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
@@ -1601,6 +1605,95 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       /^hbidx:assistant-input:v[0-9]+:[a-f0-9]{64}$/u,
     );
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("admits a scheduled v3 wake after its matching v2 wake was consumed", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
+        const where = readHostedMailboxFindUniqueWhere(args);
+        return rows.find((row) => (
+          row.userId === where.userId && row.dedupeKey === where.dedupeKey
+        )) ?? null;
+      }),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    const identity = {
+      connectionId: "dsc_scheduled_cutover",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
+      nextReconcileAt: "2026-04-26T00:00:00.000Z",
+    };
+    const legacyEventId = [
+      "device-sync",
+      "scheduled-reconcile",
+      "v2",
+      identity.connectionId,
+      identity.expectedConnectedAt,
+      identity.nextReconcileAt,
+    ].join(":");
+    const currentEventId = buildHostedDeviceSyncScheduledReconcileWakeEventId(identity);
+    const buildEnvelope = (eventId: string) => buildHostedDeviceSyncWake({
+      connectionId: identity.connectionId,
+      eventId,
+      expectedConnectedAt: identity.expectedConnectedAt,
+      occurredAt: identity.nextReconcileAt,
+      provider: "oura",
+      source: "scheduled-reconcile",
+      userId: "member_mailbox_1",
+    });
+
+    const legacy = await appendHostedMailboxEnvelopeTx({
+      envelope: buildEnvelope(legacyEventId),
+      tx,
+    });
+    const legacyRow = rows[0];
+    if (!legacyRow) {
+      throw new TypeError("Expected the legacy scheduled wake to be stored.");
+    }
+    rows[0] = {
+      ...legacyRow,
+      consumedAt: new Date("2026-04-26T00:01:00.000Z"),
+    };
+    const recovered = await appendHostedMailboxEnvelopeTx({
+      envelope: buildEnvelope(currentEventId),
+      tx,
+    });
+    const retry = await appendHostedMailboxEnvelopeTx({
+      envelope: buildEnvelope(currentEventId),
+      tx,
+    });
+
+    expect(legacy.inserted).toBe(true);
+    expect(currentEventId).not.toBe(legacyEventId);
+    expect(recovered).toMatchObject({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+    });
+    expect(retry).toMatchObject({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: recovered.item.id,
+      },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.dedupeKey)).toEqual([
+      legacyEventId,
+      currentEventId,
+    ]);
+    expect(rows[0]?.consumedAt).toEqual(new Date("2026-04-26T00:01:00.000Z"));
+    expect(rows[1]?.consumedAt).toBeNull();
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(2);
   });
 
   it("rejects group email when the target group names another runtime workspace", async () => {
