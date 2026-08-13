@@ -1698,6 +1698,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("replays one transport-ambiguous snapshot completion with the identical payload and headers", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const startedAtMs = Date.parse("2026-05-01T00:00:00.000Z");
+    vi.setSystemTime(startedAtMs);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
     const checkpointRequest = createWorkspaceSnapshotCheckpointRequest(ref);
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
@@ -1724,7 +1728,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         completionBodies.push(await request.clone().text());
         completionHeaders.push(Array.from(request.headers.entries()));
         if (completionBodies.length === 1) {
-          throw new TypeError("fetch failed");
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("{"));
+              vi.setSystemTime(startedAtMs + 250);
+              controller.error(new TypeError("fetch failed"));
+            },
+          }), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+            status: 200,
+          });
         }
         return createWorkspaceSnapshotCompleteResponse(ref);
       }
@@ -1732,6 +1745,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
+      commitTimeoutMs: 1_000,
       fetchImpl: fetchMock as typeof fetch,
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
@@ -1768,6 +1782,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "x-hosted-runtime-lease-generation": "9",
       "x-hosted-runtime-workspace-version": "4",
     }));
+    expect(timeoutSpy.mock.calls.slice(-2)).toEqual([[750], [750]]);
+    vi.useRealTimers();
   });
 
   it("does not replay an application 5xx when its response body transport closes", async () => {
@@ -1776,6 +1792,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       Uint8Array.from({ length: 32 }, (_, index) => index + 1),
     );
     let completionCalls = 0;
+    let responseBodyCancelled = false;
+    let responseBodyRead = false;
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "workspace snapshot completion 5xx");
       if (request.url.endsWith("/workspace-snapshots/start")) {
@@ -1794,9 +1812,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         completionCalls += 1;
         return new Response(new ReadableStream<Uint8Array>({
-          start(controller) {
+          cancel() {
+            responseBodyCancelled = true;
+          },
+          pull(controller) {
+            responseBodyRead = true;
             controller.error(new TypeError("fetch failed"));
           },
+        }, {
+          highWaterMark: 0,
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 503,
@@ -1819,6 +1843,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     })).rejects.toThrow("Hosted workspace snapshot complete failed with HTTP 503.");
 
     expect(completionCalls).toBe(1);
+    expect(responseBodyCancelled).toBe(true);
+    expect(responseBodyRead).toBe(false);
   });
 
   it("does not replay snapshot completion after cancellation", async () => {
