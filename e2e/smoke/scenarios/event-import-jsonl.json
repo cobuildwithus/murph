@@ -1,6 +1,6 @@
 {
   "id": "event-import-jsonl",
-  "command": "vault-cli event import-jsonl --vault <path> --input @file.jsonl|- [--apply] [--request-id <id>]",
+  "command": "vault-cli event import-jsonl --vault <path> --input @file.jsonl|- [--conflict-policy supersede|reject] [--apply] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/events/events.jsonl"
