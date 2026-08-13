@@ -30,6 +30,15 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
   `vault-cli wearables activity list --date <date> --format json`. Its canonical
   workout-day rollup owns the answer; do not stop at one selected activity or
   rebuild the rollup from provider records.
+- When the day or activity summary omits the specific signal the user asked
+  about, use `vault-cli wearables metric latest <metric> --format json` or
+  `vault-cli wearables metric trend <metric> --format json` with the matching
+  public metric name: `daylight_exposure`, `fall`, `floors_climbed`,
+  `handwashing`, `stand_duration`, `stand_hour`, `uv_exposure`,
+  `wheelchair_push`, `workout_distance`, `workout_duration`, or
+  `workout_swimming_stroke`.
+  A missing metric is missing coverage, not zero or proof the event did not
+  happen.
 - Check steps, sedentary time, active minutes, workout days, work schedule, commute, sleep, fatigue, and pain flags.
 - Use the user's baseline; a 2,000-step jump can be easy for one user and too much for another.
 - Look for long unbroken sitting blocks, not just daily step total.

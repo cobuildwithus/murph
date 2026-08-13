@@ -55,6 +55,13 @@ Check, when relevant:
 - age and life stage; pregnancy, breastfeeding, growth, or older-adult context
 - current weight and same-condition trend, not only the latest value
 - waist trend or clothing fit if useful and acceptable
+- when connected measurements matter, use
+  `vault-cli wearables metric latest <metric> --format json` for the latest
+  value or `vault-cli wearables metric trend <metric> --format json` for its
+  direction, with `body_mass_index`, `fat`, `lean_body_mass`, or
+  `waist_circumference`; compare repeated readings from consistent sources and
+  conditions, and treat an absent metric as missing coverage rather than no
+  change
 - strength, repetitions, training quality, and resistance-training consistency
 - meal or food pattern, estimated protein, alcohol, liquid calories, appetite, and food access
 - steps, cardio, sedentary time, sleep, recovery, illness, pain, and recent training changes
