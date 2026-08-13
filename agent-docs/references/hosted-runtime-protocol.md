@@ -206,10 +206,13 @@ serialized heartbeat attempts on a two-second start-to-start cadence for the
 full publication. This leaves the two-second heartbeat request inside the
 10-second stale boundary. A successful foreground preemption bypasses handoff
 preservation and stops heartbeat liveness before detached session cleanup.
-After Web accepts the checkpoint, the runtime stops heartbeating and
-best-effort records completion; a failed marker falls back to stale-heartbeat
-expiry. Absent, mismatched, completed, or stale sessions do not delay
-replacement. This
+If `/complete` loses its response at the transport boundary, the runtime replays
+that exact completion request at most once under the original heartbeat,
+stored write-fence headers, and remaining commit timeout; non-OK HTTP responses
+and parse/validation failures are terminal. After Web accepts the checkpoint,
+the runtime stops heartbeating and best-effort records completion; a failed
+marker falls back to stale-heartbeat expiry. Absent, mismatched, completed, or
+stale sessions do not delay replacement. This
 bridges the shutdown publication race without imposing a fixed snapshot
 deadline or turning the much longer orphan-cleanup lifetime into startup
 liveness. A dead runtime can defer replacement for the 10-second liveness
