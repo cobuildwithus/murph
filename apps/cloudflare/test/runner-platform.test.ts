@@ -1006,6 +1006,44 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("keeps presign HTTP status authoritative when its error body transport closes", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-presign-http-body-"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const fetchMock = vi.fn(async () =>
+        new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new TypeError("other side closed"));
+          },
+        }), { status: 409 })
+      );
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      })).rejects.toThrow("Hosted workspace snapshot presign PUT failed with HTTP 409.");
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("does not replay direct R2 snapshot PUT presigning after caller cancellation", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-presign-cancel-"));
