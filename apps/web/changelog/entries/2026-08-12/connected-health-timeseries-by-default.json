@@ -5,9 +5,9 @@
     "id": "connected-health-timeseries-by-default",
     "kind": "improvement",
     "priority": 3,
-    "title": "Connected health sync includes more measurements",
-    "summary": "Connected health sync now includes steps, distance, active calories, heart rate, and weight by default.",
-    "details": "Murph keeps steps and distance as daily totals, active calories and heart rate as hourly summaries, and weight as individual readings across the longer history available from the connected service.",
+    "title": "Connected health sync includes every supported measurement",
+    "summary": "Connected health sync now requests every measurement Murph supports, including steps, distance, active calories, heart rate, and weight.",
+    "details": "Murph keeps dense signals compact: steps and distance are daily totals, active calories and heart rate are hourly summaries, and weight remains an individual reading with longer history.",
     "relevanceTags": ["wearables", "activity", "heart-health", "body-composition"],
     "sourcePullRequests": [1698]
   }

@@ -525,12 +525,6 @@ export function createJunctionDeviceSyncProvider(
   const extendedBackfillTimeseriesResources = timeseriesResources.filter(
     (resource) => resolveJunctionExtendedTimeseriesBackfillPolicy(resource) !== null,
   );
-  const wideChunkTimeseriesResources = timeseriesResources.filter(
-    (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) > 1,
-  );
-  const denseTimeseriesResources = timeseriesResources.filter(
-    (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) === 1,
-  );
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
   const pushSourceRecoveryEnabled = config.pushSourceRecoveryEnabled === true;
   const webhookTimestampToleranceMs =
@@ -1190,18 +1184,8 @@ export function createJunctionDeviceSyncProvider(
       return executePushSourceRecoveryJob(context, job);
     }
 
-    // Validate already-queued phase-based continuations before any provider
-    // egress. Valid legacy payloads are migrated by the ordinary setup pass to
-    // the deterministic direct continuation below; newly created jobs never
-    // emit the phase/set encoding.
     if (job.payload.timeseriesPhase !== undefined) {
-      const legacyPhase = readJunctionTimeseriesPhase(job);
-      readJunctionTimeseriesCompletedResources({
-        denseResources: denseTimeseriesResources,
-        job,
-        phase: legacyPhase,
-        wideResources: wideChunkTimeseriesResources,
-      });
+      throw invalidJunctionTimeseriesResourceProgress();
     }
 
     if (isFullJobTimeseriesContinuation(job)) {
@@ -2637,6 +2621,7 @@ export function createJunctionDeviceSyncProvider(
           scheduledJobs: [
             ...(input.result.scheduledJobs ?? []),
             buildExtendedTimeseriesBackfillJob({
+              availableAt: input.context.now,
               dedupeKey: input.job.dedupeKey,
               historicalRecordsSeen: recordsSeen,
               historicalWindowStart,
@@ -3171,7 +3156,7 @@ export function createJunctionDeviceSyncProvider(
             window.windowEnd,
             skippedOptionalResources,
             sourceProviderSlug,
-            { dateQueryFormat: "datetime" },
+            { dateQueryFormat: options.dateQueryFormat ?? "datetime" },
           ),
         };
       } catch (error) {
@@ -3384,95 +3369,6 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  async function importTimeseriesSparseSnapshots(
-    context: ProviderJobContext,
-    sourceProviders: readonly JunctionProviderConnection[],
-    windowStart: string,
-    windowEnd: string,
-    skippedOptionalResources: JunctionSkippedOptionalResource[],
-    resources: readonly string[],
-    sourceProviderSlug?: string | null,
-    completedTimeseriesResources: ReadonlySet<string> = new Set(),
-  ): Promise<JunctionResourceTimeseriesImportResult> {
-    const chunkMs = resolveJunctionTimeseriesImportChunkMs(resources);
-    let resumeCompletedResources = new Set(completedTimeseriesResources);
-    let madeProgress = false;
-
-    for (const window of buildPreciseTimeseriesWindows(windowStart, windowEnd, chunkMs)) {
-      const completedResources = new Set(resumeCompletedResources);
-      for (const resource of resources) {
-        if (completedResources.has(resource)) {
-          continue;
-        }
-        if (context.shouldYield?.()) {
-          if (madeProgress) {
-            return {
-              madeProgress: true,
-              timeseriesResourceCursor: encodeJunctionTimeseriesCompletedResources(completedResources),
-              yieldedAt: window.windowStart,
-            };
-          }
-          // A pre-existing cursor is not progress made by this execution. In
-          // production the maintenance abort throws here and releases the same
-          // row; test contexts without a signal may continue until they make a
-          // durable unit of progress.
-          context.throwIfAborted?.();
-        }
-
-        try {
-          await importJunctionTimeseriesResourceSnapshot({
-            context,
-            dateQueryFormat: "datetime",
-            resource,
-            skippedOptionalResources,
-            sourceProviderSlug,
-            sourceProviders,
-            windowEnd: window.windowEnd,
-            windowStart: window.windowStart,
-          });
-        } catch (error) {
-          const timeseriesResourceCursor =
-            encodeJunctionTimeseriesCompletedResources(completedResources);
-          if (isJunctionJobSignalAbort(error, context.signal)) {
-            if (madeProgress) {
-              return {
-                madeProgress: true,
-                timeseriesResourceCursor,
-                yieldedAt: window.windowStart,
-              };
-            }
-            throw error;
-          }
-          if (isRetryableDeviceSyncFailure(error)) {
-            throw new JunctionTimeseriesProgressError(
-              error,
-              window.windowStart,
-              null,
-              {
-                timeseriesPhase: "wide",
-                timeseriesResourceCursor,
-              },
-            );
-          }
-          throw error;
-        }
-        completedResources.add(resource);
-        madeProgress = true;
-      }
-
-      // The completed-resource set is scoped to one exact window. Reaching the
-      // next window is itself strict progress, even when an incoming cursor
-      // already named every resource in this window.
-      resumeCompletedResources = new Set();
-      madeProgress = true;
-    }
-    return {
-      madeProgress,
-      timeseriesResourceCursor: null,
-      yieldedAt: null,
-    };
-  }
-
   async function importTimeseriesDailySnapshots(
     context: ProviderJobContext,
     sourceProviders: readonly JunctionProviderConnection[],
@@ -3653,6 +3549,15 @@ export function createJunctionDeviceSyncProvider(
     if (!resource || !timeseriesCursor) {
       throw invalidJunctionTimeseriesResourceProgress();
     }
+    const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+    if (
+      (timeseriesWindowHours === 1
+        && policy?.normalizationMode !== "hourly_or_session_feature")
+      || (resource !== "workout_stream"
+        && job.payload.workoutStreamCursor !== undefined)
+    ) {
+      throw invalidJunctionTimeseriesResourceProgress();
+    }
 
     const executionWindowEnd = new Date(Math.min(
       Date.parse(timeseriesCursor) + timeseriesWindowHours * TIMESERIES_HOUR_MS,
@@ -3689,12 +3594,21 @@ export function createJunctionDeviceSyncProvider(
         }
       } catch (error) {
         if (error instanceof JunctionTimeseriesProgressError) {
-          throw new JunctionTimeseriesProgressError(
-            error.failure,
-            timeseriesCursor,
-            error.workoutStreamCursor,
-            { timeseriesResourceCursor: resource },
-          );
+          if (!error.workoutStreamCursor) {
+            throw error.failure;
+          }
+          return buildFullJobTimeseriesContinuationResult({
+            context,
+            job,
+            skippedOptionalResources,
+            continuation: {
+              timeseriesCursor,
+              timeseriesResourceCursor: resource,
+              timeseriesWindowHours,
+              workoutStreamCursor: error.workoutStreamCursor,
+            },
+            window,
+          });
         }
         throw error;
       }
@@ -3711,7 +3625,6 @@ export function createJunctionDeviceSyncProvider(
           windowStart: timeseriesCursor,
         });
       } catch (error) {
-        const policy = resolveJunctionTimeseriesResourcePolicy(resource);
         if (
           isJunctionTimeseriesWindowTooLarge(error)
           && timeseriesWindowHours === 24
@@ -4290,7 +4203,11 @@ export function createJunctionDeviceSyncProvider(
         ...followUp,
         payload: {
           ...followUp.payload,
-          ...(emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}),
+          ...(input.emptyBackfillAttempts === undefined
+            ? emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}
+            : input.emptyBackfillAttempts > 0
+              ? { emptyBackfillAttempts: input.emptyBackfillAttempts }
+              : {}),
           timeseriesCursor: cursor,
           ...(input.timeseriesPhase ? { timeseriesPhase: input.timeseriesPhase } : {}),
           ...(input.timeseriesResourceCursor
@@ -6830,92 +6747,6 @@ function readDeferredEmptyBackfillAttempts(
   return 0;
 }
 
-function readJunctionTimeseriesPhase(
-  job: DeviceSyncJobRecord,
-): JunctionTimeseriesProgressPhase | null {
-  const phase = job.payload.timeseriesPhase;
-  if (phase === "wide" || phase === "dense") {
-    if (phase === "wide" && job.payload.workoutStreamCursor !== undefined) {
-      throw invalidJunctionTimeseriesResourceProgress();
-    }
-    return phase;
-  }
-  if (phase !== undefined) {
-    throw invalidJunctionTimeseriesResourceProgress();
-  }
-  if (job.payload.timeseriesResourceCursor !== undefined) {
-    throw invalidJunctionTimeseriesResourceProgress();
-  }
-  // Payloads created before resource-level progress existed can still carry a
-  // workout cursor. That cursor can only belong to the dense daily phase.
-  return job.payload.workoutStreamCursor === undefined ? null : "dense";
-}
-
-function readJunctionTimeseriesCompletedResources(input: {
-  denseResources: readonly string[];
-  job: DeviceSyncJobRecord;
-  phase: JunctionTimeseriesProgressPhase | null;
-  wideResources: readonly string[];
-}): ReadonlySet<string> {
-  if (
-    input.job.payload.workoutStreamCursor !== undefined
-    && !input.denseResources.includes("workout_stream")
-  ) {
-    throw invalidJunctionTimeseriesResourceProgress();
-  }
-
-  const encoded = input.job.payload.timeseriesResourceCursor;
-  if (encoded === undefined) {
-    return new Set();
-  }
-  if (typeof encoded !== "string" || encoded.length === 0 || input.phase === null) {
-    throw invalidJunctionTimeseriesResourceProgress();
-  }
-
-  const configuredResources = input.phase === "wide"
-    ? input.wideResources
-    : input.denseResources;
-  const configuredResourceSet = new Set(configuredResources);
-  if (configuredResourceSet.size !== configuredResources.length) {
-    throw new TypeError("Junction timeseries resource policy contained duplicates.");
-  }
-
-  let parsedValue: unknown;
-  try {
-    parsedValue = JSON.parse(encoded);
-  } catch {
-    throw invalidJunctionTimeseriesResourceProgress();
-  }
-  const parsed = readPlainObject(parsedValue);
-  const identities = parsed?.i;
-  if (
-    !parsed
-    || parsed.v !== JUNCTION_TIMESERIES_RESOURCE_PROGRESS_VERSION
-    || Object.keys(parsed).some((key) => key !== "i" && key !== "v")
-    || !Array.isArray(identities)
-    || identities.length === 0
-    || identities.length > configuredResources.length
-    || !identities.every(
-      (identity): identity is string =>
-        typeof identity === "string" && configuredResourceSet.has(identity),
-    )
-  ) {
-    throw invalidJunctionTimeseriesResourceProgress();
-  }
-
-  const sortedIdentities = [...identities].sort();
-  if (
-    new Set(sortedIdentities).size !== sortedIdentities.length
-    || JSON.stringify({
-      v: JUNCTION_TIMESERIES_RESOURCE_PROGRESS_VERSION,
-      i: sortedIdentities,
-    }) !== encoded
-  ) {
-    throw invalidJunctionTimeseriesResourceProgress();
-  }
-  return new Set(sortedIdentities);
-}
-
 function readBackfillTimeseriesCursor(
   job: DeviceSyncJobRecord,
   ownerWindow: { windowStart: string; windowEnd: string },
@@ -7093,6 +6924,52 @@ function hasJunctionHistoricalBackfillSummaryRecords(
   return evidence.some(({ resource }) =>
     isJunctionHistoricalBackfillCompletionSummaryResource(resource)
   );
+}
+
+type JunctionHistoricalPullReadiness =
+  | "no_obligation"
+  | "pending"
+  | "ready"
+  | "terminal_failure"
+  | "unavailable";
+
+function resolveJunctionHistoricalPullReadiness(input: {
+  resource: string;
+  snapshot: JunctionHistoricalPullSnapshot | null;
+  sourceProviderSlug: string | null;
+}): JunctionHistoricalPullReadiness {
+  const sourceProviderSlug =
+    canonicalizeJunctionHistoricalProviderSlug(input.sourceProviderSlug)
+    ?? normalizeProviderSlug(input.sourceProviderSlug);
+  if (!sourceProviderSlug || !input.snapshot?.matchedUser) {
+    return "unavailable";
+  }
+  const source = input.snapshot.sources.find((entry) => (
+    canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug)
+    ?? normalizeProviderSlug(entry.sourceProviderSlug)
+  ) === sourceProviderSlug);
+  if (!source) {
+    return "unavailable";
+  }
+  const pulled = source.pulledResources.find((entry) =>
+    normalizeJunctionResourceName(entry.resource) === input.resource
+  );
+  if (pulled) {
+    if (pulled.status === "success") {
+      return "ready";
+    }
+    if (pulled.status === "failure") {
+      return "terminal_failure";
+    }
+    return ["in_progress", "retrying", "scheduled"].includes(pulled.status)
+      ? "pending"
+      : "unavailable";
+  }
+  return source.notPulledResources.some((resource) =>
+      normalizeJunctionResourceName(resource) === input.resource
+    )
+    ? "no_obligation"
+    : "unavailable";
 }
 
 function evaluateJunctionHistoricalBackfillCoverage(

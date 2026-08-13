@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_TIMESERIES_RESOURCES,
 } from "@murphai/contracts";
 import {
   cloneConfiguredDeviceSyncRuntimeConfig,
@@ -105,35 +106,8 @@ describe("deviceSyncProviderManifests", () => {
   });
 
   it("activates the exact code-owned production timeseries list", () => {
-    expect([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]).toEqual([
-      ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-      "body_mass_index",
-      "calories_basal",
-      "carbohydrates",
-      "daylight_exposure",
-      "electrocardiogram_voltage",
-      "fall",
-      "fat",
-      "floors_climbed",
-      "forced_expiratory_volume_1",
-      "forced_vital_capacity",
-      "handwashing",
-      "heart_rate_alert",
-      "inhaler_usage",
-      "insulin_injection",
-      "lean_body_mass",
-      "peak_expiratory_flow_rate",
-      "sleep_apnea_alert",
-      "stand_duration",
-      "stand_hour",
-      "uv_exposure",
-      "waist_circumference",
-      "wheelchair_push",
-      "workout_distance",
-      "workout_duration",
-      "workout_stream",
-      "workout_swimming_stroke",
-    ]);
+    expect([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES])
+      .toEqual([...JUNCTION_TIMESERIES_RESOURCES]);
     const configs = readConfiguredDeviceSyncProviderConfigs({
       JUNCTION_API_KEY: "sk_us_test_manifest",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
@@ -283,6 +257,7 @@ describe("deviceSyncProviderManifests", () => {
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
         timeseriesPhase: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
         workoutStreamCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
@@ -292,6 +267,7 @@ describe("deviceSyncProviderManifests", () => {
       payload: {
         timeseriesPhase: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
         workoutStreamCursor: { kind: "string", includeInHostedHint: true },
       },
     });
@@ -895,9 +871,9 @@ describe("Junction opt-in timeseries configuration", () => {
     region: "us" as const,
   };
 
-  it("keeps defaults unchanged when no code-owned override is supplied", () => {
+  it("requests every canonical resource when configuration is omitted", () => {
     expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
-      .toEqual(JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
+      .toEqual(JUNCTION_TIMESERIES_RESOURCES);
   });
 
   it("preserves an explicit only-opt-in list exactly", () => {
