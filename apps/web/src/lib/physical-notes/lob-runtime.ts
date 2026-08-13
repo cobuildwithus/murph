@@ -13,11 +13,13 @@ import {
   MailType,
 } from "@lob/lob-typescript-sdk";
 import type {
+  HostedPhysicalNoteFailureReason,
   HostedPhysicalNoteRecipient,
 } from "@murphai/hosted-execution/physical-notes";
 
 const LOB_API_BASE_URL = "https://api.lob.com";
 const LOB_API_VERSION = "2024-01-01";
+const LOB_ERROR_RESPONSE_MAX_BYTES = 16 * 1_024;
 const LOB_LOOKUP_TIMEOUT_MS = 5_000;
 const LOB_REQUEST_TIMEOUT_MS = 30_000;
 const PHYSICAL_NOTE_METADATA_KEY = "murph_physical_note_id";
@@ -39,6 +41,7 @@ export type LobPhysicalNoteCreateResult =
     }
   | {
       kind: "definite_failure";
+      reason: HostedPhysicalNoteFailureReason;
       status: number;
     }
   | {
@@ -109,8 +112,12 @@ export function createLobPhysicalNoteRuntime(input: {
           : { kind: "ambiguous_failure" };
       } catch (error) {
         const status = readLobHttpStatus(error);
-        return status !== null && status < 500
-          ? { kind: "definite_failure", status }
+        return status !== null && status !== 408 && status < 500
+          ? {
+              kind: "definite_failure",
+              reason: readLobHttpFailureReason(error),
+              status,
+            }
           : { kind: "ambiguous_failure" };
       }
     },
@@ -179,11 +186,13 @@ class UsLetterEditable extends LetterEditable {
 }
 
 class LobHttpStatusError extends Error {
+  readonly reason: HostedPhysicalNoteFailureReason;
   readonly status: number;
 
-  constructor(status: number) {
+  constructor(status: number, reason: HostedPhysicalNoteFailureReason) {
     super("Lob request failed.");
     this.name = "LobHttpStatusError";
+    this.reason = reason;
     this.status = status;
   }
 }
@@ -262,8 +271,13 @@ function createLobFetchAdapter(
     const response = await fetchImpl(url, requestInit);
 
     if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new LobHttpStatusError(response.status);
+      const reason = response.status !== 408 && response.status < 500
+        ? await readLobFailureReason(response)
+        : "unknown";
+      if (response.status === 408 || response.status >= 500) {
+        await response.body?.cancel().catch(() => undefined);
+      }
+      throw new LobHttpStatusError(response.status, reason);
     }
 
     const data: unknown = await response.json();
@@ -337,6 +351,10 @@ function readLobHttpStatus(value: unknown): number | null {
   return value instanceof LobHttpStatusError ? value.status : null;
 }
 
+function readLobHttpFailureReason(value: unknown): HostedPhysicalNoteFailureReason {
+  return value instanceof LobHttpStatusError ? value.reason : "unknown";
+}
+
 function readLobLetterId(value: unknown): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -345,6 +363,127 @@ function readLobLetterId(value: unknown): string | null {
   return typeof id === "string" && /^ltr_[A-Za-z0-9]+$/u.test(id)
     ? id
     : null;
+}
+
+async function readLobFailureReason(
+  response: Response,
+): Promise<HostedPhysicalNoteFailureReason> {
+  const payload = await readLobFailurePayload(response);
+  if (payload === null) {
+    return "unknown";
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return "unknown";
+  }
+  const error = Reflect.get(payload, "error");
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return "unknown";
+  }
+  const code = Reflect.get(error, "code");
+  if (typeof code !== "string") {
+    return "unknown";
+  }
+
+  switch (code.toLowerCase()) {
+    case "address_length_exceeds_limit":
+    case "failed_deliverability_strictness":
+      return "recipient_address";
+    case "file_size_exceeds_limit":
+    case "invalid_image_dpi":
+      return "artwork";
+    case "billing_address_required":
+    case "custom_envelope_inventory_depleted":
+    case "email_required":
+    case "feature_limit_reached":
+    case "foreign_return_address":
+    case "invalid_api_key":
+    case "invalid_country_covid":
+    case "invalid_file_download_time":
+    case "invalid_file_url":
+    case "not_found":
+    case "payment_method_unverified":
+    case "publishable_key_not_allowed":
+    case "rate_limit_exceeded":
+    case "unauthorized":
+    case "unauthorized_token":
+      return "service_unavailable";
+    case "bad_request":
+    case "conflict":
+    case "file_pages_below_min":
+    case "file_pages_exceed_max":
+    case "inconsistent_page_dimensions":
+    case "invalid":
+    case "invalid_file":
+    case "invalid_file_dimensions":
+    case "invalid_international_feature":
+    case "invalid_perforation_return_envelope":
+    case "invalid_template_html":
+    case "mail_use_type_can_not_be_null":
+    case "merge_variable_required":
+    case "merge_variable_whitespace":
+    case "pdf_encrypted":
+    case "special_characters_restricted":
+    case "unembedded_fonts":
+    case "unrecognized_endpoint":
+    case "unsupported_lob_version":
+      return "request_invalid";
+    default:
+      return "unknown";
+  }
+}
+
+async function readLobFailurePayload(response: Response): Promise<unknown | null> {
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+
+  const contentLength = response.headers.get("content-length");
+  if (
+    contentLength !== null
+    && /^\d+$/u.test(contentLength.trim())
+    && Number(contentLength) > LOB_ERROR_RESPONSE_MAX_BYTES
+  ) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+
+  if (!response.body) {
+    return null;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      totalBytes += value.byteLength;
+      if (totalBytes > LOB_ERROR_RESPONSE_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
 }
 
 function readLobLetterLookup(value: unknown): LobPhysicalNoteLookupResult | null {

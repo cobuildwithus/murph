@@ -17,6 +17,7 @@ import {
   HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -25,10 +26,26 @@ import {
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliveryRecord,
-  parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   parseHostedVaultShareDeliverResponse,
+  parseHostedVaultShareEffectDeadlineAtEpochMs,
   parseHostedVaultShareProjectionScopeKey,
 } from "../src/vault-share.ts";
+
+const TEST_SOURCE_WORKSPACE_VERSION = "7";
+
+function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
+  const {
+    expectedGenerationToken: _generationToken,
+    sourceWorkspaceVersion: _sourceWorkspaceVersion,
+    ...request
+  } = parseHostedVaultShareDeliverRequestContract({
+    expectedGenerationToken: GENERATION_TOKEN,
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    ...value,
+  });
+  return request;
+}
 
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const ACTIVITY_SCOPE = { projectionKind: "activity-days.v0" } as const;
@@ -69,6 +86,7 @@ const VALID_RECORD = {
   occurredAt: "2026-06-09T00:00:00.000Z",
   recordKey: "2026-06-09",
 };
+const GENERATION_TOKEN = "a".repeat(43);
 
 const VALID_ACTIVITY_RECORD = {
   data: {
@@ -228,6 +246,43 @@ const VALID_REVOKE = {
 };
 
 describe("vault-share contracts", () => {
+  it("parses only an exact millisecond effect deadline header", () => {
+    expect(parseHostedVaultShareEffectDeadlineAtEpochMs("1786543200000")).toBe(
+      1_786_543_200_000,
+    );
+    expect(() => parseHostedVaultShareEffectDeadlineAtEpochMs(null)).toThrow(
+      "effect deadline header is invalid",
+    );
+    expect(() => parseHostedVaultShareEffectDeadlineAtEpochMs("178654320000")).toThrow(
+      "effect deadline header is invalid",
+    );
+  });
+
+  it("requires one canonical source workspace version per replacement", () => {
+    expect(parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: GENERATION_TOKEN,
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    })).toMatchObject({
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
+
+    for (const sourceWorkspaceVersion of [
+      undefined,
+      "-1",
+      "07",
+      "9223372036854775808",
+    ]) {
+      expect(() => parseHostedVaultShareDeliverRequestContract({
+        expectedGenerationToken: GENERATION_TOKEN,
+        projectionKind: "sleep-times.v0",
+        records: [VALID_RECORD],
+        sourceWorkspaceVersion,
+      })).toThrow(/sourceWorkspaceVersion/u);
+    }
+  });
+
   it("registers vault-share kinds in the mailbox kind registry", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.delivery");
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");
@@ -379,6 +434,37 @@ describe("vault-share contracts", () => {
     expect(parsed.records).toEqual([VALID_RECORD]);
     expect(parsed.projectionKind).toBe("sleep-times.v0");
     expect(parsed.projectionScope).toEqual(SLEEP_SCOPE);
+  });
+
+  it("parses only fixed-width opaque share-generation tokens", () => {
+    const expectedGenerationToken = "a".repeat(43);
+    expect(parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken,
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    }).expectedGenerationToken).toBe(expectedGenerationToken);
+
+    for (const invalidToken of ["short", "a".repeat(44), `${"a".repeat(42)}/`]) {
+      expect(() => parseHostedVaultShareDeliverRequest({
+        expectedGenerationToken: invalidToken,
+        projectionKind: "sleep-times.v0",
+        records: [VALID_RECORD],
+      })).toThrow(/SHA-256 base64url digest/u);
+    }
+    expect(() => parseHostedVaultShareDeliverRequest({
+      expectedGenerationToken: "",
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+    })).toThrow(/non-empty string/u);
+  });
+
+  it("rejects a deliver request without generation proof", () => {
+    expect(() => parseHostedVaultShareDeliverRequestContract({
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    })).toThrow(/expectedGenerationToken/u);
   });
 
   it("parses an optional opaque source revision", () => {
@@ -598,6 +684,25 @@ describe("vault-share contracts", () => {
     ).toThrow(/delivered or no-active-share/u);
   });
 
+  it("parses only the exact first-materialization delivery mode", () => {
+    expect(parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: "a".repeat(43),
+      projectionKind: "sleep-times.v0",
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    })).toEqual(expect.objectContaining({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    }));
+    expect(() => parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: "a".repeat(43),
+      projectionKind: "sleep-times.v0",
+      projectionMode: "refresh-all",
+      records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    })).toThrow(/first-materialization/u);
+  });
+
   it("deduplicates supported active projection-kind responses and rejects unknown values", () => {
     const runningScope = {
       projectionKind: "activity-minutes-days.v1",
@@ -615,6 +720,7 @@ describe("vault-share contracts", () => {
         runningScope,
       ],
     })).toEqual({
+      hasDeferredProjectionWork: false,
       projectionKinds: ["profile-name.v0", "activity-days.v0"],
       projectionScopes: [PROFILE_SCOPE, runningScope],
     });
@@ -633,6 +739,70 @@ describe("vault-share contracts", () => {
         projectionScopes: [{ projectionKind: "future-challenge-kind.v0" }],
       })
     ).toThrow(/known vault-share projection kind/u);
+  });
+
+  it("parses only opaque tokens for active projection scopes", () => {
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
+    const generationToken = "b".repeat(43);
+    expect(parseHostedVaultShareActiveProjectionKindsResponse({
+      generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toEqual({
+      generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      hasDeferredProjectionWork: false,
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    });
+
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      generationTokensByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: generationToken,
+      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/inactive scope key/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      generationTokensByProjectionScopeKey: { [scopeKey]: "not-a-digest" },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/SHA-256 base64url digest/u);
+  });
+
+  it("parses the fixed-width deferred-work signal and rejects non-booleans", () => {
+    expect(parseHostedVaultShareActiveProjectionKindsResponse({
+      hasDeferredProjectionWork: true,
+      projectionKinds: [],
+      projectionScopes: [],
+    })).toEqual({
+      hasDeferredProjectionWork: true,
+      projectionKinds: [],
+      projectionScopes: [],
+    });
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      hasDeferredProjectionWork: "yes",
+      projectionKinds: [],
+      projectionScopes: [],
+    })).toThrow(/boolean/u);
+  });
+
+  it("requires exact first-materialization acknowledgment", () => {
+    expect(parseHostedVaultShareActiveProjectionKindsResponse({
+      hasDeferredProjectionWork: false,
+      projectionKinds: [],
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScopes: [],
+    })).toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: [],
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScopes: [],
+    });
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      projectionKinds: [],
+      projectionMode: "first-materialization-v2",
+      projectionScopes: [],
+    })).toThrow(/first-materialization/u);
   });
 
   it("parses exact projection scope keys for capability negotiation", () => {

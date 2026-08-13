@@ -160,7 +160,7 @@ describe("Lob physical-note runtime", () => {
     }
   });
 
-  it("normalizes definite provider rejections to their status only", async () => {
+  it("normalizes bodyless provider rejections to a safe reason", async () => {
     const cancel = vi.fn();
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response(
       new ReadableStream({ cancel }),
@@ -187,6 +187,7 @@ describe("Lob physical-note runtime", () => {
       },
     })).resolves.toEqual({
       kind: "definite_failure",
+      reason: "unknown",
       status: 422,
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
@@ -228,6 +229,134 @@ describe("Lob physical-note runtime", () => {
     } finally {
       timeoutSpy.mockRestore();
     }
+  });
+
+  it.each([
+    ["address_length_exceeds_limit", "recipient_address"],
+    ["failed_deliverability_strictness", "recipient_address"],
+    ["file_size_exceeds_limit", "artwork"],
+    ["invalid_image_dpi", "artwork"],
+    ["billing_address_required", "service_unavailable"],
+    ["custom_envelope_inventory_depleted", "service_unavailable"],
+    ["email_required", "service_unavailable"],
+    ["feature_limit_reached", "service_unavailable"],
+    ["foreign_return_address", "service_unavailable"],
+    ["invalid_api_key", "service_unavailable"],
+    ["invalid_country_covid", "service_unavailable"],
+    ["invalid_file_download_time", "service_unavailable"],
+    ["invalid_file_url", "service_unavailable"],
+    ["not_found", "service_unavailable"],
+    ["payment_method_unverified", "service_unavailable"],
+    ["publishable_key_not_allowed", "service_unavailable"],
+    ["rate_limit_exceeded", "service_unavailable"],
+    ["unauthorized", "service_unavailable"],
+    ["unauthorized_token", "service_unavailable"],
+    ["bad_request", "request_invalid"],
+    ["conflict", "request_invalid"],
+    ["file_pages_below_min", "request_invalid"],
+    ["file_pages_exceed_max", "request_invalid"],
+    ["inconsistent_page_dimensions", "request_invalid"],
+    ["invalid", "request_invalid"],
+    ["invalid_file", "request_invalid"],
+    ["invalid_file_dimensions", "request_invalid"],
+    ["invalid_international_feature", "request_invalid"],
+    ["invalid_perforation_return_envelope", "request_invalid"],
+    ["invalid_template_html", "request_invalid"],
+    ["mail_use_type_can_not_be_null", "request_invalid"],
+    ["merge_variable_required", "request_invalid"],
+    ["merge_variable_whitespace", "request_invalid"],
+    ["pdf_encrypted", "request_invalid"],
+    ["special_characters_restricted", "request_invalid"],
+    ["unembedded_fonts", "request_invalid"],
+    ["unrecognized_endpoint", "request_invalid"],
+    ["unsupported_lob_version", "request_invalid"],
+    ["future_provider_code", "unknown"],
+  ] as const)(
+    "maps Lob rejection code %s to safe reason %s",
+    async (code, reason) => {
+      const runtime = createLobPhysicalNoteRuntime({
+        apiKey: "test_key",
+        fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
+          error: {
+            code,
+            message: "private provider detail must not cross the boundary",
+            status_code: 422,
+          },
+        }, { status: 422 })),
+        fromAddressId: "adr_from",
+      });
+
+      await expect(runtime.create({
+        artworkUrl: "https://media.example.test/artwork",
+        idempotencyKey: "hpn_rejected",
+        noteId: "hpn_rejected",
+        recipient: {
+          addressLine1: "123 Main St",
+          city: "Atlanta",
+          name: "Sam",
+          postalCode: "30308",
+          state: "GA",
+        },
+      })).resolves.toEqual({
+        kind: "definite_failure",
+        reason,
+        status: 422,
+      });
+    },
+  );
+
+  it("keeps a timed-out HTTP outcome ambiguous", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
+        error: {
+          code: "request_timeout",
+          message: "request timed out",
+          status_code: 408,
+        },
+      }, { status: 408 })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.create({
+      artworkUrl: "https://media.example.test/artwork",
+      idempotencyKey: "hpn_timeout_response",
+      noteId: "hpn_timeout_response",
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+    })).resolves.toEqual({ kind: "ambiguous_failure" });
+  });
+
+  it("uses an unknown safe reason for malformed rejection payloads", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => new Response("not json", {
+        status: 422,
+      })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.create({
+      artworkUrl: "https://media.example.test/artwork",
+      idempotencyKey: "hpn_malformed_rejection",
+      noteId: "hpn_malformed_rejection",
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+    })).resolves.toEqual({
+      kind: "definite_failure",
+      reason: "unknown",
+      status: 422,
+    });
   });
 
   it("finds an accepted letter through Lob's exact metadata filter", async () => {

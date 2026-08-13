@@ -16,6 +16,7 @@ import { test } from "vitest";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 
 import { DeviceSyncError } from "../src/errors.ts";
+import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -3031,13 +3032,16 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      const data = new URL(url).searchParams.get("start_date") === "2026-04-02"
+        ? [{
+            start: "2026-04-02T12:00:00.000Z",
+            value: 97,
+          }]
+        : [];
       return createJsonResponse({
         groups: {
           garmin: [{
-            data: [{
-              start: "2026-04-02T12:00:00.000Z",
-              value: 97,
-            }],
+            data,
             source: { provider: "garmin", type: "watch" },
           }],
         },
@@ -3548,6 +3552,9 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse({
         groups: {
           garmin: [{
@@ -4768,8 +4775,15 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     true,
   );
   assert.equal(
-    scheduledResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
-    "v1|garmin,omron",
+    ["garmin", "omron"].every((providerSlug) =>
+      hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        scheduledResult.metadataPatch ?? {},
+        providerSlug,
+        "blood_pressure",
+        1,
+      )
+    ),
+    true,
   );
 });
 
@@ -7303,6 +7317,30 @@ test("Junction scheduled polling uses stable closed-day windows", () => {
   assert.equal(derivedBackfill?.dedupeKey, second?.jobs[1]?.dedupeKey);
 });
 
+test("Junction reconcile cadence cannot schedule faster than once per minute", () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    { reconcileIntervalMs: 1 },
+  );
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+
+  const scheduled = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
+      },
+    }),
+    "2026-04-03T12:34:56.000Z",
+  );
+
+  assert.equal(scheduled?.nextReconcileAt, "2026-04-03T12:35:56.000Z");
+});
+
 test("Junction scheduled pass repairs legacy coverage and honors current or future terminal status", () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);
@@ -9312,6 +9350,9 @@ test("Junction polling updates source projection and imports bounded summary/tim
 
     const timeseriesResource = new URL(url).pathname.match(/\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
     if (timeseriesResource && timeseriesResource in groupedTimeseriesPayloads) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse(groupedTimeseriesPayloads[timeseriesResource]);
     }
 

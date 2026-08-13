@@ -10,12 +10,14 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   hostedVaultShareProjectionKindToScope,
   isHostedVaultShareFixedProjectionKind,
+  isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeviceSyncSource,
@@ -63,6 +65,10 @@ import {
   readActiveHostedVaultShareProjectionScopes,
   revokeHostedVaultSharesTx,
 } from "../hosted-vault-share/share-grant-store";
+import {
+  appendHostedVaultShareProjectionMaintenanceTx,
+  type HostedVaultShareProjectionMaintenanceSignal,
+} from "../hosted-vault-share/projection-maintenance";
 import {
   decryptHostedVaultShareProjectionSnapshots,
   type HostedVaultShareProjectionSnapshotEntry,
@@ -152,7 +158,11 @@ export interface HostedGroupJoinAcceptanceResult {
 export interface HostedGroupJoinAcceptanceTxResult
   extends HostedGroupJoinAcceptanceResult {
   joinConfirmationSignal?: HostedGroupJoinConfirmationSignal;
+  projectionMaintenanceSignal?: HostedGroupProjectionMaintenanceSignal;
 }
+
+export type HostedGroupProjectionMaintenanceSignal =
+  HostedVaultShareProjectionMaintenanceSignal;
 
 export interface HostedGroupJoinOfferBindingTxResult {
   groupId: string;
@@ -208,7 +218,8 @@ export type HostedGroupMemberLeaveSelector =
   | { joinCode: string; membershipId?: never }
   | { joinCode?: never; membershipId: string };
 
-export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
+export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION =
+  HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 export const HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX = 64;
 
@@ -1002,8 +1013,9 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           }
 
           const grantScopeKey = grant.projectionScopeKey;
+          const hasReadableShare = readableGrantIds.has(grant.id);
           const records = projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
-            ? readableGrantIds.has(grant.id)
+            ? hasReadableShare
               ? [buildHostedGroupSharedDeviceSyncRecord({
                   connections: connectionsByMember.get(memberId) ?? [],
                   now,
@@ -1018,9 +1030,11 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
               )
             : records ?? [];
           return {
-            dataStatus: normalizedRecords.length > 0
-              ? "available" as const
-              : "missing" as const,
+            dataStatus: hasReadableShare && records === null
+              ? "pending" as const
+              : normalizedRecords.length > 0
+                ? "available" as const
+                : "missing" as const,
             grantedAt: grant.grantedAt.toISOString(),
             grantStatus: "granted" as const,
             projectionScope,
@@ -2115,11 +2129,15 @@ async function acceptHostedGroupJoinTx(input: {
   const revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[] = [];
   const revokedVaultShareProjectionScopes: HostedVaultShareProjectionScope[] = [];
-  await grantHostedGroupMembershipProfileNameTx(input.tx, {
+  const projectionGrantIds: string[] = [];
+  const profileNameGrant = await grantHostedGroupMembershipProfileNameTx(input.tx, {
     groupRuntimeMemberId: group.runtimeMemberId,
     memberId: input.memberId,
     now: input.now,
   });
+  if (profileNameGrant.requiresProjection) {
+    projectionGrantIds.push(profileNameGrant.id);
+  }
   grantedVaultShareProjectionKinds.push("profile-name.v0");
   grantedVaultShareProjectionScopes.push(hostedVaultShareProjectionKindToScope("profile-name.v0"));
   if (requestedProjectionScopes.length > 0) {
@@ -2148,13 +2166,19 @@ async function acceptHostedGroupJoinTx(input: {
           grantorMemberId: input.memberId,
           projectionScope,
         });
-        await grantHostedVaultShareTx({
+        const grant = await grantHostedVaultShareTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
           projectionScope,
+          ...(isHostedVaultShareRecentDateProjectionKind(projectionScope.projectionKind)
+            ? { refreshMaterializedProjection: true }
+            : {}),
           tx: input.tx,
         });
+        if (grant.requiresProjection) {
+          projectionGrantIds.push(grant.id);
+        }
         grantedVaultShareProjectionKinds.push(projectionScope.projectionKind);
         grantedVaultShareProjectionScopes.push(projectionScope);
       } else if (!input.additiveOnly) {
@@ -2215,6 +2239,13 @@ async function acceptHostedGroupJoinTx(input: {
   const joinConfirmationSignal = joinConfirmationResult?.kind === "appended"
     ? joinConfirmationResult.signal
     : null;
+  const projectionMaintenanceSignal = projectionGrantIds.length > 0
+    ? await appendHostedVaultShareProjectionMaintenanceTx({
+        grantIds: projectionGrantIds,
+        memberId: input.memberId,
+        tx: input.tx,
+      })
+    : null;
 
   return {
     alreadyMember,
@@ -2223,6 +2254,7 @@ async function acceptHostedGroupJoinTx(input: {
     groupId: group.id,
     ...(joinConfirmationSignal ? { joinConfirmationSignal } : {}),
     membershipId,
+    ...(projectionMaintenanceSignal ? { projectionMaintenanceSignal } : {}),
     revokedVaultShareProjectionKinds,
     revokedVaultShareProjectionScopes,
   };
@@ -2521,8 +2553,8 @@ function fixedProjectionKindsToScopes(
 async function grantHostedGroupMembershipProfileNameTx(
   tx: Prisma.TransactionClient,
   input: { groupRuntimeMemberId: string; memberId: string; now: Date },
-): Promise<void> {
-  await grantHostedGroupMembershipProjectionTx(tx, {
+): ReturnType<typeof grantHostedVaultShareTx> {
+  return grantHostedGroupMembershipProjectionTx(tx, {
     ...input,
     projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
   });
@@ -2536,13 +2568,13 @@ async function grantHostedGroupMembershipProjectionTx(
     now: Date;
     projectionScope: HostedVaultShareProjectionScope;
   },
-): Promise<void> {
+): ReturnType<typeof grantHostedVaultShareTx> {
   await assertHostedGroupVaultShareGrantLimitTx(tx, {
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     projectionScope: input.projectionScope,
   });
-  await grantHostedVaultShareTx({
+  return grantHostedVaultShareTx({
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     now: input.now,
