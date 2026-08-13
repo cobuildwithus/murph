@@ -2510,26 +2510,22 @@ test("Junction sparse calendar refresh rejects lossy collection parsing before c
   }
 });
 
-test("Junction sparse calendar refresh admits supported Apple Health group spellings", async () => {
-  for (const source of [{
-    groupedSourceSlug: "apple_health_kit",
-    jobSourceProviderSlug: "apple_health_kit",
-  }, {
-    groupedSourceSlug: "apple_health",
-    jobSourceProviderSlug: "apple_health",
-  }, {
-    groupedSourceSlug: "apple-healthkit",
-    jobSourceProviderSlug: "apple_healthkit",
-  }]) {
+test("Junction sparse calendar refresh admits the Apple Health alias cross-product", async () => {
+  const appleHealthSlugs = ["apple_health_kit", "apple_health", "apple-healthkit"];
+  for (const jobSourceProviderSlug of appleHealthSlugs) {
+    for (const listedSourceProviderSlug of appleHealthSlugs) {
+      for (const groupedSourceSlug of appleHealthSlugs) {
+    const requests: string[] = [];
     const provider = createJunctionProvider(async (input) => {
       const url = readUrl(input);
+      requests.push(url);
       if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
         return createJsonResponse({
           providers: [{
             id: "provider-apple-health-1",
             name: "Apple Health",
             resource_availability: { water: true },
-            slug: source.jobSourceProviderSlug,
+            slug: listedSourceProviderSlug,
             status: "connected",
           }],
         });
@@ -2547,7 +2543,7 @@ test("Junction sparse calendar refresh admits supported Apple Health group spell
               }],
               source: { provider: "fitbit", type: "watch" },
             }],
-            [source.groupedSourceSlug]: [{
+            [groupedSourceSlug]: [{
               data: [{
                 calendarDate: "2026-04-02",
                 end: "2026-04-02T08:01:00.000Z",
@@ -2555,7 +2551,7 @@ test("Junction sparse calendar refresh admits supported Apple Health group spell
                 start: "2026-04-02T08:00:00.000Z",
                 value: 250,
               }],
-              source: { provider: source.groupedSourceSlug, type: "phone" },
+              source: { provider: groupedSourceSlug, type: "phone" },
             }],
           },
         });
@@ -2567,6 +2563,20 @@ test("Junction sparse calendar refresh admits supported Apple Health group spell
     await executeJunctionJob(
       provider,
       createJunctionJobContext({
+        account: createAccount({
+          sources: [{
+            sourceProviderSlug: listedSourceProviderSlug,
+            displayName: "Apple Health",
+            status: "connected",
+            resourceCount: 1,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            firstSeenAt: "2026-04-01T00:00:00.000Z",
+            lastSeenAt: "2026-04-03T00:00:00.000Z",
+            lastDataAt: null,
+          }],
+        }),
+        connectionSourceAdmissionMode: "listed_only",
         now: "2026-04-03T12:00:00.000Z",
         importSnapshot: async (snapshot) => {
           importedSnapshots.push(snapshot);
@@ -2585,7 +2595,7 @@ test("Junction sparse calendar refresh admits supported Apple Health group spell
         calendarRefreshDay: "2026-04-02",
         resource: "water",
         resourceCategory: "timeseries",
-        sourceProviderSlug: source.jobSourceProviderSlug,
+        sourceProviderSlug: jobSourceProviderSlug,
         sourceType: "phone",
       }),
     );
@@ -2593,9 +2603,19 @@ test("Junction sparse calendar refresh admits supported Apple Health group spell
     const records = (importedSnapshots[0] as {
       timeseries?: { water?: Array<Record<string, unknown>> };
     }).timeseries?.water;
-    assert.equal(records?.length, 1, source.groupedSourceSlug);
-    assert.equal(records?.[0]?.value, 250, source.groupedSourceSlug);
+    const label = `${jobSourceProviderSlug}/${listedSourceProviderSlug}/${groupedSourceSlug}`;
+    assert.equal(records?.length, 1, label);
+    assert.equal(records?.[0]?.value, 250, label);
     assert.equal(records?.[0]?.authoritativeEmptyCalendarSet, undefined);
+    assert.equal(records?.[0]?.sourceProviderSlug, jobSourceProviderSlug.replaceAll("-", "_"));
+    const timeseriesRequest = requests.find((url) => url.includes("/v2/timeseries/"));
+    assert.equal(
+      timeseriesRequest ? new URL(timeseriesRequest).searchParams.get("provider") : null,
+      "apple_health_kit",
+      label,
+    );
+      }
+    }
   }
 });
 

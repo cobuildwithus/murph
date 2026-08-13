@@ -66,7 +66,8 @@ Updated: 2026-08-13
     complexity findings.
 17. [x] Resolve round fifteen's lossy production-parser calendar finding.
 18. [x] Resolve round sixteen's grouped-source alias finding.
-19. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+19. [x] Resolve round seventeen's end-to-end alias-equivalence finding.
+20. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
     the task worktree.
 
 ## Decisions
@@ -188,6 +189,11 @@ Updated: 2026-08-13
   normalizes it. This deletes a second comparison rule, so supported Apple
   Health separator aliases reach the established exact-source filter while
   malformed groups remain retryable.
+- Round seventeen's end-to-end alias finding is accepted. The calendar path now
+  reuses the existing connect route as its single equivalence owner for live
+  authority and row selection, queries the route's canonical target, and
+  projects selected rows onto the job-owned historical identity before strict
+  import. No alias table, migration, or second identity comparator was added.
 
 ## Verification
 
@@ -312,5 +318,11 @@ Updated: 2026-08-13
   could be dropped and replaced with an authoritative zero. Focused
   production-fetch proof now covers all three admitted spellings plus an
   unrelated valid group, imports the real value, and emits no zero marker.
+- Round seventeen found that the remaining live-source, query, filter, and
+  importer boundaries still compared raw spellings. A 27-case production-fetch
+  matrix now proves every Apple Health job/listing/group spelling cross-product
+  in hosted `listed_only` mode, canonical provider query selection, unrelated
+  group exclusion, real-value import, and preservation of the job-owned daily
+  identity.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

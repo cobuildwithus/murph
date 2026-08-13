@@ -173,7 +173,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    source identity, or provider day. Non-object groups or samples cannot be
    silently discarded into a partial set or fabricated authoritative empty
    response, so one surviving row cannot certify a partial complete-set
-   revision. Core rejects more than
+   revision. The calendar path uses the existing Junction connect-route owner
+   to compare provider aliases at authority and response-selection boundaries,
+   queries the route's canonical target, and projects selected rows back onto
+   the job-owned historical source identity before strict import. Core rejects more than
    64 affected dates before its canonical write, and the provider repeats that
    bound before queue fanout. That path is the sole writer of their
    daily sums, so a UTC-normalized execution window cannot select the wrong provider
