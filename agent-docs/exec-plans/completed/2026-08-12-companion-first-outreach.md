@@ -1,6 +1,6 @@
 # Companion Signup First Outreach
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-13
 
@@ -102,6 +102,10 @@ an active Murph line first when no line may safely open a proactive conversation
   tests prove that a rejected wake returns the retryable setup error without a
   Junction session, an accepted retry proceeds once, and a consumed activation
   does not signal again.
+- The disclosure-only round 4 retry returned `ROUND_OUTCOME: PASS` on the
+  corrected exact patch. Final focused proof passed 350 route/dispatch tests,
+  including 107 companion route cases, plus the Web typecheck and three
+  PostgreSQL enrollment scenarios.
 
 ## Rollout
 
@@ -114,3 +118,4 @@ reply-safe line binds and reaches the canonical mailbox, while an unmanaged or
 unsafe recipient line stays ignored.
 Also verify that a deliberately failed activation wake returns the retryable
 account-gate outcome and that retry re-signals the existing mailbox item.
+Completed: 2026-08-13
