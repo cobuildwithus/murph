@@ -3118,6 +3118,17 @@ test("device sync store preserves retained calendar work across account cleanup 
       payload: {},
       provider: "junction",
     });
+    const unrelatedFailure = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-09T00:00:00.000Z",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-03",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      provider: "junction",
+    });
 
     store.markPendingJobsDeadForAccount(
       account.id,
@@ -3140,6 +3151,20 @@ test("device sync store preserves retained calendar work across account cleanup 
       "2026-04-09T00:00:01.000Z",
       "ACCOUNT_DISCONNECTED",
       "Reconnect required.",
+      "2026-04-10T00:00:00.000Z",
+      true,
+      true,
+    ), true);
+    assert.equal(
+      store.claimDueJob("worker-unrelated-failure", "2026-04-09T00:00:01.000Z", 60_000)?.id,
+      unrelatedFailure.id,
+    );
+    assert.equal(store.failJobIfOwned(
+      unrelatedFailure.id,
+      "worker-unrelated-failure",
+      "2026-04-09T00:00:02.000Z",
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      "Provider data incomplete.",
       "2026-04-10T00:00:00.000Z",
       true,
       true,
@@ -3171,6 +3196,7 @@ test("device sync store preserves retained calendar work across account cleanup 
       store.claimDueJob("worker-reconnected", "2026-04-09T01:00:00.000Z", 60_000)?.id,
       retained.id,
     );
+    assert.equal(store.getJobById(unrelatedFailure.id)?.availableAt, "2026-04-10T00:00:00.000Z");
   } finally {
     store.close();
     await rm(tempDir, { force: true, recursive: true });

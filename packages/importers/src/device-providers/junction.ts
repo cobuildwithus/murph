@@ -146,6 +146,7 @@ export interface JunctionSnapshotInput {
   windowStart?: string | number | Date;
   windowEnd?: string | number | Date;
   timeseriesWindowKind?: JunctionTimeseriesWindowKind;
+  strictSparseCalendarRepair?: JunctionSparseCalendarRepairExpectation;
   connections?: unknown[];
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
@@ -153,6 +154,14 @@ export interface JunctionSnapshotInput {
 }
 
 export type JunctionTimeseriesWindowKind = "calendar_day" | "precise";
+
+export interface JunctionSparseCalendarRepairExpectation {
+  dayKey: string;
+  resource: JunctionSparseIntervalResource;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string | null;
+}
 
 export type JunctionSummaryResource =
   (typeof JUNCTION_ALLOWED_SUMMARY_RESOURCES)[number];
@@ -204,6 +213,7 @@ interface NormalizationContext {
   windowStart?: string;
   windowEnd?: string;
   timeseriesWindowKind?: JunctionTimeseriesWindowKind;
+  strictSparseCalendarRepair?: JunctionSparseCalendarRepairExpectation;
   connectionsByKey: ReadonlyMap<string, PlainObject>;
   evidenceParts: DeviceEvidencePartPayload[];
   events: DeviceEventPayload[];
@@ -237,6 +247,13 @@ const junctionSnapshotSchema = z.object({
   windowStart: z.union([z.string(), z.number(), z.date()]).optional(),
   windowEnd: z.union([z.string(), z.number(), z.date()]).optional(),
   timeseriesWindowKind: z.enum(["calendar_day", "precise"]).optional(),
+  strictSparseCalendarRepair: z.object({
+    dayKey: z.string(),
+    resource: z.enum(["caffeine", "water", "mindfulness_minutes"]),
+    sourceInstanceId: z.string().nullable().optional(),
+    sourceProviderSlug: z.string(),
+    sourceType: z.string().nullable().optional(),
+  }).strict().optional(),
   connections: z.array(z.unknown()).optional(),
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
@@ -1055,6 +1072,7 @@ export function normalizeJunctionSnapshot(
     windowStart,
     windowEnd,
     timeseriesWindowKind: snapshot.timeseriesWindowKind,
+    strictSparseCalendarRepair: snapshot.strictSparseCalendarRepair,
     connectionsByKey: buildConnectionsByKey(connections),
     evidenceParts,
     events,
@@ -1734,6 +1752,13 @@ function normalizeTimeseries(
     if (descriptor) {
       let selectedSparseRecords: ReadonlyMap<string, JunctionSparseIntervalReading> | undefined;
       if (isJunctionSparseIntervalResource(resource)) {
+        assertJunctionSparseCalendarRepairRowsValid({
+          context,
+          descriptor,
+          payload,
+          resource,
+          resourceSlug: slugify(resource, "timeseries"),
+        });
         selectedSparseRecords = pushJunctionSparseIntervalReadings(
           payload,
           resource,
@@ -1756,6 +1781,90 @@ function normalizeTimeseries(
         );
       }
     }
+  }
+}
+
+function assertJunctionSparseCalendarRepairRowsValid(input: {
+  context: NormalizationContext;
+  descriptor: JunctionDailyTimeseriesDescriptor;
+  payload: unknown;
+  resource: JunctionSparseIntervalResource;
+  resourceSlug: string;
+}): void {
+  const expectation = input.context.strictSparseCalendarRepair;
+  if (!expectation || expectation.resource !== input.resource) {
+    return;
+  }
+
+  const entries = timeseriesResourceEntries(input.payload);
+  assertJunctionTimeseriesResponseBound(input.resource, entries.length);
+  if (
+    entries.length === 1
+    && entries[0]?.entry.authoritativeEmptyCalendarSet === true
+  ) {
+    return;
+  }
+
+  for (const [index, { entry, originFallback }] of entries.entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: `junction-timeseries-reading-${input.resourceSlug}`,
+      context: input.context,
+    });
+    const providerValue = finiteNumber(firstValueFromPaths(entry, input.descriptor.valuePaths));
+    const value = input.descriptor.normalizeValue(providerValue);
+    const startRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
+    const endRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS);
+    const startAt = resolveSafeTimestamp(startRaw);
+    const endAt = resolveSafeTimestamp(endRaw);
+    const timestamp = resourceContext && startRaw
+      ? resolveJunctionSparseIntervalTimestamp(
+          entry,
+          startRaw,
+          input.context,
+          resourceContext.sourceProviderSlug,
+        )
+      : null;
+    const dayKey = timestamp && startAt
+      ? resolveJunctionTimeseriesAggregateDayKey(
+          entry,
+          timestamp,
+          startAt,
+          input.context.defaultTimeZone,
+        )
+      : undefined;
+    const valid = resourceContext !== null
+      && providerValue !== undefined
+      && value !== undefined
+      && startRaw !== undefined
+      && endRaw !== undefined
+      && startAt !== undefined
+      && endAt !== undefined
+      && Date.parse(endAt) >= Date.parse(startAt)
+      && dayKey === expectation.dayKey
+      && resourceContext.sourceProviderSlug === expectation.sourceProviderSlug
+      && (expectation.sourceType == null
+        || resourceContext.origin.sourceType === expectation.sourceType)
+      && (expectation.sourceInstanceId == null
+        || resourceContext.origin.sourceInstanceId === expectation.sourceInstanceId);
+    if (!valid) {
+      throw new JunctionSparseCalendarRepairNormalizationError();
+    }
+  }
+}
+
+export class JunctionSparseCalendarRepairNormalizationError extends Error {
+  readonly code = "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION";
+  readonly retryable = true;
+
+  constructor() {
+    super("Junction calendar refresh contained a row that could not be applied completely.");
+    this.name = "JunctionSparseCalendarRepairNormalizationError";
   }
 }
 
@@ -3277,6 +3386,9 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   if (!sanitized) {
     return sanitized;
   }
+  const sanitizedSnapshot = Object.fromEntries(
+    Object.entries(sanitized).filter(([key]) => key !== "strictSparseCalendarRepair"),
+  );
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -3298,7 +3410,7 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   }
 
   return stripUndefined({
-    ...sanitized,
+    ...sanitizedSnapshot,
     connections: sanitizeJunctionRawConnections(snapshot.connections),
     summaries,
     timeseries,

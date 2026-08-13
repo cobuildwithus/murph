@@ -2354,6 +2354,71 @@ test("Junction backfill diagnostic rejects malformed requested windows without p
   );
 });
 
+test("Junction sparse calendar refresh threads strict completeness before canonical import", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { water: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              calendarDate: "2026-04-02",
+              end: "2026-04-02T08:01:00.000Z",
+              id: "water-valid",
+              start: "2026-04-02T08:00:00.000Z",
+              value: 250,
+            }, {
+              calendarDate: "2026-04-02",
+              end: "2026-04-02T09:01:00.000Z",
+              id: "water-malformed",
+              value: 125,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, { timeseriesResources: ["water"] });
+  let canonicalImportCalls = 0;
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        now: "2026-04-03T12:00:00.000Z",
+        importSnapshot: async (snapshot) => {
+          canonicalImportCalls += 1;
+          normalizeJunctionSnapshot(snapshot as Parameters<typeof normalizeJunctionSnapshot>[0]);
+          return { durableDeliveryAccepted: true };
+        },
+      }),
+      createJob("resource", {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof Error
+      && error.name === "JunctionSparseCalendarRepairNormalizationError",
+  );
+  assert.equal(canonicalImportCalls, 1);
+});
+
 const usefulHistoricalSummaryRecordByResource = {
   sleep: {
     id: "sleep-1",

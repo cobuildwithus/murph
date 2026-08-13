@@ -167,7 +167,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    only when the canonical import receipt names its exact source/resource/day
    daily identity. A successful exact-source HTTP 200 empty response applies
    an explicit zero through that identity; a nonempty response that normalizes
-   to no owned daily state stays retryable. Core rejects more than
+   to no owned daily state stays retryable. The exact calendar-repair snapshot
+   also fails before the canonical write if any target row lacks a valid value,
+   interval, source identity, or provider day, so one surviving row cannot
+   certify a partial complete-set revision. Core rejects more than
    64 affected dates before its canonical write, and the provider repeats that
    bound before queue fanout. That path is the sole writer of their
    daily sums, so a UTC-normalized execution window cannot select the wrong provider

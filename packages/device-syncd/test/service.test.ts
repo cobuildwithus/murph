@@ -2564,6 +2564,118 @@ test("device sync service retains one accepted sparse calendar job until canonic
   }
 });
 
+test("device sync service retries mixed-validity calendar rows before a partial import", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-strict-completeness");
+  let now = new Date("2026-07-10T13:46:00.000Z");
+  let providerRowsComplete = false;
+  let canonicalImportCalls = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        canonicalImportCalls += 1;
+        const prepared = await prepareDeviceProviderSnapshotImport(input);
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["water"],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      fetchImpl: async (input) => {
+        const url = readUrl(input);
+        if (url.includes("/v2/user/providers/")) {
+          return createJsonResponse({
+            providers: [{
+              id: "provider-garmin-1",
+              name: "Garmin",
+              resource_availability: { water: true },
+              slug: "garmin",
+              status: "connected",
+            }],
+          });
+        }
+        if (url.includes("/v2/timeseries/") && url.includes("/water/grouped")) {
+          const completeRow = {
+            calendarDate: "2026-07-08",
+            end: "2026-07-08T09:01:00.000Z",
+            id: "water-calendar-second",
+            start: "2026-07-08T09:00:00.000Z",
+            value: 125,
+          };
+          return createJsonResponse({
+            groups: {
+              garmin: [{
+                data: [{
+                  calendarDate: "2026-07-08",
+                  end: "2026-07-08T08:01:00.000Z",
+                  id: "water-calendar-first",
+                  start: "2026-07-08T08:00:00.000Z",
+                  value: 250,
+                }, providerRowsComplete ? completeRow : {
+                  ...completeRow,
+                  start: undefined,
+                }],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          });
+        }
+        throw new Error(`Unexpected Junction calendar request: ${url}`);
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-strict-completeness",
+      displayName: "Junction",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-07-08",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      },
+      availableAt: now.toISOString(),
+      maxAttempts: 1,
+    });
+
+    await service.runWorkerOnce();
+    const retained = store.getJobById(job.id);
+    assert.equal(retained?.status, "queued");
+    assert.equal(retained?.lastErrorCode, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+    assert.equal(canonicalImportCalls, 1);
+
+    providerRowsComplete = true;
+    now = new Date(retained!.availableAt);
+    await service.runWorkerOnce();
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    assert.equal(canonicalImportCalls, 2);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service keeps calendar work dormant without account authority", async () => {
   for (const accountState of [
     { status: "active", setupPhase: "pending_link" },

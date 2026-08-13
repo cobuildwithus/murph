@@ -29,6 +29,7 @@ export {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
+  JunctionSparseCalendarRepairNormalizationError,
   junctionProviderAdapter,
   normalizeJunctionResourceName,
   normalizeJunctionSnapshot,

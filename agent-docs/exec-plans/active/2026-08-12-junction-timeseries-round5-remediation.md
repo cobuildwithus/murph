@@ -62,7 +62,9 @@ Updated: 2026-08-13
     findings.
 15. [x] Resolve round thirteen's lifecycle-boundary and applied-daily-state
     findings.
-16. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+16. [x] Resolve round fourteen's strict complete-set and reconnect-wake
+    complexity findings.
+17. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
     the task worktree.
 
 ## Decisions
@@ -164,6 +166,14 @@ Updated: 2026-08-13
   nonempty response that normalizes to no owned fact remains retryable. This
   adds one lifecycle exception and one receipt assertion, not another queue,
   store, service, scheduler, cursor, watermark, or aggregate owner.
+- Round fourteen's correctness finding is accepted. Exact calendar repair now
+  validates every target row before the canonical write; a mixed-validity
+  response cannot commit a partial daily collection merely because one row
+  emitted the expected identity. Its complexity-collapse finding is also
+  accepted: reconnect wake is one set-based SQLite update instead of an
+  account-wide row collection plus per-job JSON parsing and updates. The strict
+  mode is an ephemeral snapshot expectation and adds no persisted owner; the
+  SQL correction deletes the unbounded collection path.
 
 ## Verification
 
@@ -270,5 +280,12 @@ Updated: 2026-08-13
   source-fence retention and reconnect wake on the same job, account-cleanup
   and credential-epoch preservation, exact daily receipt admission, retry for
   invalid nonempty rows, and authoritative-empty success.
+- Round fourteen found that the exact-ID receipt could still certify a partial
+  daily total when one valid row survived beside a malformed row, and that the
+  reconnect wake helper used an uncapped read/parse/update loop. Focused proof
+  now rejects mixed-validity calendar snapshots before core import, retries the
+  same retained job, succeeds after a fully valid response, preserves
+  authoritative empty success, and selects reconnect wake rows through one
+  set-based mutation.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

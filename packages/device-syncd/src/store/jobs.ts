@@ -523,46 +523,31 @@ export function wakeRetainedDeviceSyncJobsForAccount(
   database: DatabaseSync,
   input: { accountId: string; now: string },
 ): number {
-  const pending = database.prepare(`
-    select id, provider, kind, payload_json, last_error_code
-    from device_job
-    where account_id = ?
-      and status = 'queued'
-  `).all(input.accountId) as Array<{
-    id: string;
-    kind: string;
-    last_error_code: string | null;
-    payload_json: string | null;
-    provider: string;
-  }>;
-  const wake = database.prepare(`
+  const result = database.prepare(`
     update device_job
     set available_at = min(available_at, ?),
         updated_at = ?
-    where id = ?
-      and account_id = ?
+    where account_id = ?
       and status = 'queued'
-  `);
-  let woken = 0;
-  for (const job of pending) {
-    const delayedForMissingAuthority = job.last_error_code === "CONNECTION_SETUP_PENDING"
-      || job.last_error_code === "ACCOUNT_DISCONNECTED"
-      || job.last_error_code === "ACCOUNT_REAUTHORIZATION_REQUIRED"
-      || job.last_error_code === "JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE";
-    if (
-      !delayedForMissingAuthority
-      || !isJunctionRetainedAcceptedWorkJob({
-        kind: job.kind,
-        payload: maybeParseJsonObject(job.payload_json),
-        provider: job.provider,
-      })
-    ) {
-      continue;
-    }
-    const result = wake.run(input.now, input.now, job.id, input.accountId) as { changes: number };
-    woken += result.changes ?? 0;
-  }
-  return woken;
+      and last_error_code in (
+        'CONNECTION_SETUP_PENDING',
+        'ACCOUNT_DISCONNECTED',
+        'ACCOUNT_REAUTHORIZATION_REQUIRED',
+        'JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE'
+      )
+      and provider = 'junction'
+      and kind = 'resource'
+      and (
+        json_extract(payload_json, '$.resource') = ?
+        or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+      )
+  `).run(
+    input.now,
+    input.now,
+    input.accountId,
+    COMPANION_HRV_RMSSD_RESOURCE,
+  ) as { changes: number };
+  return result.changes ?? 0;
 }
 
 export function failDeviceSyncJob(

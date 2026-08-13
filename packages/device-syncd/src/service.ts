@@ -1,4 +1,7 @@
-import { createImporters } from "@murphai/importers";
+import {
+  createImporters,
+  JunctionSparseCalendarRepairNormalizationError,
+} from "@murphai/importers";
 
 import {
   normalizeConfiguredDeviceSyncJobInput,
@@ -1881,6 +1884,15 @@ function normalizeExecutionError(error: unknown): {
   retryable: boolean;
   accountStatus?: "reauthorization_required" | "disconnected" | null;
 } {
+  if (error instanceof JunctionSparseCalendarRepairNormalizationError) {
+    return {
+      code: error.code,
+      details: {},
+      message: error.message,
+      retryable: true,
+    };
+  }
+
   if (isDeviceSyncError(error)) {
     return {
       code: error.code,

@@ -28,6 +28,7 @@ import {
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
+  JunctionSparseCalendarRepairNormalizationError,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
@@ -4482,6 +4483,96 @@ test("Junction authoritative empty sparse days clear the prior retained daily su
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
+});
+
+test("Junction strict sparse calendar repairs reject mixed valid and malformed rows before import", async () => {
+  const baseSnapshot = {
+    accountId: "junction-account-strict-sparse-calendar-day",
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseriesWindowKind: "calendar_day" as const,
+    strictSparseCalendarRepair: {
+      dayKey: "2026-04-22",
+      resource: "water" as const,
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+    },
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+  };
+  const valid = {
+    calendarDate: "2026-04-22",
+    end: "2026-04-22T08:01:00.000Z",
+    id: "water-strict-valid",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    start: "2026-04-22T08:00:00.000Z",
+    value: 250,
+  };
+
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      ...baseSnapshot,
+      timeseries: {
+        water: [valid, {
+          ...valid,
+          id: "water-strict-malformed",
+          start: undefined,
+        }],
+      },
+    }),
+    (error: unknown) =>
+      error instanceof JunctionSparseCalendarRepairNormalizationError
+      && error.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+      && error.retryable,
+  );
+  await assert.rejects(
+    prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      vaultRoot: "/tmp/unused-strict-calendar-repair",
+      snapshot: {
+        ...baseSnapshot,
+        timeseries: {
+          water: [valid, {
+            ...valid,
+            id: "water-strict-malformed-before-core",
+            value: "not-a-number",
+          }],
+        },
+      },
+    }),
+    JunctionSparseCalendarRepairNormalizationError,
+  );
+
+  const complete = normalizeJunctionSnapshot({
+    ...baseSnapshot,
+    timeseries: {
+      water: [valid, {
+        ...valid,
+        end: "2026-04-22T09:01:00.000Z",
+        id: "water-strict-second-valid",
+        start: "2026-04-22T09:00:00.000Z",
+        value: 125,
+      }],
+    },
+  });
+  const daily = complete.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === "water"
+  );
+  assert.equal(daily?.fields && "value" in daily.fields ? daily.fields.value : undefined, 375);
+
+  assert.doesNotThrow(() => normalizeJunctionSnapshot({
+    ...baseSnapshot,
+    timeseries: {
+      water: [{
+        authoritativeEmptyCalendarSet: true,
+        calendarDate: "2026-04-22",
+        date: "2026-04-22",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        value: 0,
+      }],
+    },
+  }));
 });
 
 test("Junction unversioned calendar aggregates reconcile through the serialized event spine", async () => {

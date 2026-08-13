@@ -16,7 +16,10 @@ import {
   JUNCTION_DENSE_FIDELITY_RESOURCES,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
-import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
+import {
+  normalizeJunctionSourceProviderSlug,
+  resolveJunctionOrigin,
+} from "@murphai/importers/device-providers/junction-origin";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
@@ -3192,6 +3195,18 @@ export function createJunctionDeviceSyncProvider(
           windowStart: window.windowStart,
           windowEnd: window.windowEnd,
           timeseriesWindowKind: "calendar_day",
+          ...(emptySparseCalendarSource
+            ? {
+                strictSparseCalendarRepair: {
+                  dayKey: window.windowStart.slice(0, 10),
+                  resource: windowResources[0],
+                  ...emptySparseCalendarSource,
+                  sourceProviderSlug: normalizeJunctionSourceProviderSlug(
+                    emptySparseCalendarSource.sourceProviderSlug,
+                  ) ?? emptySparseCalendarSource.sourceProviderSlug,
+                },
+              }
+            : {}),
           connections: preparedImport.connections,
           summaries: {},
           timeseries: preparedImport.snapshots,
