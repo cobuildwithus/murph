@@ -1591,6 +1591,34 @@ export async function importWorkoutCsv(input: {
     existingPayloads,
     expectedLatest,
   )
+  if (decisions.length === 0) {
+    return {
+      vault: input.vault,
+      sourceFile: input.file,
+      rawFile: null,
+      manifestFile: null,
+      rawStored: false,
+      source: plan.source,
+      timeZone: plan.timeZone,
+      weightUnit: plan.weightUnit,
+      distanceUnit: plan.distanceUnit,
+      parsedWorkoutCount: plan.sessions.length,
+      receivedCount: suppressedDeletedCount,
+      importedCount: 0,
+      createdCount: 0,
+      skippedExistingCount: suppressedDeletedCount,
+      supersededCount: 0,
+      repairedRowCount: plan.repairedRowCount,
+      ignoredRowCount: plan.ignoredRowCount,
+      skippedRowCount: plan.skippedRowCount,
+      rawOnly: false,
+      lookupIds: [],
+      lookupIdsTruncated: false,
+      ledgerFiles: [],
+      ledgerFilesTruncated: false,
+      warnings: plan.warnings,
+    }
+  }
   let preview: WorkoutImportBatchResult
   try {
     preview = await core.importEventBatch({

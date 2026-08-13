@@ -194,6 +194,15 @@ Updated: 2026-08-12
   projection is accepted only as the exact correction ownership baseline, so
   the first explicit unit choice requires confirmation and writes the selected
   units without replacing member-owned fields.
+- Final ReviewGPT round 8 found that a byte-different equivalent snapshot whose
+  every prior session is tombstoned suppresses every workout decision, then
+  crosses the generic core boundary as an invalid empty batch. The workout
+  owner now recognizes that fully reconciled domain state before the core call
+  and returns a successful aggregate no-op without raw, event, or audit writes.
+- Final ReviewGPT round 8 also found that the required PR disclosure omitted the
+  shared optimistic-concurrency surface introduced by round 7. The PR now names
+  the optional event ID/lifecycle-revision fence, explains why core validates it
+  under the canonical lock, and points to the generic and workout race proof.
 
 ## Verification
 
@@ -222,3 +231,10 @@ Updated: 2026-08-12
   delete fences reject a two-event core batch atomically, and a legacy unitless
   Strong event requires and accepts an exact-evidence unit correction. Final
   ReviewGPT and exact-head PR CI remain pending.
+- Round 8 reproduction and remediation proof: a production-runtime two-session
+  import, deletion of both canonical workouts, and byte-different equivalent
+  replay reproduced `EVENT_BATCH_EMPTY`. The retained regression now proves a
+  successful two-session skipped no-op, unchanged raw and audit collections,
+  unchanged event-ledger row count, and continued tombstone authority. Final
+  focused verification, the next exact-head ReviewGPT pass, and PR CI remain
+  pending.

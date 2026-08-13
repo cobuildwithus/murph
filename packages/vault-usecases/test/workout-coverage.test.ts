@@ -1505,6 +1505,102 @@ describe("workout-import", () => {
     });
   });
 
+  test("treats an all-tombstoned equivalent workout snapshot as a no-op", async () => {
+    await withTempDir(async (tempDir) => {
+      await initializeVault({
+        vaultRoot: tempDir,
+        title: "Workout Tombstone Replay Test Vault",
+        timezone: "UTC",
+      });
+      const text = [
+        "Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,Reps",
+        "Upper,2026-04-08,10:00,45,Press,1,8",
+        "Lower,2026-04-09,11:00,30,Row,1,10",
+      ].join("\n");
+      const csvPath = path.join(tempDir, "tombstoned.csv");
+      await writeFile(csvPath, text, "utf8");
+      const generatedIds = [
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      ];
+      const workoutImportModule = (await importWithMocks(
+        "../src/usecases/workout-import.ts",
+        {
+          "../src/runtime-import.js": () => ({
+            loadRuntimeModule: vi.fn(async (specifier: string) => {
+              if (specifier === "@murphai/core") return coreRuntime;
+              if (specifier === "@murphai/importers") return importersRuntime;
+              if (specifier === "@murphai/runtime-state") {
+                return { generateUlid: () => generatedIds.shift()! };
+              }
+              throw new Error(`Unexpected runtime module: ${specifier}`);
+            }),
+          }),
+        },
+      )) as typeof import("../src/usecases/workout-import.ts");
+
+      const imported = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        source: "strong",
+      });
+      assert.equal(imported.createdCount, 2);
+      const plan = importersRuntime.planWorkoutCsvImport({
+        text,
+        timeZone: "UTC",
+        source: "strong",
+      });
+      const importedRecords = await Promise.all(plan.sessions.map((session) =>
+        coreRuntime.findEventByExternalRef({
+          vaultRoot: tempDir,
+          system: "strong",
+          resourceType: "workout-session",
+          resourceId: session.sourceWorkoutId,
+        })));
+      for (const record of importedRecords) {
+        assert.ok(record);
+        await coreRuntime.deleteEvent({ vaultRoot: tempDir, eventId: record.id });
+      }
+      const rawFilesBeforeReplay = await coreRuntime.walkVaultFiles(tempDir, "raw/workouts");
+      const auditRowsBeforeReplay = await countAuditRows(tempDir);
+      const eventRowsBeforeReplay = await coreRuntime.readJsonlRecords({
+        vaultRoot: tempDir,
+        relativePath: imported.ledgerFiles[0]!,
+      });
+      const equivalentPath = path.join(tempDir, "tombstoned-equivalent.csv");
+      await writeFile(
+        equivalentPath,
+        text.replace(",10:00,", ",10:00:00,").replace(",11:00,", ",11:00:00,"),
+        "utf8",
+      );
+
+      const replay = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: equivalentPath,
+        source: "strong",
+      });
+
+      assert.equal(replay.importedCount, 0);
+      assert.equal(replay.receivedCount, 2);
+      assert.equal(replay.skippedExistingCount, 2);
+      assert.equal(replay.rawStored, false);
+      assert.deepEqual(await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"), rawFilesBeforeReplay);
+      assert.equal(await countAuditRows(tempDir), auditRowsBeforeReplay);
+      assert.equal((await coreRuntime.readJsonlRecords({
+        vaultRoot: tempDir,
+        relativePath: imported.ledgerFiles[0]!,
+      })).length, eventRowsBeforeReplay.length);
+      for (const session of plan.sessions) {
+        assert.equal(await coreRuntime.findEventByExternalRef({
+          vaultRoot: tempDir,
+          system: "strong",
+          resourceType: "workout-session",
+          resourceId: session.sourceWorkoutId,
+        }), null);
+      }
+    });
+  });
+
   test("unit correction preserves blank-note fallbacks and later canonical workout context", async () => {
     await withTempDir(async (tempDir) => {
       await initializeVault({
