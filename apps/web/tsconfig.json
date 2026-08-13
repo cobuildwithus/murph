@@ -288,6 +288,9 @@
       "@murphai/device-syncd/junction-inline-authority": [
         "../../packages/device-syncd/src/junction-inline-authority.ts"
       ],
+      "@murphai/device-syncd/junction-historical-backfill-progress": [
+        "../../packages/device-syncd/src/junction-historical-backfill-progress.ts"
+      ],
       "@murphai/device-syncd/junction-resources": [
         "../../packages/device-syncd/src/junction-resources.ts"
       ],

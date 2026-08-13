@@ -80,6 +80,10 @@
       "path": "fixtures/sample-imports/workouts/workout.json"
     },
     {
+      "id": "strong-workout-csv",
+      "path": "fixtures/sample-imports/workouts/strong.csv"
+    },
+    {
       "id": "encounter-bundle-json",
       "path": "fixtures/sample-imports/encounters/encounter-bundle.json"
     },
@@ -148,6 +152,10 @@
     {
       "id": "workout-import-json",
       "path": "fixtures/golden-outputs/workout-import-json"
+    },
+    {
+      "id": "workout-import-csv",
+      "path": "fixtures/golden-outputs/workout-import-csv"
     },
     {
       "id": "workout-payload-schema",

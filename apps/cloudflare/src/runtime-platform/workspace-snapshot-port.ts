@@ -8,6 +8,7 @@ import type {
   HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
   HostedRuntimeWorkspaceSnapshotSessionStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import { readHostedRuntimeSafeErrorText } from "@murphai/hosted-execution";
 import { parseHostedWorkspaceCheckpointResponse, parseHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import type { HostedWorkspaceCheckpointResponse } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -54,6 +55,8 @@ import {
 
 const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
 const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS = 2_000;
+const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_MAX_BYTES = 16 * 1024;
+const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_READ_TIMEOUT_MS = 1_000;
 // Session creation records the server heartbeat before its response reaches the
 // runtime. Cap that handshake so an immediate first heartbeat still has one
 // full cadence of margin before replacement may consider the session stale.
@@ -314,13 +317,29 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       timings.snapshotDirectR2PutElapsedMs =
         readHostedRuntimeStepElapsedMs(putStartedAt);
       assertHostedWorkspaceSnapshotOperationLive(request.signal);
+      const r2FailureDiagnostics = response.ok
+        ? null
+        : await readHostedWorkspaceSnapshotR2FailureDiagnostics({
+            response,
+            signal: request.signal,
+            timeoutMs: Math.min(
+              WORKSPACE_SNAPSHOT_R2_ERROR_BODY_READ_TIMEOUT_MS,
+              input.timeoutMs,
+            ),
+          });
       try {
         assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
       } catch (error) {
         throw new Error(
           `Hosted workspace snapshot direct R2 upload is not resumable after HTTP ${response.status}; `
           + "abandon this snapshot session and start a fresh snapshot before retrying.",
-          { cause: error },
+          {
+            cause: buildHostedWorkspaceSnapshotR2FailureError({
+              cause: error,
+              diagnostics: r2FailureDiagnostics,
+              status: response.status,
+            }),
+          },
         );
       }
       return timings;
@@ -520,6 +539,120 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
     },
   };
   return port;
+}
+
+interface HostedWorkspaceSnapshotR2FailureDiagnostics {
+  errorCode: string | null;
+  errorMessage: string | null;
+  requestId: string | null;
+}
+
+async function readHostedWorkspaceSnapshotR2FailureDiagnostics(input: {
+  response: Response;
+  signal?: AbortSignal | null;
+  timeoutMs: number;
+}): Promise<HostedWorkspaceSnapshotR2FailureDiagnostics | null> {
+  if (!input.response.body) {
+    return null;
+  }
+
+  const decoder = new TextDecoder();
+  let body = "";
+  let bodyBytes = 0;
+  try {
+    for await (const chunk of readHostedRuntimeResponseBodyChunks({
+      body: input.response.body,
+      description: "Hosted workspace snapshot direct R2 error",
+      signal: input.signal ?? null,
+      timeoutMs: input.timeoutMs,
+    })) {
+      const remainingBytes = WORKSPACE_SNAPSHOT_R2_ERROR_BODY_MAX_BYTES - bodyBytes;
+      if (remainingBytes <= 0) {
+        break;
+      }
+      const retained = chunk.byteLength <= remainingBytes
+        ? chunk
+        : chunk.subarray(0, remainingBytes);
+      body += decoder.decode(retained, { stream: true });
+      bodyBytes += retained.byteLength;
+      if (retained.byteLength !== chunk.byteLength) {
+        break;
+      }
+    }
+    body += decoder.decode();
+  } catch {
+    return null;
+  }
+
+  const errorCode = readHostedWorkspaceSnapshotR2XmlField(body, "Code");
+  const errorMessage = readHostedWorkspaceSnapshotR2XmlField(body, "Message");
+  const requestId = readHostedWorkspaceSnapshotR2XmlField(body, "RequestId");
+  return {
+    errorCode: errorCode && /^[A-Za-z][A-Za-z0-9]{0,95}$/u.test(errorCode)
+      ? errorCode
+      : null,
+    errorMessage: readHostedWorkspaceSnapshotR2SafeMessage(errorMessage),
+    requestId: requestId && /^[A-Za-z0-9_-]{8,128}$/u.test(requestId)
+      ? requestId
+      : null,
+  };
+}
+
+function readHostedWorkspaceSnapshotR2XmlField(
+  body: string,
+  field: "Code" | "Message" | "RequestId",
+): string | null {
+  const match = new RegExp(`<${field}>([^<]{1,1000})</${field}>`, "iu").exec(body);
+  if (!match?.[1]) {
+    return null;
+  }
+  return match[1]
+    .replace(/&amp;/giu, "&")
+    .replace(/&lt;/giu, "<")
+    .replace(/&gt;/giu, ">")
+    .replace(/&quot;/giu, "\"")
+    .replace(/&apos;/giu, "'")
+    .trim();
+}
+
+function readHostedWorkspaceSnapshotR2SafeMessage(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = readHostedRuntimeSafeErrorText(
+    new Error(value.replace(/\s+/gu, " ").trim()),
+  );
+  return normalized?.slice(0, 500) ?? null;
+}
+
+function buildHostedWorkspaceSnapshotR2FailureError(input: {
+  cause: unknown;
+  diagnostics: HostedWorkspaceSnapshotR2FailureDiagnostics | null;
+  status: number;
+}): Error {
+  const detail = [
+    `Hosted workspace snapshot direct R2 upload failed with HTTP ${input.status}.`,
+    ...(input.diagnostics?.errorCode
+      ? [`R2 error code ${input.diagnostics.errorCode}.`]
+      : []),
+    ...(input.diagnostics?.errorMessage
+      ? [`R2 error message: ${input.diagnostics.errorMessage}`]
+      : []),
+    ...(input.diagnostics?.requestId
+      ? [`R2 request ID ${input.diagnostics.requestId}.`]
+      : []),
+  ].join(" ");
+  const error = new Error(detail, { cause: input.cause }) as Error & {
+    code?: string;
+    status: number;
+    statusCode: number;
+  };
+  error.status = input.status;
+  error.statusCode = input.status;
+  if (input.diagnostics?.errorCode) {
+    error.code = `R2_${input.diagnostics.errorCode}`;
+  }
+  return error;
 }
 
 function parseHostedWorkspaceSnapshotStartPayload(

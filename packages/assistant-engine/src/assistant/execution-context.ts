@@ -81,6 +81,9 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
+import type {
+  AssistantCronOccurrenceUnverifiedReason,
+} from './cron/timing-verification.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -208,6 +211,12 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId: string
     }
 
+export type AssistantAutomationTimingVerificationIssue =
+  | AssistantCronOccurrenceUnverifiedReason
+  | 'default_timezone_unverified'
+  | 'projection_unavailable'
+  | 'record_readback_mismatch'
+
 export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
@@ -219,6 +228,7 @@ export type AssistantHostedAutomationToolResponse =
       schedule: AutomationSchedule
       status: AutomationStatus
       timingVerified: boolean
+      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {
@@ -232,6 +242,7 @@ export type AssistantHostedAutomationToolResponse =
       schedule: AutomationSchedule
       status: AutomationStatus
       timingVerified: boolean
+      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
       updatedAt: string
     }
   | {

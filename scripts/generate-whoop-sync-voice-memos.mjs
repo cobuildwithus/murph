@@ -5,12 +5,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { generateElevenLabsSpeechMp3 } from "./elevenlabs-speech-generation.mjs";
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "apps/web/public/audio/whoop-sync-memos");
-const ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
-// Matches the voice-preview clips: 64 kbps mono keeps ~20 seconds of speech
-// around 150 KB per clip. Changing this rewrites every committed clip.
-const ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_64";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v3";
 // Played from the WHOOP Apple Health fallback card on /connect, in the voice
 // the member picked during onboarding.
@@ -42,7 +40,7 @@ for (const option of assistantVoiceOptions) {
     throw new Error("MURPH_ELEVENLABS_VOICE_ID is required to generate the classic memo.");
   }
 
-  const bytes = await generateElevenLabsMemo({
+  const bytes = await generateElevenLabsSpeechMp3({
     apiKey,
     modelId,
     text: MEMO_TEXT,
@@ -67,36 +65,6 @@ async function readAssistantVoiceOptions() {
   }
 
   return contracts.assistantVoiceOptions;
-}
-
-async function generateElevenLabsMemo(input) {
-  const url = new URL(
-    `/v1/text-to-speech/${encodeURIComponent(input.voiceId)}`,
-    ELEVENLABS_API_BASE_URL,
-  );
-  url.searchParams.set("output_format", ELEVENLABS_OUTPUT_FORMAT);
-
-  const response = await fetch(url, {
-    body: JSON.stringify({
-      model_id: input.modelId,
-      text: input.text,
-    }),
-    headers: {
-      accept: "audio/mpeg",
-      "content-type": "application/json",
-      "xi-api-key": input.apiKey,
-    },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      `ElevenLabs memo generation failed for voice ${input.voiceId}: ${response.status} ${text.slice(0, 160)}`,
-    );
-  }
-
-  return new Uint8Array(await response.arrayBuffer());
 }
 
 async function loadLocalEnvFile(relativePath) {

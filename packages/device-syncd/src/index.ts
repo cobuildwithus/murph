@@ -11,6 +11,7 @@ export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verificatio
 export {
   createDeviceSyncService,
   createDefaultImporterPort,
+  resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
 } from "./service.ts";
 export type {

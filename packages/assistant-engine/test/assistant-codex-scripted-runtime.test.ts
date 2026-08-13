@@ -409,6 +409,199 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
+  it('carries expanded connected-health questions through the production prompt, skill, command, evidence, and answer boundary', {
+    timeout: 360_000,
+  }, async () => {
+    const cases = [
+      {
+        answer: 'Your connected device recorded 45 minutes of daylight on July 12.',
+        command: 'measurement entry list --metric daylight_exposure --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_daylight_summary',
+            metric: 'daylight-exposure-minutes',
+            occurredAt: '2026-07-12T12:00:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'minutes',
+            value: 45,
+          }],
+        },
+        prompt: 'How much daylight did I get on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected device recorded a 48-minute workout on July 12.',
+        command: 'measurement entry list --metric workout_duration --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_workout_duration_summary',
+            metric: 'workout-minutes',
+            occurredAt: '2026-07-12T15:00:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'minutes',
+            value: 48,
+          }],
+        },
+        prompt: 'How long was my workout on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected-device body-fat estimate moved from 19.2% to 18.5%; keep the same source and conditions before treating that as a trend.',
+        command: 'measurement entry list --metric fat --from 2026-07-01 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 2,
+          items: [
+            {
+              eventId: 'evt_body_fat_latest',
+              metric: 'body-fat-percentage',
+              occurredAt: '2026-07-12T07:00:00.000Z',
+              recordKind: 'observation',
+              source: 'device',
+              unit: '%',
+              value: 18.5,
+            },
+            {
+              eventId: 'evt_body_fat_prior',
+              metric: 'body-fat-percentage',
+              occurredAt: '2026-07-01T07:00:00.000Z',
+              recordKind: 'observation',
+              source: 'device',
+              unit: '%',
+              value: 19.2,
+            },
+          ],
+        },
+        prompt: 'What is my body-fat trend from July 1 through July 12?',
+        skillHeading: '# Body Composition',
+        skillSlug: 'body-composition',
+      },
+      {
+        answer: 'I found no daylight entries for July 13, so that reading is unavailable—not zero and not proof you had no daylight exposure.',
+        command: 'measurement entry list --metric daylight_exposure --from 2026-07-13 --to 2026-07-13 --limit 50 --format json',
+        evidence: { count: 0, items: [] },
+        prompt: 'How much daylight did I get on July 13?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+    ] as const
+
+    for (const input of cases) {
+      const scenario = await prepareScriptedTurnScenario()
+      const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+      const commandLog = path.join(scenario.turnInput.workingDirectory, 'expanded-health-command.log')
+      const skillRead = `sed -n '1,220p' skills/${input.skillSlug}/SKILL.md`
+      await Promise.all([
+        mkdir(skillsRoot, { recursive: true }),
+        writeFile(commandLog, '', 'utf8'),
+      ])
+      await cp(
+        path.join(resolveAssistantSkillsRoot(), input.skillSlug),
+        path.join(skillsRoot, input.skillSlug),
+        { recursive: true },
+      )
+      await writeFile(
+        path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
+        [
+          '#!/bin/sh',
+          'set -eu',
+          `printf '%s\\n' "$*" >> ${quotePosixShellLiteral(commandLog)}`,
+          `if [ "$*" != ${quotePosixShellLiteral(input.command)} ]; then`,
+          "  printf '%s\\n' '{\"error\":\"unexpected command\"}' >&2",
+          '  exit 64',
+          'fi',
+          `printf '%s\\n' ${quotePosixShellLiteral(JSON.stringify(input.evidence))}`,
+          '',
+        ].join('\n'),
+        { encoding: 'utf8', mode: 0o755 },
+      )
+      scenario.stub.queue(
+        {
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(skillRead)},
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+            name: 'exec',
+          },
+        },
+        {
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(`./vault-cli ${input.command}`)},
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+            name: 'exec',
+          },
+        },
+        {
+          text: input.answer,
+        },
+      )
+
+      try {
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput,
+          baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+          env: {
+            ...scenario.turnInput.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          prompt: input.prompt,
+          sandbox: 'danger-full-access',
+        })
+
+        const providerToolOutputs = scenario.stub
+          .requestSummariesSinceBaseline()
+          .flatMap((summary) => summary.customToolCallOutputs ?? [])
+          .join('\n')
+        expect(providerToolOutputs, 'skill and CLI tool outputs').toContain(input.skillHeading)
+        expect(providerToolOutputs, 'CLI evidence output').toContain(JSON.stringify(input.evidence))
+        expect((await readFile(commandLog, 'utf8')).trim()).toBe(input.command)
+        expect(result.finalMessage).toBe(input.answer)
+      } finally {
+        await stopWarmCodexAppServer()
+      }
+    }
+  })
+
+  it('keeps raw dense streams and partial carbohydrate observations outside complete-answer claims', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const answer = [
+      'Raw ECG voltages and workout stream points are not stored or exposed; I can use only their compact imported summaries.',
+      'A 48 g carbohydrate observation is not a complete meal or eaten-calorie log, so complete intake is unavailable without meal records.',
+    ].join(' ')
+    scenario.stub.queue({
+      requestIncludes: [
+        'Raw ECG voltages and workout stream points are not stored or exposed',
+        'burned calories, carbohydrate observations, and complete meal intake distinct',
+      ],
+      text: answer,
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      prompt: 'Show me raw ECG voltages and raw workout points, and use my 48 g carbohydrate observation as my complete eaten-calorie log.',
+    })
+
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+    expect(result.finalMessage).toBe(answer)
+  })
+
   it.each([
     {
       label: 'member-memory',
@@ -4698,10 +4891,11 @@ text(JSON.stringify(result));
     expect(result.finalMessage).toMatch(/new time|reschedule/iu)
   })
 
-  it('does not describe an unverified stale recurrence as exhausted', {
+  it('uses host-recovered timing without another model-selected tool call', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
         customToolCall: {
@@ -4718,7 +4912,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording was updated, but I could not verify its next occurrence. I can inspect or update the schedule if you want.',
+        text: 'The reminder wording was updated. I checked the scheduler and confirmed the daily schedule is active.',
       },
     )
 
@@ -4729,6 +4923,7 @@ text(JSON.stringify(result));
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            automationRequests.push(request)
             if (request.action !== 'patch') {
               throw new Error('Expected an automation patch request.')
             }
@@ -4738,11 +4933,12 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: null,
+              nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
               routeBinding: 'preserved',
               schedule: { everyMs: 86_400_000, kind: 'every' },
               status: 'active',
-              timingVerified: false,
+              timingVerified: true,
+              timingVerificationIssues: [],
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -4763,13 +4959,99 @@ text(JSON.stringify(result));
       .join('\n')
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"every"')
-    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":false')
-    expect(result.finalMessage).toMatch(/could not verify/iu)
-    expect(result.finalMessage).toMatch(/inspect|update/iu)
-    expect(result.finalMessage).not.toMatch(
-      /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+    expect(toolOutputs).toContain('"nextOccurrenceAt":"2026-08-11T00:01:00.000Z"')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+    ])
+    expect(result.finalMessage).toMatch(/checked|confirmed/iu)
+    expect(result.finalMessage).not.toMatch(/could not verify|if you want/iu)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('reports persistent timing uncertainty without offering more inspection', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is still finishing existing work, so the next run is not confirmed yet.',
+      },
     )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            const response = {
+              automationId: 'automation-daily-interval',
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved' as const,
+              schedule: { everyMs: 86_400_000, kind: 'every' as const },
+              status: 'active' as const,
+              timingVerified: false,
+              timingVerificationIssues: ['runtime_state_pending'] as const,
+              updatedAt: '2026-08-10T00:01:00.000Z',
+            }
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch' as const,
+              ...response,
+              created: false,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my daily interval reminder now.',
+    })
+
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+    ])
+    expect(result.finalMessage).toMatch(/updated|active/iu)
+    expect(result.finalMessage).toMatch(/next run is not confirmed yet/iu)
+    expect(result.finalMessage).not.toMatch(/if you want|inspect|10:30|tomorrow/iu)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('keeps active device-triggered saves distinct from exhausted clock schedules', {
@@ -7430,7 +7712,7 @@ text(result.output);
         currentHostedMailboxItemIds: () => [],
         groupSharedReader: {
           request: async () => ({
-            members: Array.from({ length: 32 }, (_unused, index) => ({
+            members: Array.from({ length: 200 }, (_unused, index) => ({
               currentTurnHandles: [],
               displayName: `Member ${index}`,
               memberId: `member_oversized_${index}`,
