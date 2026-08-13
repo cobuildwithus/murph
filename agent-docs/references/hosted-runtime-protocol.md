@@ -405,9 +405,11 @@ infrastructure fields.
 The Web response is complete. For the model boundary, the assistant-engine
 adapter keys every retained projection by its exact scope and collapses the
 grant/data pair to `not_granted`, `pending`, `missing`, or `available`.
-Non-workout record arrays remain intact; `workouts.v0` additionally hoists
-repeated day, kind, time-semantics, and completion-watermark fields. If whole
-member rows still
+All source-tagged record arrays remain intact; `workouts.v0` additionally
+hoists repeated day, kind, time-semantics, and completion-watermark fields while
+retaining each workout item's source tag. Group email reads use this same model
+adapter, so they cannot silently collapse a source that the ordinary group tool
+would preserve. If whole member rows still
 exceed the model result limit, the adapter returns `status="partial"` with every
 omitted current membership named in `omittedParticipantIds`. It never truncates
 a member row, treats an omitted member as departed, or alters stored or
@@ -627,15 +629,27 @@ rollback floor; rolling Web back would recreate false missing states for newly
 admitted or refreshed generations even before the legacy backfill begins.
 
 Recent daily and sleep projection owners derive the member's current civil date
-from the validated vault timezone, admit only that date and the prior six civil
-dates, and emit at most seven records. Sparse data therefore cannot reach an
-eighth member-local date, including around UTC midnight or daylight-saving
-changes. A missing or invalid vault timezone fails these civil-date scopes
-closed. `workouts.v0` retains its separate global calendar-close semantics.
+from the validated vault timezone and admit only that date and the prior six
+civil dates. Each available public source receives its own tagged record and
+`date.source` key; up to eight sources therefore produce at most 56 complete
+records without cross-source ranking or truncation. `workouts.v0` retains its
+seven day records and tags each workout item instead. A missing or invalid vault
+timezone fails these civil-date scopes closed. `workouts.v0` retains its
+separate global calendar-close semantics.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
 `pending` parser/model status before Web emits `pending`, exact seven-day consent
 copy, or fresh projection work. Deploy Web before any backfill clears a legacy
 snapshot.
+
+The source-tagged snapshot shape is a consumer-first rolling change. Deploy Web
+first so its delivery parser, encrypted snapshot bound, direct reader, v1-to-v0
+compatibility path, ordinary group tool, and group-email path accept and retain
+the additive source fields and larger complete record sets. Then deploy the
+Cloudflare Worker/runner producer with immediate convergence. During the bounded
+window, new Web accepts old unsourced snapshots. Old Web must not receive a new
+source-tagged snapshot because its closed parser would reject the additive
+field. Roll back the producer before Web; after tagged snapshots are published,
+the source-aware Web consumer is the rollback floor.
 
 This protocol is a consumer-first hard cut:
 

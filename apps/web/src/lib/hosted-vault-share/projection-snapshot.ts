@@ -2,7 +2,7 @@ import "server-only";
 
 import {
   buildHostedVaultShareProjectionScopeKey,
-  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  getHostedVaultShareProjectionMaxRecords,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeliveryRecord,
@@ -19,7 +19,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA =
   "murph.hosted-vault-share.projection-snapshot.v1" as const;
 const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCOPE =
   "hosted-vault-share-projection-snapshot:v1";
-export const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES = 32 * 1024;
+export const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES = 48 * 1024;
 
 export interface HostedVaultShareProjectionSnapshotAuthority {
   destinationMemberId: string;
@@ -170,9 +170,12 @@ function parseHostedVaultShareProjectionSnapshotRecords(
   share: HostedVaultShareProjectionSnapshotAuthority,
 ): HostedVaultShareDeliveryRecord[] {
   assertHostedVaultShareProjectionSnapshotAuthority(share);
-  if (value.length > HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
+  const maxRecords = getHostedVaultShareProjectionMaxRecords(
+    share.projectionScope,
+  );
+  if (value.length > maxRecords) {
     throw new TypeError(
-      `Hosted vault-share projection snapshot records must contain at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS} entries.`,
+      `Hosted vault-share projection snapshot records must contain at most ${maxRecords} entries.`,
     );
   }
 

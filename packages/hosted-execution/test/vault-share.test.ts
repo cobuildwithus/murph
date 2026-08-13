@@ -13,6 +13,7 @@ import {
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
@@ -1039,6 +1040,38 @@ describe("daily metric vault-share delivery records", () => {
     });
   });
 
+  it("keeps every bounded public source and rejects a ninth source", () => {
+    const records = Array.from(
+      { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+      (_, index) => {
+        const source = `source-${index}`;
+        return {
+          ...VALID_DAILY_METRIC_RECORD,
+          recordKey: `2026-07-03.${source}`,
+          source: { label: source, source },
+        };
+      },
+    );
+
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records,
+    }).records).toEqual(records);
+
+    const ninthSource = "source-8";
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records: [
+        ...records,
+        {
+          ...VALID_DAILY_METRIC_RECORD,
+          recordKey: `2026-07-03.${ninthSource}`,
+          source: { label: ninthSource, source: ninthSource },
+        },
+      ],
+    })).toThrow(/at most 8 public sources/u);
+  });
+
   it("rejects daily scalar records that do not match the projection kind", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({
@@ -1308,7 +1341,7 @@ describe("daily metric vault-share delivery records", () => {
       sources: validData.sources.map((source, index) => index === 0
         ? { ...source, label: "Junction", source: "junction" }
         : source),
-    }, /canonical public provider keys and labels/u);
+    }, /canonical public provider slugs/u);
     expectInvalidSources({
       ...validData,
       sources: validData.sources.map((source, index) => index === 0

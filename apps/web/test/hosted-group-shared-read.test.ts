@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
@@ -452,10 +453,14 @@ describe("workouts.v0 snapshot bounds", () => {
     // This finite in-range value exercises the longest JSON number spelling used
     // by the bounded duration field rather than relying only on integer minutes.
     const maximumWidthMinutes = 0.0000030024105450300988;
+    const maximumWidthSource = {
+      label: "x".repeat(80),
+      source: "x".repeat(80),
+    };
     expect(JSON.stringify(maximumWidthMinutes)).toHaveLength(24);
 
     const records = Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
+      { length: HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS },
       (_, dayIndex): HostedVaultShareDeliveryRecord => {
         const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
         return {
@@ -468,6 +473,7 @@ describe("workouts.v0 snapshot bounds", () => {
               (_, workoutIndex) => ({
                 kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
                 minutes: maximumWidthMinutes,
+                source: maximumWidthSource,
                 startLocalMs: 86_399_999 - workoutIndex,
               }),
             ),
@@ -490,7 +496,7 @@ describe("workouts.v0 snapshot bounds", () => {
     const encoder = new TextEncoder();
 
     const snapshotBytes = encoder.encode(serialized).byteLength;
-    expect(snapshotBytes).toBe(18_352);
+    expect(snapshotBytes).toBe(38_528);
     expect(snapshotBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
     );
@@ -690,7 +696,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           value: 8123,
         },
         occurredAt: `${yesterday.toISOString().slice(0, 10)}T00:00:00.000Z`,
-        recordKey: yesterday.toISOString().slice(0, 10),
+        recordKey: `${yesterday.toISOString().slice(0, 10)}.garmin`,
+        source: { label: "Garmin", source: "garmin" },
       }],
     });
     const stepsB = snapshot({
@@ -752,6 +759,10 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     });
     expect(result.members[0]?.projections[1]?.records[0]?.data).toMatchObject({
       sources: [],
+    });
+    expect(result.members[0]?.projections[0]?.records[0]?.source).toEqual({
+      label: "Garmin",
+      source: "garmin",
     });
     expect(result.members[1]).toMatchObject({
       displayName: "Alex",
@@ -1052,7 +1063,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(JSON.stringify(result)).not.toContain("sourceRevision");
   });
 
-  it("lets a frozen v0 sleep read consume only the canonical value from a v1 grant", async () => {
+  it("lets a frozen v0 sleep read retain every tagged value from a v1 grant", async () => {
     const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
@@ -1060,36 +1071,32 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       id: "share_deep_sources_for_legacy_read",
       memberId: "member_legacy_reader",
       projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
-      records: [{
-        data: {
-          date,
-          metricKey: "deep-sleep-minutes",
-          projectedAt: `${date}T12:00:00.000Z`,
-          sources: [
-            {
-              label: "fitbit",
-              recordedAt: `${date}T06:58:00.000Z`,
-              source: "fitbit",
-              unit: "minutes",
-              value: 64,
-            },
-            {
-              label: "Garmin",
-              recordedAt: `${date}T07:01:00.000Z`,
-              selected: true as const,
-              source: "garmin",
-              unit: "minutes",
-              value: 88,
-            },
-          ],
-          sourcesDisagree: true,
-          unit: "minutes",
-          value: 88,
+      records: [
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            unit: "minutes",
+            value: 64,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.fitbit`,
+          source: { label: "fitbit", source: "fitbit" },
+          sourceRevision: "E".repeat(32),
         },
-        occurredAt: `${date}T00:00:00.000Z`,
-        recordKey: date,
-        sourceRevision: "E".repeat(32),
-      }],
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            unit: "minutes",
+            value: 88,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.garmin`,
+          source: { label: "Garmin", source: "garmin" },
+          sourceRevision: "F".repeat(32),
+        },
+      ],
     });
     installCiphertexts({ sourceAwareSleep });
     const { prisma } = createPrisma({
@@ -1122,20 +1129,32 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       grantStatus: "granted",
       projectionScope: DEEP_SLEEP_SCOPE,
       projectionScopeKey: DEEP_SLEEP_KEY,
-      records: [{
-        data: {
-          date,
-          metricKey: "deep-sleep-minutes",
-          unit: "minutes",
-          value: 88,
+      records: [
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            unit: "minutes",
+            value: 64,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.fitbit`,
+          source: { label: "fitbit", source: "fitbit" },
         },
-        occurredAt: `${date}T00:00:00.000Z`,
-        recordKey: date,
-      }],
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            unit: "minutes",
+            value: 88,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.garmin`,
+          source: { label: "Garmin", source: "garmin" },
+        },
+      ],
     });
-    expect(JSON.stringify(result)).not.toMatch(
-      /fitbit|Garmin|garmin|projectedAt|recordedAt|selected|sourcesDisagree|sourceRevision/u,
-    );
+    expect(JSON.stringify(result)).not.toMatch(/projectedAt|recordedAt|selected|sourcesDisagree|sourceRevision/u);
   });
 
   it("prefers an exact v0 sleep grant over a v1 compatibility fallback", async () => {

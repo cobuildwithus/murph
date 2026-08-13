@@ -72,6 +72,11 @@ import {
 } from "@murphai/contracts";
 
 const TEST_SOURCE_WORKSPACE_VERSION = "7";
+const GARMIN_SOURCE = { label: "Garmin", source: "garmin" } as const;
+const MURPH_SOURCE = { label: "Murph", source: "murph" } as const;
+const OURA_SOURCE = { label: "Oura", source: "oura" } as const;
+const STRAVA_SOURCE = { label: "Strava", source: "strava" } as const;
+const WHOOP_SOURCE = { label: "WHOOP", source: "whoop" } as const;
 
 function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
   const {
@@ -1173,7 +1178,8 @@ describe("selectProjectableDailyMetricDays", () => {
             value,
           },
           occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-          recordKey: ACTIVITY_DAY.date,
+          recordKey: `${ACTIVITY_DAY.date}.garmin`,
+          source: GARMIN_SOURCE,
           sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
         }]);
         expect(parseHostedVaultShareDeliverRequest({
@@ -1210,7 +1216,7 @@ describe("selectProjectableDailyMetricDays", () => {
     }
   });
 
-  it("projects every available sleep source with freshness and one canonical selection", async () => {
+  it("projects every available sleep source without choosing a canonical winner", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-sources-"));
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
@@ -1293,55 +1299,32 @@ describe("selectProjectableDailyMetricDays", () => {
         requireDailyMetricSpec("deep-sleep-sources-days.v1"),
       );
 
-      expect(selected).toHaveLength(1);
-      expect(selected[0]?.data).toMatchObject({
-        date: ACTIVITY_DAY.date,
-        metricKey: "deep-sleep-minutes",
-        projectedAt: "2026-07-04T00:00:00.000Z",
-        sourcesDisagree: true,
-        unit: "minutes",
-      });
-      const data = selected[0]?.data;
-      if (
-        !data
-        || !("sources" in data)
-        || !Array.isArray(data.sources)
-        || !("unit" in data)
-        || !("value" in data)
-      ) {
-        throw new Error("Expected source-aware sleep projection data.");
-      }
-      expect(data.sources).toEqual([
+      expect(selected).toEqual([
         expect.objectContaining({
-          label: "fitbit",
-          recordedAt: "2026-07-03T06:58:00.000Z",
-          source: "fitbit",
-          value: 64,
+          data: expect.objectContaining({
+            date: ACTIVITY_DAY.date,
+            metricKey: "deep-sleep-minutes",
+            unit: "minutes",
+            value: 64,
+          }),
+          recordKey: `${ACTIVITY_DAY.date}.fitbit`,
+          source: { label: "fitbit", source: "fitbit" },
         }),
         expect.objectContaining({
-          label: "Garmin",
-          recordedAt: "2026-07-03T07:01:00.000Z",
-          source: "garmin",
-          value: 88,
+          data: expect.objectContaining({ value: 88 }),
+          recordKey: `${ACTIVITY_DAY.date}.garmin`,
+          source: { label: "Garmin", source: "garmin" },
         }),
         expect.objectContaining({
-          label: "Oura",
-          recordedAt: "2026-07-03T07:04:00.000Z",
-          source: "oura",
-          value: 112,
+          data: expect.objectContaining({ value: 112 }),
+          recordKey: `${ACTIVITY_DAY.date}.oura`,
+          source: { label: "Oura", source: "oura" },
         }),
       ]);
-      const selectedSources = data.sources.filter((source) =>
-        typeof source === "object"
-        && source !== null
-        && "selected" in source
-        && source.selected === true
-      );
-      expect(selectedSources).toHaveLength(1);
-      expect(selectedSources[0]).toMatchObject({
-        unit: data.unit,
-        value: data.value,
-      });
+      expect(selected.every((record) =>
+        !("sources" in record.data)
+        && !("selected" in record.data)
+      )).toBe(true);
       expect(parseHostedVaultShareDeliverRequest({
         projectionKind: "deep-sleep-sources-days.v1",
         records: selected,
@@ -1372,7 +1355,7 @@ describe("selectProjectableDailyMetricDays", () => {
       stage: "rem" as const,
       title: "REM sleep",
     },
-  ])("makes the newest manual $stage correction authoritative with and without wearable evidence", async ({
+  ])("keeps the newest manual $stage correction beside wearable evidence", async ({
     legacyProjectionKind,
     metric,
     metricKey,
@@ -1438,53 +1421,27 @@ describe("selectProjectableDailyMetricDays", () => {
           requireDailyMetricSpec(legacyProjectionKind),
         );
 
-        expect(legacySelected).toEqual([
-          expect.objectContaining({
-            data: expect.objectContaining({
-              metricKey,
-              unit: "minutes",
-              value: 91,
-            }),
-            recordKey: ACTIVITY_DAY.date,
-          }),
-        ]);
-        expect(selected).toEqual([
+        expect(selected).toHaveLength(includesWearable ? 2 : 1);
+        expect(selected).toEqual(expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
               date: ACTIVITY_DAY.date,
               metricKey,
-              sources: includesWearable
-                ? [
-                    expect.objectContaining({
-                      label: "Garmin",
-                      source: "garmin",
-                      unit: "minutes",
-                      value: 70,
-                    }),
-                    {
-                      label: "Manual",
-                      recordedAt: "2026-07-03T13:00:00.000Z",
-                      selected: true,
-                      source: "manual",
-                      unit: "minutes",
-                      value: 91,
-                    },
-                  ]
-                : [{
-                    label: "Manual",
-                    recordedAt: "2026-07-03T13:00:00.000Z",
-                    selected: true,
-                    source: "manual",
-                    unit: "minutes",
-                    value: 91,
-                  }],
-              sourcesDisagree: includesWearable,
               unit: "minutes",
               value: 91,
             }),
-            recordKey: ACTIVITY_DAY.date,
+            recordKey: `${ACTIVITY_DAY.date}.manual`,
+            source: { label: "Manual", source: "manual" },
           }),
-        ]);
+          ...(includesWearable
+            ? [expect.objectContaining({
+                data: expect.objectContaining({ value: 70 }),
+                recordKey: `${ACTIVITY_DAY.date}.garmin`,
+                source: { label: "Garmin", source: "garmin" },
+              })]
+            : []),
+        ]));
+        expect(legacySelected).toEqual(selected);
         expect(parseHostedVaultShareDeliverRequest({
           projectionKind: sourceProjectionKind,
           records: selected,
@@ -1513,7 +1470,7 @@ describe("selectProjectableDailyMetricDays", () => {
       stage: "rem" as const,
       title: "REM sleep",
     },
-  ])("keeps four wearable $stage sources visible beside the authoritative manual correction", async ({
+  ])("keeps four wearable $stage sources visible beside the manual correction", async ({
     legacyProjectionKind,
     metric,
     metricKey,
@@ -1559,22 +1516,17 @@ describe("selectProjectableDailyMetricDays", () => {
         requireDailyMetricSpec(legacyProjectionKind),
       );
 
-      expect(legacy[0]?.data).toMatchObject({ metricKey, value: 91 });
-      expect(sourceAware[0]?.data).toMatchObject({
-        sources: expect.arrayContaining([
-          expect.objectContaining({ source: "fitbit" }),
-          expect.objectContaining({ source: "garmin" }),
-          expect.objectContaining({ source: "oura" }),
-          expect.objectContaining({ source: "polar" }),
-          expect.objectContaining({ selected: true, source: "manual", value: 91 }),
-        ]),
-        value: 91,
-      });
-      const sourceAwareData = sourceAware[0]?.data;
-      if (!sourceAwareData || !("sources" in sourceAwareData)) {
-        throw new Error("Expected source-aware sleep-stage projection data.");
-      }
-      expect(sourceAwareData.sources).toHaveLength(5);
+      expect(sourceAware).toHaveLength(5);
+      expect(sourceAware.map((record) => record.source?.source).sort()).toEqual([
+        "fitbit",
+        "garmin",
+        "manual",
+        "oura",
+        "polar",
+      ]);
+      expect(sourceAware.find((record) => record.source?.source === "manual")?.data)
+        .toMatchObject({ value: 91 });
+      expect(legacy).toEqual(sourceAware);
       expect(parseHostedVaultShareDeliverRequest({
         projectionKind: sourceProjectionKind,
         records: sourceAware,
@@ -1586,7 +1538,7 @@ describe("selectProjectableDailyMetricDays", () => {
   });
 
   it.each([false, true])(
-    "omits an invalid manual sleep-stage date without erasing valid source-aware history (history=%s)",
+    "omits an invalid manual sleep-stage value without erasing wearable source history (history=%s)",
     async (includesValidHistory) => {
       const vaultRoot = await createSleepSourceProjectionVault(includesValidHistory
         ? [{ date: "2026-07-02", providers: ["garmin"] }]
@@ -1641,7 +1593,7 @@ describe("selectProjectableDailyMetricDays", () => {
           requireDailyMetricSpec("deep-sleep-sources-days.v1"),
         );
         expect(selected.map((record) => record.recordKey)).toEqual(
-          includesValidHistory ? ["2026-07-02"] : [],
+          includesValidHistory ? ["2026-07-02.garmin"] : [],
         );
         expect(parseHostedVaultShareDeliverRequest({
           projectionKind: "deep-sleep-sources-days.v1",
@@ -1728,8 +1680,11 @@ describe("selectProjectableDailyMetricDays", () => {
         requireDailyMetricSpec(legacyProjectionKind),
       );
 
-      expect(sourceAware.map((record) => record.recordKey)).toEqual(["2026-07-02"]);
-      expect(legacy.map((record) => record.recordKey)).toEqual(["2026-07-02"]);
+      expect(sourceAware.map((record) => record.recordKey)).toEqual([
+        "2026-07-03.garmin",
+        "2026-07-02.garmin",
+      ]);
+      expect(legacy).toEqual(sourceAware);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -1814,23 +1769,17 @@ describe("selectProjectableDailyMetricDays", () => {
         requireDailyMetricSpec(legacyProjectionKind),
       );
 
-      expect(legacy[0]?.data).toMatchObject({ value: 60 });
-      expect(sourceAware[0]?.data).toMatchObject({
-        sources: expect.arrayContaining([
-          expect.objectContaining({ selected: true, source: "manual", value: 60 }),
-          expect.objectContaining({ source: "garmin" }),
-        ]),
-        value: 60,
-      });
-      const sourceAwareData = sourceAware[0]?.data;
-      if (!sourceAwareData || !("sources" in sourceAwareData) || !Array.isArray(sourceAwareData.sources)) {
-        throw new Error("Expected source-aware sleep-stage projection data.");
-      }
-      expect(sourceAwareData.sources.filter((source) =>
-        "selected" in source && source.selected
-      )).toEqual([
-        expect.objectContaining({ source: "manual", value: 60 }),
-      ]);
+      expect(sourceAware).toHaveLength(2);
+      expect(sourceAware).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({ value: 60 }),
+          source: { label: "Manual", source: "manual" },
+        }),
+        expect.objectContaining({
+          source: { label: "Garmin", source: "garmin" },
+        }),
+      ]));
+      expect(legacy).toEqual(sourceAware);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -1851,19 +1800,12 @@ describe("selectProjectableDailyMetricDays", () => {
       );
 
       expect(selected.map((record) => record.recordKey).sort()).toEqual([
-        "2026-07-02",
-        "2026-07-03",
+        "2026-07-02.fitbit",
+        "2026-07-02.garmin",
+        "2026-07-02.oura",
+        "2026-07-02.polar",
+        "2026-07-03.suunto",
       ]);
-      const sourceCounts = new Map(selected.map((record) => [
-        record.recordKey,
-        "sources" in record.data && Array.isArray(record.data.sources)
-          ? record.data.sources.length
-          : 0,
-      ]));
-      expect(sourceCounts).toEqual(new Map([
-        ["2026-07-02", 4],
-        ["2026-07-03", 1],
-      ]));
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -1887,12 +1829,22 @@ describe("selectProjectableDailyMetricDays", () => {
     }
   });
 
-  it("omits only an over-bound date while preserving other source-aware dates", async () => {
+  it("fails closed instead of truncating when public sources exceed the bound", async () => {
     const vaultRoot = await createSleepSourceProjectionVault([
       { date: "2026-07-02", providers: ["fitbit"] },
       {
         date: "2026-07-03",
-        providers: ["fitbit", "garmin", "oura", "polar", "suunto"],
+        providers: [
+          "fitbit",
+          "garmin",
+          "oura",
+          "polar",
+          "suunto",
+          "coros",
+          "whoop",
+          "strava",
+          "withings",
+        ],
       },
     ]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
@@ -1903,11 +1855,7 @@ describe("selectProjectableDailyMetricDays", () => {
         requireDailyMetricSpec("deep-sleep-sources-days.v1"),
       );
 
-      expect(selected.map((record) => record.recordKey)).toEqual(["2026-07-02"]);
-      expect(selected[0]?.data).toMatchObject({
-        date: "2026-07-02",
-        sources: [expect.objectContaining({ source: "fitbit", selected: true })],
-      });
+      expect(selected).toEqual([]);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -2035,6 +1983,117 @@ describe("selectProjectableDailyMetricDays", () => {
         records: selected,
       }).records,
     ).toEqual(selected);
+  });
+
+  it("keeps distinct public step sources as separate tagged records", () => {
+    const records = selectProjectableDailyMetricDays([
+      {
+        date: ACTIVITY_DAY.date,
+        grain: "day",
+        metricKey: "steps",
+        source: { label: "Garmin", source: "garmin" },
+        statistic: "value",
+        unit: "count",
+        value: 18_000,
+      },
+      {
+        date: ACTIVITY_DAY.date,
+        grain: "day",
+        metricKey: "steps",
+        source: { label: "Apple Health", source: "apple-health-kit" },
+        statistic: "value",
+        unit: "count",
+        value: 12_000,
+      },
+    ], stepsSpec, nowMs, utcDateKey(nowMs));
+
+    expect(records).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ value: 12_000 }),
+        recordKey: `${ACTIVITY_DAY.date}.apple-health-kit`,
+        source: { label: "Apple Health", source: "apple-health-kit" },
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({ value: 18_000 }),
+        recordKey: `${ACTIVITY_DAY.date}.garmin`,
+        source: { label: "Garmin", source: "garmin" },
+      }),
+    ]);
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records,
+    }).records).toEqual(records);
+  });
+
+  it("reconstructs every public step source from a Junction-backed vault", async () => {
+    const vaultRoot = await createActivitySessionVault([
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_steps_apple_health",
+        kind: "observation",
+        occurredAt: "2026-07-03T12:00:00.000Z",
+        recordedAt: "2026-07-03T12:01:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        source: "device",
+        title: "Steps",
+        metric: "steps",
+        value: 12_000,
+        unit: "count",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          originConfidence: "high",
+          sourceProviderSlug: "apple-health-kit",
+          version: 1,
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: "steps",
+          resourceId: "steps_apple_health",
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_steps_garmin",
+        kind: "observation",
+        occurredAt: "2026-07-03T12:00:00.000Z",
+        recordedAt: "2026-07-03T12:02:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        source: "device",
+        title: "Steps",
+        metric: "steps",
+        value: 18_000,
+        unit: "count",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          originConfidence: "high",
+          sourceProviderSlug: "garmin",
+          version: 1,
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: "steps",
+          resourceId: "steps_garmin",
+        },
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const records = await readProjectableDailyMetricDays(vaultRoot, stepsSpec);
+      expect(records).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({ value: 12_000 }),
+          source: { label: "Apple Health", source: "apple-health-kit" },
+        }),
+        expect.objectContaining({
+          data: expect.objectContaining({ value: 18_000 }),
+          source: GARMIN_SOURCE,
+        }),
+      ]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
   });
 
   it.each([
@@ -2293,10 +2352,10 @@ describe("selectProjectableDailyMetricDays", () => {
             value,
           },
           occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-          recordKey: ACTIVITY_DAY.date,
+          recordKey: `${ACTIVITY_DAY.date}.strava`,
+          source: STRAVA_SOURCE,
           sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
         }]);
-        expect(JSON.stringify(selected)).not.toContain("strava");
         expect(JSON.stringify(selected)).not.toContain("averagePowerWatts");
       }
     } finally {
@@ -2325,7 +2384,8 @@ describe("selectProjectableMealNutritionDays", () => {
         value: 87.5,
       },
       occurredAt: "2026-07-03T00:00:00.000Z",
-      recordKey: "2026-07-03",
+      recordKey: "2026-07-03.murph",
+      source: { label: "Murph", source: "murph" },
     }]);
   });
 
@@ -2355,7 +2415,8 @@ describe("selectProjectableMealNutritionDays", () => {
         value: 0,
       },
       occurredAt: "2026-07-03T00:00:00.000Z",
-      recordKey: "2026-07-03",
+      recordKey: "2026-07-03.murph",
+      source: { label: "Murph", source: "murph" },
     }]);
   });
 
@@ -2389,13 +2450,13 @@ describe("selectProjectableMealNutritionDays", () => {
 
     expect(selected).toHaveLength(7);
     expect(selected.map((record) => record.recordKey)).toEqual([
-      "2026-07-04",
-      "2026-07-03",
-      "2026-07-02",
-      "2026-07-01",
-      "2026-06-30",
-      "2026-06-29",
-      "2026-06-28",
+      "2026-07-04.murph",
+      "2026-07-03.murph",
+      "2026-07-02.murph",
+      "2026-07-01.murph",
+      "2026-06-30.murph",
+      "2026-06-29.murph",
+      "2026-06-28.murph",
     ]);
   });
 
@@ -2443,7 +2504,8 @@ describe("selectProjectableMealNutritionDays", () => {
           value: nutrient.value,
         },
         occurredAt: "2026-07-03T00:00:00.000Z",
-        recordKey: "2026-07-03",
+        recordKey: "2026-07-03.murph",
+        source: { label: "Murph", source: "murph" },
       }]);
 
       // Complete true-zero day is data.
@@ -2596,7 +2658,8 @@ describe("selectProjectableMealNutritionDays", () => {
           value: 62,
         },
         occurredAt: "2026-07-03T00:00:00.000Z",
-        recordKey: "2026-07-03",
+        recordKey: "2026-07-03.murph",
+        source: { label: "Murph", source: "murph" },
       }]);
       expect(selected[0]).not.toHaveProperty("sourceRevision");
       expect(JSON.stringify(selected)).not.toContain("externalRef");
@@ -3481,6 +3544,7 @@ describe("selectProjectableWorkoutsDays", () => {
       )?.data.workouts).toEqual([{
         kind: "running",
         minutes: 45,
+        source: OURA_SOURCE,
         startLocalMs: 18 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
       }]);
       expect(JSON.stringify(selected)).not.toMatch(/meditation|oura-session/u);
@@ -3559,7 +3623,7 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
-  it("merges a generic provider copy into its specific twin across the threshold", async () => {
+  it("keeps overlapping provider copies separate and source tagged", async () => {
     const vaultRoot = await createActivitySessionVault([
       {
         // Specific copy starts exactly at 18:00, so a strict "after 18:00"
@@ -3624,11 +3688,18 @@ describe("selectProjectableWorkoutsDays", () => {
       const selected = await readProjectableWorkoutsDays(vaultRoot);
       const duplicated = findWorkoutsRecord(selected, "2026-07-03")?.data
         .workouts as { kind: string; startLocalMs: number }[];
-      // One workout, not two, and the specific label wins.
-      expect(duplicated).toHaveLength(1);
-      expect(duplicated[0]?.kind).toBe("running");
-      // 18:00 exactly, so a strict after-18:00 rule does not qualify.
-      expect(duplicated[0]?.startLocalMs).toBe(18 * 60 * 60 * 1_000);
+      expect(duplicated).toEqual([
+        expect.objectContaining({
+          kind: "running",
+          source: GARMIN_SOURCE,
+          startLocalMs: 18 * 60 * 60 * 1_000,
+        }),
+        expect.objectContaining({
+          kind: "workout",
+          source: WHOOP_SOURCE,
+          startLocalMs: 18 * 60 * 60 * 1_000 + 60 * 1_000,
+        }),
+      ]);
       expect(findWorkoutsRecord(selected, "2026-07-02")?.data.workouts)
         .toMatchObject([{ kind: "workout", minutes: 30 }]);
     } finally {
@@ -3727,6 +3798,7 @@ describe("selectProjectableWorkoutsDays", () => {
       )?.data.workouts).toEqual([{
         kind: "running",
         minutes: 45,
+        source: MURPH_SOURCE,
         startLocalMs: 18 * 60 * 60 * 1_000,
       }]);
     } finally {
@@ -3950,7 +4022,8 @@ describe("selectProjectableActivityMinutesDays", () => {
           sessionMinutes: 42,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
     } finally {
@@ -3983,7 +4056,8 @@ describe("selectProjectableActivityMinutesDays", () => {
           sessionMinutes: 20,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
     } finally {
@@ -4116,7 +4190,8 @@ describe("selectProjectableActivityMinutesDays", () => {
           sessionDistanceMeters: 5_000,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
       expect(deliver.mock.calls[1]?.[0].records).toMatchObject([{
@@ -4134,7 +4209,8 @@ describe("selectProjectableActivityMinutesDays", () => {
           sessionCount: 1,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
       expect(findWorkoutsRecord(
@@ -4146,6 +4222,7 @@ describe("selectProjectableActivityMinutesDays", () => {
           workouts: [{
             kind: "running",
             minutes: 40,
+            source: MURPH_SOURCE,
             startLocalMs: 7 * 60 * 60 * 1_000,
           }],
         },
@@ -4245,7 +4322,9 @@ describe("selectProjectableActivityDistanceDays", () => {
         vaultRoot,
         runningDistanceSpec,
       );
-      expect(selected.map((record) => record.recordKey)).toEqual(expectedDates);
+      expect(selected.map((record) => record.recordKey)).toEqual(
+        expectedDates.map((date) => `${date}.murph`),
+      );
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -4427,7 +4506,8 @@ describe("selectProjectableActivityDistanceDays", () => {
           sessionDistanceMeters: 8_400,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
     } finally {
@@ -4589,7 +4669,8 @@ describe("selectProjectableActivitySessionCountDays", () => {
           sessionCount: 1,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
     } finally {

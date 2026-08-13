@@ -363,8 +363,8 @@ const HOSTED_GROUP_SHARED_READ_SELECTABLE_SCOPE_KEYS = new Set(
   ),
 );
 // Three requested scopes plus profile name, with at most two additional v1
-// sleep counterparts needed to let frozen v0 workflows consume a v1 grant's
-// narrower canonical value.
+// sleep counterparts needed to let frozen v0 workflows consume a compatible
+// v1 grant.
 const HOSTED_GROUP_SHARED_READ_MAX_GRANTS =
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS * 6;
 const HOSTED_GROUP_SHARED_READ_MAX_DEVICE_CONNECTIONS =
@@ -936,10 +936,11 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
       if (snapshot === undefined) {
         throw new Error("Hosted group shared snapshot result is missing.");
       }
-      const records = snapshot?.map(({ data, occurredAt, recordKey }) => ({
+      const records = snapshot?.map(({ data, occurredAt, recordKey, source }) => ({
         data,
         occurredAt,
         recordKey,
+        ...(source ? { source } : {}),
       })) ?? null;
       const memberRecords = recordsByMemberAndScope.get(share.grantorMemberId)
         ?? new Map<string, HostedRuntimeGroupSharedRecord[] | null>();
@@ -1079,6 +1080,8 @@ function projectHostedGroupSourceAwareSleepRecordsToLegacy(
   records: readonly HostedRuntimeGroupSharedRecord[],
   projectionScope: HostedVaultShareSelectableProjectionScope,
 ): HostedRuntimeGroupSharedRecord[] {
+  // New records retain their public source. Persisted legacy v1 snapshots still
+  // expose only their historical selected scalar, without inventing a source.
   return records.map((record) => {
     if (
       !("date" in record.data)
@@ -1100,11 +1103,13 @@ function projectHostedGroupSourceAwareSleepRecordsToLegacy(
       },
       occurredAt: record.occurredAt,
       recordKey: record.recordKey,
+      ...(record.source ? { source: record.source } : {}),
     }, projectionScope);
     return {
       data: parsed.data,
       occurredAt: parsed.occurredAt,
       recordKey: parsed.recordKey,
+      ...(parsed.source ? { source: parsed.source } : {}),
     };
   });
 }
@@ -1143,6 +1148,7 @@ function buildHostedGroupSharedDeviceSyncRecord(input: {
     data: record.data,
     occurredAt: record.occurredAt,
     recordKey: record.recordKey,
+    ...(record.source ? { source: record.source } : {}),
   };
 }
 

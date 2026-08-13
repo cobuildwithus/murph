@@ -133,39 +133,37 @@ Revoke and regrant clear the ciphertext in the same authority transaction, and
 regrant rotates the share id, so a stale producer cannot write into a later
 grant generation.
 
-Deep sleep and REM sleep are each one user-facing permission. New access offers
-always use the source-aware `deep-sleep-sources-days.v1` and
-`rem-sleep-sources-days.v1` scopes, which disclose the canonical value plus one
-bounded entry for every public sleep source that has that metric on the date,
-up to four wearable sources plus the optional reserved `Manual` correction
-source. Each entry carries the canonical public source key and label, its value
-and unit, its nullable canonical source-record time, and whether it supplied the
-canonical selected value. The record also carries `projectedAt` and a literal
-`sourcesDisagree` flag. Source-aware records fail closed instead of truncating
-when either source bound is exceeded or the selected source cannot be proved. A
-canonical manually entered sleep-stage event is projected onto its
-member-local day and disclosed as the explicit `manual` / `Manual` source; it is
-never attributed to a connected wearable or aggregator, and it is authoritative
-for that day while wearable values remain visible as disagreeing sources. When
-multiple live manual facts target the same stage and member-local day, canonical
-recording order decides the correction before value or unit normalization: the
-newest recorded raw fact wins after the shared metric date, source, and
-observation-time rules. An invalid newest fact omits only its affected day
-instead of silently reviving an older value or erasing other valid shared days.
-A canonically deleted fact no longer
-participates, so the next newest live manual fact wins; wearable selection
-resumes only when no live manual fact remains. The legacy
-provider-neutral `deep-sleep-days.v0` and
-`rem-sleep-days.v0` scopes remain read-only compatibility contracts for
-existing policies and grants, disclosing one canonical daily value only. A new
-join view or access offer derives the matching legacy policy request as v1, so
-existing groups expose the same single complete permission without an owner
-reconfiguration step. The durable v0 policy entry remains exact. When Web
-acceptance explicitly approves v1, that scope is added alongside v0 in the same
-locked transaction as the grant change, so the previous Web can still show and
-revoke every active authority after rollback. This never upgrades or broadens
-an existing grant in place; each member's v1 grant still requires its own
-server-owned access approval.
+Deep sleep and REM sleep remain one user-facing permission each. New access
+offers continue to use `deep-sleep-sources-days.v1` and
+`rem-sleep-sources-days.v1`; legacy v0 grants and every existing permission,
+grant, revoke, and settings flow remain unchanged. The projection shape is now
+uniform with every other shared health scope: each date can carry one complete
+record per available public source, and each record carries a canonical
+`{ source, label }` tag plus a `date.source` record key. A canonical manually
+entered observation is the explicit `manual` / `Manual` source and is never
+attributed to a wearable or aggregator. Murph-derived meal totals use
+`murph` / `Murph`. The producer admits at most eight public sources and seven
+member-local civil dates, fails closed above the complete 56-record bound, and
+never truncates or chooses one source to represent another.
+
+The same source-preserving rule applies across steps, sleep duration and times,
+sleep stages, activity metrics and selectors, workout-day summaries, heart-rate
+zones, workouts, and nutrition totals. `workouts.v0` tags each workout item
+inside its existing day record; the other dated health scopes tag the record.
+Duplicate normalization may resolve multiple facts within one public source,
+but it never compares sources to pick a group-share winner. Single-owner
+profile, timezone, and group-email authority records stay unsourced, and
+`device-sync-status.v0` retains its existing per-source item list.
+
+Persisted unsourced records and the earlier nested source-aware sleep snapshots
+remain parseable during convergence. A new join view or access offer still
+derives the matching legacy sleep policy request as v1, so existing groups keep
+one complete permission without owner reconfiguration. The durable v0 policy
+entry remains exact. When Web acceptance explicitly approves v1, that scope is
+added alongside v0 in the same locked transaction as the grant change, so the
+previous Web can still show and revoke every active authority after rollback.
+This never upgrades or broadens an existing grant in place; each member's v1
+grant still requires its own server-owned access approval.
 
 The authenticated sharing controls keep a legacy-active sleep grant visible
 under that same single Deep sleep or REM sleep row. Saving without changing it
@@ -175,22 +173,21 @@ transaction, or turn the row off, which revokes both versions. A native reaction
 to a new v1 offer uses the same replacement semantics. No legacy grant is hidden
 or broadened by policy normalization.
 
-A persisted reader that still requests a legacy v0 sleep scope may use the
-canonical top-level value from the matching v1 grant when no exact v0 grant is
-active. That compatibility projection keeps the requested v0 scope identity and
-removes every source name, source value, recorded time, projection time, and
-disagreement field. When both grants exist, the exact v0 grant wins. This lets a
-frozen workflow converge after an explicit v1 approval without silently giving
-that workflow the broader source-aware contract.
+A persisted reader that still requests a legacy v0 sleep scope may use records
+from the matching v1 grant when no exact v0 grant is active. New source-tagged
+records retain every source under the requested v0 scope identity. An earlier
+nested v1 snapshot still projects only its historical top-level scalar because
+that snapshot did not contain independent record envelopes. When both grants
+exist, the exact v0 grant wins. This lets a frozen workflow converge after an
+explicit v1 approval without changing its authority.
 
-`projectedAt` is snapshot generation time, not proof of a provider fetch or a
-fresh sync. A source entry's `recordedAt` is canonical source-record evidence,
-not proof of a live fetch. A group response may describe the stored source
-values and their timestamps, but it must never call a `read_shared` result a
-live provider check or imply that a new provider read occurred. When
-`sourcesDisagree` is true, Murph reports the source values separately; the
-top-level canonical value remains the scoring selection and is not presented
-as every provider's answer.
+Snapshot generation and record times are not proof of a live provider fetch. A
+group response may describe the stored source-tagged values and their
+timestamps, but it must never call a `read_shared` result a live provider check
+or imply that a new provider read occurred. When sources disagree, Murph reports
+the values separately. Any later challenge-specific collapsing or scoring rule
+must be explicit and downstream; the share contract does not choose a canonical
+cross-source value.
 
 The retired `vault-share.delivery` and `vault-share.revoke` mailbox rows are
 terminally skipped from their plaintext metadata before payload fetch or
@@ -238,7 +235,7 @@ evidence.
 
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
-| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. Reported Deep/REM sleep is scoreable immediately; the member-local future-date guard still excludes future rows, but the current local date alone does not make a reported stage value provisional. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data eligible under the scope's producer-owned completion marker | Treat every source-tagged value as settled evidence. Reported Deep/REM sleep is available immediately; the member-local future-date guard still excludes future rows, but the current local date alone does not make a reported stage value provisional. If multiple sources exist, name them separately instead of presenting one as the member-wide value. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence or select between sources. |
 | Current challenge-metric data exists but is not yet eligible under that completion marker | Keep the participant pending and unranked. This is not missing data or a zero. | Do not diagnose, offer permission, or advance completion from the reader's clock. |
 | Exact scope granted with a `pending` first projection snapshot | Say the permission is active and the recent shared data is still preparing. Keep the participant pending and unranked. | Invite a retry shortly. Do not diagnose a source, offer permission again, or infer private sync state. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
