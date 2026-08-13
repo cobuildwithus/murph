@@ -627,22 +627,24 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const providers = await client.listUserProviders(userId);
-    const targetProvider = providers.find((provider) =>
-      (
-        normalizeProviderSlug(provider.origin.sourceProviderSlug)
-        ?? normalizeProviderSlug(provider.slug)
-      ) === targetProviderSlug
-    );
-    const targetStatus = targetProvider
-      ? mapJunctionSourceStatus(targetProvider.status)
-      : "disconnected";
-    if (targetStatus === "disconnected") {
+    const targetStatuses = providers
+      .filter((provider) =>
+        (
+          normalizeProviderSlug(provider.origin.sourceProviderSlug)
+          ?? normalizeProviderSlug(provider.slug)
+        ) === targetProviderSlug
+      )
+      .map((provider) => mapJunctionSourceStatus(provider.status));
+    if (
+      targetStatuses.length === 0
+      || targetStatuses.every((status) => status === "disconnected")
+    ) {
       return;
     }
     if (
       requiredActiveProviderSlug
       && (
-        targetStatus !== "connected"
+        !targetStatuses.includes("connected")
         || !providers.some((provider) =>
           mapJunctionSourceStatus(provider.status) === "connected"
           && (

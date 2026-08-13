@@ -5881,6 +5881,45 @@ test("Junction migration cleanup requires a live successor before revoking Fitbi
   }]);
 });
 
+test("Junction migration cleanup evaluates every Fitbit registration before completing", async () => {
+  const requests: Array<{ method: string; url: string }> = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    const request = {
+      method: String(init?.method ?? "GET"),
+      url: readUrl(input),
+    };
+    requests.push(request);
+    if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        data: [
+          { slug: "fitbit", status: "revoked" },
+          { slug: "fitbit", status: "connected" },
+          { slug: "google_health", status: "revoked" },
+        ],
+      });
+    }
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+  });
+  const revokeSourceAccess = requireValue(
+    provider.connectionHandler?.revokeSourceAccess,
+  );
+
+  await assert.rejects(
+    () => revokeSourceAccess(createAccount(), "fitbit", {
+      requiredActiveSourceProviderSlug: "google_health",
+    }),
+    (error: unknown) => {
+      assert.ok(isDeviceSyncError(error));
+      assert.equal(error.code, "JUNCTION_REQUIRED_SOURCE_NOT_ACTIVE");
+      return true;
+    },
+  );
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+  }]);
+});
+
 test("Junction migration cleanup revokes Fitbit when its live successor is active", async () => {
   const requests: Array<{ method: string; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
@@ -5920,6 +5959,53 @@ test("Junction migration cleanup revokes Fitbit when its live successor is activ
     },
   ]);
 });
+
+for (const fitbitStatuses of [
+  ["revoked", "connected"],
+  ["connected", "revoked"],
+  ["error", "connected"],
+  ["connected", "error"],
+]) {
+  test(`Junction migration cleanup merges sibling Fitbit authority in ${fitbitStatuses.join("-")} order`, async () => {
+    const requests: Array<{ method: string; url: string }> = [];
+    const provider = createJunctionProvider(async (input, init) => {
+      const request = {
+        method: String(init?.method ?? "GET"),
+        url: readUrl(input),
+      };
+      requests.push(request);
+      if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          data: [
+            ...fitbitStatuses.map((status) => ({ slug: "fitbit", status })),
+            { slug: "google_health", status: "connected" },
+          ],
+        });
+      }
+      if (request.method === "DELETE") {
+        return createJsonResponse({ success: true });
+      }
+      throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+    });
+    const revokeSourceAccess = requireValue(
+      provider.connectionHandler?.revokeSourceAccess,
+    );
+
+    await revokeSourceAccess(createAccount(), "fitbit", {
+      requiredActiveSourceProviderSlug: "google_health",
+    });
+    assert.deepEqual(requests, [
+      {
+        method: "GET",
+        url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+      },
+      {
+        method: "DELETE",
+        url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/fitbit",
+      },
+    ]);
+  });
+}
 
 test("Junction migration cleanup does not revoke an ambiguous Fitbit registration", async () => {
   const requests: Array<{ method: string; url: string }> = [];
@@ -5970,6 +6056,38 @@ test("Junction migration cleanup is already complete when Fitbit is absent", asy
     if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
         data: [{ slug: "google_health", status: "revoked" }],
+      });
+    }
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+  });
+  const revokeSourceAccess = requireValue(
+    provider.connectionHandler?.revokeSourceAccess,
+  );
+
+  await revokeSourceAccess(createAccount(), "fitbit", {
+    requiredActiveSourceProviderSlug: "google_health",
+  });
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+  }]);
+});
+
+test("Junction migration cleanup is already complete when every Fitbit registration is terminal", async () => {
+  const requests: Array<{ method: string; url: string }> = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    const request = {
+      method: String(init?.method ?? "GET"),
+      url: readUrl(input),
+    };
+    requests.push(request);
+    if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        data: [
+          { slug: "fitbit", status: "revoked" },
+          { slug: "fitbit", status: "disconnected" },
+          { slug: "google_health", status: "revoked" },
+        ],
       });
     }
     throw new Error(`Unexpected request: ${request.method} ${request.url}`);
