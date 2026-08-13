@@ -3465,6 +3465,7 @@ test("importDeviceBatch exact historical replay does not supersede a newer provi
 
   assert.equal(replay.applied, false);
   assert.equal(replay.auditPath, null);
+  assert.deepEqual(replay.events, []);
   assert.equal(eventRows.length, 2);
   const latest = eventRows.at(-1);
   assert.equal(latest?.kind, "activity_session");

@@ -2864,6 +2864,8 @@ function mapCurrentDeviceEventOwners(
     const incomingHasEqualOrNewerComparableVersion = sourceVersionComparisons.some(
       (comparison) => comparison >= 0,
     );
+    const incomingHasOnlyOlderComparableVersions = sourceVersionComparisons.length > 0
+      && !incomingHasEqualOrNewerComparableVersion;
     if (sourceVersionComparisons.some((comparison) => comparison > 0)) {
       incomingNewerPreparedIds.add(entry.record.id);
     }
@@ -2876,6 +2878,7 @@ function mapCurrentDeviceEventOwners(
     }
     if (
       resolved.associationSafe
+      && !incomingHasOnlyOlderComparableVersions
       && !isDeletedEventSpineRecord(current)
       && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
     ) {
@@ -2971,6 +2974,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
       && deviceEventContentKey(indexedProviderMatch.indexedRecord)
         === deviceEventContentKey(entry.record);
+    const indexedSourceVersionComparison = indexedProviderMatch
+      ? compareIncomingExternalRefVersion(
+          indexedProviderMatch.indexedExternalRef,
+          externalRef,
+        )
+      : null;
 
     const authoritativeSet = authoritativeEventSets.find((set) =>
       externalRef.system === set.system
@@ -3021,7 +3030,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
 
-    if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
+    if (
+      deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
+      && (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0)
+    ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
       records.push(latest);
@@ -3032,13 +3044,11 @@ async function reconcileDeviceEventEntriesByExternalRef(
       const historicalUserEditMatch = matchedEntries.find((match) =>
         hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
       );
-      const sourceVersionComparison = indexedProviderMatch
-        ? compareIncomingExternalRefVersion(
-            indexedProviderMatch.indexedExternalRef,
-            externalRef,
-          )
-        : null;
-      if (historicalUserEditMatch && sourceVersionComparison !== null && sourceVersionComparison > 0) {
+      if (
+        historicalUserEditMatch
+        && indexedSourceVersionComparison !== null
+        && indexedSourceVersionComparison > 0
+      ) {
         const providerRevision = Math.max(
           eventSpineRevision(latest),
           index.maxRevisionById.get(latest.id) ?? 0,
@@ -3082,10 +3092,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
         supersededCount += 1;
         continue;
       }
-      skippedDuplicateCount += 1;
-      retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
-      continue;
+      if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        records.push(latest);
+        continue;
+      }
     }
 
     if (entry.externalRefUpdatePolicy === "immutable") {
