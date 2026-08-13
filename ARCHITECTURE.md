@@ -2278,12 +2278,19 @@ ENAM Standard. The runtime has no source-region fallback, dual write, migration
 phase, storage-specific admission gate, or binding to the retired OC region.
 
 Provider webhooks may use Cloudflare Queue as encrypted, non-canonical burst
-transport. Web verifies provider proof and encrypts before any Postgres access;
-one Queue consumer returns size-bounded subbatches to the existing Web ingress,
-which admits entries serially. Postgres remains the sole trace, consent,
-connection-lifecycle, dirty-state, mailbox, and device-sync control owner. This
-Queue transport is separate from hosted runtime wake execution and is never a
-second device-sync authority.
+transport. Web verifies provider proof once and freezes the versioned parsed
+event before any Postgres access; raw provider signature headers and payload
+bytes do not enter Queue state. One Queue consumer returns size-bounded
+subbatches of those prepared events to the existing Web ingress, which admits
+entries serially without rerunning the provider verifier. Postgres remains the
+sole trace, consent, connection-lifecycle, dirty-state, mailbox, and device-sync
+control owner. This Queue transport is separate from hosted runtime wake
+execution and is never a second device-sync authority. Dequeue revalidates
+current provider registration, connection epoch/status, consent, source
+lifecycle, and provider-application authority. Every emitted prepared-event
+schema decoder remains readable until all main-Queue and DLQ retention plus
+redrive exposure to that schema is proven drained, matching the decrypt-only
+transport-key retirement floor.
 An independent Cloudflare Durable Object samples only main-Queue and DLQ
 metrics every five minutes. Its SQLite state owns the monitor run lease,
 incident and alert sequence, immutable pending page, attempt pacing, and latest

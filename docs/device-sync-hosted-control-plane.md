@@ -134,24 +134,30 @@ Postgres should keep only opaque ids, blind indexes, typed summaries, sparse sig
 ### Bursty webhook transport
 
 For providers explicitly listed in `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS`, the
-public Web route verifies the provider signature against the exact bounded body
-and freezes that receipt instant without reading Postgres. It then minimizes the
-headers to the provider signature fields, seals the provider name, headers,
-receipt time, and exact body under a one-message ingress root wrapped to the
-existing Cloudflare automation P-256 recipient, and calls the OIDC-authenticated
-Cloudflare enqueue route. Provider success is returned only after `Queue.send`
-confirms durable acceptance. A failed or ambiguous enqueue never falls through
-to synchronous admission; provider redelivery converges through the existing
-provider-scoped trace identity. Payloads outside the Queue size contract use the
-existing synchronous path before any enqueue attempt.
+public Web route first decides Queue eligibility from the provider gate and
+bounded raw-body size. Oversized bodies use the existing synchronous path. An
+eligible request verifies the provider signature and parses the exact body once,
+then freezes that authenticated meaning as the explicit versioned
+`murph.device-sync-prepared-webhook.v1` contract without reading Postgres. The
+raw signature headers and body are not queued. Web seals only that prepared
+event under a one-message ingress root wrapped to the existing Cloudflare
+automation P-256 recipient, then calls the OIDC-authenticated Cloudflare enqueue
+route. Provider success is returned only after `Queue.send` confirms durable
+acceptance. A failed or ambiguous enqueue never falls through to synchronous
+admission; provider redelivery converges through the existing provider-scoped
+trace identity. Neither path invokes the provider verifier twice.
 
 The Queue consumer is configured for 100 messages, five-second collection,
 one consumer, ten retries, and an encrypted DLQ. It decrypts outside Postgres
 and partitions each delivery into signed Web callbacks of at most 25 messages.
 Web validates the whole callback, then uses an explicit serial loop around the
-existing shared ingress. The frozen receipt instant prevents valid signatures
-from becoming stale while queued; the trace processing lease begins at Web
-admission time so a delayed delivery never starts with an expired lease.
+existing shared ingress's prepared-event admission. It does not re-run the
+provider signature verifier or parser. The frozen receipt instant and parsed
+meaning therefore survive provider secret or parser rotation while queued; the
+trace processing lease begins at Web admission time so a delayed delivery never
+starts with an expired lease. Every emitted prepared schema decoder must remain
+readable through the maximum Queue, DLQ, and redrive horizon, just as an old
+transport recipient key remains decrypt-only during its retention window.
 Existing trace claims, health-data consent,
 provider-application revision, setup, source, reconnect, disconnect, dirty
 state, exact encrypted payload, mailbox wake, and post-commit Temporal behavior
@@ -161,12 +167,13 @@ No raw-SQL batch owner, Queue database, Durable Object state, Vercel Workflow,
 or Temporal webhook workflow is introduced.
 
 Queue-visible state contains random transport identifiers, ciphertext, and key
-wrap metadata only. Provider, member, account, event, trace, signature headers,
-body, token, and health identity remain inside the secure box. Tamper, unknown
-key, malformed envelope, callback ambiguity, and every failed Web admission
-retain the individual encrypted message for retry and eventual DLQ. Only
-accepted and duplicate dispositions acknowledge a message; failures cannot be
-dropped without a separate durable quarantine owner.
+wrap metadata only. Provider, account, event, trace, and prepared job meaning
+remain inside the secure box; provider signature headers and raw request bodies
+are discarded after initial verification. Tamper, unknown key, unsupported
+prepared schema, malformed envelope, callback ambiguity, and every failed Web
+admission retain the individual encrypted message for retry and eventual DLQ.
+Only accepted and duplicate dispositions acknowledge a message; failures cannot
+be dropped without a separate durable quarantine owner.
 
 `device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The hosted browser start also requires its configured provider callback base to use that request's hostname; a mismatch fails before OAuth state creation or provider authorization. Start sets a short-lived provider-, state-, member-, and session-bound host-only proof. The provider callback GET validates that proof, passes `expectedOwnerId` into shared ingress, and redirects back into the app without an interstitial. A missing proof burns the OAuth state and returns to Connect so the callback URL cannot be relayed. Intent rows must not store raw provider or Junction authorization URLs.
 

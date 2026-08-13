@@ -1,6 +1,4 @@
 import {
-  createDeviceWebhookHeaders,
-  decodeDeviceWebhookRawBody,
   DEVICE_WEBHOOK_ADMISSION_HANDLER_MAX_DURATION_SECONDS,
   DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES,
   DEVICE_WEBHOOK_TRANSPORT_USER_ID,
@@ -15,7 +13,11 @@ import {
   requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 
-export const maxDuration = DEVICE_WEBHOOK_ADMISSION_HANDLER_MAX_DURATION_SECONDS;
+export const maxDuration = 90;
+
+if (maxDuration !== DEVICE_WEBHOOK_ADMISSION_HANDLER_MAX_DURATION_SECONDS) {
+  throw new TypeError("Device webhook admission duration contract drifted.");
+}
 
 export const POST = withJsonError(async (request: Request) => {
   const stopBefore = Date.now() + (maxDuration - 10) * 1_000;
@@ -31,26 +33,12 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
   const batch = parseDeviceWebhookAdmissionBatch(authenticated.payload);
+  const ingress = createHostedDeviceSyncPublicIngressService(request);
   const result = await admitHostedDeviceWebhookBatch({
     entries: batch.entries,
     shouldContinue: () => Date.now() < stopBefore,
     async handle(entry) {
-      const replayRequest = new Request(
-        new URL(
-          `/api/device-sync/webhooks/${encodeURIComponent(entry.provider)}`,
-          request.url,
-        ),
-        {
-          headers: createDeviceWebhookHeaders(entry),
-          method: "POST",
-        },
-      );
-      const ingress = createHostedDeviceSyncPublicIngressService(replayRequest);
-      return ingress.handleWebhook(
-        entry.provider,
-        Buffer.from(decodeDeviceWebhookRawBody(entry)),
-        new Date(entry.receivedAt),
-      );
+      return ingress.handlePreparedWebhook(entry.preparedWebhook);
     },
   });
   return jsonOk(result);

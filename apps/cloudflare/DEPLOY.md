@@ -1151,6 +1151,11 @@ During Cloudflare automation-key rotation, keep the prior private key as
 encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ
 retention is part of the key-retirement floor; elapsed rollout time alone is not
 proof that the old key is safe to disable.
+Prepared webhook parsers have the same retention floor: keep every decoder for
+an emitted `murph.device-sync-prepared-webhook.*` schema readable until both
+Queues and all supported redrive paths are proven free of that version. A
+provider signing-secret or parser rotation needs no overlap for already queued
+events because Web froze verified prepared meaning before provider acknowledgement.
 
 The Queue-health Durable Object reads only native main-Queue and DLQ metrics.
 It pages both configured operator chats immediately when the DLQ is nonempty,

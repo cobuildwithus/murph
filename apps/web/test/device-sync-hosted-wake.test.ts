@@ -4,6 +4,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
+import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -530,92 +531,115 @@ describe("hosted device-sync wakes", () => {
         onUnknownWebhook?: (value: unknown) => Promise<void> | void;
         onWebhookAccepted?: (value: unknown) => Promise<void> | void;
       };
-    }) => ({
-      describeProviders: vi.fn(() => []),
-      handleOAuthCallback: vi.fn(async () => {
-        await input.hooks?.onConnectionEstablished?.({
-          account: {
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-03-26T12:00:00.000Z",
-            createdAt: "2026-03-26T12:00:00.000Z",
-            displayName: "Oura",
-            externalAccountId: "acct_sensitive",
-            id: "dsc_123",
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            lastSyncCompletedAt: null,
-            lastSyncErrorAt: null,
-            lastSyncStartedAt: null,
-            lastWebhookAt: null,
-            metadata: {},
-            nextReconcileAt: null,
-            provider: "oura",
-            scopes: ["heartrate"],
-            status: "active",
-            updatedAt: "2026-03-26T12:00:00.000Z",
-          },
-          connection: {
-            initialJobs: [],
-            nextReconcileAt: null,
-            tokens: {
-              accessToken: "access-token",
-              accessTokenExpiresAt: null,
-              refreshToken: "refresh-token",
+    }) => {
+      const defaultPreparedWebhook: PreparedDeviceSyncWebhookV1 = {
+        acceptanceMode: "level_dirty_hint" as const,
+        eventType: "sleep.updated",
+        externalAccountId: "acct_sensitive",
+        jobs: [
+          {
+            kind: "reconcile",
+            payload: {
+              windowStart: "2026-03-19T00:00:00.000Z",
+              windowEnd: "2026-03-26T00:00:00.000Z",
             },
           },
-          now: "2026-03-26T12:00:00.000Z",
-          provider: {
-            provider: "oura",
-            webhookAdmin: {
-              ensureSubscriptions: mocks.ensureWebhookSubscriptions,
-            },
-          },
-        });
-        return {
-          connection: {
-            id: "dsc_123",
-          },
-        };
-      }),
-      createSdkSignInSession: mocks.createSdkSignInSession,
-      handleWebhook: vi.fn(async () => {
+        ],
+        occurredAt: "2026-03-26T11:59:00.000Z",
+        provider: "oura",
+        receivedAt: "2026-03-26T12:00:00.000Z",
+        resourceCategory: "daily_sleep",
+        schema: "murph.device-sync-prepared-webhook.v1" as const,
+        traceId: "trace_123",
+      };
+      const admitPreparedWebhook = async (
+        preparedWebhook: PreparedDeviceSyncWebhookV1 = defaultPreparedWebhook,
+      ) => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
             connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
-            provider: "oura",
+            provider: preparedWebhook.provider,
             scopes: ["heartrate"],
           },
-          now: "2026-03-26T12:00:00.000Z",
+          now: preparedWebhook.receivedAt,
           provider: {
-            provider: "oura",
+            provider: preparedWebhook.provider,
           },
           claimToken: "claim-token",
-          traceId: "trace_123",
+          traceId: preparedWebhook.traceId,
           webhook: {
-            acceptanceMode: "level_dirty_hint",
-            eventType: "sleep.updated",
-            jobs: [
-              {
-                kind: "reconcile",
-                payload: {
-                  windowStart: "2026-03-19T00:00:00.000Z",
-                  windowEnd: "2026-03-26T00:00:00.000Z",
-                },
-              },
-            ],
-            occurredAt: "2026-03-26T11:59:00.000Z",
-            resourceCategory: "daily_sleep",
+            acceptanceMode: preparedWebhook.acceptanceMode,
+            eventType: preparedWebhook.eventType,
+            jobs: preparedWebhook.jobs,
+            occurredAt: preparedWebhook.occurredAt,
+            resourceCategory: preparedWebhook.resourceCategory,
+            ...(preparedWebhook.sourceProviderSlug
+              ? { sourceProviderSlug: preparedWebhook.sourceProviderSlug }
+              : {}),
           },
         });
-        return {
-          accepted: true,
-        };
-      }),
-      ensureSdkConnection: mocks.ensureSdkConnection,
-      resumeSdkSignInSession: mocks.resumeSdkSignInSession,
-      startConnection: vi.fn(),
-    }));
+        return { accepted: true };
+      };
+      return {
+        describeProviders: vi.fn(() => []),
+        handleOAuthCallback: vi.fn(async () => {
+          await input.hooks?.onConnectionEstablished?.({
+            account: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-03-26T12:00:00.000Z",
+              createdAt: "2026-03-26T12:00:00.000Z",
+              displayName: "Oura",
+              externalAccountId: "acct_sensitive",
+              id: "dsc_123",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              metadata: {},
+              nextReconcileAt: null,
+              provider: "oura",
+              scopes: ["heartrate"],
+              status: "active",
+              updatedAt: "2026-03-26T12:00:00.000Z",
+            },
+            connection: {
+              initialJobs: [],
+              nextReconcileAt: null,
+              tokens: {
+                accessToken: "access-token",
+                accessTokenExpiresAt: null,
+                refreshToken: "refresh-token",
+              },
+            },
+            now: "2026-03-26T12:00:00.000Z",
+            provider: {
+              provider: "oura",
+              webhookAdmin: {
+                ensureSubscriptions: mocks.ensureWebhookSubscriptions,
+              },
+            },
+          });
+          return {
+            connection: {
+              id: "dsc_123",
+            },
+          };
+        }),
+        createSdkSignInSession: mocks.createSdkSignInSession,
+        handlePreparedWebhook: vi.fn(admitPreparedWebhook),
+        handleWebhook: vi.fn(() => admitPreparedWebhook()),
+        prepareWebhookForDurableEnqueue: vi.fn(async (provider: string) => ({
+          ...defaultPreparedWebhook,
+          provider,
+        })),
+        ensureSdkConnection: mocks.ensureSdkConnection,
+        resumeSdkSignInSession: mocks.resumeSdkSignInSession,
+        startConnection: vi.fn(),
+      };
+    });
     mocks.createSignal.mockResolvedValue({ id: 8 });
     mocks.createSdkSignInSession.mockResolvedValue({
       account: buildHostedConnection({
@@ -1379,18 +1403,23 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("completes but does not process claimed webhooks after consent withdrawal", async () => {
-    mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValueOnce({
-      scope: "launch.health-data",
-      status: "revoked",
-    });
+  it("completes but does not process a prepared queued webhook after consent withdrawal", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         method: "POST",
       }),
     );
+    const prepared = await controlPlane.prepareWebhookForDurableEnqueue(
+      "oura",
+      Buffer.from("{}"),
+      new Date("2026-03-26T12:00:00.000Z"),
+    );
+    mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValueOnce({
+      scope: "launch.health-data",
+      status: "revoked",
+    });
 
-    await expect(controlPlane.handleWebhook("oura", Buffer.from("{}"))).resolves.toEqual({
+    await expect(controlPlane.handlePreparedWebhook(prepared)).resolves.toEqual({
       accepted: true,
     });
 
@@ -4274,11 +4303,17 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("terminally rejects a shared webhook after its connection is rebound to a private application", async () => {
-    const connection = buildHostedConnection({
-      displayName: "Strava",
-      provider: "strava",
-    });
+  it("terminally rejects prepared queued work after its connection is rebound to a private application", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/strava", {
+        method: "POST",
+      }),
+    );
+    const prepared = await controlPlane.prepareWebhookForDurableEnqueue(
+      "strava",
+      Buffer.from("{}"),
+      new Date("2026-03-26T12:00:00.000Z"),
+    );
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce({
       ...buildWebhookAdmissionRecord({
         provider: "strava",
@@ -4287,25 +4322,8 @@ describe("hosted device-sync wakes", () => {
       providerApplicationRevision: 2,
     });
 
-    await handleHostedDeviceSyncWebhookAccepted({
-      account: {
-        connectedAt: connection.connectedAt,
-        id: connection.id,
-        provider: connection.provider,
-      },
-      claimToken: "claim-token",
-      now: "2026-03-26T12:00:00.000Z",
-      ownerId: "user-123",
-      store: new PrismaDeviceSyncControlPlaneStore({
-        prisma: getPrisma(),
-      }),
-      traceId: "trace_123",
-      webhook: {
-        acceptanceMode: "durable_webhook_work",
-        eventType: "athlete.deauthorized",
-        jobs: [{ kind: "account_disconnect" }],
-        occurredAt: "2026-03-26T11:59:00.000Z",
-      },
+    await expect(controlPlane.handlePreparedWebhook(prepared)).resolves.toEqual({
+      accepted: true,
     });
 
     expect(mocks.getConnectionRecordForUser).not.toHaveBeenCalled();
@@ -4324,7 +4342,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.revokeStravaDeviceSyncAccess).not.toHaveBeenCalled();
   });
 
-  it("terminally supersedes webhook work when reconnect replaces its observed epoch before dirty-state commit", async () => {
+  it("terminally supersedes prepared queued work when reconnect replaces its observed epoch before dirty-state commit", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
       buildWebhookAdmissionRecord({
         connectedAt: "2026-03-26T12:05:00.000Z",
@@ -4341,8 +4359,13 @@ describe("hosted device-sync wakes", () => {
         method: "POST",
       }),
     );
+    const prepared = await controlPlane.prepareWebhookForDurableEnqueue(
+      "oura",
+      Buffer.from("{}"),
+      new Date("2026-03-26T12:00:00.000Z"),
+    );
 
-    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+    await expect(controlPlane.handlePreparedWebhook(prepared)).resolves.toMatchObject({
       accepted: true,
     });
 
@@ -4454,7 +4477,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("retries source-attributed webhook work when the target disconnects before dirty-state commit", async () => {
+  it("retries prepared queued source work when the target disconnects before dirty-state commit", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
       buildWebhookAdmissionRecord({
         provider: "junction",
@@ -4466,36 +4489,30 @@ describe("hosted device-sync wakes", () => {
       sourceProviderSlug: "fitbit",
       status: "disconnected",
     }]);
-    const store = new PrismaDeviceSyncControlPlaneStore({
-      prisma: getPrisma(),
-    });
-
-    await expect(
-      handleHostedDeviceSyncWebhookAccepted({
-        account: {
-          connectedAt: "2026-03-26T12:00:00.000Z",
-          id: "dsc_123",
-          provider: "junction",
-        },
-        claimToken: "claim-token",
-        now: "2026-03-26T12:00:00.000Z",
-        ownerId: "user-123",
-        store,
-        traceId: "trace_123",
-        webhook: {
-          acceptanceMode: "durable_webhook_work",
-          eventType: "activity.updated",
-          jobs: [{
-            kind: "resource",
-            payload: {
-              resource: "activity",
-              sourceProviderSlug: "fitbit",
-            },
-          }],
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
+        method: "POST",
+      }),
+    );
+    const prepared: PreparedDeviceSyncWebhookV1 = {
+      acceptanceMode: "durable_webhook_work",
+      eventType: "activity.updated",
+      externalAccountId: "acct_sensitive",
+      jobs: [{
+        kind: "resource",
+        payload: {
+          resource: "activity",
           sourceProviderSlug: "fitbit",
         },
-      }),
-    ).rejects.toMatchObject({
+      }],
+      provider: "junction",
+      receivedAt: "2026-03-26T12:00:00.000Z",
+      schema: "murph.device-sync-prepared-webhook.v1",
+      sourceProviderSlug: "fitbit",
+      traceId: "1".repeat(64),
+    };
+
+    await expect(controlPlane.handlePreparedWebhook(prepared)).rejects.toMatchObject({
       code: "WEBHOOK_SOURCE_NOT_READY",
       httpStatus: 503,
       retryable: true,

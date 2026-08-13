@@ -279,10 +279,16 @@ describe("hosted device webhook Queue consumer", () => {
 async function createEnvelope(index: number): Promise<DeviceWebhookQueueEnvelopeV1> {
   return sealDeviceWebhookQueueEnvelope({
     env: "test",
-    headers: [],
-    provider: "oura",
-    rawBody: new TextEncoder().encode(JSON.stringify({ index })),
-    receivedAt: "2026-04-10T12:00:00.000Z",
+    preparedWebhook: {
+      acceptanceMode: "level_dirty_hint",
+      eventType: "demo.updated",
+      externalAccountId: `opaque-account-${index}`,
+      jobs: [],
+      provider: "oura",
+      receivedAt: "2026-04-10T12:00:00.000Z",
+      schema: "murph.device-sync-prepared-webhook.v1",
+      traceId: index.toString(16).padStart(64, "0"),
+    },
     recipientKeyId: TEST_HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
     recipientPublicJwk: TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
   });

@@ -483,6 +483,9 @@
       "@murphai/device-syncd/hosted-runtime": [
         "./packages/device-syncd/src/hosted-runtime.ts"
       ],
+      "@murphai/device-syncd/prepared-webhook": [
+        "./packages/device-syncd/src/prepared-webhook.ts"
+      ],
       "@murphai/device-syncd/runtime-config": [
         "./packages/device-syncd/src/runtime-config.ts"
       ],

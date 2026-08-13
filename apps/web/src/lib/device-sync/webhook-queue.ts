@@ -1,10 +1,9 @@
 import {
-  canQueueDeviceWebhook,
-  copyDeviceWebhookTransportHeaders,
+  canQueuePreparedDeviceWebhook,
   sealDeviceWebhookQueueEnvelope,
-  type DeviceWebhookTransportHeader,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 
 import { getHostedWebCryptoConfig } from "../hosted-crypto/env";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
@@ -12,6 +11,7 @@ import { readHostedExecutionControlClientIfConfigured } from "../hosted-executio
 const QUEUE_PROVIDER_ENV = "HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS";
 const PROVIDER_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const QUEUE_CAPABLE_PROVIDERS = new Set(["junction", "oura", "strava", "whoop"]);
+const HOSTED_DEVICE_WEBHOOK_QUEUE_MAX_RAW_BODY_BYTES = 32 * 1024;
 
 export function readHostedDeviceWebhookQueueProviders(
   source: Readonly<Record<string, string | undefined>> = process.env,
@@ -30,41 +30,40 @@ export function readHostedDeviceWebhookQueueProviders(
 }
 
 export function prepareHostedDeviceWebhookQueueTransport(input: {
-  headers: Headers;
   provider: string;
   rawBody: Uint8Array;
   source?: Readonly<Record<string, string | undefined>>;
-}): { enabled: boolean; headers: DeviceWebhookTransportHeader[] } {
+}): { enabled: boolean } {
   const providerEnabled = readHostedDeviceWebhookQueueProviders(input.source).has(
     input.provider.toLowerCase(),
   );
   if (!providerEnabled) {
-    return { enabled: false, headers: [] };
+    return { enabled: false };
   }
-  try {
-    const headers = copyDeviceWebhookTransportHeaders(input.headers);
-    if (!canQueueDeviceWebhook({ headers, rawBody: input.rawBody })) {
-      return { enabled: false, headers: [] };
-    }
-    return { enabled: true, headers };
-  } catch {
-    return { enabled: false, headers: [] };
-  }
+  // Decide synchronous oversize fallback before provider verification. Once a
+  // verified event is prepared for Queue, an enqueue failure never falls
+  // through to synchronous admission; the signature/parser never runs twice.
+  return {
+    enabled:
+      input.rawBody.byteLength <= HOSTED_DEVICE_WEBHOOK_QUEUE_MAX_RAW_BODY_BYTES,
+  };
 }
 
 export async function enqueueHostedDeviceWebhook(input: {
-  headers: readonly DeviceWebhookTransportHeader[];
-  provider: string;
-  rawBody: Uint8Array;
-  receivedAt: string;
+  preparedWebhook: PreparedDeviceSyncWebhookV1;
 }): Promise<{ accepted: true; transportId: string }> {
+  if (!canQueuePreparedDeviceWebhook(input.preparedWebhook)) {
+    throw deviceSyncError({
+      code: "DEVICE_WEBHOOK_QUEUE_PREPARED_EVENT_INVALID",
+      httpStatus: 500,
+      message: "Device webhook prepared event cannot enter durable transport.",
+      retryable: false,
+    });
+  }
   const cryptoConfig = getHostedWebCryptoConfig();
   const envelope = await sealDeviceWebhookQueueEnvelope({
     env: cryptoConfig.env,
-    headers: input.headers,
-    provider: input.provider,
-    rawBody: input.rawBody,
-    receivedAt: input.receivedAt,
+    preparedWebhook: input.preparedWebhook,
     recipientKeyId: cryptoConfig.cloudflareAutomationRecipientKeyId,
     recipientPublicJwk: cryptoConfig.cloudflareAutomationPublicJwk,
   });

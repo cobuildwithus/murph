@@ -39,21 +39,17 @@ export const POST = withJsonError(async (
   }
 
   const queueTransport = prepareHostedDeviceWebhookQueueTransport({
-    headers: request.headers,
     provider,
     rawBody,
   });
   if (queueTransport.enabled) {
-    const receipt = await publicIngress.verifyWebhookForDurableEnqueue(
+    const preparedWebhook = await publicIngress.prepareWebhookForDurableEnqueue(
       provider,
       rawBody,
       new Date(),
     );
     await enqueueHostedDeviceWebhook({
-      headers: queueTransport.headers,
-      provider,
-      rawBody,
-      receivedAt: receipt.receivedAt,
+      preparedWebhook,
     });
     return jsonOk({
       accepted: true,

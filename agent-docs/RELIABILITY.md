@@ -785,16 +785,26 @@ Last verified: 2026-08-13
   lock the dirty marker before touching payload rows.
   A larger nullable backlog fails retryably until runtime acknowledgement
   reduces it; classification may never run before the consent fence.
-- Queue-enabled provider webhooks verify and encrypt before any Postgres read,
-  then enter one Cloudflare Queue consumer configured for batches of 100,
-  five-second collection, concurrency one, ten retries, and an encrypted DLQ.
-  The consumer decrypts outside Postgres and sends sequential Web subbatches of
-  at most 25; Web admits each entry through the existing canonical ingress in an
-  explicit serial loop. The original receipt instant remains the signature and
-  audit instant, while the trace-processing lease starts when Web admits the
-  queued delivery. Only `accepted` and `duplicate` results ack one Queue
+- Queue-enabled provider webhooks verify once, freeze a versioned prepared
+  event, and encrypt before any Postgres read. Raw provider signature headers
+  and payload bytes do not enter Queue state. The prepared event enters one
+  Cloudflare Queue consumer configured for batches of 100, five-second
+  collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
+  decrypts outside Postgres and sends sequential Web subbatches of at most 25;
+  Web admits each prepared entry through the existing canonical ingress in an
+  explicit serial loop and never reruns a provider verifier whose secret,
+  parser, or replay window may have rotated. The original receipt instant
+  remains the signature and audit instant, while the trace-processing lease
+  starts when Web admits the queued delivery. Only `accepted` and `duplicate`
+  results ack one Queue
   message; all failed, missing, malformed, tampered, ambiguous, or unavailable
-  results retain only that encrypted message for retry and DLQ recovery. Queue is transport,
+  results retain only that encrypted message for retry and DLQ recovery.
+  Current provider registration, connection epoch/status, consent, source
+  lifecycle, and provider-application authority are revalidated at admission.
+  Every emitted prepared-event schema decoder remains readable through the
+  maximum Queue/DLQ retention and redrive horizon, just as old transport keys
+  remain decrypt-only until those encrypted envelopes are proven drained.
+  Queue is transport,
   not device truth, and cannot weaken consent, source, setup, reconnect,
   disconnect, trace, dirty-payload, mailbox, or Temporal authority.
   A separate five-minute SQLite Durable Object monitor reads only native Queue

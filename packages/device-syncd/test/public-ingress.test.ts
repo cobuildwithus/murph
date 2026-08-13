@@ -2849,7 +2849,7 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
   );
 });
 
-test("public ingress verifies a queued webhook at its frozen receipt instant without touching the store", async () => {
+test("public ingress freezes a versioned prepared webhook at its verified receipt instant without touching the store", async () => {
   const store = new InMemoryPublicIngressStore();
   const receivedAt = new Date("2026-04-10T12:00:00.000Z");
   const ingress = createDeviceSyncPublicIngress({
@@ -2870,14 +2870,118 @@ test("public ingress verifies a queued webhook at its frozen receipt instant wit
     store,
   });
 
-  assert.deepEqual(await ingress.verifyWebhookForDurableEnqueue(
+  assert.deepEqual(await ingress.prepareWebhookForDurableEnqueue(
     "demo",
     new Headers(),
     Buffer.from("{}"),
     receivedAt,
-  ), { receivedAt: receivedAt.toISOString() });
+  ), {
+    acceptanceMode: "durable_webhook_work",
+    eventType: "demo.updated",
+    externalAccountId: "opaque-account",
+    jobs: [],
+    provider: "demo",
+    receivedAt: receivedAt.toISOString(),
+    schema: "murph.device-sync-prepared-webhook.v1",
+    traceId: scopeWebhookTraceId("demo", "opaque-account", "opaque-trace"),
+  });
   assert.equal(store.claimWebhookTraceCalls, 0);
   assert.equal(store.lastRecordedWebhookTrace, null);
+});
+
+test("public ingress admits a prepared webhook after verifier rotation without invoking the new verifier", async () => {
+  const receivedAt = new Date("2026-04-10T12:00:00.000Z");
+  let originalVerifierCalls = 0;
+  let rotatedVerifierCalls = 0;
+  const store = new InMemoryPublicIngressStore();
+  const original = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          originalVerifierCalls += 1;
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            jobs: [],
+            traceId: "secret-one-trace",
+          };
+        },
+      }),
+    ]),
+    store,
+  });
+  const begin = await original.startConnection({ provider: "demo" });
+  await original.handleOAuthCallback({ code: "abc", provider: "demo", state: begin.state });
+  const prepared = await original.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers({ "x-demo-signature": "secret-one-proof" }),
+    Buffer.from("secret-one-body"),
+    receivedAt,
+  );
+
+  const rotated = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          rotatedVerifierCalls += 1;
+          throw deviceSyncError({
+            code: "WEBHOOK_SIGNATURE_INVALID",
+            httpStatus: 401,
+            message: "Only rotated proof is accepted.",
+            retryable: false,
+          });
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted({ account, claimToken, traceId }) {
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+
+  const result = await rotated.handlePreparedWebhook(prepared);
+  assert.equal(result.accepted, true);
+  assert.equal(originalVerifierCalls, 1);
+  assert.equal(rotatedVerifierCalls, 0);
+  assert.equal(store.lastWebhookTraceClaim?.receivedAt, receivedAt.toISOString());
+});
+
+test("public ingress revalidates current provider and connection authority for prepared webhooks", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+  });
+  const prepared = await ingress.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    new Date("2026-04-10T12:00:00.000Z"),
+  );
+
+  const providerRemoved = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([]),
+    store,
+  });
+  await assert.rejects(
+    () => providerRemoved.handlePreparedWebhook(prepared),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "PROVIDER_NOT_REGISTERED",
+  );
+
+  await assert.rejects(
+    () => ingress.handlePreparedWebhook(prepared),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY",
+  );
 });
 
 test("public ingress leases a delayed queued trace from dequeue time while preserving its receipt time", async () => {
@@ -3777,9 +3881,15 @@ test("public ingress marks disconnected-account webhook traces processed so dela
     state: begin.state,
     code: "abc",
   });
+  const prepared = await ingress.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    new Date("2026-04-10T12:00:00.000Z"),
+  );
   store.patchAccountStatus(connected.account.id, "disconnected");
 
-  const first = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  const first = await ingress.handlePreparedWebhook(prepared);
   const expectedScopedTraceId = scopeWebhookTraceId("demo", "demo-abc", "trace-inactive");
   assert.equal(first.accepted, true);
   assert.equal(first.duplicate, false);
@@ -3787,7 +3897,7 @@ test("public ingress marks disconnected-account webhook traces processed so dela
   assert.deepEqual(acceptedWebhooks, []);
   assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
 
-  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  const duplicate = await ingress.handlePreparedWebhook(prepared);
   assert.equal(duplicate.accepted, true);
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.traceId, expectedScopedTraceId);

@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createIngress: vi.fn(),
-  handleWebhook: vi.fn(),
+  handlePreparedWebhook: vi.fn(),
   queryRaw: vi.fn(),
 }));
 
@@ -66,18 +66,14 @@ describe("device webhook signed batch callback route", () => {
     maxActiveAdmissions = 0;
     replayRequests = [];
     mocks.createIngress.mockReset();
-    mocks.handleWebhook.mockReset();
+    mocks.handlePreparedWebhook.mockReset();
     mocks.queryRaw.mockReset();
     mocks.queryRaw.mockResolvedValue([{ admitted: true }]);
     mocks.createIngress.mockImplementation((request: Request) => {
       replayRequests.push(request);
-      return { handleWebhook: mocks.handleWebhook };
+      return { handlePreparedWebhook: mocks.handlePreparedWebhook };
     });
-    mocks.handleWebhook.mockImplementation(async (
-      provider: string,
-      _rawBody: Buffer,
-      _receivedAt: Date,
-    ) => {
+    mocks.handlePreparedWebhook.mockImplementation(async (preparedWebhook) => {
       activeAdmissions += 1;
       maxActiveAdmissions = Math.max(maxActiveAdmissions, activeAdmissions);
       await Promise.resolve();
@@ -86,7 +82,7 @@ describe("device webhook signed batch callback route", () => {
         accepted: true,
         duplicate: false,
         eventType: "measurement.updated",
-        provider,
+        provider: preparedWebhook.provider,
         traceId: crypto.randomUUID(),
       };
     });
@@ -108,7 +104,7 @@ describe("device webhook signed batch callback route", () => {
     );
   });
 
-  it("accepts the exact signed subject and serially reconstructs 25 ordinary ingress requests", async () => {
+  it("accepts the exact signed subject and serially admits 25 prepared events", async () => {
     const batch = createAdmissionBatch(DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE);
     const response = await POST(await createSignedRequest({
       body: JSON.stringify(batch),
@@ -119,19 +115,14 @@ describe("device webhook signed batch callback route", () => {
     expect(response.status).toBe(200);
     expect(mocks.queryRaw).toHaveBeenCalledOnce();
     expect(maxActiveAdmissions).toBe(1);
-    expect(mocks.handleWebhook).toHaveBeenCalledTimes(25);
-    expect(replayRequests).toHaveLength(25);
+    expect(mocks.handlePreparedWebhook).toHaveBeenCalledTimes(25);
+    expect(replayRequests).toHaveLength(1);
+    expect(replayRequests[0]?.url).toBe(
+      `https://join.example.test${HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH}`,
+    );
     for (const [index, entry] of batch.entries.entries()) {
-      const [provider, rawBody, receivedAt] = mocks.handleWebhook.mock.calls[index]!;
-      expect(provider).toBe(entry.provider);
-      expect(Buffer.from(rawBody).equals(Buffer.from(entry.rawBodyBase64, "base64"))).toBe(true);
-      expect(receivedAt).toEqual(new Date(entry.receivedAt));
-      expect(replayRequests[index]?.url).toBe(
-        `https://join.example.test/api/device-sync/webhooks/${entry.provider}`,
-      );
-      expect(replayRequests[index]?.headers.get("x-oura-signature")).toBe(
-        entry.headers[0]?.value,
-      );
+      const [preparedWebhook] = mocks.handlePreparedWebhook.mock.calls[index]!;
+      expect(preparedWebhook).toEqual(entry.preparedWebhook);
     }
   });
 
@@ -144,7 +135,7 @@ describe("device webhook signed batch callback route", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.createIngress).not.toHaveBeenCalled();
-    expect(mocks.handleWebhook).not.toHaveBeenCalled();
+    expect(mocks.handlePreparedWebhook).not.toHaveBeenCalled();
   });
 
   it("rejects 26 entries and malformed signed JSON before ordinary ingress", async () => {
@@ -163,7 +154,7 @@ describe("device webhook signed batch callback route", () => {
     }
 
     expect(mocks.createIngress).not.toHaveBeenCalled();
-    expect(mocks.handleWebhook).not.toHaveBeenCalled();
+    expect(mocks.handlePreparedWebhook).not.toHaveBeenCalled();
   });
 
   it("rejects an oversized body before signature verification or ordinary ingress", async () => {
@@ -182,7 +173,7 @@ describe("device webhook signed batch callback route", () => {
     expect(response.ok).toBe(false);
     expect(mocks.queryRaw).not.toHaveBeenCalled();
     expect(mocks.createIngress).not.toHaveBeenCalled();
-    expect(mocks.handleWebhook).not.toHaveBeenCalled();
+    expect(mocks.handlePreparedWebhook).not.toHaveBeenCalled();
   });
 });
 
@@ -195,13 +186,18 @@ function createAdmissionBatch(count: number): DeviceWebhookAdmissionBatchV1 {
 
 function createPayload(index: number): DeviceWebhookQueuePayloadV1 {
   const suffix = index.toString(16).padStart(12, "0");
-  const rawBody = JSON.stringify({ event: index, member: "opaque" });
   return {
-    headers: [{ name: "x-oura-signature", value: `opaque-signature-${index}` }],
-    provider: "oura",
-    rawBodyBase64: Buffer.from(rawBody).toString("base64"),
-    receivedAt: new Date(Date.parse("2026-04-10T12:00:00.000Z") + index * 1_000)
-      .toISOString(),
+    preparedWebhook: {
+      acceptanceMode: "level_dirty_hint",
+      eventType: "demo.updated",
+      externalAccountId: `opaque-account-${index}`,
+      jobs: [],
+      provider: "oura",
+      receivedAt: new Date(Date.parse("2026-04-10T12:00:00.000Z") + index * 1_000)
+        .toISOString(),
+      schema: "murph.device-sync-prepared-webhook.v1",
+      traceId: index.toString(16).padStart(64, "0"),
+    },
     schema: DEVICE_WEBHOOK_QUEUE_PAYLOAD_SCHEMA,
     transportId: `00000000-0000-4000-8000-${suffix}`,
   };

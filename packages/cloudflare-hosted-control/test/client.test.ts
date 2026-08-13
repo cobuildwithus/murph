@@ -57,10 +57,16 @@ describe("createCloudflareHostedControlClient", () => {
     );
     const envelope = await sealDeviceWebhookQueueEnvelope({
       env: "test",
-      headers: [],
-      provider: "oura",
-      rawBody: new TextEncoder().encode("{}"),
-      receivedAt: "2026-02-02T00:00:00.000Z",
+      preparedWebhook: {
+        acceptanceMode: "level_dirty_hint",
+        eventType: "demo.updated",
+        externalAccountId: "opaque-account",
+        jobs: [],
+        provider: "oura",
+        receivedAt: "2026-02-02T00:00:00.000Z",
+        schema: "murph.device-sync-prepared-webhook.v1",
+        traceId: "1".repeat(64),
+      },
       recipientKeyId: "automation:test",
       recipientPublicJwk: await crypto.subtle.exportKey("jwk", keys.publicKey),
     });

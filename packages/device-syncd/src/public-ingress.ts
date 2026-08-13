@@ -10,6 +10,11 @@ import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor
 import {
   normalizeConfiguredDeviceSyncJobInput,
 } from "./provider-job-definitions.ts";
+import {
+  DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA,
+  parsePreparedDeviceSyncWebhook,
+  type PreparedDeviceSyncWebhookV1,
+} from "./prepared-webhook.ts";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
@@ -1361,19 +1366,18 @@ export class DeviceSyncPublicIngress {
     }
   }
 
-  async verifyWebhookForDurableEnqueue(
+  async prepareWebhookForDurableEnqueue(
     providerName: string,
     headers: Headers,
     rawBody: Buffer,
     receivedAt: Date,
-  ): Promise<{ receivedAt: string }> {
-    const prepared = await this.prepareWebhook(
+  ): Promise<PreparedDeviceSyncWebhookV1> {
+    return this.prepareWebhook(
       providerName,
       headers,
       rawBody,
       receivedAt,
     );
-    return { receivedAt: prepared.now };
   }
 
   async handleWebhook(
@@ -1382,18 +1386,26 @@ export class DeviceSyncPublicIngress {
     rawBody: Buffer,
     receivedAt: Date = new Date(),
   ): Promise<HandleWebhookResult> {
-    const {
-      jobs,
-      now,
-      parsed,
-      provider,
-      traceId,
-    } = await this.prepareWebhook(providerName, headers, rawBody, receivedAt);
+    return this.handlePreparedWebhook(
+      await this.prepareWebhook(providerName, headers, rawBody, receivedAt),
+    );
+  }
+
+  async handlePreparedWebhook(
+    value: PreparedDeviceSyncWebhookV1,
+  ): Promise<HandleWebhookResult> {
+    const prepared = parsePreparedDeviceSyncWebhook(value);
+    // Provider registration remains live authority. The prepared event freezes
+    // only the authenticated envelope interpretation, never whether Murph
+    // still recognizes and permits this provider at dequeue.
+    const provider = this.requireProvider(prepared.provider);
+    const now = prepared.receivedAt;
+    const traceId = prepared.traceId;
     const claimToken = generateStateCode();
     const claimedAt = toIsoTimestamp(new Date());
     const webhook = toIngressWebhook({
-      ...parsed,
-      jobs,
+      ...prepared,
+      jobs: prepared.jobs,
     });
 
     const claimWebhookTrace = () => this.store.claimWebhookTrace({
@@ -1401,7 +1413,7 @@ export class DeviceSyncPublicIngress {
       traceId,
       claimedAt,
       claimToken,
-      externalAccountId: parsed.externalAccountId,
+      externalAccountId: prepared.externalAccountId,
       eventType: webhook.eventType,
       receivedAt: now,
       processingExpiresAt: addMilliseconds(claimedAt, WEBHOOK_TRACE_PROCESSING_TTL_MS),
@@ -1434,7 +1446,7 @@ export class DeviceSyncPublicIngress {
     try {
       account = await this.store.getConnectionByExternalAccount(
         provider.provider,
-        parsed.externalAccountId,
+        prepared.externalAccountId,
       );
     } catch (error) {
       await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
@@ -1444,19 +1456,19 @@ export class DeviceSyncPublicIngress {
     if (!account) {
       const unknownWebhookLogContext: Record<string, unknown> = {
         provider: provider.provider,
-        externalAccountIdHash: hashExternalAccountIdForLogs(parsed.externalAccountId),
+        externalAccountIdHash: hashExternalAccountIdForLogs(prepared.externalAccountId),
         eventType: webhook.eventType,
         traceId,
         acceptanceMode: webhook.acceptanceMode,
-        unknownAccountAction: parsed.unknownAccountAction ?? "retry",
+        unknownAccountAction: prepared.unknownAccountAction ?? "retry",
         unknownWebhookHookConfigured: Boolean(this.hooks.onUnknownWebhook),
       };
-      if (parsed.externalAccountDiagnostic) {
-        unknownWebhookLogContext.externalAccountDiagnostic = parsed.externalAccountDiagnostic;
+      if (prepared.externalAccountDiagnostic) {
+        unknownWebhookLogContext.externalAccountDiagnostic = prepared.externalAccountDiagnostic;
       }
 
       const shouldAcceptUnknownWebhook =
-        parsed.unknownAccountAction === "accept"
+        prepared.unknownAccountAction === "accept"
         && webhook.acceptanceMode === "level_dirty_hint";
 
       this.logger.warn?.(
@@ -1475,7 +1487,7 @@ export class DeviceSyncPublicIngress {
               ...webhook,
               jobs: [],
             },
-            externalAccountId: parsed.externalAccountId,
+            externalAccountId: prepared.externalAccountId,
             now,
           });
           await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
@@ -1722,7 +1734,7 @@ export class DeviceSyncPublicIngress {
     headers: Headers,
     rawBody: Buffer,
     receivedAt: Date,
-  ) {
+  ): Promise<PreparedDeviceSyncWebhookV1> {
     const provider = this.requireProvider(providerName);
     const verifyAndParseWebhook = resolveProviderWebhookVerifier(provider);
 
@@ -1750,7 +1762,14 @@ export class DeviceSyncPublicIngress {
       parsed.traceId,
     );
 
-    return { jobs, now, parsed, provider, traceId };
+    return parsePreparedDeviceSyncWebhook({
+      ...parsed,
+      jobs,
+      provider: provider.provider,
+      receivedAt: now,
+      schema: DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA,
+      traceId,
+    });
   }
 
   private requireProvider(providerName: string): DeviceSyncProvider {

@@ -321,6 +321,9 @@
       "@murphai/device-syncd/public-ingress": [
         "../../packages/device-syncd/src/public-ingress.ts"
       ],
+      "@murphai/device-syncd/prepared-webhook": [
+        "../../packages/device-syncd/src/prepared-webhook.ts"
+      ],
       "@murphai/device-syncd/public-provider-descriptors": [
         "../../packages/device-syncd/src/public-provider-descriptors.ts"
       ],

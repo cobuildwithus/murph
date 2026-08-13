@@ -75,6 +75,15 @@ payload does not identify the event time, even if an import window needs a
 receipt-time fallback internally. A missing timestamp means the provider did
 not supply a verified one, not that Murph should infer it.
 
+Hosted Queue admission freezes that verified meaning as
+`murph.device-sync-prepared-webhook.v1` before acknowledging the provider. The
+prepared event contains no raw signature headers or raw provider body. Delayed
+admission therefore survives provider-secret, parser, and timestamp-window
+rotation without verifying the same payload again, while current provider,
+connection, consent, source, and provider-application authority is still
+rechecked. A prepared-event decoder may be retired only after main Queue, DLQ,
+and every supported redrive path are proven free of its schema version.
+
 It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
 It also does **not** own provider-specific webhook-admin secrets. If a provider
 needs verification or subscription credentials, keep them on that provider's

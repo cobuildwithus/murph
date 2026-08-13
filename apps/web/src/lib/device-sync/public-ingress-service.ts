@@ -25,6 +25,7 @@ import {
   type DeviceSyncPublicIngressStore,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
+import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
@@ -630,16 +631,24 @@ export class HostedDeviceSyncPublicIngressService {
     }
   }
 
-  async verifyWebhookForDurableEnqueue(
+  async prepareWebhookForDurableEnqueue(
     provider: string,
     rawBody: Buffer,
     receivedAt: Date,
-  ): Promise<{ receivedAt: string }> {
-    return this.ingress.verifyWebhookForDurableEnqueue(
+  ): Promise<PreparedDeviceSyncWebhookV1> {
+    return this.ingress.prepareWebhookForDurableEnqueue(
       provider,
       this.context.request.headers,
       rawBody,
       receivedAt,
+    );
+  }
+
+  async handlePreparedWebhook(
+    prepared: PreparedDeviceSyncWebhookV1,
+  ): Promise<HandleWebhookResult> {
+    return runWithHostedDomainRootUnwrapCache(() =>
+      this.ingress.handlePreparedWebhook(prepared),
     );
   }
 

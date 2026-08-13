@@ -16,6 +16,10 @@ import {
   type HostedRecipientPrivateKeyring,
   type HostedSecureBoxEnvelopeV1,
 } from "@murphai/runtime-state";
+import {
+  parsePreparedDeviceSyncWebhook,
+  type PreparedDeviceSyncWebhookV1,
+} from "@murphai/device-syncd/prepared-webhook";
 
 export const DEVICE_WEBHOOK_QUEUE_ENVELOPE_SCHEMA =
   "murph.device-webhook-queue-envelope.v1" as const;
@@ -33,29 +37,11 @@ export const DEVICE_WEBHOOK_TRANSPORT_USER_ID =
   "device-webhook-transport" as const;
 export const DEVICE_WEBHOOK_QUEUE_MAX_BATCH_SIZE = 100;
 export const DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE = 25;
-export const DEVICE_WEBHOOK_QUEUE_MAX_RAW_BODY_BYTES = 32 * 1024;
-export const DEVICE_WEBHOOK_QUEUE_MAX_HEADER_BYTES = 8 * 1024;
 export const DEVICE_WEBHOOK_QUEUE_MAX_ENVELOPE_BYTES = 120 * 1024;
 export const DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEVICE_WEBHOOK_ADMISSION_HANDLER_MAX_DURATION_SECONDS = 90;
 export const DEVICE_WEBHOOK_ADMISSION_TIMEOUT_MS = 110_000;
 
-const DEVICE_WEBHOOK_QUEUE_MAX_HEADERS = 64;
-const DEVICE_WEBHOOK_QUEUE_MAX_PROVIDER_LENGTH = 64;
-const DEVICE_WEBHOOK_QUEUE_MAX_HEADER_NAME_LENGTH = 128;
-const DEVICE_WEBHOOK_QUEUE_MAX_HEADER_VALUE_LENGTH = 4 * 1024;
-const DEVICE_WEBHOOK_SIGNATURE_HEADER_NAMES = new Set([
-  "svix-id",
-  "svix-signature",
-  "svix-timestamp",
-  "x-oura-signature",
-  "x-oura-timestamp",
-  "x-strava-signature",
-  "x-whoop-signature",
-  "x-whoop-signature-timestamp",
-]);
-const DEVICE_WEBHOOK_QUEUE_PROVIDER_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
-const DEVICE_WEBHOOK_HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 const DEVICE_WEBHOOK_QUEUE_TRANSPORT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DEVICE_WEBHOOK_QUEUE_ROOT_KEY_ID_PATTERN =
@@ -63,16 +49,8 @@ const DEVICE_WEBHOOK_QUEUE_ROOT_KEY_ID_PATTERN =
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
-export interface DeviceWebhookTransportHeader {
-  name: string;
-  value: string;
-}
-
 export interface DeviceWebhookQueuePayloadV1 {
-  headers: DeviceWebhookTransportHeader[];
-  provider: string;
-  rawBodyBase64: string;
-  receivedAt: string;
+  preparedWebhook: PreparedDeviceSyncWebhookV1;
   schema: typeof DEVICE_WEBHOOK_QUEUE_PAYLOAD_SCHEMA;
   transportId: string;
 }
@@ -104,44 +82,26 @@ export interface DeviceWebhookAdmissionResultV1 {
   schema: typeof DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA;
 }
 
-export function canQueueDeviceWebhook(input: {
-  headers: readonly DeviceWebhookTransportHeader[];
-  rawBody: Uint8Array;
-}): boolean {
+export function canQueuePreparedDeviceWebhook(
+  preparedWebhook: PreparedDeviceSyncWebhookV1,
+): boolean {
   try {
-    normalizeHeaders(input.headers);
-    requireRawBody(input.rawBody);
+    parsePreparedDeviceSyncWebhook(preparedWebhook);
     return true;
   } catch {
     return false;
   }
 }
 
-export function copyDeviceWebhookTransportHeaders(
-  headers: Headers,
-): DeviceWebhookTransportHeader[] {
-  return normalizeHeaders(
-    Array.from(headers.entries())
-      .filter(([name]) => DEVICE_WEBHOOK_SIGNATURE_HEADER_NAMES.has(name.toLowerCase()))
-      .map(([name, value]) => ({ name, value })),
-  );
-}
-
 export async function sealDeviceWebhookQueueEnvelope(input: {
   env: string;
-  headers: readonly DeviceWebhookTransportHeader[];
-  provider: string;
-  rawBody: Uint8Array;
-  receivedAt: string;
+  preparedWebhook: PreparedDeviceSyncWebhookV1;
   recipientKeyId: string;
   recipientPublicJwk: JsonWebKey;
 }): Promise<DeviceWebhookQueueEnvelopeV1> {
   const transportId = requireTransportId(crypto.randomUUID());
   const payload = parseDeviceWebhookQueuePayload({
-    headers: input.headers,
-    provider: input.provider,
-    rawBodyBase64: encodeBase64(requireRawBody(input.rawBody)),
-    receivedAt: input.receivedAt,
+    preparedWebhook: input.preparedWebhook,
     schema: DEVICE_WEBHOOK_QUEUE_PAYLOAD_SCHEMA,
     transportId,
   });
@@ -340,10 +300,7 @@ export async function reencryptDeviceWebhookQueueEnvelopeForPersistence(input: {
   const { crv, kty, x, y } = activePrivateKey.privateJwk;
   return sealDeviceWebhookQueueEnvelope({
     env: input.env,
-    headers: payload.headers,
-    provider: payload.provider,
-    rawBody: decodeDeviceWebhookRawBody(payload),
-    receivedAt: payload.receivedAt,
+    preparedWebhook: payload.preparedWebhook,
     recipientKeyId: activePrivateKey.recipientKeyId,
     recipientPublicJwk: {
       crv,
@@ -361,27 +318,12 @@ export function parseDeviceWebhookQueuePayload(
 ): DeviceWebhookQueuePayloadV1 {
   const record = requireRecord(value, "Device webhook queue payload");
   assertExactKeys(record, [
-    "headers",
-    "provider",
-    "rawBodyBase64",
-    "receivedAt",
+    "preparedWebhook",
     "schema",
     "transportId",
   ], "Device webhook queue payload");
-  const rawBodyBase64 = requireNonEmptyString(
-    record.rawBodyBase64,
-    "Device webhook queue payload rawBodyBase64",
-  );
-  requireRawBody(decodeBase64(rawBodyBase64));
   return {
-    headers: normalizeHeaders(
-      requireArray(record.headers, "Device webhook queue payload headers").map(
-        (entry, index) => parseHeader(entry, index),
-      ),
-    ),
-    provider: requireProvider(record.provider),
-    rawBodyBase64,
-    receivedAt: requireIsoTimestamp(record.receivedAt),
+    preparedWebhook: parsePreparedDeviceSyncWebhook(record.preparedWebhook),
     schema: requireLiteral(
       record.schema,
       DEVICE_WEBHOOK_QUEUE_PAYLOAD_SCHEMA,
@@ -450,16 +392,6 @@ export function parseDeviceWebhookAdmissionResult(
   };
 }
 
-export function decodeDeviceWebhookRawBody(payload: DeviceWebhookQueuePayloadV1): Uint8Array {
-  return requireRawBody(decodeBase64(payload.rawBodyBase64));
-}
-
-export function createDeviceWebhookHeaders(payload: DeviceWebhookQueuePayloadV1): Headers {
-  return new Headers(
-    payload.headers.map(({ name, value }): [string, string] => [name, value]),
-  );
-}
-
 function createDeviceWebhookTransportAad(transportId: string): Uint8Array {
   return buildHostedSecureBoxAad({
     domain: "ingress",
@@ -468,93 +400,6 @@ function createDeviceWebhookTransportAad(transportId: string): Uint8Array {
     scope: requireTransportId(transportId),
     userId: DEVICE_WEBHOOK_TRANSPORT_USER_ID,
   });
-}
-
-function parseHeader(value: unknown, index: number): DeviceWebhookTransportHeader {
-  const label = `Device webhook queue payload headers[${index}]`;
-  const record = requireRecord(value, label);
-  assertExactKeys(record, ["name", "value"], label);
-  return {
-    name: requireHeaderName(record.name, `${label}.name`),
-    value: requireHeaderValue(record.value, `${label}.value`),
-  };
-}
-
-function normalizeHeaders(
-  input: readonly DeviceWebhookTransportHeader[],
-): DeviceWebhookTransportHeader[] {
-  if (input.length > DEVICE_WEBHOOK_QUEUE_MAX_HEADERS) {
-    throw new RangeError("Device webhook transport has too many headers.");
-  }
-  const headers = input.map((entry, index) => ({
-    name: requireHeaderName(entry.name, `Device webhook transport header ${index} name`),
-    value: requireHeaderValue(entry.value, `Device webhook transport header ${index} value`),
-  }));
-  if (headers.some(({ name }) => !DEVICE_WEBHOOK_SIGNATURE_HEADER_NAMES.has(name))) {
-    throw new TypeError("Device webhook transport contains an unrelated header.");
-  }
-  if (new Set(headers.map(({ name }) => name)).size !== headers.length) {
-    throw new TypeError("Device webhook transport contains duplicate headers.");
-  }
-  const totalBytes = headers.reduce(
-    (sum, entry) => sum + textEncoder.encode(entry.name).byteLength
-      + textEncoder.encode(entry.value).byteLength,
-    0,
-  );
-  if (totalBytes > DEVICE_WEBHOOK_QUEUE_MAX_HEADER_BYTES) {
-    throw new RangeError("Device webhook transport headers are too large.");
-  }
-  return headers;
-}
-
-function requireRawBody(value: Uint8Array): Uint8Array {
-  if (value.byteLength > DEVICE_WEBHOOK_QUEUE_MAX_RAW_BODY_BYTES) {
-    throw new RangeError("Device webhook transport body is too large.");
-  }
-  return value;
-}
-
-function requireProvider(value: unknown): string {
-  const provider = requireNonEmptyString(value, "Device webhook transport provider");
-  if (
-    provider.length > DEVICE_WEBHOOK_QUEUE_MAX_PROVIDER_LENGTH
-    || !DEVICE_WEBHOOK_QUEUE_PROVIDER_PATTERN.test(provider)
-  ) {
-    throw new TypeError("Device webhook transport provider is invalid.");
-  }
-  return provider;
-}
-
-function requireHeaderName(value: unknown, label: string): string {
-  const name = requireNonEmptyString(value, label).toLowerCase();
-  if (
-    name.length > DEVICE_WEBHOOK_QUEUE_MAX_HEADER_NAME_LENGTH
-    || !DEVICE_WEBHOOK_HEADER_NAME_PATTERN.test(name)
-  ) {
-    throw new TypeError(`${label} is invalid.`);
-  }
-  return name;
-}
-
-function requireHeaderValue(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length > DEVICE_WEBHOOK_QUEUE_MAX_HEADER_VALUE_LENGTH) {
-    throw new TypeError(`${label} is invalid.`);
-  }
-  try {
-    new Headers({ "x-device-webhook-value": value });
-  } catch {
-    throw new TypeError(`${label} is invalid.`);
-  }
-  return value;
-}
-
-function requireIsoTimestamp(value: unknown): string {
-  const timestamp = requireNonEmptyString(value, "Device webhook transport receivedAt");
-  const parsed = new Date(timestamp);
-  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== timestamp) {
-    throw new TypeError("Device webhook transport receivedAt must be a canonical ISO timestamp.");
-  }
-  return timestamp;
 }
 
 function requireTransportId(value: unknown): string {

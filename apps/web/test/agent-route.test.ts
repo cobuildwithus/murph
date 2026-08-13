@@ -18,11 +18,11 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedDeviceWebhook: vi.fn(),
   handleWebhook: vi.fn(),
   pairAgent: vi.fn(),
+  prepareWebhookForDurableEnqueue: vi.fn(),
   prepareHostedDeviceWebhookQueueTransport: vi.fn(),
   readWebhookRawBody: vi.fn(),
   refreshTokenBundle: vi.fn(),
   resolveWebhookPreflight: vi.fn(),
-  verifyWebhookForDurableEnqueue: vi.fn(),
   requireAgentSession: vi.fn(),
   requireAuthenticatedUser: vi.fn(),
   requireRegistry: vi.fn(),
@@ -83,9 +83,9 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       handleWebhook: mocks.handleWebhook,
+      prepareWebhookForDurableEnqueue: mocks.prepareWebhookForDurableEnqueue,
       readWebhookRawBody: mocks.readWebhookRawBody,
       resolveWebhookPreflight: mocks.resolveWebhookPreflight,
-      verifyWebhookForDurableEnqueue: mocks.verifyWebhookForDurableEnqueue,
     });
     mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
       exportTokenBundle: mocks.exportTokenBundle,
@@ -123,7 +123,6 @@ describe("hosted device-sync agent and webhook routes", () => {
     mocks.resolveWebhookPreflight.mockResolvedValue(null);
     mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValue({
       enabled: false,
-      headers: [],
     });
     mocks.pairAgent.mockResolvedValue({
       agent: {
@@ -375,13 +374,11 @@ describe("hosted device-sync agent and webhook routes", () => {
 
   it("durably enqueues a verified provider-gated webhook without synchronous admission", async () => {
     const rawBody = Buffer.from('{"event":"sleep.updated"}', "utf8");
+    const preparedWebhook = createPreparedWebhook();
     mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValueOnce({
       enabled: true,
-      headers: [{ name: "x-oura-signature", value: "opaque-signature" }],
     });
-    mocks.verifyWebhookForDurableEnqueue.mockResolvedValueOnce({
-      receivedAt: "2026-04-10T12:00:00.000Z",
-    });
+    mocks.prepareWebhookForDurableEnqueue.mockResolvedValueOnce(preparedWebhook);
     mocks.enqueueHostedDeviceWebhook.mockResolvedValueOnce({
       accepted: true,
       transportId: "00000000-0000-4000-8000-000000000001",
@@ -395,16 +392,13 @@ describe("hosted device-sync agent and webhook routes", () => {
       createRouteContext({ provider: "oura" }),
     );
 
-    expect(mocks.verifyWebhookForDurableEnqueue).toHaveBeenCalledWith(
+    expect(mocks.prepareWebhookForDurableEnqueue).toHaveBeenCalledWith(
       "oura",
       rawBody,
       expect.any(Date),
     );
     expect(mocks.enqueueHostedDeviceWebhook).toHaveBeenCalledWith({
-      headers: [{ name: "x-oura-signature", value: "opaque-signature" }],
-      provider: "oura",
-      rawBody,
-      receivedAt: "2026-04-10T12:00:00.000Z",
+      preparedWebhook,
     });
     expect(mocks.handleWebhook).not.toHaveBeenCalled();
     expect(response.status).toBe(202);
@@ -417,11 +411,10 @@ describe("hosted device-sync agent and webhook routes", () => {
   it("does not fall back to synchronous admission after an enqueue failure", async () => {
     mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValueOnce({
       enabled: true,
-      headers: [],
     });
-    mocks.verifyWebhookForDurableEnqueue.mockResolvedValueOnce({
-      receivedAt: "2026-04-10T12:00:00.000Z",
-    });
+    mocks.prepareWebhookForDurableEnqueue.mockResolvedValueOnce(
+      createPreparedWebhook(),
+    );
     mocks.enqueueHostedDeviceWebhook.mockRejectedValueOnce(deviceSyncError({
       code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
       httpStatus: 503,
@@ -596,3 +589,16 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
   });
 });
+
+function createPreparedWebhook() {
+  return {
+    acceptanceMode: "level_dirty_hint" as const,
+    eventType: "sleep.updated",
+    externalAccountId: "opaque-account",
+    jobs: [],
+    provider: "oura",
+    receivedAt: "2026-04-10T12:00:00.000Z",
+    schema: "murph.device-sync-prepared-webhook.v1" as const,
+    traceId: "a".repeat(64),
+  };
+}

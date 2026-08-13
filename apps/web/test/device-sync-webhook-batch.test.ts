@@ -3,6 +3,7 @@ import {
   type DeviceWebhookQueuePayloadV1,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA } from "@murphai/device-syncd/prepared-webhook";
 import { describe, expect, it } from "vitest";
 
 import { admitHostedDeviceWebhookBatch } from "../src/lib/device-sync/webhook-batch";
@@ -19,13 +20,17 @@ describe("hosted device webhook batch admission", () => {
     })).toThrow("invalid provider");
   });
 
-  it("uses synchronous admission before enqueue when a gated body exceeds the Queue contract", () => {
+  it("uses synchronous admission only when a gated body exceeds the Queue contract", () => {
     expect(prepareHostedDeviceWebhookQueueTransport({
-      headers: new Headers({ "x-oura-signature": "opaque-signature" }),
+      provider: "oura",
+      rawBody: new Uint8Array(32 * 1024),
+      source: { HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS: "oura" },
+    })).toEqual({ enabled: true });
+    expect(prepareHostedDeviceWebhookQueueTransport({
       provider: "oura",
       rawBody: new Uint8Array(32 * 1024 + 1),
       source: { HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS: "oura" },
-    })).toEqual({ enabled: false, headers: [] });
+    })).toEqual({ enabled: false });
   });
 
   it("admits 100 deliveries in order with at most one active handler", async () => {
@@ -135,10 +140,16 @@ describe("hosted device webhook batch admission", () => {
 function createPayload(index: number): DeviceWebhookQueuePayloadV1 {
   const suffix = index.toString(16).padStart(12, "0");
   return {
-    headers: [],
-    provider: "demo",
-    rawBodyBase64: "e30=",
-    receivedAt: "2026-04-10T12:00:00.000Z",
+    preparedWebhook: {
+      acceptanceMode: "level_dirty_hint",
+      eventType: "demo.updated",
+      externalAccountId: `opaque-account-${index}`,
+      jobs: [],
+      provider: "demo",
+      receivedAt: "2026-04-10T12:00:00.000Z",
+      schema: DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA,
+      traceId: index.toString(16).padStart(64, "0"),
+    },
     schema: DEVICE_WEBHOOK_QUEUE_PAYLOAD_SCHEMA,
     transportId: `00000000-0000-4000-8000-${suffix}`,
   };
