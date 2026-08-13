@@ -22,6 +22,16 @@ export const hostedPhysicalNoteArtworkSchema = z
   })
   .strict();
 
+export const hostedPhysicalNoteFailureReasonSchema = z.enum([
+  "recipient_address",
+  "artwork",
+  "service_unavailable",
+  "request_invalid",
+  "prior_note_unresolved",
+  "prior_note_accepted",
+  "unknown",
+]);
+
 export const hostedPhysicalNoteSendRequestSchema = z
   .object({
     artwork: hostedPhysicalNoteArtworkSchema,
@@ -35,6 +45,7 @@ export const hostedPhysicalNoteSendResponseSchema = z
   .object({
     complimentary: z.boolean(),
     costUsdMicros: z.string().regex(/^\d+$/u),
+    failureReason: hostedPhysicalNoteFailureReasonSchema.nullable().optional(),
     physicalNoteId: z.string().trim().min(1).max(200).nullable(),
     status: z.enum([
       "accepted",
@@ -52,6 +63,9 @@ export type HostedPhysicalNoteRecipient = z.infer<
 >;
 export type HostedPhysicalNoteArtwork = z.infer<
   typeof hostedPhysicalNoteArtworkSchema
+>;
+export type HostedPhysicalNoteFailureReason = z.infer<
+  typeof hostedPhysicalNoteFailureReasonSchema
 >;
 export type HostedPhysicalNoteSendRequest = z.infer<
   typeof hostedPhysicalNoteSendRequestSchema

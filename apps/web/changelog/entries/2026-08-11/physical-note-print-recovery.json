@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "physical-note-print-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer recovery when a physical note cannot print",
+    "summary": "If a printer rejects a physical note, Murph now explains whether to check the address, remake the artwork, or wait for a Murph-side fix.",
+    "details": "Nothing is claimed as sent, uncertain submissions are not retried, and printer details stay out of the conversation.",
+    "relevanceTags": ["physical-notes", "recovery"],
+    "sourcePullRequests": [1671]
+  }
+}

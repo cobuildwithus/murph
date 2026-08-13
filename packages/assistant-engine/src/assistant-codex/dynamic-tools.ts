@@ -230,6 +230,7 @@ import {
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
+  buildPhysicalNoteFailureInstruction,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
   resolvePhysicalNoteExplicitOriginInputId,
@@ -2400,6 +2401,18 @@ export async function executeMurphDynamicToolRequest(input: {
         })
         switch (result.status) {
           case 'accepted':
+            if (result.failureReason === 'prior_note_accepted') {
+              return toolTextResult(
+                true,
+                JSON.stringify({
+                  failureReason: result.failureReason,
+                  note:
+                    'Provider records show that this earlier physical-note submission was accepted for printing. This replay did not send another note. Historical billing evidence is unavailable, so do not describe it as paid or complimentary and do not state a cost. Say accepted for printing, not delivered.',
+                  physicalNoteId: result.physicalNoteId,
+                  status: result.status,
+                }),
+              )
+            }
             return toolTextResult(
               true,
               JSON.stringify({
@@ -2452,7 +2465,14 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'The physical note was not accepted for printing.',
+              JSON.stringify({
+                failureReason: result.failureReason ?? 'unknown',
+                note: buildPhysicalNoteFailureInstruction(
+                  result.failureReason,
+                ),
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
             )
         }
       } catch {
