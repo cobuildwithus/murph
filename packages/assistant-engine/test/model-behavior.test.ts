@@ -3262,19 +3262,12 @@ describe('assistant conversation scope', () => {
       'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'When a save or patch returns `timingVerified: false`, immediately call `action: inspect` once with its returned `lookupId`',
+      'A save or patch result already includes its host-owned read-only timing readback',
     )
     expect(prompt).toContain(
-      'If that inspection verifies timing, confirm from the inspection normally.',
+      'follow the tool contract and never issue a second inspection or recovery write.',
     )
-    expect(prompt).toContain(
-      'Do not ask the member to authorize another inspection or offer an inspection you already performed.',
-    )
-    expect(prompt).toContain('do not retry the write or create a fallback automation')
-    expect(prompt).toContain(
-      'Interpret `runtime_state_pending` as the scheduler finishing existing work',
-    )
-    expect(prompt).toContain('Do not expose these internal code names.')
+    expect(prompt).not.toContain('Interpret `runtime_state_pending`')
     expect(prompt).not.toContain('save or update succeeded')
     expect(prompt).not.toContain('inspect-or-update recovery action')
     expect(prompt).toContain(

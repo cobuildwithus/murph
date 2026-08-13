@@ -33,10 +33,16 @@ describe('hosted domain dynamic tools', () => {
       'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'immediately call inspect once with its returned lookupId',
+      'A save or patch result already includes one host-owned read-only timing readback.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Do not ask the member to authorize another inspection',
+      'Do not inspect again, retry the write, create a fallback automation',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'confirm that the write succeeded and report the returned stored schedule and status',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'treat the returned schedule and status as current instead of claiming the requested mutation still holds',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay',

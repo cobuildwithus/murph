@@ -7,7 +7,7 @@ Updated: 2026-08-13
 ## Goal
 
 - When an automation write succeeds but its immediate scheduler readback is
-  temporarily inconclusive, Murph performs one read-only inspection before
+  temporarily inconclusive, Murph performs one internal read-only readback before
   replying, gives a concise truthful confirmation, and emits typed secret-safe
   diagnostics that identify why verification was incomplete.
 
@@ -15,15 +15,16 @@ Updated: 2026-08-13
 
 - Automation responses preserve the existing canonical vault and cron owners and
   add a finite typed verification-reason projection without new durable state.
-- A write with unverified timing causes exactly one read-only inspect attempt in
-  the same assistant turn; it never retries the write or creates a fallback
-  automation.
-- A recovered inspection produces the normal verified confirmation. An
-  unresolved inspection confirms only the stored schedule/status, explains the
-  remaining uncertainty without asking the member to authorize an inspection,
+- A write with unverified timing causes exactly one host-owned read-only
+  readback before the tool returns; it never adds a provider continuation,
+  retries the write, or creates a fallback automation.
+- A recovered readback produces the normal verified confirmation. An
+  unresolved readback confirms the write and current stored schedule/status,
+  without claiming a superseded concurrent edit still holds, explains the
+  remaining uncertainty without asking the member to intervene,
   and makes no unverified next-occurrence claim.
 - Hosted runtime logs capture content-free issue codes and whether the bounded
-  inspection recovered verification.
+  readback recovered verification.
 - Focused assistant-engine and assistant-runtime tests plus relevant typechecks
   pass, required exact-head CI is green, and both ReviewGPT stages are resolved.
 
@@ -40,7 +41,8 @@ Updated: 2026-08-13
 
 - Technical constraints: preserve `timingVerified` compatibility; derive every
   diagnostic from existing owner facts; keep observability best-effort and off
-  the reply critical path; use only bounded operation-local recovery state.
+  the reply critical path; keep recovery inside the existing hosted tool owner
+  without correlation state.
 - Product/process constraints: do not expose private conversation content or
   identifiers; do not imply a next run is confirmed when it is not; use the
   exact pushed-head preliminary specialist and final ReviewGPT gates.
@@ -48,8 +50,8 @@ Updated: 2026-08-13
 ## Risks and mitigations
 
 1. Risk: recovery instructions could trigger a duplicate write.
-   Mitigation: require one `inspect` call by the returned lookup id and forbid
-   write retry or fallback creation.
+   Mitigation: keep one readback inside the existing tool owner and forbid
+   provider-driven recovery, write retry, or fallback creation.
 2. Risk: telemetry could leak automation content or identifiers.
    Mitigation: log only fixed schema/type, action, issue codes, and recovery
    outcome through the existing redaction pipeline.
@@ -63,8 +65,8 @@ Updated: 2026-08-13
    response while preserving the boolean compatibility field.
 2. Feed incomplete/recovered verification observations into the existing
    assistant automation-detail log stream.
-3. Update the automation instruction stack so the model performs one automatic
-   inspect and gives truthful, non-alarming fallback copy.
+3. Update the automation instruction stack so the tool owns one automatic
+   readback and the model gives truthful, non-alarming fallback copy.
 4. Add focused serialization, prompt, recovery-behavior, and runtime telemetry
    regressions.
 5. Run focused tests/typechecks, inspect the privacy-safe diff, publish the PR,
@@ -88,7 +90,7 @@ Updated: 2026-08-13
   tool/telemetry, dynamic tool serialization, and prompt/scripted behavior;
   package typechecks selected through the repository verification guide; PR
   exact-head CI; preliminary `completion-specialists` and final `pr-review`.
-- Expected outcomes: one inspect after an unverified write, no repeated write,
+- Expected outcomes: one internal readback after an unverified write, no repeated write,
   verified recovery copy when available, typed unresolved copy otherwise,
   content-free runtime diagnostics, and no test/type regression.
 
@@ -97,36 +99,48 @@ Updated: 2026-08-13
 - Added typed scheduler-owned reasons for pending runtime work and a stale
   recurring projection, then composed them with the existing timezone,
   projection, and readback checks at the hosted tool boundary.
-- Added one operation-local lookup set that observes incomplete write results
-  and matching inspection recovery without persisting state or changing
-  scheduler behavior.
-- Updated the system prompt and deferred automation contract to inspect once,
-  avoid duplicate writes, translate internal reasons into calm member-facing
-  language, and never delegate the verification step back to the member.
-- Added content-free warning and recovery events through
+- Moved the deterministic readback into the existing authenticated hosted tool
+  owner, eliminating a provider continuation, prompt-owned sequencing, and the
+  operation-local lookup correlation set from the first candidate.
+- Kept the complete member-facing terminal rule in the deferred automation
+  contract: acknowledge the write and current stored state, translate internal reasons
+  into calm language, make no unverified timing claim, and never delegate the
+  verification step back to the member.
+- Added content-free initial and final verification events through
   `assistant.automation_detail`; regression proof asserts that title,
-  instructions, slug, and conversation-route data do not enter the payload.
+  instructions, slug, schedule values, and conversation-route data do not enter
+  the payload. Both events are informational so the existing nonblocking log
+  queue keeps observability off foreground delivery.
 - Focused proof passed: 361 scheduler/prompt/scripted tests, 19 dynamic-tool
   tests, and 285 hosted runtime tests. The complete assistant-engine suite also
   passed 3,685 tests with 67 intentional skips, and the complete hosted runtime
   suite passed 2,256 tests with 4 intentional skips.
-- Affected package typechecks passed. One broader affected-suite invocation was
-  invalidated when a concurrently started dependency build replaced CLI build
-  outputs; the already-completed engine/runtime results remain valid and the
-  CLI lane is being rerun sequentially.
-- Complete first provider-visible request capture used the pinned Codex App
+- Affected package typechecks passed. The corrected hosted phase and log-queue
+  suites pass 298 tests and cover recovered, persistent, concurrent-mismatch,
+  projection-failure, content-redaction, and nonblocking-log behavior.
+- Repeated complete first provider-visible request capture against the current
+  PR base and corrected head used the pinned Codex App
   Server, scripted Responses endpoint, `gpt-5.6-terra`, low reasoning,
   production code mode, identical synthetic direct/group automation inputs,
   and `gpt-tokenizer` 3.4.0 `o200k_harmony`. It serialized `include`, `input`,
   `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and `tools`,
-  excluding transport-only fields identically. Direct changed from 28,421
-  tokens / 129,887 bytes to 28,568 / 130,670 (+147, +0.5172%; +783 bytes,
-  +0.6028%). Group changed from 24,892 tokens / 112,864 bytes to 25,039 /
-  113,647 (+147, +0.5905%; +783 bytes, +0.6938%). The delta is entirely the
-  assembled timing-recovery instructions; initial tool/schema/generated
-  guidance and other included fields are unchanged. The deferred automation
-  description, when loaded, grows from 1,174 tokens / 6,129 bytes to 1,339 /
-  7,055 (+165 tokens / +926 bytes). Temporary capture code was removed.
+  excluding transport-only fields identically. Direct changed from 26,553
+  tokens / 120,182 bytes to 26,549 / 120,182 (-4, -0.0151%; zero bytes).
+  Group changed from 22,994 tokens / 104,439 bytes to 22,977 / 104,439 (-17,
+  -0.0739%; zero bytes). The initial-request delta is entirely the assembled
+  automation guidance; tool/schema/generated guidance and all other included
+  fields are unchanged. The deferred automation description, when loaded,
+  grows from 1,173 tokens / 6,097 bytes to 1,356 / 7,145 (+183 tokens / +1,048
+  bytes). The measured base is `ca55da9d1a3576d36eefba5bf92a22c65f06b22b`;
+  temporary capture code and payloads were removed.
 - Draft PR #1763 is open. Its public changelog item validates with all seven
   focused fragment tests and describes the self-checking reminder update
   without exposing incident or conversation details.
+- Preliminary ReviewGPT and final round 1 both returned findings on the first
+  reviewed head. Accepted: warning-level telemetry could block foreground
+  delivery; deterministic recovery did not belong in another model
+  continuation; unresolved copy must acknowledge the requested mutation; and
+  persistent/mismatch/projection failure needed stronger production-boundary
+  proof. The corrected implementation resolves those findings without a new
+  owner, queue, state machine, or retry path. The preliminary pass is not rerun;
+  final round 2 will review the behavior-bearing correction.

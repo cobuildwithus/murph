@@ -5633,7 +5633,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'preserves a foreign wall clock and confirms it after read-only timing recovery',
+    'preserves a foreign wall clock and confirms host-recovered timing',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5658,27 +5658,8 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             automationTool: {
               request: async (request) => {
                 automationRequests.push(request)
-                if (request.action === 'inspect') {
-                  return {
-                    action: 'inspect',
-                    automationId: 'automation-central-evening',
-                    effectiveTimeZone: 'America/Chicago',
-                    lookupId: 'central-evening-reminder',
-                    nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
-                    routeBinding: 'preserved',
-                    schedule: {
-                      kind: 'dailyLocal',
-                      localTime: '21:00',
-                      timeZone: 'America/Chicago',
-                    },
-                    status: 'active',
-                    timingVerified: true,
-                    timingVerificationIssues: [],
-                    updatedAt: '2026-08-10T00:00:00.000Z',
-                  }
-                }
                 if (request.action !== 'save') {
-                  throw new Error('Expected an automation save or inspect request.')
+                  throw new Error('Expected an automation save request.')
                 }
                 return {
                   action: 'save',
@@ -5686,12 +5667,12 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: 'America/Chicago',
                   lookupId: 'central-evening-reminder',
-                  nextOccurrenceAt: null,
+                  nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: false,
-                  timingVerificationIssues: ['projection_unavailable'],
+                  timingVerified: true,
+                  timingVerificationIssues: [],
                   updatedAt: '2026-08-10T00:00:00.000Z',
                 }
               },
@@ -5715,7 +5696,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           workingDirectory,
         })
 
-        expect(automationRequests).toHaveLength(2)
+        expect(automationRequests).toHaveLength(1)
         const request = automationRequests[0]
         expect(request).toMatchObject({ action: 'save' })
         if (request?.action !== 'save') {
@@ -5730,10 +5711,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         } else {
           throw new Error('Expected a recurring wall-clock schedule.')
         }
-        expect(automationRequests[1]).toEqual({
-          action: 'inspect',
-          lookup: 'central-evening-reminder',
-        })
         expect(result.finalMessage).toMatch(/saved|set up|created/iu)
         expect(result.finalMessage).toMatch(
           /9\s*(?::00)?\s*p\.?m\.?|21:00|central time|america\/chicago/iu,
@@ -5950,7 +5927,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'inspects once and does not describe an unverified stale recurrence as exhausted',
+    'does not inspect again or describe an unverified stale recurrence as exhausted',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5987,11 +5964,8 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   timingVerificationIssues: ['runtime_state_pending'] as const,
                   updatedAt: '2026-08-10T00:01:00.000Z',
                 }
-                if (request.action === 'inspect') {
-                  return { action: 'inspect' as const, ...response }
-                }
                 if (request.action !== 'patch') {
-                  throw new Error('Expected an automation patch or inspect request.')
+                  throw new Error('Expected an automation patch request.')
                 }
                 return {
                   action: 'patch' as const,
@@ -6019,17 +5993,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           workingDirectory,
         })
 
-        expect(automationRequests).toHaveLength(2)
+        expect(automationRequests).toHaveLength(1)
         expect(automationRequests[0]).toMatchObject({
           action: 'patch',
           lookup: 'daily-interval-reminder',
         })
-        expect(automationRequests[1]).toEqual({
-          action: 'inspect',
-          lookup: 'daily-interval-reminder',
-        })
         expect(result.finalMessage).toMatch(
-          /saved|updated|changed|active/iu,
+          /saved|updated|changed/iu,
         )
         expect(result.finalMessage).toMatch(/next.*not (?:yet )?(?:confirmed|verified)|still finishing/iu)
         expect(result.finalMessage).not.toMatch(
