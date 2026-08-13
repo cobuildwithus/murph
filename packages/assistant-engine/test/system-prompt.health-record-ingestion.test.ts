@@ -54,4 +54,21 @@ describe('assistant system prompt health record ingestion invariant', () => {
       'A loaded skill may explicitly split independent canonical persistence from the durably accepted current input across bounded children.',
     )
   })
+
+  it('routes unfamiliar workout CSVs through one validated local bulk transformation', () => {
+    const prompt = buildPrompt()
+
+    expect(prompt).toContain(
+      'first run `vault-cli workout import inspect <readable-file-path> --format json`',
+    )
+    expect(prompt).toContain('A request for explicit source or units is not a format failure')
+    expect(prompt).toContain('local Python and the standard-library CSV parser')
+    expect(prompt).toContain('one `activity_session` row per grouped workout')
+    expect(prompt).toContain(
+      '`vault-cli event payload-schema --for import-jsonl --kind activity_session --format json`',
+    )
+    expect(prompt).toContain('never use input row position alone')
+    expect(prompt).toContain('apply that exact unchanged file once with `--apply`')
+    expect(prompt).toContain('do not make one model or CLI call per set')
+  })
 })

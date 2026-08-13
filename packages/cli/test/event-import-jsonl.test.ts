@@ -42,6 +42,11 @@ function buildActivitySessionPayload() {
     source: 'import',
     title: 'Strength training',
     activityType: 'strength-training',
+    externalRef: {
+      system: 'example-workout-csv',
+      resourceType: 'workout-session',
+      resourceId: 'session-2026-03-13-1700',
+    },
     workout: {
       exercises: [
         {
@@ -192,6 +197,23 @@ test('event import-jsonl requires activity-session duration before writing', asy
   )
   assert.equal(validImport.ok, true)
   assert.equal(requireData(validImport).createdCount, 1)
+
+  const retry = await runCli<EventImportJsonlResult>(
+    ['event', 'import-jsonl', '--input', '-', '--apply', '--vault', vaultRoot],
+    {
+      stdin: toJsonl([
+        { ...buildActivitySessionPayload(), durationMinutes: 45 },
+      ]),
+    },
+  )
+  assert.equal(retry.ok, true)
+  assert.equal(requireData(retry).applied, false)
+  assert.equal(requireData(retry).skippedExistingCount, 1)
+
+  const listAfterRetry = await runCli<{ count: number }>(
+    ['event', 'list', '--kind', 'activity_session', '--vault', vaultRoot],
+  )
+  assert.equal(requireData(listAfterRetry).count, 1)
 })
 
 // The CLI error envelope only carries code/message, so per-line failure

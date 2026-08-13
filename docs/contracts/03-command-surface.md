@@ -565,6 +565,14 @@ Current Strong exports may include `W`, `D`, and `F` set tags, rest-timer metada
 
 An explicit recognized `--source strong|hevy` selects that parser dialect. Without it, only the exact recognized Strong signature or Hevy-specific markers select a provider. Headers shared by both formats leave inspection non-importable with an instruction to choose Strong or Hevy; they are never guessed as Strong. If an explicit source conflicts with unambiguous provider-specific headers, inspection and import fail before raw or canonical persistence. `--store-raw-only` relaxes row and unit importability, but it uses the same provider-recognition gate and does not persist an ambiguous export under a guessed label. A later structured import reuses an unattached raw-only batch only when its provider, delimiter, timezone, weight unit, and distance unit exactly match the final plan; confirmed provenance otherwise gets a new immutable batch, and canonical events attach only to that batch.
 
+### Unfamiliar workout CSV layouts
+
+The assistant may adapt a workout CSV that the Strong/Hevy planner does not recognize by using local Python's standard-library CSV parser, but Python remains a transformation layer rather than a vault writer. The dedicated planner always runs first; a recognized file with an unresolved provider or unit requirement must satisfy that gate instead of bypassing it through the generic path.
+
+For a genuinely unfamiliar layout, the assistant reads the current `activity_session` row contract from `event payload-schema --for import-jsonl`, maps the complete source into one temporary JSONL batch with one row per grouped workout, and performs one `event import-jsonl` dry run followed by one apply of the exact unchanged file. The mapping must resolve grouping, timestamps and timezone, required duration, units, and exercise/set meaning without guessing. Assistant-facing discussion stays bounded to mappings, choices, warnings, and aggregate counts rather than source rows or per-set tool calls. The canonical write remains the existing atomic core batch importer.
+
+Transformed rows use `externalRef` only when the source proves stable, unique session identities; input row positions alone are not identities. A batch without stable identities retains the command's documented append-only retry behavior, so the assistant discloses that consequence before apply, applies at most once for the current import request, and never blindly retries it. A successful apply is confirmed through a bounded canonical read. Temporary scripts and JSONL files remain scratch and do not count as durable import state.
+
 ### `workout format save`
 
 ```json
