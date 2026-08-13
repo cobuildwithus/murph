@@ -2564,11 +2564,12 @@ test("device sync service retains one accepted sparse calendar job until canonic
   }
 });
 
-test("device sync service retries mixed-validity calendar rows before a partial import", async () => {
+test("device sync service retries structurally incomplete calendar rows before a partial import", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-strict-completeness");
   let now = new Date("2026-07-10T13:46:00.000Z");
   let providerRowsComplete = false;
   let canonicalImportCalls = 0;
+  const importedDailyValues: unknown[] = [];
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     clock: { now: () => now },
@@ -2581,6 +2582,12 @@ test("device sync service retries mixed-validity calendar rows before a partial 
       async importDeviceProviderSnapshot(input) {
         canonicalImportCalls += 1;
         const prepared = await prepareDeviceProviderSnapshotImport(input);
+        const daily = prepared.events?.find((event) =>
+          event.fields && "metric" in event.fields && event.fields.metric === "water"
+        );
+        importedDailyValues.push(
+          daily?.fields && "value" in daily.fields ? daily.fields.value : undefined,
+        );
         return { events: prepared.events ?? [] };
       },
     },
@@ -2622,10 +2629,7 @@ test("device sync service retries mixed-validity calendar rows before a partial 
                   id: "water-calendar-first",
                   start: "2026-07-08T08:00:00.000Z",
                   value: 250,
-                }, providerRowsComplete ? completeRow : {
-                  ...completeRow,
-                  start: undefined,
-                }],
+                }, providerRowsComplete ? completeRow : null],
                 source: { provider: "garmin", type: "watch" },
               }],
             },
@@ -2664,13 +2668,14 @@ test("device sync service retries mixed-validity calendar rows before a partial 
     const retained = store.getJobById(job.id);
     assert.equal(retained?.status, "queued");
     assert.equal(retained?.lastErrorCode, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
-    assert.equal(canonicalImportCalls, 1);
+    assert.equal(canonicalImportCalls, 0);
 
     providerRowsComplete = true;
     now = new Date(retained!.availableAt);
     await service.runWorkerOnce();
     assert.equal(store.getJobById(job.id)?.status, "succeeded");
-    assert.equal(canonicalImportCalls, 2);
+    assert.equal(canonicalImportCalls, 1);
+    assert.deepEqual(importedDailyValues, [375]);
   } finally {
     close();
   }

@@ -82,6 +82,7 @@ export type JunctionDateQueryFormat = "date" | "datetime";
 
 export interface JunctionWindowInput {
   dateQueryFormat?: JunctionDateQueryFormat;
+  requireStructurallyCompleteCollection?: boolean;
   resource: string;
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
@@ -532,7 +533,15 @@ export class JunctionClient {
         undefined,
         { endpointKind: options.endpointKind, signal: input.signal ?? null },
       );
-      records.push(...extractRecords(payload, input.resource));
+      records.push(
+        ...(input.requireStructurallyCompleteCollection
+          ? extractStructurallyCompleteTimeseriesRecords(
+              payload,
+              input.resource,
+              sourceProviderSlug,
+            )
+          : extractRecords(payload, input.resource)),
+      );
       pages += 1;
 
       if (records.length > MAX_COLLECTION_RECORDS) {
@@ -1143,8 +1152,47 @@ function extractTimeseriesRecords(payload: unknown, resource: string): unknown[]
   return groupedRecords ?? extractCollectionRecords(payload, resource);
 }
 
-function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[] | null {
+function extractStructurallyCompleteTimeseriesRecords(
+  payload: unknown,
+  resource: string,
+  requestedSourceProviderSlug: string | null,
+): unknown[] {
+  const groupedRecords = flattenGroupedTimeseries(resource, payload, {
+    requestedSourceProviderSlug,
+    strict: true,
+  });
+  const records = groupedRecords ?? extractCollectionRecords(payload, resource);
+  if (
+    groupedRecords === null
+    && (!payload || typeof payload !== "object")
+  ) {
+    throw incompleteJunctionCalendarCollectionError();
+  }
+
+  for (const record of records) {
+    const entry = readPlainObject(record);
+    const sourceProviderSlug = entry
+      ? normalizeSourceSlug(resolveJunctionOrigin(entry).sourceProviderSlug)
+      : null;
+    if (!entry || (requestedSourceProviderSlug && !sourceProviderSlug)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
+  }
+  return records;
+}
+
+function flattenGroupedTimeseries(
+  resource: string,
+  payload: unknown,
+  options: {
+    requestedSourceProviderSlug?: string | null;
+    strict?: boolean;
+  } = {},
+): unknown[] | null {
   const envelope = readPlainObject(payload);
+  if (options.strict && envelope && "groups" in envelope && !readPlainObject(envelope.groups)) {
+    throw incompleteJunctionCalendarCollectionError();
+  }
   const groups = readPlainObject(envelope?.groups);
   if (!groups) {
     return null;
@@ -1153,25 +1201,55 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   const records: unknown[] = [];
 
   for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
+    const normalizedGroupedSourceSlug = normalizeSourceSlug(sourceSlug);
+    if (options.strict && !normalizedGroupedSourceSlug) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
+    if (
+      options.strict
+      && options.requestedSourceProviderSlug
+      && normalizedGroupedSourceSlug !== options.requestedSourceProviderSlug
+    ) {
+      continue;
+    }
+    if (options.strict && (rawGroups === undefined || rawGroups === null)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
     for (const rawGroup of asArray(rawGroups)) {
       const group = readPlainObject(rawGroup);
       if (!group) {
+        if (options.strict) {
+          throw incompleteJunctionCalendarCollectionError();
+        }
         continue;
+      }
+      if (
+        options.strict
+        && (!("data" in group) || group.data === undefined || group.data === null)
+      ) {
+        throw incompleteJunctionCalendarCollectionError();
       }
 
       for (const rawSample of asArray(group.data)) {
         const sample = readPlainObject(rawSample);
         if (!sample) {
+          if (options.strict) {
+            throw incompleteJunctionCalendarCollectionError();
+          }
           continue;
         }
 
         const origin = resolveJunctionOrigin(sample, {
           ...group,
-          groupedSourceSlug: sourceSlug,
+          groupedSourceSlug: normalizedGroupedSourceSlug ?? sourceSlug,
         });
+        const sourceProviderSlug = normalizeSourceSlug(origin.sourceProviderSlug);
+        if (options.strict && !sourceProviderSlug) {
+          throw incompleteJunctionCalendarCollectionError();
+        }
         records.push(stripUndefinedRecord({
           ...sample,
-          sourceProviderSlug: normalizeSourceSlug(origin.sourceProviderSlug) ?? undefined,
+          sourceProviderSlug: sourceProviderSlug ?? undefined,
           sourceType: origin.sourceType,
           sourceInstanceId: origin.sourceInstanceId,
           junctionResource: resource,
@@ -1181,6 +1259,15 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   }
 
   return records;
+}
+
+function incompleteJunctionCalendarCollectionError() {
+  return deviceSyncError({
+    code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    message: "Junction calendar refresh response was not structurally complete.",
+    retryable: true,
+    httpStatus: 502,
+  });
 }
 
 function asArray(value: unknown): unknown[] {

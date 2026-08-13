@@ -2419,6 +2419,97 @@ test("Junction sparse calendar refresh threads strict completeness before canoni
   assert.equal(canonicalImportCalls, 1);
 });
 
+test("Junction sparse calendar refresh rejects lossy collection parsing before canonical import", async () => {
+  const validRow = {
+    calendarDate: "2026-04-02",
+    end: "2026-04-02T08:01:00.000Z",
+    id: "water-valid",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    start: "2026-04-02T08:00:00.000Z",
+    value: 250,
+  };
+  const cases: Array<{ label: string; payload: unknown }> = [{
+    label: "grouped mixed valid and non-object samples",
+    payload: {
+      groups: {
+        garmin: [{
+          data: [validRow, null],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    },
+  }, {
+    label: "grouped non-object group",
+    payload: {
+      groups: {
+        garmin: [null],
+      },
+    },
+  }, {
+    label: "grouped nonempty collection with only invalid samples",
+    payload: {
+      groups: {
+        garmin: [{
+          data: [null],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    },
+  }, {
+    label: "ungrouped mixed valid and non-object records",
+    payload: [validRow, null],
+  }];
+
+  for (const testCase of cases) {
+    const provider = createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-1",
+            name: "Garmin",
+            resource_availability: { water: true },
+            slug: "garmin",
+            status: "connected",
+          }],
+        });
+      }
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+        return createJsonResponse(testCase.payload);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }, { timeseriesResources: ["water"] });
+    let canonicalImportCalls = 0;
+
+    await assert.rejects(
+      executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          now: "2026-04-03T12:00:00.000Z",
+          importSnapshot: async () => {
+            canonicalImportCalls += 1;
+            return { durableDeliveryAccepted: true };
+          },
+        }),
+        createJob("resource", {
+          calendarRefreshDay: "2026-04-02",
+          resource: "water",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+        }),
+      ),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+        && error.retryable,
+      testCase.label,
+    );
+    assert.equal(canonicalImportCalls, 0, testCase.label);
+  }
+});
+
 const usefulHistoricalSummaryRecordByResource = {
   sleep: {
     id: "sleep-1",

@@ -64,7 +64,8 @@ Updated: 2026-08-13
     findings.
 16. [x] Resolve round fourteen's strict complete-set and reconnect-wake
     complexity findings.
-17. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+17. [x] Resolve round fifteen's lossy production-parser calendar finding.
+18. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
     the task worktree.
 
 ## Decisions
@@ -174,6 +175,13 @@ Updated: 2026-08-13
   account-wide row collection plus per-job JSON parsing and updates. The strict
   mode is an ephemeral snapshot expectation and adds no persisted owner; the
   SQL correction deletes the unbounded collection path.
+- Round fifteen's production-path finding is accepted. Exact provider/date
+  calendar fetches now require structurally complete grouped or ungrouped
+  collections before filtering, empty-set synthesis, or canonical write. A
+  discarded non-object group or sample raises the same retryable retained-job
+  failure; genuinely empty exact-source results retain the existing zero path.
+  The correction reuses the existing bounded client/provider call tree and
+  adds no state owner, queue, worker, schema, cursor, watermark, or dependency.
 
 ## Verification
 
@@ -287,5 +295,11 @@ Updated: 2026-08-13
   same retained job, succeeds after a fully valid response, preserves
   authoritative empty success, and selects reconnect wake rows through one
   set-based mutation.
+- Round fifteen found that the production HTTP client could discard non-object
+  groups or samples before round fourteen's validator and then certify a
+  partial or false-empty collection. Focused production-fetch proof now rejects
+  grouped mixed-validity, grouped all-invalid, and ungrouped mixed-validity
+  responses before canonical import; the service-level retry uses the same row
+  and a later complete response applies the full daily value.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

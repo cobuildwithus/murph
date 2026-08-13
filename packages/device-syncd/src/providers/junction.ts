@@ -257,6 +257,7 @@ const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9
 
 interface JunctionWindowFetchOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
+  requireStructurallyCompleteCollection?: boolean;
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
@@ -2832,6 +2833,9 @@ export function createJunctionDeviceSyncProvider(
         if (options.dateQueryFormat) {
           request.dateQueryFormat = options.dateQueryFormat;
         }
+        if (options.requireStructurallyCompleteCollection) {
+          request.requireStructurallyCompleteCollection = true;
+        }
         const chunkRecords = await client.listTimeseries(request);
         records.push(
           ...(options.dateQueryFormat === "date"
@@ -3143,7 +3147,10 @@ export function createJunctionDeviceSyncProvider(
         skippedOptionalResources,
         windowResources,
         sourceProviderSlug,
-        { dateQueryFormat: "date" },
+        {
+          dateQueryFormat: "date",
+          requireStructurallyCompleteCollection: Boolean(emptySparseCalendarSource),
+        },
       );
       if (
         emptySparseCalendarSource
@@ -6613,12 +6620,37 @@ function filterJunctionSparseCalendarRecordsToSource(
   return records.filter((record) => {
     const entry = readPlainObject(record);
     if (!entry) {
-      return false;
+      throw incompleteJunctionSparseCalendarCollectionError();
     }
     const origin = resolveJunctionOrigin(entry);
-    return normalizeProviderSlug(origin.sourceProviderSlug) === sourceProviderSlug
-      && (!sourceType || normalizeString(origin.sourceType) === sourceType)
-      && (!sourceInstanceId || normalizeString(origin.sourceInstanceId) === sourceInstanceId);
+    const recordSourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
+    if (!recordSourceProviderSlug) {
+      throw incompleteJunctionSparseCalendarCollectionError();
+    }
+    if (recordSourceProviderSlug !== sourceProviderSlug) {
+      return false;
+    }
+    const recordSourceType = normalizeString(origin.sourceType);
+    if (sourceType && !recordSourceType) {
+      throw incompleteJunctionSparseCalendarCollectionError();
+    }
+    if (sourceType && recordSourceType !== sourceType) {
+      return false;
+    }
+    const recordSourceInstanceId = normalizeString(origin.sourceInstanceId);
+    if (sourceInstanceId && !recordSourceInstanceId) {
+      throw incompleteJunctionSparseCalendarCollectionError();
+    }
+    return !sourceInstanceId || recordSourceInstanceId === sourceInstanceId;
+  });
+}
+
+function incompleteJunctionSparseCalendarCollectionError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    message: "Junction calendar refresh response was not structurally complete.",
+    retryable: true,
+    httpStatus: 502,
   });
 }
 
