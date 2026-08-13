@@ -1,6 +1,6 @@
 # Page pooled database connection errors to operator phones
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-13
 
@@ -37,17 +37,21 @@ Updated: 2026-08-13
 
 ## Tasks
 
-1. Inspect the exact Prisma classifier, PlanetScale pooled-port metrics, and Cloudflare database-health lifecycle.
-2. Have ReviewGPT select and implement the smallest independent durable signal path with focused tests and docs.
-3. Inspect the patch, verify failure/recovery/coalescing/privacy behavior, and remediate findings.
-4. Push the exact candidate, run specialist and final ReviewGPT gates with CI, and open the PR.
+1. [x] Inspect the exact Prisma classifier, PlanetScale pooled-port metrics, and Cloudflare database-health lifecycle.
+2. [x] Have ReviewGPT select and implement the smallest independent durable signal path with focused tests and docs.
+3. [x] Inspect the patch, verify failure/recovery/coalescing/privacy behavior, and remediate findings.
+4. [x] Push the exact candidate, run specialist and final ReviewGPT gates with CI, and open the PR.
 
 ## Decisions
 
 - The alert owner remains the Cloudflare database-health singleton; Postgres cannot be the signal store because this alert specifically covers its admission failure.
 - Scope is exact connection admission/limit rejection, not every SQL failure.
+- The PlanetScale counter lacks a rejection-reason label, so port 6432 alerts use factual pooled application connection-error wording rather than claiming every delta was specifically `max_client_conn`.
+- A legacy region-only 5432 baseline cannot be compared safely with the new region-plus-port key. The upgrade therefore establishes a new direct-port baseline once, suppressing that first ambiguous delta without replaying it.
 
 ## Verification
 
-- Commands to run: focused Cloudflare database-health and Web Prisma classifier tests; affected package typechecks; `git diff --check`; required exact-head CI.
-- Expected outcomes: one durable two-destination page for a new rejection window, no page replay on unchanged/reset counters, no secret-bearing metadata, and a later recovered recurrence pages again.
+- Passed: focused Cloudflare metric, monitor, store, Worker-boundary, and scheduled Durable Object tests; Cloudflare typecheck; `git diff --check`; and exact-head required GitHub Actions.
+- ReviewGPT: preliminary product/coverage specialist pass and final full-patch audit both passed with no qualifying findings.
+- Direct proof: one durable two-destination page for a new pooled-error window, no replay on unchanged/reset counters, no secret-bearing metadata, and a later recovered recurrence pages again.
+Completed: 2026-08-13
