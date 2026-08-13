@@ -65,6 +65,7 @@ import {
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+  type HostedWorkspaceSnapshotOrphanCandidate,
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -6355,6 +6356,133 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
+  it("moves the shared orphan alarm earlier without scanning or postponing it", async () => {
+    const storageList = vi.fn();
+    const { alarms, runner } = createRunnerHarness({
+      onStorageList: storageList,
+    });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-27T02:00:00.000Z",
+      objectKey: `${workspacePrefix}snapshot_alarm_later.snapshot.enc`,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_alarm_later",
+      userId: TEST_USER_ID,
+    });
+
+    const browserVaultPrefix = await hostedBrowserVaultReplicaUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: "2026-04-27T00:30:00.000Z",
+      objectKey: `${browserVaultPrefix}${"a".repeat(48)}.json`,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    });
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-27T03:00:00.000Z",
+      objectKey: `${workspacePrefix}snapshot_alarm_latest.snapshot.enc`,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_alarm_latest",
+      userId: TEST_USER_ID,
+    });
+
+    expect(alarms).toEqual([
+      "2026-04-27T03:05:00.000Z",
+      "2026-04-27T01:35:00.000Z",
+    ]);
+    expect(storageList).not.toHaveBeenCalled();
+  });
+
+  it("keeps repeated orphan candidate recording bounded and idempotent", async () => {
+    const storageList = vi.fn();
+    const { alarms, runner, storageValues } = createRunnerHarness({
+      onStorageList: storageList,
+    });
+    const snapshotId = "snapshot_alarm_repeated";
+    const candidate: HostedWorkspaceSnapshotOrphanCandidate = {
+      createdAt: "2026-04-27T00:00:00.000Z",
+      objectKey: `${
+        await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })
+      }${snapshotId}.snapshot.enc`,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: TEST_USER_ID,
+    };
+
+    for (let call = 0; call < 25; call += 1) {
+      await runner.recordHostedWorkspaceSnapshotOrphanCandidate(candidate);
+    }
+
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(snapshotId),
+    )).toEqual(candidate);
+    expect(alarms).toEqual(["2026-04-27T01:05:00.000Z"]);
+    expect(storageList).not.toHaveBeenCalled();
+  });
+
+  it("full-scans after cleanup so deletion can move the alarm later and clear it", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T02:00:00.000Z"));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    const firstObjectKey = `${workspacePrefix}snapshot_alarm_first.snapshot.enc`;
+    const secondObjectKey = `${workspacePrefix}snapshot_alarm_second.snapshot.enc`;
+    await bucket.put(firstObjectKey, "first-encrypted-snapshot");
+    await bucket.put(secondObjectKey, "second-encrypted-snapshot");
+    const storageList = vi.fn();
+    const { alarms, runner, storageValues } = createRunnerHarness({
+      bucket,
+      onStorageList: storageList,
+    });
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-27T00:00:00.000Z",
+      objectKey: firstObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_alarm_first",
+      userId: TEST_USER_ID,
+    });
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-27T01:30:00.000Z",
+      objectKey: secondObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_alarm_second",
+      userId: TEST_USER_ID,
+    });
+    expect(alarms).toEqual(["2026-04-27T01:05:00.000Z"]);
+
+    alarms.length = 0;
+    storageList.mockClear();
+    await runner.alarm();
+
+    expect(storageList).toHaveBeenCalledTimes(4);
+    expect(bucket.objects.has(firstObjectKey)).toBe(false);
+    expect(bucket.objects.has(secondObjectKey)).toBe(true);
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey("snapshot_alarm_first"),
+    )).toBeUndefined();
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey("snapshot_alarm_second"),
+    )).toBeDefined();
+    expect(alarms).toEqual(["2026-04-27T02:35:00.000Z"]);
+
+    alarms.length = 0;
+    storageList.mockClear();
+    vi.setSystemTime(new Date("2026-04-27T02:35:00.000Z"));
+    await runner.alarm();
+
+    expect(storageList).toHaveBeenCalledTimes(4);
+    expect(bucket.objects.has(secondObjectKey)).toBe(false);
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey("snapshot_alarm_second"),
+    )).toBeUndefined();
+    expect(alarms).toEqual(["deleted"]);
+  });
+
   it("cleans stale browser vault replicas alongside snapshots after confirming current Web refs", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -6530,6 +6658,127 @@ describe("HostedUserRunner execution coordination", () => {
     expect(storageValues.get(
       browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
     )).toBeUndefined();
+  });
+
+  it("does not await retained orphan scans when creating a snapshot session", async () => {
+    const listStarted = createDeferred<void>();
+    const releaseFirstList = createDeferred<void>();
+    let blockFirstList = true;
+    const storageList = vi.fn(async () => {
+      if (!blockFirstList) {
+        return;
+      }
+      blockFirstList = false;
+      listStarted.resolve(undefined);
+      await releaseFirstList.promise;
+    });
+    const { flushWaitUntil, runner, sql, storageValues } = createRunnerHarness({
+      onStorageList: storageList,
+    });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    for (let index = 0; index < 1_500; index += 1) {
+      const snapshotId = `snapshot_create_no_scan_retained_${index}`;
+      storageValues.set(
+        workspaceSnapshotOrphanCandidateStorageKey(snapshotId),
+        {
+          createdAt: "2030-01-01T00:00:00.000Z",
+          objectKey: `${workspacePrefix}${snapshotId}.snapshot.enc`,
+          schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+          snapshotId,
+          userId: TEST_USER_ID,
+        },
+      );
+    }
+    const createPromise = runner.createHostedWorkspaceSnapshotUploadSession({
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: `${workspacePrefix}snapshot_create_no_scan_current.snapshot.enc`,
+        snapshotId: "snapshot_create_no_scan_current",
+      }),
+      createdAt: "2030-01-02T00:00:00.000Z",
+      expiresAt: "2030-01-02T00:10:00.000Z",
+    });
+    await listStarted.promise;
+
+    const hotPathOutcome = await Promise.race([
+      createPromise.then(() => "created" as const),
+      new Promise<"blocked">((resolve) => setImmediate(() => resolve("blocked"))),
+    ]);
+    const blockedListCallCount = storageList.mock.calls.length;
+    releaseFirstList.resolve(undefined);
+    const createdSession = await createPromise;
+    await flushWaitUntil();
+
+    expect(hotPathOutcome).toBe("created");
+    expect(createdSession).toMatchObject({
+      snapshotId: "snapshot_create_no_scan_current",
+    });
+    expect(blockedListCallCount).toBe(1);
+    expect(storageList).toHaveBeenCalledTimes(4);
+  });
+
+  it("retains both previous-current orphan records while scheduling their earliest eligibility", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T02:00:00.000Z"));
+    const { alarms, flushWaitUntil, runner, sql, storageValues } = createRunnerHarness();
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    const previousObjectKey =
+      `${workspacePrefix}snapshot_previous_current_candidate.snapshot.enc`;
+    const replacedObjectKey =
+      `${workspacePrefix}snapshot_previous_replaced_candidate.snapshot.enc`;
+    const nextObjectKey = `${workspacePrefix}snapshot_next_current_candidate.snapshot.enc`;
+    const replacedSnapshotRef = createWorkspaceSnapshotV2RefForTest({
+      objectKey: replacedObjectKey,
+      snapshotId: "snapshot_previous_replaced_candidate",
+    });
+    const previousSession = {
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: previousObjectKey,
+        replacedSnapshotRef,
+        snapshotId: "snapshot_previous_current_candidate",
+      }),
+      createdAt: "2026-04-27T01:30:00.000Z",
+      expiresAt: "2026-04-27T01:40:00.000Z",
+    };
+    storageValues.set(
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
+      previousSession,
+    );
+
+    await runner.createHostedWorkspaceSnapshotUploadSession({
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: nextObjectKey,
+        snapshotId: "snapshot_next_current_candidate",
+      }),
+      createdAt: "2026-04-27T02:00:00.000Z",
+      expiresAt: "2026-04-27T02:10:00.000Z",
+    });
+    await flushWaitUntil();
+
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(replacedSnapshotRef.snapshotId),
+    )).toEqual({
+      createdAt: previousSession.createdAt,
+      objectKey: replacedObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: replacedSnapshotRef.snapshotId,
+      userId: TEST_USER_ID,
+    });
+    expect(storageValues.get(
+      workspaceSnapshotOrphanCandidateStorageKey(previousSession.snapshotId),
+    )).toEqual({
+      createdAt: "2026-04-27T02:00:00.000Z",
+      objectKey: previousObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: previousSession.snapshotId,
+      userId: TEST_USER_ID,
+    });
+    expect(alarms).toEqual(["2026-04-27T02:35:00.000Z"]);
   });
 
   it("does not scan orphan candidates when deleting an upload session", async () => {
