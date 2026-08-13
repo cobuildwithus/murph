@@ -1022,7 +1022,7 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   provider: string;
   store: HostedRuntimeDeviceSyncStore;
 }): HostedDirtyDeviceSyncAdmissionResult {
-  const pendingJobs = input.store.listPendingJobsForAccount(
+  const pendingJobs = input.store.listAdmissibleJobsForAccount(
     input.accountId,
     HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
   );

@@ -117,7 +117,12 @@ function decodeStoredJobRow(row: Record<string, unknown>): StoredJobRow {
   };
 }
 
-function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: string): void {
+function deadLetterExpiredExhaustedDeviceSyncJobs(
+  database: DatabaseSync,
+  now: string,
+  accountId?: string,
+): void {
+  const accountPredicate = accountId ? "and account_id = ?" : "";
   database.prepare(`
     update device_job
     set status = 'dead',
@@ -136,6 +141,7 @@ function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: s
         and kind = 'resource'
         and coalesce(json_extract(payload_json, '$.resource'), '') = ?
       )
+      ${accountPredicate}
   `).run(
     EXPIRED_JOB_LEASE_ERROR_CODE,
     EXPIRED_JOB_LEASE_ERROR_MESSAGE,
@@ -143,6 +149,7 @@ function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: s
     now,
     now,
     COMPANION_HRV_RMSSD_RESOURCE,
+    ...(accountId ? [accountId] : []),
   );
 }
 
@@ -198,6 +205,22 @@ export function listPendingDeviceSyncJobsForAccount(input: {
   return rows.flatMap((row) => {
     const job = mapJobRow(row);
     return job ? [job] : [];
+  });
+}
+
+export function listAdmissibleDeviceSyncJobsForAccount(input: {
+  accountId: string;
+  database: DatabaseSync;
+  limit: number;
+}): DeviceSyncJobRecord[] {
+  return withImmediateTransaction(input.database, () => {
+    const now = toIsoTimestamp(new Date());
+    deadLetterExpiredExhaustedDeviceSyncJobs(
+      input.database,
+      now,
+      input.accountId,
+    );
+    return listPendingDeviceSyncJobsForAccount(input);
   });
 }
 

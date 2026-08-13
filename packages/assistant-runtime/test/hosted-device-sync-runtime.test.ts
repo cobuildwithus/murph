@@ -549,6 +549,24 @@ function setAccountUpdatedAtForTesting(
   }
 }
 
+function setJobMaxAttemptsForTesting(
+  service: DeviceSyncService,
+  jobId: string,
+  maxAttempts: number,
+): void {
+  const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+
+  try {
+    database.prepare(`
+      update device_job
+      set max_attempts = ?
+      where id = ?
+    `).run(maxAttempts, jobId);
+  } finally {
+    database.close();
+  }
+}
+
 function clearAccountCredentialForTesting(service: DeviceSyncService, accountId: string): void {
   const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
   const now = "2026-04-06T10:00:00.000Z";
@@ -3890,7 +3908,7 @@ describe("hosted device-sync runtime", () => {
           provider: "strava",
         });
         const store = getStore(service);
-        const listPendingJobsForAccount = vi.spyOn(store, "listPendingJobsForAccount");
+        const listAdmissibleJobsForAccount = vi.spyOn(store, "listAdmissibleJobsForAccount");
         const wake = buildDirtyDeviceSyncWake(
           connectionId,
           `2026-04-04T10:0${pass}:00.000Z`,
@@ -3943,12 +3961,12 @@ describe("hosted device-sync runtime", () => {
         assert.equal(state.pendingDirtyPayloadJobs.length, 100);
         assert.equal(readJobsForAccount(service, localAccountId).length, 100);
         assert.equal(state.dirtyWorkRemaining, pass < 4);
-        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+        assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
 
         assert.equal(await service.drainWorker(100, localAccountId), 100);
         promoteHostedCompletedDirtyPayloadAcks({ service, state });
         assert.equal(state.pendingDirtyPayloadJobs.length, 0);
-        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+        assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
         const [ack] = state.pendingDirtyAcks;
         assert.ok(ack);
         assert.equal(ack.processedDirtyPayloadIds?.length, 100);
@@ -3960,7 +3978,7 @@ describe("hosted device-sync runtime", () => {
         }
 
         const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
-        assert.equal(listPendingJobsForAccount.mock.calls.length, 2);
+        assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
         assert.equal(recovery?.wake.hint?.jobs?.length ?? 0, 0);
         assert.equal(
           recovery?.wake.hint?.reason ?? null,
@@ -4086,7 +4104,8 @@ describe("hosted device-sync runtime", () => {
       firstClosed = true;
 
       const restoredStore = getStore(restoredService);
-      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
+      const listAdmissibleJobsForAccount = vi.spyOn(restoredStore, "listAdmissibleJobsForAccount");
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: port,
         secret: DEVICE_SYNC_SECRET,
@@ -4098,7 +4117,12 @@ describe("hosted device-sync runtime", () => {
       const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
       assert.equal(restoredJobs.length, 100);
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 100);
-      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
+      assert.equal(enqueueJob.mock.calls.length, 100);
+      assert.equal(
+        new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
+        100,
+      );
       assert.ok(restoredJobs.every((job) => !firstJobIds.has(job.id)));
       assert.equal(await restoredService.drainWorker(100, restoredAccountId), 100);
 
@@ -4234,7 +4258,8 @@ describe("hosted device-sync runtime", () => {
       currentDirtyResources = restoredResources;
 
       const restoredStore = getStore(restoredService);
-      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
+      const listAdmissibleJobsForAccount = vi.spyOn(restoredStore, "listAdmissibleJobsForAccount");
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: port,
         secret: DEVICE_SYNC_SECRET,
@@ -4247,7 +4272,12 @@ describe("hosted device-sync runtime", () => {
       assert.equal(restoredJobs.length, 100);
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 101);
       assert.equal(restoredState.dirtyWorkRemaining, true);
-      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
+      assert.equal(enqueueJob.mock.calls.length, 100);
+      assert.equal(
+        new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
+        100,
+      );
       for (const hint of retainedHints) {
         const restored = restoredJobs.find((job) => job.dedupeKey === hint.dedupeKey);
         assert.equal(restored?.availableAt, hint.availableAt);
@@ -4283,6 +4313,181 @@ describe("hosted device-sync runtime", () => {
       closeHostedRuntimeDeviceSyncService(restoredService);
       await firstWorkspace.cleanup();
       await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("expired final-attempt dirty work is replaced before acknowledgement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-04T10:00:00.000Z"));
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-expired-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-expired-restored-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const executeJob = vi.fn(async () => ({}));
+    const provider = createFakeProvider({
+      jobExecutor: { executeJob },
+    });
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [provider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [provider],
+    );
+    const connectionId = "hosted_dirty_expired_final_attempt";
+    const originalWake = buildDirtyDeviceSyncWake(
+      connectionId,
+      "2026-04-04T10:00:00.000Z",
+    );
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "dirty-expired-final-attempt",
+    });
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "1",
+      dirtyResources: [{
+        count: 1,
+        dirtyPayloadId: "dsp_dirty_expired_final_attempt",
+        jobKind: "resource",
+        payload: {
+          resourceId: "dirty-expired-final-attempt",
+          resourceType: "activity",
+        },
+        resource: "activity",
+        resourceCategory: "activity",
+        sourceProviderSlug: "demo",
+        windowEnd: null,
+        windowStart: null,
+      }],
+    });
+    let dirtyVisible = true;
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during sync");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during sync");
+      },
+      async fetchDirtyStates() {
+        return {
+          hasMore: false,
+          items: dirtyVisible ? [dirtyState] : [],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+    let firstClosed = false;
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake: originalWake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(firstAccountId);
+      const [firstJob] = readJobsForAccount(firstService, firstAccountId);
+      assert.ok(firstJob);
+      setJobMaxAttemptsForTesting(firstService, firstJob.id, 1);
+      const firstStore = getStore(firstService);
+      assert.equal(
+        firstStore.claimDueJob(
+          "dirty-expired-first-worker",
+          "2026-04-04T10:00:00.000Z",
+          60_000,
+          firstAccountId,
+        )?.id,
+        firstJob.id,
+      );
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: originalWake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.wake.hint?.jobs?.[0]?.maxAttempts, 1);
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+      dirtyVisible = false;
+
+      const restoredInitialState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredInitialState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const restoredStore = getStore(restoredService);
+      const [retainedJob] = readJobsForAccount(restoredService, restoredAccountId);
+      assert.ok(retainedJob);
+      assert.equal(
+        restoredStore.claimDueJob(
+          "dirty-expired-restored-worker",
+          "2026-04-04T10:01:00.000Z",
+          60_000,
+          restoredAccountId,
+        )?.id,
+        retainedJob.id,
+      );
+
+      dirtyVisible = true;
+      vi.setSystemTime(new Date("2026-04-04T10:02:01.000Z"));
+      const replacementState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: buildDirtyDeviceSyncWake(
+          connectionId,
+          "2026-04-04T10:02:01.000Z",
+        ),
+      });
+      const [replacement] = replacementState.pendingDirtyPayloadJobs;
+      assert.ok(replacement);
+      assert.notEqual(replacement.jobId, retainedJob.id);
+      assert.equal(restoredStore.getJobById(retainedJob.id)?.status, "dead");
+
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: replacementState,
+      });
+      assert.equal(
+        replacementState.pendingDirtyAcks[0]?.processedDirtyPayloadIds,
+        undefined,
+      );
+      assert.equal(executeJob.mock.calls.length, 0);
+
+      assert.equal(await restoredService.drainWorker(1, restoredAccountId), 1);
+      assert.equal(executeJob.mock.calls.length, 1);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: replacementState,
+      });
+      assert.deepEqual(
+        replacementState.pendingDirtyAcks[0]?.processedDirtyPayloadIds,
+        ["dsp_dirty_expired_final_attempt"],
+      );
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+      vi.useRealTimers();
     }
   });
 
