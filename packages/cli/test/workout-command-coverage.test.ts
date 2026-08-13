@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { Cli } from 'incur'
@@ -912,6 +912,86 @@ test('Strong CSV import requires weight provenance, commits once, and returns bo
   assert.equal(correctedReplay.importedCount, 0)
   assert.equal(correctedReplay.skippedExistingCount, 12)
   assert.equal(correctedReplay.rawStored, false)
+})
+
+test('workout CSV manifests omit arbitrary source headers from storage and public output', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-header-privacy-')
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutSliceCli()
+
+  await runWorkoutCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'UTC',
+  ])
+
+  const privateHeader = 'PRIVATE_FREEFORM_HEADER_SENTINEL'
+  const privateValue = 'PRIVATE_FREEFORM_VALUE_SENTINEL'
+  const csvPath = path.join(parentRoot, 'workout-with-extra-column.csv')
+  await writeFile(csvPath, [
+    `Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,Weight Kg,Reps,${privateHeader}`,
+    `Upper,2026-04-08,10:00,45,Press,1,40,8,${privateValue}`,
+  ].join('\n'), 'utf8')
+
+  const inspected = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])
+  assert.equal(JSON.stringify(inspected.envelope).includes(privateHeader), false)
+  assert.equal(JSON.stringify(inspected.envelope).includes(privateValue), false)
+
+  const imported = requireData((await runWorkoutCli<{
+    lookupIds: string[]
+    manifestFile: string
+  }>(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])).envelope)
+  assert.equal(imported.lookupIds.length, 1)
+  const storedManifest = await readFile(path.join(vaultRoot, imported.manifestFile), 'utf8')
+  assert.equal(storedManifest.includes(privateHeader), false)
+  assert.equal(storedManifest.includes(privateValue), false)
+
+  const publicManifest = await runWorkoutCli(cli, [
+    'workout',
+    'manifest',
+    imported.lookupIds[0]!,
+    '--vault',
+    vaultRoot,
+  ])
+  const publicManifestOutput = JSON.stringify(publicManifest.envelope)
+  assert.equal(publicManifestOutput.includes(privateHeader), false)
+  assert.equal(publicManifestOutput.includes(privateValue), false)
+
+  const replay = requireData((await runWorkoutCli<{
+    importedCount: number
+    skippedExistingCount: number
+  }>(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])).envelope)
+  assert.equal(replay.importedCount, 0)
+  assert.equal(replay.skippedExistingCount, 1)
 })
 
 test('workout format save rejects missing name or text when --input is absent', async () => {

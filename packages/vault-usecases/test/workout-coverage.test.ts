@@ -1419,7 +1419,35 @@ describe("workout-import", () => {
           occurredAt: "2026-04-08T12:00:00.000Z",
         },
       });
+      await editEventRecord({
+        vault: tempDir,
+        lookup: edited.id,
+        entityLabel: "workout session",
+        expectedKinds: ["activity_session"],
+        set: ["workout.exercises.0.sets.0.weight=77"],
+      });
       await coreRuntime.deleteEvent({ vaultRoot: tempDir, eventId: removed.id });
+
+      const exactReplay = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        source: "strong",
+      });
+      assert.equal(exactReplay.importedCount, 0);
+      assert.equal(exactReplay.skippedExistingCount, 2);
+      assert.equal(exactReplay.rawStored, false);
+      const exactReplayEdit = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[0]!.sourceWorkoutId,
+      });
+      assert.equal(
+        exactReplayEdit?.kind === "activity_session"
+          ? exactReplayEdit.workout.exercises[0]?.sets[0]?.weight
+          : undefined,
+        77,
+      );
       await coreRuntime.updateVaultSummary({
         vaultRoot: tempDir,
         timezone: "America/Los_Angeles",
@@ -1488,6 +1516,12 @@ describe("workout-import", () => {
       assert.equal(retainedEdit?.id, edited.id);
       assert.equal(retainedEdit?.title, "Member-edited title");
       assert.equal(retainedEdit?.occurredAt, "2026-04-08T12:00:00.000Z");
+      assert.equal(
+        retainedEdit?.kind === "activity_session"
+          ? retainedEdit.workout.exercises[0]?.sets[0]?.weight
+          : undefined,
+        77,
+      );
       assert.equal(await coreRuntime.findEventByExternalRef({
         vaultRoot: tempDir,
         system: "strong",
@@ -1714,6 +1748,164 @@ describe("workout-import", () => {
         /overlaps edited load or distance fields/u,
       );
       assert.deepEqual(await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"), rawFilesBefore);
+    });
+  });
+
+  test("unit correction changes only the selected axis and preserves member edits on the other axis", async () => {
+    await withTempDir(async (tempDir) => {
+      await initializeVault({
+        vaultRoot: tempDir,
+        title: "Workout Axis Correction Test Vault",
+        timezone: "UTC",
+      });
+      const weightText = [
+        "Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,Weight,Reps,Distance Km",
+        "Weight Axis,2026-04-08,10:00,45,Carry,1,100,5,1.5",
+      ].join("\n");
+      const distanceText = [
+        "Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,Weight Kg,Reps,Distance",
+        "Distance Axis,2026-04-09,10:00,45,Carry,1,40,5,1.5",
+      ].join("\n");
+      const weightPath = path.join(tempDir, "weight-axis.csv");
+      const distancePath = path.join(tempDir, "distance-axis.csv");
+      await writeFile(weightPath, weightText, "utf8");
+      await writeFile(distancePath, distanceText, "utf8");
+      const generatedIds = [
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+      ];
+      const workoutImportModule = (await importWithMocks(
+        "../src/usecases/workout-import.ts",
+        {
+          "../src/runtime-import.js": () => ({
+            loadRuntimeModule: vi.fn(async (specifier: string) => {
+              if (specifier === "@murphai/core") return coreRuntime;
+              if (specifier === "@murphai/importers") return importersRuntime;
+              if (specifier === "@murphai/runtime-state") {
+                return { generateUlid: () => generatedIds.shift()! };
+              }
+              throw new Error(`Unexpected runtime module: ${specifier}`);
+            }),
+          }),
+        },
+      )) as typeof import("../src/usecases/workout-import.ts");
+
+      await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: weightPath,
+        source: "strong",
+        weightUnit: "lb",
+      });
+      const weightPlan = importersRuntime.planWorkoutCsvImport({
+        text: weightText,
+        timeZone: "UTC",
+        source: "strong",
+        weightUnit: "lb",
+      });
+      const weightRecord = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: weightPlan.sessions[0]!.sourceWorkoutId,
+      });
+      assert.ok(weightRecord);
+      await editEventRecord({
+        vault: tempDir,
+        lookup: weightRecord.id,
+        entityLabel: "workout session",
+        expectedKinds: ["activity_session"],
+        set: [
+          "distanceKm=9",
+          "workout.exercises.0.sets.0.distanceMeters=9000",
+        ],
+      });
+      const weightCorrection = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: weightPath,
+        source: "strong",
+        weightUnit: "kg",
+        correctUnits: true,
+      });
+      assert.equal(weightCorrection.supersededCount, 1);
+      const afterWeightCorrection = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: weightPlan.sessions[0]!.sourceWorkoutId,
+      });
+      if (!afterWeightCorrection || afterWeightCorrection.kind !== "activity_session") {
+        throw new Error("Expected a weight-corrected activity session.");
+      }
+      assert.equal(afterWeightCorrection.distanceKm, 9);
+      assert.equal(afterWeightCorrection.workout.exercises[0]?.sets[0]?.weightUnit, "kg");
+      assert.equal(afterWeightCorrection.workout.exercises[0]?.sets[0]?.distanceMeters, 9000);
+      const identicalWeightCorrection = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: weightPath,
+        source: "strong",
+        weightUnit: "kg",
+        correctUnits: true,
+      });
+      assert.equal(identicalWeightCorrection.supersededCount, 0);
+      assert.equal(identicalWeightCorrection.skippedExistingCount, 1);
+
+      await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: distancePath,
+        source: "hevy",
+        distanceUnit: "km",
+      });
+      const distancePlan = importersRuntime.planWorkoutCsvImport({
+        text: distanceText,
+        timeZone: "UTC",
+        source: "hevy",
+        distanceUnit: "km",
+      });
+      const distanceRecord = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: distancePlan.sessions[0]!.sourceWorkoutId,
+      });
+      assert.ok(distanceRecord);
+      await editEventRecord({
+        vault: tempDir,
+        lookup: distanceRecord.id,
+        entityLabel: "workout session",
+        expectedKinds: ["activity_session"],
+        set: ["workout.exercises.0.sets.0.weight=77"],
+      });
+      const distanceCorrection = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: distancePath,
+        source: "hevy",
+        distanceUnit: "mi",
+        correctUnits: true,
+      });
+      assert.equal(distanceCorrection.supersededCount, 1);
+      const afterDistanceCorrection = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: distancePlan.sessions[0]!.sourceWorkoutId,
+      });
+      if (!afterDistanceCorrection || afterDistanceCorrection.kind !== "activity_session") {
+        throw new Error("Expected a distance-corrected activity session.");
+      }
+      assert.equal(afterDistanceCorrection.workout.exercises[0]?.sets[0]?.weight, 77);
+      assert.equal(afterDistanceCorrection.distanceKm, 2.414016);
+      assert.equal(afterDistanceCorrection.workout.exercises[0]?.sets[0]?.distanceMeters, 2414.016);
+      const identicalDistanceCorrection = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: distancePath,
+        source: "hevy",
+        distanceUnit: "mi",
+        correctUnits: true,
+      });
+      assert.equal(identicalDistanceCorrection.supersededCount, 0);
+      assert.equal(identicalDistanceCorrection.skippedExistingCount, 1);
     });
   });
 

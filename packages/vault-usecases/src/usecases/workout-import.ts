@@ -288,7 +288,6 @@ function prepareRawWorkoutBatch(input: {
     provenance: {
       sourceFileName: path.basename(input.file),
       delimiter: input.plan.delimiter,
-      headers: input.plan.headers,
       rowCount: input.plan.rowCount,
       estimatedWorkouts: input.plan.estimatedWorkouts,
       repairedRowCount: input.plan.repairedRowCount,
@@ -585,6 +584,7 @@ function mappingFromAttachedEvents(
   canonicalSourceMatches: boolean
   currentMappingReplay: boolean
   latestSourceRevision?: string
+  legacyUnitProvenance?: boolean
 } | undefined {
   if (matches.length !== plan.sessions.length) {
     return undefined
@@ -789,8 +789,12 @@ async function resolvePriorSnapshotRecords(input: {
         timeZone: input.plan.timeZone,
         source: input.plan.source,
         delimiter: candidate.delimiter,
-        weightUnit: input.plan.weightUnit ?? undefined,
-        distanceUnit: input.plan.distanceUnit ?? undefined,
+        weightUnit: candidate.weightUnit === undefined
+          ? input.plan.weightUnit ?? undefined
+          : candidate.weightUnit ?? undefined,
+        distanceUnit: candidate.distanceUnit === undefined
+          ? input.plan.distanceUnit ?? undefined
+          : candidate.distanceUnit ?? undefined,
       })
     } catch {
       throw new VaultCliError(
@@ -860,7 +864,6 @@ async function resolvePriorSnapshotRecords(input: {
       const match = partialMatchesByIndex.get(priorIndex)
       if (!match) return
       const record = match.latest
-      const currentSession = input.plan.sessions[currentIndex]!
       if (
         record.kind !== 'activity_session'
         || record.workout.sourceApp !== input.plan.source
@@ -868,15 +871,6 @@ async function resolvePriorSnapshotRecords(input: {
         throw new VaultCliError(
           'conflict',
           'Prior workout sessions use a different provider dialect; correct the exact prior file first. Nothing was imported.',
-        )
-      }
-      if (
-        JSON.stringify(unitOwnedProjection(record.workout, record.distanceKm))
-          !== JSON.stringify(unitOwnedProjection(currentSession.workout, currentSession.distanceKm))
-      ) {
-        throw new VaultCliError(
-          'conflict',
-          'Prior workout sessions use different unit-derived values; correct the exact prior file first. Nothing was imported.',
         )
       }
       const selected = alignedRecords[currentIndex]
@@ -914,6 +908,9 @@ async function resolveExistingWorkoutEvidence(input: {
   canonicalSourceMatches?: boolean
   currentMappingReplay?: boolean
   currentUnitsMatch?: boolean
+  currentCorrectedUnitsMatch?: boolean
+  currentWeightValuesMatch?: boolean
+  currentDistanceValuesMatch?: boolean
   latestSourceRevision?: string
   originalTimeZone?: string
   originalSource?: WorkoutCsvSource
@@ -945,6 +942,9 @@ async function resolveExistingWorkoutEvidence(input: {
     canonicalSourceMatches: boolean
     currentMappingReplay: boolean
     currentUnitsMatch: boolean
+    currentCorrectedUnitsMatch: boolean
+    currentWeightValuesMatch: boolean
+    currentDistanceValuesMatch: boolean
     latestSourceRevision?: string
     originalTimeZone?: string
     originalSource?: WorkoutCsvSource
@@ -966,16 +966,37 @@ async function resolveExistingWorkoutEvidence(input: {
         .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
       const recordTimeZone = recordTimeZones.size === 1 ? [...recordTimeZones][0] : undefined
       const originalTimeZone = recordTimeZone ?? candidate.timeZone
+      const currentWeightValuesMatch = mapping.records.every((record, sessionIndex) =>
+        record.kind === 'activity_session'
+        && JSON.stringify(weightOwnedProjection(record.workout))
+          === JSON.stringify(weightOwnedProjection(input.plan.sessions[sessionIndex]?.workout)))
+      const currentDistanceValuesMatch = mapping.records.every((record, sessionIndex) =>
+        record.kind === 'activity_session'
+        && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+          === JSON.stringify(distanceOwnedProjection(
+            input.plan.sessions[sessionIndex]?.workout,
+            input.plan.sessions[sessionIndex]?.distanceKm,
+          )))
       const evidence = {
         rawFile,
         ...mapping,
-        currentUnitsMatch: mapping.records.every((record, sessionIndex) =>
-          record.kind === 'activity_session'
-          && JSON.stringify(unitOwnedProjection(record.workout, record.distanceKm))
-            === JSON.stringify(unitOwnedProjection(
-              input.plan.sessions[sessionIndex]?.workout,
-              input.plan.sessions[sessionIndex]?.distanceKm,
-            ))),
+        currentWeightValuesMatch,
+        currentDistanceValuesMatch,
+        currentCorrectedUnitsMatch:
+          currentWeightValuesMatch
+          && currentDistanceValuesMatch
+          && mapping.records.every((record) => {
+            const revision = Date.parse(record.externalRef?.version ?? '')
+            return Number.isFinite(revision)
+              && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
+          }),
+        currentUnitsMatch:
+          (candidate.weightUnit !== undefined
+            ? candidate.weightUnit === input.plan.weightUnit
+            : currentWeightValuesMatch)
+          && (candidate.distanceUnit !== undefined
+            ? candidate.distanceUnit === input.plan.distanceUnit
+            : currentDistanceValuesMatch),
         ...(originalTimeZone ? { originalTimeZone } : {}),
         ...(candidate.source ? { originalSource: candidate.source } : {}),
         ...(candidate.delimiter ? { originalDelimiter: candidate.delimiter } : {}),
@@ -1034,16 +1055,33 @@ function unitOwnedProjection(
   distanceKm: number | undefined,
 ) {
   return {
-    distanceKm,
-    exercises: workout?.exercises.map((exercise) => ({
+    weight: weightOwnedProjection(workout),
+    distance: distanceOwnedProjection(workout, distanceKm),
+  }
+}
+
+function weightOwnedProjection(workout: WorkoutSession | undefined) {
+  return workout?.exercises.map((exercise) => ({
       unitOverride: exercise.unitOverride,
       sets: exercise.sets.map((set) => ({
         weight: set.weight,
         weightUnit: set.weightUnit,
-        distanceMeters: set.distanceMeters,
         bodyweightKg: set.bodyweightKg,
         assistanceKg: set.assistanceKg,
         addedWeightKg: set.addedWeightKg,
+      })),
+    }))
+}
+
+function distanceOwnedProjection(
+  workout: WorkoutSession | undefined,
+  distanceKm: number | undefined,
+) {
+  return {
+    distanceKm,
+    exercises: workout?.exercises.map((exercise) => ({
+      sets: exercise.sets.map((set) => ({
+        distanceMeters: set.distanceMeters,
       })),
     })),
   }
@@ -1112,20 +1150,22 @@ function buildUnitCorrectionPayload(input: {
   correctWeight: boolean
   correctDistance: boolean
 }): JsonObject {
-  assertCorrectionStructure(input.session, input.record)
-  const recordProjection = JSON.stringify(unitOwnedProjection(
-    input.record.workout,
-    input.record.distanceKm,
-  ))
-  if (!input.ownershipSessions.some((session) =>
-    JSON.stringify(unitOwnedProjection(session.workout, session.distanceKm)) === recordProjection)) {
+  const { record } = input
+  assertCorrectionStructure(input.session, record)
+  const weightOwnershipMatches = !input.correctWeight || input.ownershipSessions.some((session) =>
+    JSON.stringify(weightOwnedProjection(session.workout))
+      === JSON.stringify(weightOwnedProjection(record.workout)))
+  const distanceOwnershipMatches = !input.correctDistance || input.ownershipSessions.some((session) =>
+    JSON.stringify(distanceOwnedProjection(session.workout, session.distanceKm))
+      === JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm)))
+  if (!weightOwnershipMatches || !distanceOwnershipMatches) {
     throw new VaultCliError(
       'conflict',
       'Exact prior workout evidence overlaps edited load or distance fields; nothing was imported.',
     )
   }
-  const payload = eventRecordToImportPayload(input.record)
-  const workout = structuredClone(input.record.workout)
+  const payload = eventRecordToImportPayload(record)
+  const workout = structuredClone(record.workout)
   workout.exercises.forEach((exercise, exerciseIndex) => {
     const plannedExercise = input.session.workout.exercises[exerciseIndex]!
     if (input.correctWeight) {
@@ -1150,7 +1190,7 @@ function buildUnitCorrectionPayload(input: {
     if (input.session.distanceKm === undefined) delete payload.distanceKm
     else payload.distanceKm = input.session.distanceKm
   }
-  payload.externalRef = correctedExternalRef(input.record, input.mappingRevision)
+  payload.externalRef = correctedExternalRef(record, input.mappingRevision)
   return payload
 }
 
@@ -1388,6 +1428,7 @@ export async function importWorkoutCsv(input: {
   if (
     existingEvidence.records
     && !existingEvidence.currentUnitsMatch
+    && !existingEvidence.currentCorrectedUnitsMatch
     && !input.correctUnits
   ) {
     throw new VaultCliError(
@@ -1397,8 +1438,11 @@ export async function importWorkoutCsv(input: {
   }
   if (
     (
-      (input.correctUnits && existingEvidence.currentUnitsMatch)
-      || (existingEvidence.currentMappingReplay && !input.correctUnits)
+      (input.correctUnits
+        && (input.weightUnit === undefined || existingEvidence.currentWeightValuesMatch)
+        && (input.distanceUnit === undefined || existingEvidence.currentDistanceValuesMatch))
+      || ((existingEvidence.currentMappingReplay || existingEvidence.currentCorrectedUnitsMatch)
+        && !input.correctUnits)
     )
     && !sourceDialectCorrection
   ) {

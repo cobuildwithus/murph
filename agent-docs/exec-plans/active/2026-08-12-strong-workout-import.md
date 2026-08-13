@@ -203,6 +203,20 @@ Updated: 2026-08-12
   shared optimistic-concurrency surface introduced by round 7. The PR now names
   the optional event ID/lifecycle-revision fence, explains why core validates it
   under the canonical lock, and points to the generic and workout race proof.
+- Final ReviewGPT round 9 found that arbitrary CSV header cells were still
+  copied into immutable manifests and therefore exposed through the public
+  manifest read. Workout manifests now retain only the bounded provenance
+  required for reconciliation; raw headers remain solely in the private raw
+  artifact. Sentinel coverage proves inspection, persisted manifests, and
+  public manifest output omit both an arbitrary header and its value.
+- Final ReviewGPT round 9 also found that replay and refreshed-snapshot checks
+  treated the latest member-edited canonical load and distance values as source
+  evidence. Exact replay now uses immutable manifest units when present,
+  refreshed snapshots compare the verified old raw plan with the new raw plan,
+  and latest events remain payload authority. Unit correction ownership is
+  split by selected axis, so a load-only correction preserves an edited
+  distance and a distance-only correction preserves an edited load; edits to
+  the selected axis still fail closed.
 
 ## Verification
 
@@ -238,3 +252,10 @@ Updated: 2026-08-12
   unchanged event-ledger row count, and continued tombstone authority. Final
   focused verification, the next exact-head ReviewGPT pass, and PR CI remain
   pending.
+- Round 9 remediation proof: focused workout-usecase coverage passes 18 tests,
+  focused CLI workout coverage passes 9 tests, and the affected usecase and CLI
+  typechecks pass. The tests prove private header omission through all public
+  surfaces, exact replay after a member load edit, refreshed-snapshot expansion
+  with that edit preserved, independent load and distance correction ownership,
+  identical correction no-ops with an edited unselected axis, changed-unit
+  expanded-snapshot rejection, and legacy unit-provenance migration.
