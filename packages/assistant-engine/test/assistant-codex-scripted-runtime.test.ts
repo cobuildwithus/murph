@@ -409,6 +409,199 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
+  it('carries expanded connected-health questions through the production prompt, skill, command, evidence, and answer boundary', {
+    timeout: 360_000,
+  }, async () => {
+    const cases = [
+      {
+        answer: 'Your connected device recorded 45 minutes of daylight on July 12.',
+        command: 'measurement entry list --metric daylight_exposure --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_daylight_summary',
+            metric: 'daylight-exposure-minutes',
+            occurredAt: '2026-07-12T12:00:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'minutes',
+            value: 45,
+          }],
+        },
+        prompt: 'How much daylight did I get on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected device recorded a 48-minute workout on July 12.',
+        command: 'measurement entry list --metric workout_duration --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_workout_duration_summary',
+            metric: 'workout-minutes',
+            occurredAt: '2026-07-12T15:00:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'minutes',
+            value: 48,
+          }],
+        },
+        prompt: 'How long was my workout on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected-device body-fat estimate moved from 19.2% to 18.5%; keep the same source and conditions before treating that as a trend.',
+        command: 'measurement entry list --metric fat --from 2026-07-01 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 2,
+          items: [
+            {
+              eventId: 'evt_body_fat_latest',
+              metric: 'body-fat-percentage',
+              occurredAt: '2026-07-12T07:00:00.000Z',
+              recordKind: 'observation',
+              source: 'device',
+              unit: '%',
+              value: 18.5,
+            },
+            {
+              eventId: 'evt_body_fat_prior',
+              metric: 'body-fat-percentage',
+              occurredAt: '2026-07-01T07:00:00.000Z',
+              recordKind: 'observation',
+              source: 'device',
+              unit: '%',
+              value: 19.2,
+            },
+          ],
+        },
+        prompt: 'What is my body-fat trend from July 1 through July 12?',
+        skillHeading: '# Body Composition',
+        skillSlug: 'body-composition',
+      },
+      {
+        answer: 'I found no daylight entries for July 13, so that reading is unavailable—not zero and not proof you had no daylight exposure.',
+        command: 'measurement entry list --metric daylight_exposure --from 2026-07-13 --to 2026-07-13 --limit 50 --format json',
+        evidence: { count: 0, items: [] },
+        prompt: 'How much daylight did I get on July 13?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+    ] as const
+
+    for (const input of cases) {
+      const scenario = await prepareScriptedTurnScenario()
+      const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+      const commandLog = path.join(scenario.turnInput.workingDirectory, 'expanded-health-command.log')
+      const skillRead = `sed -n '1,220p' skills/${input.skillSlug}/SKILL.md`
+      await Promise.all([
+        mkdir(skillsRoot, { recursive: true }),
+        writeFile(commandLog, '', 'utf8'),
+      ])
+      await cp(
+        path.join(resolveAssistantSkillsRoot(), input.skillSlug),
+        path.join(skillsRoot, input.skillSlug),
+        { recursive: true },
+      )
+      await writeFile(
+        path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
+        [
+          '#!/bin/sh',
+          'set -eu',
+          `printf '%s\\n' "$*" >> ${quotePosixShellLiteral(commandLog)}`,
+          `if [ "$*" != ${quotePosixShellLiteral(input.command)} ]; then`,
+          "  printf '%s\\n' '{\"error\":\"unexpected command\"}' >&2",
+          '  exit 64',
+          'fi',
+          `printf '%s\\n' ${quotePosixShellLiteral(JSON.stringify(input.evidence))}`,
+          '',
+        ].join('\n'),
+        { encoding: 'utf8', mode: 0o755 },
+      )
+      scenario.stub.queue(
+        {
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(skillRead)},
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+            name: 'exec',
+          },
+        },
+        {
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(`./vault-cli ${input.command}`)},
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+            name: 'exec',
+          },
+        },
+        {
+          text: input.answer,
+        },
+      )
+
+      try {
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput,
+          baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+          env: {
+            ...scenario.turnInput.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          prompt: input.prompt,
+          sandbox: 'danger-full-access',
+        })
+
+        const providerToolOutputs = scenario.stub
+          .requestSummariesSinceBaseline()
+          .flatMap((summary) => summary.customToolCallOutputs ?? [])
+          .join('\n')
+        expect(providerToolOutputs, 'skill and CLI tool outputs').toContain(input.skillHeading)
+        expect(providerToolOutputs, 'CLI evidence output').toContain(JSON.stringify(input.evidence))
+        expect((await readFile(commandLog, 'utf8')).trim()).toBe(input.command)
+        expect(result.finalMessage).toBe(input.answer)
+      } finally {
+        await stopWarmCodexAppServer()
+      }
+    }
+  })
+
+  it('keeps raw dense streams and partial carbohydrate observations outside complete-answer claims', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const answer = [
+      'Raw ECG voltages and workout stream points are not stored or exposed; I can use only their compact imported summaries.',
+      'A 48 g carbohydrate observation is not a complete meal or eaten-calorie log, so complete intake is unavailable without meal records.',
+    ].join(' ')
+    scenario.stub.queue({
+      requestIncludes: [
+        'Raw ECG voltages and workout stream points are not stored or exposed',
+        'burned calories, carbohydrate observations, and complete meal intake distinct',
+      ],
+      text: answer,
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      prompt: 'Show me raw ECG voltages and raw workout points, and use my 48 g carbohydrate observation as my complete eaten-calorie log.',
+    })
+
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+    expect(result.finalMessage).toBe(answer)
+  })
+
   it.each([
     {
       label: 'member-memory',
