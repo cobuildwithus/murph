@@ -103,7 +103,7 @@ Updated: 2026-08-12
 Current evidence:
 
 - Focused guard suite: 51 tests passed.
-- Repository-tool suite: 34 files and 556 tests passed.
+- Repository-tool suite: 34 files and 557 tests passed.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
 - `pnpm provider-requests:guard`: intentionally exits 1 with 43 current
   low-level provider transports/contracts; sibling migrations own those call
