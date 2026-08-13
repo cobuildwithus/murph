@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT wrapper rejects documented prompt-only flags'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1772'
 ---
 
 ## Expected Behavior

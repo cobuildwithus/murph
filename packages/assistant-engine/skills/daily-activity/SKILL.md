@@ -24,6 +24,10 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- When the user specifically asks for basal calories, go directly to
+  `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json`.
+  Do not run `wearables day` first; basal calories are query-only and absent
+  from that summary.
 - For date-specific facts, first run
   `vault-cli wearables day <date> --format json`; for all workouts, types,
   count, duration, or normalized detail, next run

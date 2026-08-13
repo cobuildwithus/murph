@@ -1,6 +1,7 @@
 ---
 title: 'Design catalog OTP study adds a hydration warning overlay to unrelated frontend proof'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1659'
 ---
 
 ## Expected Behavior

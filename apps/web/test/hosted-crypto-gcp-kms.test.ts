@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION } from "../../cloudflare/test/hosted-execution-fixtures";
 import {
   createHostedGcpKmsClientFromEnv,
   HostedGcpKmsIntegrityError,
@@ -610,6 +611,18 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
 });
 
 describe("hosted crypto local KMS", () => {
+  it("accepts the shared hosted execution authority-signing fixture", async () => {
+    const signingKey = await createLocalSigningKey();
+    const client = createLocalClient(signingKey.privateJwkJson, 6);
+
+    await expect(client.asymmetricSign({
+      keyVersionName: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+      message: new TextEncoder().encode("shared hosted execution fixture"),
+    })).resolves.toMatchObject({
+      keyVersionName: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+    });
+  });
+
   it("encrypts, decrypts, signs, and MACs without Google credentials", async () => {
     const signingKey = await createLocalSigningKey();
     const client = createLocalClient(signingKey.privateJwkJson, 7);

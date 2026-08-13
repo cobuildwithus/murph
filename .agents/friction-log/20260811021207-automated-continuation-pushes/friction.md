@@ -1,6 +1,7 @@
 ---
 title: 'Automated continuation pushes can leave PR Actions on the previous head'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1646'
 ---
 
 A scoped follow-up commit pushed to an active pull-request branch should emit the ordinary synchronize event and start the repository's required pull-request workflows on that exact head.
