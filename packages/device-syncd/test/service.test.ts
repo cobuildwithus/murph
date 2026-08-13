@@ -6926,12 +6926,13 @@ test("device sync service releases Junction backfill row when cooperative abort 
     assert.equal(store.getJobById(initial.id)?.status, "succeeded");
     assert.equal(continuation.status, "queued");
     assert.equal(continuation.attempts, 0);
-    assert.deepEqual(continuation.payload, {
-      windowStart: ownerWindowStart,
-      windowEnd: ownerWindowEnd,
-      timeseriesCursor: ownerWindowStart,
-      timeseriesResourceCursor: "stress_level",
-    });
+    assert.equal(continuation.payload.windowStart, ownerWindowStart);
+    assert.equal(continuation.payload.windowEnd, ownerWindowEnd);
+    assert.equal(continuation.payload.timeseriesCursor, ownerWindowStart);
+    assert.equal(
+      continuation.payload.timeseriesResourceCursor,
+      JSON.stringify({ v: 1, a: "stress_level", i: [] }),
+    );
 
     yieldRequested = false;
     const processedContinuation = await service.runWorkerOnce();

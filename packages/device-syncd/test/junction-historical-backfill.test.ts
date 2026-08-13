@@ -109,6 +109,7 @@ function createProvider(summaryRecord: Record<string, unknown>) {
     environment: "sandbox",
     region: "us",
     summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
     summaryBackfillDays: 2,
     fetchImpl: async (input) => {
       const url = readUrl(input);

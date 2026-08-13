@@ -26,6 +26,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./hosted-hints",
     "./hosted-runtime",
     "./http",
+    "./junction-historical-backfill-progress",
     "./junction-inline-authority",
     "./junction-push-source-recovery",
     "./junction-resources",
