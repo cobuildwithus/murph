@@ -1737,7 +1737,14 @@ function buildAssistantCronExecutionInstructions(
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
-  const overlays = [retryEvidence, independentAuthority, supportScope]
+  const recurringReminderConversation =
+    buildAssistantCronRecurringReminderConversationInstructions(job)
+  const overlays = [
+    retryEvidence,
+    independentAuthority,
+    recurringReminderConversation,
+    supportScope,
+  ]
     .filter((section): section is string => section !== null)
   const providerSafeBase =
     stripAutomationAvailabilityConflictEvidenceForProvider(job.job.prompt)
@@ -1786,7 +1793,7 @@ function buildAssistantCronSupportScopeInstructions(
   }
 
   const exactScope = job.source.supportKind === 'reminder'
-    ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. Do not ask a proactive repair, accountability, reflection, or follow-up question.'
+    ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
       ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
       : job.source.supportKind === 'review'
@@ -1797,6 +1804,33 @@ function buildAssistantCronSupportScopeInstructions(
     'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
     `- Persisted support kind: ${job.source.supportKind}.`,
     `- ${exactScope}`,
+  ].join('\n')
+}
+
+function buildAssistantCronRecurringReminderConversationInstructions(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    job.source.status !== 'active' ||
+    (job.source.supportKind !== null && job.source.supportKind !== 'reminder') ||
+    resolveMurphManagedMaintenancePolicy(job.source.automationId) !== null ||
+    job.source.schedule.kind === 'at'
+  ) {
+    return null
+  }
+
+  return [
+    'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):',
+    '- Use recent conversation plus engine delivery evidence. A failed or unconfirmed immediately prior attempt does not count: send the current reminder normally instead of treating that attempt as unanswered.',
+    '- Otherwise find the most recent reminder from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
+    '- If there is no such reminder for this revision, send the current reminder normally.',
+    '- If a relevant human reply followed that reminder, use it when composing the current reminder.',
+    '- If no relevant human reply followed and that reminder already asked whether to keep, change, or pause these interruptions, return `skip`.',
+    '- Otherwise send the current concise cue and ask one natural question about whether to keep, change, or pause these interruptions.',
+    '- This question administers reminder cadence only. Do not ask whether the action was completed, infer failure or refusal from silence, increase frequency, or manufacture novelty when the same concise cue still fits.',
+    '- In a group, address the room collectively. Never assign silence, non-completion, or failure to an individual participant.',
   ].join('\n')
 }
 

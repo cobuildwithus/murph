@@ -192,6 +192,9 @@ import {
   executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
 import {
+  prepareAssistantCronNotificationInput,
+} from '../src/assistant/cron/output-history.ts'
+import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
@@ -4038,7 +4041,7 @@ describe('assistant cron runtime orchestration', () => {
     [
       'reminder',
       'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so',
-      'Do not ask a proactive repair, accountability, reflection, or follow-up question.',
+      'Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.',
     ],
     [
       'check_in',
@@ -4109,6 +4112,137 @@ describe('assistant cron runtime orchestration', () => {
       )
     },
   )
+
+  it('sends one recurring reminder cadence question and then skips after continued room silence', async () => {
+    vi.useFakeTimers()
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-recurring-reminder-conversation-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'room reset reminder',
+    )
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the recurring reminder automation to exist.')
+    }
+    automation.instructions = 'Remind the room to do its short reset.'
+    automation.route.threadIsDirect = false
+
+    const providerDecisions = [
+      {
+        kind: 'send_message' as const,
+        privateSummary: 'Sent the current room reminder.',
+        text: 'Quick room reset.',
+      },
+      {
+        kind: 'send_message' as const,
+        privateSummary: 'Sent the cue with one room cadence question.',
+        text: 'Quick room reset. Should I keep these, change them, or pause?',
+      },
+      {
+        kind: 'skip' as const,
+        privateSummary: 'The room cadence question remains unanswered.',
+      },
+    ]
+    let occurrenceIndex = 0
+    cronMocks.sendAssistantMessageLocal.mockImplementation(async (input: {
+      beforeCommit?: (context: {
+        decision: (typeof providerDecisions)[number]
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome> | null
+        response: string | null
+      }) => Promise<void> | void
+      beforeDelivery?: (context: {
+        decision: (typeof providerDecisions)[number]
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome> | null
+        response: string | null
+      }) => Promise<void> | void
+      instructions: string
+      onProviderRequestStarted?: () => Promise<void> | void
+    }) => {
+      const notificationInput = await prepareAssistantCronNotificationInput(
+        input as AssistantNotificationInput,
+      )
+      expect(notificationInput.instructions).toContain(
+        'Recurring reminder conversation (engine-supplied',
+      )
+      expect(notificationInput.instructions).toContain(
+        'If no relevant human reply followed and that reminder already asked whether to keep, change, or pause these interruptions, return `skip`.',
+      )
+      expect(notificationInput.instructions).toContain(
+        'In a group, address the room collectively.',
+      )
+      expect(notificationInput.instructions).not.toContain('carry-forward grace')
+      if (occurrenceIndex === 0) {
+        expect(notificationInput.instructions).not.toContain(
+          'Recent outputs from this automation',
+        )
+      } else {
+        expect(notificationInput.instructions).toContain(
+          'Recent outputs from this automation',
+        )
+        expect(notificationInput.instructions).toContain('1. "Quick room reset.')
+      }
+      await input.onProviderRequestStarted?.()
+
+      const decision = providerDecisions[occurrenceIndex]
+      if (!decision) {
+        throw new Error('Unexpected extra reminder occurrence.')
+      }
+      occurrenceIndex += 1
+      if (decision.kind === 'skip') {
+        return {
+          decision,
+          response: null,
+          session: { sessionId: 'session-room-reminder' },
+        }
+      }
+
+      const deliveryOutcome = buildSentReminderDeliveryOutcome(
+        `outbox_room_reminder_${occurrenceIndex}`,
+      )
+      const context = {
+        decision,
+        deliveryOutcome,
+        response: decision.text,
+      }
+      await input.beforeDelivery?.(context)
+      await input.beforeCommit?.(context)
+      return {
+        ...context,
+        session: { sessionId: 'session-room-reminder' },
+      }
+    })
+
+    const occurrenceTimes = [
+      '2026-04-08T10:01:00.000Z',
+      '2026-04-09T10:01:00.000Z',
+      '2026-04-10T10:01:00.000Z',
+    ]
+    for (const occurrenceTime of occurrenceTimes) {
+      vi.setSystemTime(new Date(occurrenceTime))
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 1,
+      })
+    }
+
+    expect(occurrenceIndex).toBe(3)
+    await expect(listAssistantCronRuns({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        { outcome: 'no_op', response: 'The room cadence question remains unanswered.' },
+        { outcome: 'delivered', response: providerDecisions[1].text },
+        { outcome: 'delivered', response: providerDecisions[0].text },
+      ],
+    })
+  })
 
   it('runs retained Linq overnight maintenance without entering its audience', async () => {
     const { vaultRoot } = await createRuntimeContext(
@@ -12792,6 +12926,25 @@ async function createCanonicalJob(
     threadIsDirect: true,
     vault: vaultRoot,
   })
+}
+
+function buildSentReminderDeliveryOutcome(intentId: string) {
+  return {
+    delivery: {
+      channel: 'telegram' as const,
+      idempotencyKey: null,
+      messageLength: 'Quick room reset.'.length,
+      providerMessageId: intentId,
+      providerThreadId: 'room-1',
+      sentAt: new Date().toISOString(),
+      target: 'room-1',
+      targetKind: 'thread' as const,
+    },
+    intentId,
+    kind: 'sent' as const,
+    media: [],
+    session: { sessionId: 'session-room-reminder' },
+  }
 }
 
 async function claimFirstCanonicalCronJob(vaultRoot: string): Promise<{
