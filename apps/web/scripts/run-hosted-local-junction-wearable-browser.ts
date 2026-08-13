@@ -13,6 +13,7 @@ import {
 } from "./hosted-local-browser-process.ts";
 
 interface BrowserConfig {
+  disclosureSourceName: "Oura" | "Whoop";
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
@@ -117,7 +118,7 @@ async function main(): Promise<void> {
       .getByRole("dialog")
       .getByRole("button", {
         exact: true,
-        name: `Continue to ${config.label}`,
+        name: `Continue to ${config.disclosureSourceName}`,
       })
       .click({ timeout: config.timeoutMs });
 
@@ -389,6 +390,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   }
 
   return {
+    disclosureSourceName: source === "oura" ? "Oura" : "Whoop",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,
       "MURPH_E2E_PROVIDER_EMAIL",

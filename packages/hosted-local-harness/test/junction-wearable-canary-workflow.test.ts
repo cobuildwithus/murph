@@ -110,8 +110,13 @@ describe("live Junction wearable canary workflow", () => {
     expect(connectOffset).toBeGreaterThan(disclosureOffset);
     const disclosureStep = browserRunner.slice(disclosureOffset, connectOffset);
     expect(disclosureStep).toContain('.getByRole("dialog")');
-    expect(disclosureStep).toContain('name: `Continue to ${config.label}`');
+    expect(disclosureStep).toContain(
+      'name: `Continue to ${config.disclosureSourceName}`',
+    );
     expect(disclosureStep).toContain(".click({ timeout: config.timeoutMs })");
+    expect(browserRunner).toContain(
+      'disclosureSourceName: source === "oura" ? "Oura" : "Whoop"',
+    );
   });
 
   it("keeps Playwright's closing quote out of redacted navigation URLs", () => {
