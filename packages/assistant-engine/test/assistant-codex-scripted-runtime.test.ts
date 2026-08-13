@@ -452,6 +452,52 @@ describe('real codex app-server with scripted provider', () => {
         skillSlug: 'daily-activity',
       },
       {
+        answer: 'Your connected device recorded 1,640 basal calories on July 12.',
+        command: 'measurement entry list --metric calories_basal --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_basal_calories_summary',
+            metric: 'basal-calories',
+            occurredAt: '2026-07-12T23:59:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'kcal',
+            value: 1640,
+          }],
+        },
+        prompt: 'How many basal calories did my connected device record on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected device recorded a 4-unit insulin dose on July 12.',
+        command: 'event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            data: {
+              fields: {
+                'dose-amount': 4,
+                'dose-unit': 'unit',
+              },
+              interventionType: 'insulin-injection',
+              sessionStatus: 'completed',
+              source: 'device',
+            },
+            id: 'evt_insulin_dose',
+            kind: 'intervention_session',
+            links: [],
+            occurredAt: '2026-07-12T19:15:00.000Z',
+            path: 'events/2026/07/evt_insulin_dose.md',
+            title: 'Connected insulin injection',
+          }],
+        },
+        prompt: 'How much insulin did my connected device record on July 12?',
+        skillHeading: '# Cardiometabolic Health',
+        skillSlug: 'cardiometabolic-health',
+      },
+      {
         answer: 'Your connected-device body-fat estimate moved from 19.2% to 18.5%; keep the same source and conditions before treating that as a trend.',
         command: 'measurement entry list --metric fat --from 2026-07-01 --to 2026-07-12 --limit 50 --format json',
         evidence: {
@@ -581,13 +627,13 @@ text(result.output);
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
     const answer = [
-      'Raw ECG voltages and workout stream points are not stored or exposed; I can use only their compact imported summaries.',
+      'Raw ECG voltage/workout points are not stored; I can use only their compact imported summaries.',
       'A 48 g carbohydrate observation is not a complete meal or eaten-calorie log, so complete intake is unavailable without meal records.',
     ].join(' ')
     scenario.stub.queue({
       requestIncludes: [
-        'Raw ECG voltages and workout stream points are not stored or exposed',
-        'burned calories, carbohydrate observations, and complete meal intake distinct',
+        'Raw ECG voltage/workout points are not stored',
+        'Burned calories and carbs are not intake',
       ],
       text: answer,
     })

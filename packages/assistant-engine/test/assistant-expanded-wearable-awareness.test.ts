@@ -31,24 +31,26 @@ async function readSkill(slug: string): Promise<string> {
 }
 
 describe('expanded wearable awareness', () => {
-  it('advertises normalized coverage without promising source support or raw streams', () => {
+  it('routes normalized facts without promising source support or raw streams', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain('Connected health data can include body-composition')
-    expect(prompt).toContain('respiratory, metabolic, treatment, alert, accessibility, environmental')
+    expect(prompt).toContain('respiratory, metabolic, alert, accessibility, environmental')
     expect(prompt).toContain('ECG-summary, and workout-summary observations')
-    expect(prompt).toContain('Read these signals with bounded `vault-cli measurement entry list`')
-    expect(prompt).toContain('reserve `wearables metric` for catalog aliases')
-    expect(prompt).toContain('not proof a source supplied it')
-    expect(prompt).toContain('missing means unavailable, not zero')
+    expect(prompt).toContain('Read them with bounded `vault-cli measurement entry list`')
+    expect(prompt).toContain('Connected insulin is an `intervention_session`')
     expect(prompt).toContain(
-      'Raw ECG voltages and workout stream points are not stored or exposed',
+      'vault-cli event list --kind intervention_session --from <date> --to <date> --limit 50 --format json',
+    )
+    expect(prompt).toContain('device-sourced `insulin-injection` events')
+    expect(prompt).not.toContain('respiratory, metabolic, treatment, alert')
+    expect(prompt).toContain('not `wearables metric`')
+    expect(prompt).toContain('missing is unavailable, not zero or proof of absence')
+    expect(prompt).toContain(
+      'Raw ECG voltage/workout points are not stored',
     )
     expect(prompt).toContain(
-      'burned calories, carbohydrate observations, and complete meal intake distinct',
-    )
-    expect(prompt).toContain(
-      'use meal totals or meal records for eaten calories',
+      'Burned calories and carbs are not intake; use meal records or say unavailable',
     )
   })
 
@@ -59,6 +61,7 @@ describe('expanded wearable awareness', () => {
       'vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json',
     )
     for (const metric of [
+      'calories_basal',
       'daylight_exposure',
       'fall',
       'floors_climbed',
