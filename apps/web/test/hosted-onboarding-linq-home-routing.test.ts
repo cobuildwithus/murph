@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   claimHostedLinqProactiveConversationCapacityTx: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
+  readHostedLinqIncomingLineState: vi.fn(),
   readHostedLinqRecentMessageEffectCountsTx: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
@@ -78,6 +79,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   claimHostedLinqProactiveConversationCapacityTx:
     mocks.claimHostedLinqProactiveConversationCapacityTx,
   listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
+  readHostedLinqIncomingLineState: mocks.readHostedLinqIncomingLineState,
   readHostedLinqRecentMessageEffectCountsTx:
     mocks.readHostedLinqRecentMessageEffectCountsTx,
 }));
@@ -618,6 +620,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
+    mocks.readHostedLinqIncomingLineState.mockResolvedValue({ kind: "unmanaged" });
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
@@ -1661,6 +1664,60 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[0]);
     expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["assignable", "at_risk", "degraded_unavailable"] as const)(
+    "binds an exact active member's provider-attested first inbound on a managed %s line",
+    async (kind) => {
+      mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+      mocks.readHostedLinqIncomingLineState.mockResolvedValue({ kind });
+
+      await expect(resolveHostedMemberLinqHomeLineRouteBindingTx({
+        acceptManagedInboundLine: true,
+        incomingChatId: "chat_first_inbound",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+        memberAuthority: { kind: "member-identity" },
+        memberId: "member_123",
+        prisma: {} as never,
+      })).resolves.toMatchObject({
+        homeLineAssignedAt: expect.any(Date),
+        kind: "bind",
+        recipientPhone: "+15550100001",
+      });
+
+      expect(mocks.readHostedLinqIncomingLineState).toHaveBeenCalledWith({
+        phoneNumberLookupKeys:
+          createHostedPhoneLookupKeyReadCandidates("+15550100001"),
+        prisma: {} as never,
+      });
+      expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
+      expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not let a managed inbound claim bypass exact member identity authority", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+
+    await expect(resolveHostedMemberLinqHomeLineRouteBindingTx({
+      acceptManagedInboundLine: true,
+      incomingChatId: "chat_pending_contact",
+      incomingDirectAttested: true,
+      incomingRecipientPhone: "+15550100001",
+      memberAuthority: {
+        contact: {
+          kind: "phone",
+          lookupKey: "lookup:+15551234567",
+          value: "+15551234567",
+        },
+        kind: "pending-contact",
+      },
+      memberId: "member_123",
+      prisma: {} as never,
+    })).resolves.toEqual({ kind: "ignore_unknown_home" });
+
+    expect(mocks.readHostedLinqIncomingLineState).not.toHaveBeenCalled();
   });
 
   it("resolves the route after taking the member lock", async () => {

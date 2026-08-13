@@ -27,6 +27,7 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
+  readHostedLinqIncomingLineState,
   readHostedLinqRecentMessageEffectCountsTx,
   listHostedLinqHealthyProactiveLines,
 } from "./linq-line-store";
@@ -308,6 +309,7 @@ type HostedLinqHomeLineRouteBindingDecision =
     };
 
 export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
+  acceptManagedInboundLine?: boolean;
   incomingChatId: string;
   incomingDirectAttested: boolean;
   incomingRecipientPhone: string | null;
@@ -324,6 +326,37 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
   if (decision.kind === "done") {
     return decision.result;
+  }
+
+  if (
+    input.acceptManagedInboundLine === true
+    && input.incomingDirectAttested
+    && input.memberAuthority?.kind === "member-identity"
+  ) {
+    const recipientPhone = normalizePhoneNumber(decision.preferredRecipientPhone);
+    const incomingLineState = await readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys:
+        createHostedPhoneLookupKeyReadCandidates(recipientPhone),
+      prisma: input.prisma,
+    });
+    if (
+      recipientPhone
+      && (
+        incomingLineState.kind === "assignable"
+        || incomingLineState.kind === "at_risk"
+        || incomingLineState.kind === "degraded_unavailable"
+      )
+    ) {
+      // A provider-attested direct message from an active, exact member
+      // identity establishes the relationship itself. The contacted managed
+      // line only needs to be safe for a reply; proactive assignment health
+      // and capacity must not discard the member's already-arrived message.
+      return {
+        homeLineAssignedAt: new Date(),
+        kind: "bind",
+        recipientPhone,
+      };
+    }
   }
 
   const reservationResult = await reserveHostedLinqHomeLineFromAssignablePoolTx({

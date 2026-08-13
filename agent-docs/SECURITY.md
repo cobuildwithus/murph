@@ -635,7 +635,14 @@ Last verified: 2026-08-12
   capacity must not block activation: Web still assigns an eligible home line
   without a proactive welcome, and inbound-first messaging remains available.
   If no line is assignable, activation still succeeds without creating route
-  authority; a later inbound message uses the ordinary route owner. Successful
+  authority. The ordinary route owner may later bind the exact active member's
+  provider-attested direct message to the contacted managed line when the
+  existing reply-egress policy permits it, including at-risk and delivery-
+  warning postures that cannot start proactive outreach. That narrow inbound
+  authority does not admit pending-contact or inactive-member claims. Unmanaged,
+  ambiguous, disabled, flagged, critical, unhealthy, or structurally
+  unavailable recipient lines cannot establish exact-line authority; the
+  ordinary fallback pool remains unchanged and fails closed when empty. Successful
   welcome delivery may seed the existing finite three-local-day unfinished-
   onboarding continuation, but companion admission must not add a second
   scheduler or send the separate signup welcome email. If the committed

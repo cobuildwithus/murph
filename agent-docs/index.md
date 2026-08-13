@@ -199,9 +199,10 @@ contract is specified by `agent-docs/references/hosted-runtime-protocol.md` and
 
 Native companion account admission reuses the canonical capacity-gated signup
 welcome for verified phones, completes without a route when no line is
-assignable, keeps the separate Web welcome email out of the companion path, and
-retries only the exact pending activation mailbox wake after a missed runtime
-signal. This contract is jointly specified by `ARCHITECTURE.md`,
+assignable, lets an exact active member's provider-attested direct input bind a
+managed reply-safe line without proactive eligibility, keeps the separate Web
+welcome email out of the companion path, and retries only the exact pending
+activation mailbox wake after a missed runtime signal. This contract is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/product-specs/companion-app.md`, and
 `docs/device-sync-hosted-control-plane.md`.
 
@@ -289,7 +290,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only selection rules for member-valued and capturable outcomes, credible evidence, typed session metrics, timeframe integrity, and setup handoff. | Experiment outcome selection behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for private outcome cards now and future sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-05-13 |
 | `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence, durable user-authored media, and 14-day generated-image payload retention with mandatory lookup materialization, checkpointed deadlines, replay-blocking tombstones, and lookup-backed generated-origin recovery that still requires outbox delivery proof. | Capture behavior | High | 2026-08-10 |
-| `agent-docs/product-specs/companion-app.md` | Native iOS and Android health companions: canonical account admission with a capacity-gated first iMessage, no-line activation and inbound-first recovery, Web-only welcome email, exact pending-activation runtime-wake retry, broad Apple Health sync, closed WHOOP enrichment, scheduled overnight PRV on iOS, and a narrow Health Connect bridge on Android. | Companion app plan | High | 2026-08-13 |
+| `agent-docs/product-specs/companion-app.md` | Native iOS and Android health companions: canonical account admission with a capacity-gated first iMessage, no-line activation and managed-line inbound-first recovery, Web-only welcome email, exact pending-activation runtime-wake retry, broad Apple Health sync, closed WHOOP enrichment, scheduled overnight PRV on iOS, and a narrow Health Connect bridge on Android. | Companion app plan | High | 2026-08-13 |
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec plus bounded WHOOP metadata enrichment and the strict scheduled six-field overnight-PRV beta: one-time enrollment, constant-memory five-minute windows, protected scalar recovery, one immutable nightly summary, metric separation, bounded retention, and deployment/physical-validation gates. | Companion app build plan | High | 2026-07-14 |
 | `agent-docs/product-specs/ios-address-book-advisory-names.md` | Optional iOS Contacts projection with bounded one-to-four-label alternatives, member-scoped KMS MAC tokens, encrypted advisory labels, route-authorized iMessage/SMS roster lookup and sender attribution with one hosted-group access workflow, typed provider capability gaps, participant-access reconciliation, CAS deletion/retention, residual threat model, and rollout order. | Companion/group privacy contract | High | 2026-07-30 |

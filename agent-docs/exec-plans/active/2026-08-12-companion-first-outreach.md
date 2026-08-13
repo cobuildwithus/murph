@@ -10,7 +10,7 @@ When a new member activates through the native companion app with a verified
 phone number, use Murph's existing signup-welcome path to assign an eligible
 home line and send the canonical first iMessage. Preserve the normal
 capacity-exhausted behavior: activation succeeds and the member can still text
-Murph first when no line may safely open a proactive conversation.
+an active Murph line first when no line may safely open a proactive conversation.
 
 ## Root Cause Evidence
 
@@ -48,7 +48,9 @@ Murph first when no line may safely open a proactive conversation.
    wake, with active-admission replay signaling the exact pending mailbox item.
 3. Prove routed, no-line, missed-wake, replay, and maximum-pool behavior in
    focused unit and PostgreSQL-backed integration tests.
-4. Update the owning architecture, security, product, control-plane, index, and
+4. Keep proactive assignment eligibility out of exact active-member inbound
+   authority so a managed reply-safe line can durably accept the first text.
+5. Update the owning architecture, security, product, control-plane, index, and
    public changelog documentation.
 
 ## Verification
@@ -83,6 +85,13 @@ Murph first when no line may safely open a proactive conversation.
   two PostgreSQL-backed companion enrollment scenarios covering routed welcome,
   no-line activation, durable grant/mailbox state, no email, duplicate-free
   replay, and maximum-pool success and contention bounds.
+- Final ReviewGPT round 2 found that the same proactive-line eligibility could
+  still discard the first inbound after route-less activation. The route owner
+  now distinguishes outbound-first-contact from an exact active member's
+  provider-attested direct input: a managed reply-safe line binds and appends
+  durably without proactive eligibility, while unowned or unsafe inputs remain
+  fail-closed. Focused unit and real-PostgreSQL proof cover the first bind and
+  duplicate replay.
 
 ## Rollout
 
@@ -90,5 +99,8 @@ Deploy Web only. Existing companion clients keep the same request and response
 contract. After deploy, verify a fresh consented phone signup receives one
 canonical first iMessage when a healthy line has proactive capacity, and that
 an exhausted or unavailable pool still activates the member without sending.
+Also verify that a route-less active member's first direct input on a managed
+reply-safe line binds and reaches the canonical mailbox, while an unmanaged or
+unsafe recipient line stays ignored.
 Also verify that a deliberately failed activation wake returns the retryable
 account-gate outcome and that retry re-signals the existing mailbox item.

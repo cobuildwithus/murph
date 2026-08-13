@@ -184,8 +184,13 @@ welcome and keeps its existing bounded three-day unfinished-setup continuation;
 the companion does not also send the separate Web signup email. Exhausted
 proactive capacity still assigns an eligible home line without a welcome. If no
 line is assignable, companion activation completes without a route and
-inbound-first messaging remains available; Web activation keeps its existing
-fail-closed requirement. The activation mailbox item is the durable retry
+inbound-first messaging remains available on a contacted managed line whose
+existing reply-egress policy permits the exact active member's provider-attested
+direct message. That path binds the home route and appends the encrypted input
+atomically even when at-risk or delivery-warning posture excluded proactive
+outreach; unmanaged, disabled, ambiguous, and unsafe lines cannot establish that
+exact-line authority, and ordinary fallback selection fails closed when empty.
+Web activation keeps its existing fail-closed requirement. The activation mailbox item is the durable retry
 authority: a failed companion runtime wake returns the public retryable outcome,
 and later admission retries signal that exact unconsumed item instead of creating
 a second activation or welcome. Admission creates, resumes, reactivates, or

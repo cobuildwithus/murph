@@ -15,6 +15,8 @@ import {
   ensureHostedStarterUsageEnrollment,
 } from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
 import { buildHostedStarterUsageSemanticSourceKey } from "@/src/lib/hosted-onboarding/starter-usage";
+import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
+import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 vi.mock("server-only", () => ({}));
@@ -252,6 +254,94 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toBe(1);
         expect(boundaries.signalMailboxAppend).toHaveBeenCalledTimes(2);
         expect(boundaries.sendSignupWelcomeEmail).not.toHaveBeenCalled();
+
+        if (!scenario.lineAvailable) {
+          await prisma.hostedLinqLine.create({
+            data: {
+              assignmentWeight: 1_000_000,
+              configuredAt: new Date(now.getTime() + 120_000),
+              egressPolicy: "enabled",
+              healthStatus: "warning",
+              maxNewConversationsPerDay: 50,
+              phoneNumberEncrypted:
+                encryptHostedLinqLinePhoneNumber(linePhone),
+              phoneNumberHint: "*** test",
+              phoneNumberLookupKey: lineLookupKey,
+              providerReputationStatus: "HEALTHY",
+              providerServiceStatus: "ACTIVE",
+              source: "test",
+            },
+          });
+          lineCreated = true;
+
+          const firstInbound = buildCompanionFirstInboundEvent({
+            chatId: `chat_companion_first_inbound_${fixtureId}`,
+            eventId: `event_companion_first_inbound_${fixtureId}`,
+            linePhone,
+            memberPhone,
+            messageId: `message_companion_first_inbound_${fixtureId}`,
+            occurredAt: new Date(now.getTime() + 180_000),
+          });
+          const firstInboundPlan = await prisma.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: firstInbound,
+              prisma: tx,
+            })
+          );
+
+          expect(firstInboundPlan.response).toMatchObject({
+            ignored: false,
+            ok: true,
+            reason: "wake-appended-active-member",
+          });
+          expect(firstInboundPlan.wakeHandoffs).toHaveLength(1);
+          if (!firstInboundPlan.wakeHandoffs) {
+            throw new Error("Expected the first inbound runtime wake.");
+          }
+          await expect(prisma.hostedMemberRouting.findUnique({
+            select: {
+              linqChatLookupKey: true,
+              linqRecipientPhoneLookupKey: true,
+            },
+            where: { memberId },
+          })).resolves.toMatchObject({
+            linqChatLookupKey: expect.any(String),
+            linqRecipientPhoneLookupKey: lineLookupKey,
+          });
+          await expect(prisma.hostedMailboxItem.count({
+            where: {
+              dedupeKey: firstInbound.event_id,
+              kind: "conversation.message",
+              userId: memberId,
+            },
+          })).resolves.toBe(1);
+
+          const replayPlan = await prisma.$transaction((tx) =>
+            planHostedOnboardingLinqWebhook({
+              event: firstInbound,
+              prisma: tx,
+            })
+          );
+          expect(replayPlan.response).toMatchObject({
+            duplicate: true,
+            ignored: true,
+            ok: true,
+            reason: "duplicate-webhook-event",
+          });
+          if (!replayPlan.wakeHandoffs) {
+            throw new Error("Expected the duplicate inbound runtime wake.");
+          }
+          expect(replayPlan.wakeHandoffs[0]?.mailboxItemId).toBe(
+            firstInboundPlan.wakeHandoffs[0]?.mailboxItemId,
+          );
+          await expect(prisma.hostedMailboxItem.count({
+            where: {
+              dedupeKey: firstInbound.event_id,
+              kind: "conversation.message",
+              userId: memberId,
+            },
+          })).resolves.toBe(1);
+        }
       } finally {
         if (memberCreated) {
           await prisma.hostedUsageCreditGrant.deleteMany({
@@ -274,6 +364,46 @@ describe.skipIf(!runPostgresProof)(
     });
   },
 );
+
+function buildCompanionFirstInboundEvent(input: {
+  chatId: string;
+  eventId: string;
+  linePhone: string;
+  memberPhone: string;
+  messageId: string;
+  occurredAt: Date;
+}) {
+  const occurredAt = input.occurredAt.toISOString();
+  return parseHostedLinqWebhookEvent(JSON.stringify({
+    api_version: "v3",
+    created_at: occurredAt,
+    data: {
+      chat: {
+        id: input.chatId,
+        is_group: false,
+        owner_handle: {
+          handle: input.linePhone,
+          id: "owner-handle",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      direction: "inbound",
+      id: input.messageId,
+      parts: [{ type: "text", value: "hello" }],
+      sender_handle: {
+        handle: input.memberPhone,
+        id: "sender-handle",
+        service: "iMessage",
+      },
+      sent_at: occurredAt,
+      service: "iMessage",
+    },
+    event_id: input.eventId,
+    event_type: "message.received",
+    webhook_version: "2026-02-03",
+  }));
+}
 
 function requirePhoneLookupKey(phoneNumber: string): string {
   const lookupKey = createHostedPhoneLookupKey(phoneNumber);

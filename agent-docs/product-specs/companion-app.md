@@ -177,8 +177,12 @@ binding, signup idempotency, home-line health, and proactive-capacity owners
 still govern that path. Exhausted proactive capacity does not block activation:
 Web assigns an eligible home line without a proactive welcome, and inbound-first
 messaging remains available. If no line is assignable, account activation still
-succeeds without assigning one; the member's first inbound message uses the
-ordinary route owner. A successfully delivered welcome uses the existing finite
+succeeds without assigning one. The exact active member's first provider-
+attested direct message can bind the contacted managed line when the existing
+reply-egress policy permits it, including at-risk and delivery-warning lines
+that cannot initiate outreach. Unmanaged, disabled, ambiguous, or unsafe lines
+cannot establish that exact-line authority; ordinary fallback selection still
+fails closed when no eligible line exists. A successfully delivered welcome uses the existing finite
 unfinished-onboarding continuation: at most one low-pressure opportunity on
 each of the next three local days, with the ordinary stop rules. Companion
 admission does not also send the signup welcome email. A committed activation
