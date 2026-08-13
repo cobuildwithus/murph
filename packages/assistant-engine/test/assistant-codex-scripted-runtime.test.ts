@@ -7430,7 +7430,7 @@ text(result.output);
         currentHostedMailboxItemIds: () => [],
         groupSharedReader: {
           request: async () => ({
-            members: Array.from({ length: 32 }, (_unused, index) => ({
+            members: Array.from({ length: 200 }, (_unused, index) => ({
               currentTurnHandles: [],
               displayName: `Member ${index}`,
               memberId: `member_oversized_${index}`,
