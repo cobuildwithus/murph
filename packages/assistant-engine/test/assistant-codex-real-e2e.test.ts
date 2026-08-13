@@ -5633,7 +5633,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'preserves a foreign wall clock and reports a successful save without unverified timing',
+    'preserves a foreign wall clock and confirms host-recovered timing',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5657,21 +5657,22 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
+                automationRequests.push(request)
                 if (request.action !== 'save') {
                   throw new Error('Expected an automation save request.')
                 }
-                automationRequests.push(request)
                 return {
                   action: 'save',
                   automationId: 'automation-central-evening',
                   created: true,
                   effectiveTimeZone: 'America/Chicago',
                   lookupId: 'central-evening-reminder',
-                  nextOccurrenceAt: null,
+                  nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: false,
+                  timingVerified: true,
+                  timingVerificationIssues: [],
                   updatedAt: '2026-08-10T00:00:00.000Z',
                 }
               },
@@ -5712,11 +5713,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         }
         expect(result.finalMessage).toMatch(/saved|set up|created/iu)
         expect(result.finalMessage).toMatch(
-          /could not verify|couldn't verify|unable to verify/iu,
-        )
-        expect(result.finalMessage).toMatch(/inspect|check|review|update|change/iu)
-        expect(result.finalMessage).not.toMatch(
           /9\s*(?::00)?\s*p\.?m\.?|21:00|central time|america\/chicago/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /could not verify|couldn't verify|unable to verify|if you want/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -5927,7 +5927,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'does not describe an unverified stale recurrence as exhausted',
+    'does not inspect again or describe an unverified stale recurrence as exhausted',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5951,22 +5951,26 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
-                if (request.action !== 'patch') {
-                  throw new Error('Expected an automation patch request.')
-                }
                 automationRequests.push(request)
-                return {
-                  action: 'patch',
+                const response = {
                   automationId: 'automation-daily-interval',
-                  created: false,
                   effectiveTimeZone: null,
                   lookupId: 'daily-interval-reminder',
                   nextOccurrenceAt: null,
-                  routeBinding: 'preserved',
-                  schedule: { everyMs: 86_400_000, kind: 'every' },
-                  status: 'active',
+                  routeBinding: 'preserved' as const,
+                  schedule: { everyMs: 86_400_000, kind: 'every' as const },
+                  status: 'active' as const,
                   timingVerified: false,
+                  timingVerificationIssues: ['runtime_state_pending'] as const,
                   updatedAt: '2026-08-10T00:01:00.000Z',
+                }
+                if (request.action !== 'patch') {
+                  throw new Error('Expected an automation patch request.')
+                }
+                return {
+                  action: 'patch' as const,
+                  ...response,
+                  created: false,
                 }
               },
             },
@@ -5995,11 +5999,11 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           lookup: 'daily-interval-reminder',
         })
         expect(result.finalMessage).toMatch(
-          /could not verify|couldn't verify|unable to verify/iu,
+          /saved|updated|changed/iu,
         )
-        expect(result.finalMessage).toMatch(/inspect|check|review|update/iu)
+        expect(result.finalMessage).toMatch(/next.*not (?:yet )?(?:confirmed|verified)|still finishing/iu)
         expect(result.finalMessage).not.toMatch(
-          /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+          /if you want|inspect|check again|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
