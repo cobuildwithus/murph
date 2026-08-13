@@ -6,7 +6,10 @@ import {
 import { getPrisma } from "../prisma";
 import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 import { completeHostedPrivyVerification } from "./authentication-service";
-import { ensureHostedStarterUsageEnrollment } from "./starter-usage-enrollment-service";
+import {
+  ensureHostedStarterUsageEnrollment,
+  retryPendingHostedStarterUsageActivationRuntimeWake,
+} from "./starter-usage-enrollment-service";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -73,6 +76,10 @@ export async function ensureHostedCompanionMemberId(input: {
         memberId: existingMember.id,
         prisma,
       });
+      await requireHostedCompanionActivationRuntimeWake({
+        memberId: existingMember.id,
+        prisma,
+      });
       return existingMember.id;
     }
   }
@@ -95,6 +102,10 @@ export async function ensureHostedCompanionMemberId(input: {
     memberId: completion.memberId,
     prisma,
   })) {
+    await requireHostedCompanionActivationRuntimeWake({
+      memberId: completion.memberId,
+      prisma,
+    });
     return completion.memberId;
   }
 
@@ -120,4 +131,20 @@ export async function ensureHostedCompanionMemberId(input: {
   });
 
   return completion.memberId;
+}
+
+async function requireHostedCompanionActivationRuntimeWake(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const runtimeWake =
+    await retryPendingHostedStarterUsageActivationRuntimeWake(input);
+  if (runtimeWake && !runtimeWake.accepted) {
+    throw hostedOnboardingError({
+      code: "HOSTED_STARTER_USAGE_RUNTIME_WAKE_REQUIRED",
+      httpStatus: 503,
+      message: "Murph account setup is waiting for runtime recovery.",
+      retryable: true,
+    });
+  }
 }

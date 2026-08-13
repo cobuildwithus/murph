@@ -438,6 +438,7 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
 }
 
 export async function resolveHostedMemberActivationLinqRoute(input: {
+  allowNoAssignableLine?: boolean;
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
@@ -446,12 +447,16 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     prisma: input.prisma,
   });
   return resolveHostedMemberActivationLinqRouteAttempt({
+    ...(input.allowNoAssignableLine
+      ? { allowNoAssignableLine: true }
+      : {}),
     member: input.member,
     prisma: input.prisma,
   });
 }
 
 async function resolveHostedMemberActivationLinqRouteAttempt(input: {
+  allowNoAssignableLine?: boolean;
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
@@ -532,6 +537,11 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   const targetRecipientPhone = normalizePhoneNumber(target.recipientPhone);
 
   if (!targetRecipientPhone) {
+    if (input.allowNoAssignableLine) {
+      return {
+        welcomeRoute: null,
+      };
+    }
     throw hostedOnboardingError({
       code: "LINQ_CONVERSATION_PHONE_REQUIRED",
       message: "Configure an enabled hosted_linq_line row before activating members without an existing Linq conversation thread.",

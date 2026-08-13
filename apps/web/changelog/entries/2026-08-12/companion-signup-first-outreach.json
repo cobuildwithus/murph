@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Murph starts the companion conversation",
     "summary": "After finishing account setup in the companion app with a verified phone, Murph can now start the conversation with the standard first iMessage.",
-    "details": "If every healthy line is at its proactive limit, setup still completes and you can text Murph first.",
+    "details": "When a healthy line is available, Murph sends the usual welcome and may keep unfinished setup moving with a low-pressure check-in on the next few days. If no line can safely start the conversation, setup still completes and you can text Murph first.",
     "relevanceTags": ["companion", "imessage", "onboarding", "reliability"],
     "sourcePullRequests": [1761]
   }

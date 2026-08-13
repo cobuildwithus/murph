@@ -179,10 +179,17 @@ hosted lifecycle codes remain private. The route's static dependency graph is
 kept outside device-sync public ingress. A consented fresh companion activation
 with a verified phone may enter the canonical signup-welcome path under the
 existing exact-member binding, signup idempotency, home-line health, and
-proactive-capacity owners. Exhausted proactive capacity does not block
-activation: Web still assigns an eligible home line without a proactive welcome,
-and inbound-first messaging remains available. Admission creates, resumes,
-reactivates, or otherwise mutates no Junction connection.
+proactive-capacity owners. A healthy line sends the normal conversational
+welcome and keeps its existing bounded three-day unfinished-setup continuation;
+the companion does not also send the separate Web signup email. Exhausted
+proactive capacity still assigns an eligible home line without a welcome. If no
+line is assignable, companion activation completes without a route and
+inbound-first messaging remains available; Web activation keeps its existing
+fail-closed requirement. The activation mailbox item is the durable retry
+authority: a failed companion runtime wake returns the public retryable outcome,
+and later admission retries signal that exact unconsumed item instead of creating
+a second activation or welcome. Admission creates, resumes, reactivates, or
+otherwise mutates no Junction connection.
 
 ### Cloudflare execution state
 

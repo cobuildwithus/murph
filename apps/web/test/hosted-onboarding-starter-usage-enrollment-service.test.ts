@@ -81,7 +81,10 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
     mocks.requireHostedInviteForBillingCheckout,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
+vi.mock("@/src/lib/hosted-onboarding/member-activation", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/member-activation")
+  >()),
   activateHostedMemberForPositiveSourceTx:
     mocks.activateHostedMemberForPositiveSourceTx,
 }));
@@ -104,6 +107,7 @@ vi.mock("@/src/lib/hosted-onboarding/starter-usage-grant", () => ({
 import {
   ensureHostedLinqInstantStartStarterUsageEnrollment,
   ensureHostedStarterUsageEnrollment,
+  retryPendingHostedStarterUsageActivationRuntimeWake,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
 } from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
 
@@ -357,7 +361,8 @@ describe("Starter usage enrollment owner", () => {
         if (activationWritten) {
           return {
             activated: false,
-            hostedExecutionEventId: null,
+            hostedExecutionEventId: "execution_activation_1",
+            hostedExecutionMailboxItemId: "mailbox_activation_1",
           };
         }
         stageTransactionWrites("activation", "root", "audit", "mailbox");
@@ -365,13 +370,21 @@ describe("Starter usage enrollment owner", () => {
         return {
           activated: true,
           hostedExecutionEventId: "execution_activation_1",
+          hostedExecutionMailboxItemId: "mailbox_activation_1",
         };
       }),
     );
     mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
       .mockImplementation(async () => {
         await runProviderWork({ kind: "runtime-wake" });
-        return { signaled: true };
+        return {
+          accepted: true,
+          configured: true,
+          errorCode: null,
+          mailboxItemIdPresent: true,
+          signalAccepted: true,
+          workflowIdPresent: true,
+        };
       });
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort
       .mockImplementation(async () => {
@@ -408,13 +421,139 @@ describe("Starter usage enrollment owner", () => {
     expect(
       mocks.activateHostedMemberForPositiveSourceTx.mock.calls[0]?.[0],
     ).toMatchObject({
+      allowSignupWelcomeWithoutAssignableLinqLine: true,
       memberId: memberState.id,
       suppressSignupWelcome: false,
     });
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
       .toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
+  it("keeps the Web signup email separate from companion conversation welcome", async () => {
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).resolves.toMatchObject({ status: "enrolled" });
+
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowSignupWelcomeWithoutAssignableLinqLine: false,
+        suppressSignupWelcome: false,
+      }),
+    );
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .toHaveBeenCalledOnce();
+  });
+
+  it("re-signals a still-pending activation on repeated companion enrollment", async () => {
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "companion_onboarding",
+    })).resolves.toMatchObject({ status: "enrolled" });
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: new Date(NOW.getTime() + 1_000),
+      prisma: prisma as never,
+      source: "companion_onboarding",
+    })).resolves.toMatchObject({ status: "already_enrolled" });
+
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenLastCalledWith(expect.objectContaining({
+        hostedExecutionEventId: "execution_activation_1",
+        mailboxItemId: "mailbox_activation_1",
+        memberId: memberState.id,
+      }));
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
+  it("commits companion activation but requires retry when the runtime wake is not accepted", async () => {
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+      .mockResolvedValueOnce({
+        accepted: false,
+        configured: true,
+        errorCode: "TEMPORARY_RUNTIME_FAILURE",
+        mailboxItemIdPresent: true,
+        signalAccepted: null,
+        workflowIdPresent: null,
+      });
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "companion_onboarding",
+    })).rejects.toMatchObject({
+      code: "HOSTED_STARTER_USAGE_RUNTIME_WAKE_REQUIRED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(activationWritten).toBe(true);
+    expect(grantState).not.toBeNull();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
+  it("re-signals only the exact pending Starter activation mailbox item", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      consumedAt: null,
+      id: "mailbox_activation_1",
+    });
+    const prisma = {
+      hostedMailboxItem: { findUnique },
+    } as never;
+
+    await expect(retryPendingHostedStarterUsageActivationRuntimeWake({
+      memberId: memberState.id,
+      prisma,
+    })).resolves.toMatchObject({ accepted: true });
+
+    const hostedExecutionEventId = [
+      "member.activated",
+      "hosted.starter_usage.enrolled",
+      memberState.id,
+      "hosted-starter-usage",
+      memberState.id,
+      "starter-usage-2026-08-07-v1",
+    ].join(":");
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        consumedAt: true,
+        id: true,
+      },
+      where: {
+        userId_dedupeKey: {
+          dedupeKey: hostedExecutionEventId,
+          userId: memberState.id,
+        },
+      },
+    });
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledWith({
+        hostedExecutionEventId,
+        mailboxItemId: "mailbox_activation_1",
+        memberId: memberState.id,
+        prisma,
+        source: "starter-usage.activation.retry",
+      });
   });
 
   it("prewarms exact active roots and reuses both cache identities inside the transaction", async () => {

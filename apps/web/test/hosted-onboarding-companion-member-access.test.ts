@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  retryPendingHostedStarterUsageActivationRuntimeWake: vi.fn(),
   remapHostedPrivyCompletionLagError: vi.fn((error: unknown) => error),
   resolveHostedPrivySessionFromBearerToken: vi.fn(),
 }));
@@ -39,6 +40,8 @@ vi.mock("@/src/lib/hosted-onboarding/authentication-service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", () => ({
   ensureHostedStarterUsageEnrollment: mocks.ensureHostedStarterUsageEnrollment,
+  retryPendingHostedStarterUsageActivationRuntimeWake:
+    mocks.retryPendingHostedStarterUsageActivationRuntimeWake,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
@@ -152,6 +155,8 @@ describe("native companion hosted member admission", () => {
       redirectPath: "/home",
       status: "enrolled",
     });
+    mocks.retryPendingHostedStarterUsageActivationRuntimeWake
+      .mockResolvedValue(null);
   });
 
   it("requires bearer identity without falling back to browser authority", async () => {
@@ -238,6 +243,11 @@ describe("native companion hosted member admission", () => {
     });
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
+    expect(mocks.retryPendingHostedStarterUsageActivationRuntimeWake)
+      .toHaveBeenCalledWith({
+        memberId: activeMember.id,
+        prisma,
+      });
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
@@ -333,6 +343,30 @@ describe("native companion hosted member admission", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+  });
+
+  it("returns retryable admission until a pending activation wake is accepted", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.retryPendingHostedStarterUsageActivationRuntimeWake
+      .mockResolvedValueOnce({ accepted: false })
+      .mockResolvedValueOnce({ accepted: true });
+
+    const firstResponse = await admissionRoute.POST(admissionRequest());
+    const retryResponse = await admissionRoute.POST(admissionRequest());
+
+    expect(firstResponse.status).toBe(503);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "COMPANION_ADMISSION_RETRYABLE",
+      },
+    });
+    expect(retryResponse.status).toBe(200);
+    await expect(retryResponse.json()).resolves.toEqual({ ok: true });
+    expect(mocks.retryPendingHostedStarterUsageActivationRuntimeWake)
+      .toHaveBeenCalledTimes(2);
   });
 
   it("creates the canonical member but stops at consent before starter access or Junction admission", async () => {

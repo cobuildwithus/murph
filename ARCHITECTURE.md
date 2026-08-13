@@ -1803,7 +1803,16 @@ binding, signup idempotency, home-line health, and proactive capacity remain
 owned by the existing starter enrollment, line reservation, and welcome
 services. Exhausted proactive capacity does not block activation: Web still
 assigns an eligible home line without a proactive welcome, preserving the
-inbound-first messaging path. On failure it preserves the stable native
+inbound-first messaging path. If no line is currently assignable, activation
+still succeeds without assigning a line; a later inbound message enters the
+ordinary route owner. Successful welcome delivery seeds the existing finite
+unfinished-onboarding automation, with at most one low-pressure opportunity on
+each of the next three local days and the existing completion, decline,
+response, suspension, and expiry stops. The companion path does not send the
+separate signup welcome email. A committed activation whose runtime wake is not
+accepted returns a retryable admission result; replay re-signals only that
+member's exact still-pending Starter activation mailbox item. On failure it
+preserves the stable native
 login, consent, access, suspension, and alternate-sign-in identity-conflict
 outcomes. Every other retryable owner failure becomes
 `COMPANION_ADMISSION_RETRYABLE`, while every remaining terminal setup failure

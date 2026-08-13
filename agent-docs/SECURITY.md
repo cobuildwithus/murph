@@ -634,6 +634,14 @@ Last verified: 2026-08-12
   starter enrollment, line reservation, and welcome owners. Exhausted proactive
   capacity must not block activation: Web still assigns an eligible home line
   without a proactive welcome, and inbound-first messaging remains available.
+  If no line is assignable, activation still succeeds without creating route
+  authority; a later inbound message uses the ordinary route owner. Successful
+  welcome delivery may seed the existing finite three-local-day unfinished-
+  onboarding continuation, but companion admission must not add a second
+  scheduler or send the separate signup welcome email. If the committed
+  activation's runtime wake is not accepted, return the closed retryable
+  outcome and let replay re-signal only the exact unconsumed Starter activation
+  mailbox item for that member.
   The route must not import or invoke
   device-sync public ingress, mint Junction authority, or create, resume,
   reactivate, or otherwise mutate a device connection. Validate the complete

@@ -1418,6 +1418,73 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
   });
+
+  it("allows companion activation to continue without an assignable proactive line", async () => {
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        allowNoAssignableLine: true,
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: null,
+    });
+
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps maximum-cardinality assignment set-based and bounded", async () => {
+    const lines = Array.from({ length: 250 }, (_, index) =>
+      buildLine(`+15552${String(index).padStart(6, "0")}`)
+    );
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue(lines);
+
+    await expect(resolveHostedMemberActivationLinqRoute({
+      member: buildMember(),
+      prisma: {} as never,
+    })).resolves.toMatchObject({
+      welcomeRoute: {
+        delivery: {
+          kind: "participant",
+        },
+      },
+    });
+
+    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledOnce();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone)
+      .toHaveBeenCalledOnce();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        recipientPhones: lines.map((line) => line.phoneNumber),
+      }));
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx)
+      .toHaveBeenCalledOnce();
+  });
+
+  it("bounds maximum-cardinality capacity contention to two claims per line", async () => {
+    const lines = Array.from({ length: 250 }, (_, index) =>
+      buildLine(`+15553${String(index).padStart(6, "0")}`)
+    );
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue(lines);
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(false);
+
+    await expect(resolveHostedMemberActivationLinqRoute({
+      member: buildMember(),
+      prisma: {} as never,
+    })).resolves.toEqual({
+      welcomeRoute: null,
+    });
+
+    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledOnce();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone)
+      .toHaveBeenCalledOnce();
+    expect(mocks.readHostedLinqRecentMessageEffectCountsTx).toHaveBeenCalledOnce();
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx)
+      .toHaveBeenCalledTimes(500);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledOnce();
+  });
 });
 
 describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {

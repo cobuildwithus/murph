@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -32,20 +32,24 @@ Murph first when no line may safely open a proactive conversation.
   pacing, daily capacity, exact verified-phone, and delivery-idempotency gates.
 - Keep Linq instant-start suppression unchanged because the inbound message is
   already that member's welcome turn.
+- Preserve the canonical finite unfinished-onboarding continuation after a
+  successfully delivered welcome; disclose it instead of adding another owner.
+- Keep the signup welcome email Web-only; companion admission requested an
+  iMessage conversation, not parallel email outreach.
 - Do not retry or backfill historical companion activations in this patch.
 - Keep all tests, docs, changelog copy, and review artifacts free of production
   member data and direct identifiers.
 
 ## Planned Changes
 
-1. Remove the companion-admission request for signup-welcome suppression and
-   delete the now-unneeded companion-service option if no other caller needs it.
-2. Update focused route and service tests to prove a fresh phone-based companion
-   activation uses the default welcome policy while existing active members
-   remain side-effect free.
-3. Update the owning security/reliability/product documentation to describe the
-   restored first outreach and its safe capacity fallback.
-4. Add one public changelog fragment describing the member-visible outcome.
+1. Let companion enrollment use the canonical signup welcome while keeping
+   instant-start suppression and the separate Web welcome email policies intact.
+2. Make no-line activation companion-specific and require a successful runtime
+   wake, with active-admission replay signaling the exact pending mailbox item.
+3. Prove routed, no-line, missed-wake, replay, and maximum-pool behavior in
+   focused unit and PostgreSQL-backed integration tests.
+4. Update the owning architecture, security, product, control-plane, index, and
+   public changelog documentation.
 
 ## Verification
 
@@ -70,10 +74,21 @@ Murph first when no line may safely open a proactive conversation.
   and inbound-routing cases. Full workspace typecheck passes.
 - PR 1761 supplies the changelog source number; its public fragment generation
   and focused archive proof pass across two files (45 tests).
+- Preliminary and final ReviewGPT found the same no-assignable-line rollback:
+  companion activation now tolerates a missing line while Web signup retains
+  its fail-closed policy. The specialist also found a silent runtime-wake gap
+  and parallel welcome email; companion replay now re-signals the exact pending
+  activation item, and the email remains Web-only.
+- Focused proof now passes across 206 ordinary tests (two expected skips) plus
+  two PostgreSQL-backed companion enrollment scenarios covering routed welcome,
+  no-line activation, durable grant/mailbox state, no email, duplicate-free
+  replay, and maximum-pool success and contention bounds.
 
 ## Rollout
 
 Deploy Web only. Existing companion clients keep the same request and response
 contract. After deploy, verify a fresh consented phone signup receives one
 canonical first iMessage when a healthy line has proactive capacity, and that
-an exhausted pool still activates the member without sending.
+an exhausted or unavailable pool still activates the member without sending.
+Also verify that a deliberately failed activation wake returns the retryable
+account-gate outcome and that retry re-signals the existing mailbox item.

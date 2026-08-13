@@ -176,7 +176,14 @@ may enter the ordinary hosted signup-welcome path. The existing exact-member
 binding, signup idempotency, home-line health, and proactive-capacity owners
 still govern that path. Exhausted proactive capacity does not block activation:
 Web assigns an eligible home line without a proactive welcome, and inbound-first
-messaging remains available. Canonical starter-usage activation, active-access
+messaging remains available. If no line is assignable, account activation still
+succeeds without assigning one; the member's first inbound message uses the
+ordinary route owner. A successfully delivered welcome uses the existing finite
+unfinished-onboarding continuation: at most one low-pressure opportunity on
+each of the next three local days, with the ordinary stop rules. Companion
+admission does not also send the signup welcome email. A committed activation
+whose runtime wake is not accepted stays on the retryable account gate; retry
+re-signals only the exact pending Starter activation mailbox item. Canonical starter-usage activation, active-access
 proof, and the internal `member.activated` fact remain intact. Existing
 established-member session restoration retains its separate
 documented `resume` path and cannot turn admission itself into health
