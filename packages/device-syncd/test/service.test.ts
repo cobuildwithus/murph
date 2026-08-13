@@ -1163,6 +1163,194 @@ test("local Junction HTTP reconnect atomically reopens exact-source sparse histo
   }
 });
 
+test("an in-flight Junction projection cannot consume a prepared local reconnect", async () => {
+  const now = new Date("2026-07-28T10:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-local-junction-prepared-reconnect");
+  let providerListRequests = 0;
+  let signalProviderListStarted!: () => void;
+  const providerListStarted = new Promise<void>((resolve) => {
+    signalProviderListStarted = resolve;
+  });
+  let releaseProviderList!: () => void;
+  const providerListRelease = new Promise<void>((resolve) => {
+    releaseProviderList = resolve;
+  });
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    pushSourceRecoveryEnabled: false,
+    reconcileDays: 7,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryResources: [],
+    timeseriesResources: [],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname.startsWith("/v2/user/resolve/")) {
+        return createJsonResponse({ id: "junction-user-prepared-reconnect" });
+      }
+      if (url.pathname === "/v2/link/token") {
+        return createJsonResponse({
+          link_web_url: "https://link.junction.com/session/prepared-reconnect",
+        });
+      }
+      if (url.pathname === "/v2/user/providers/junction-user-prepared-reconnect") {
+        providerListRequests += 1;
+        if (providerListRequests === 1) {
+          signalProviderListStarted();
+          await providerListRelease;
+        }
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-prepared-reconnect",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (
+        url.pathname.startsWith("/v2/summary/")
+        && url.pathname.endsWith("/junction-user-prepared-reconnect")
+      ) {
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected prepared Junction reconnect request: ${url.pathname}`);
+    },
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      log: {
+        error() {},
+        warn() {},
+      },
+      vaultRoot,
+      publicBaseUrl: "http://127.0.0.1:43199/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { events: [] };
+      },
+    },
+    providers: [provider],
+  });
+  let server: Awaited<ReturnType<typeof startDeviceSyncHttpServer>> | null = null;
+
+  try {
+    const coveragePatch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingMetadata: {},
+      providerSlug: "garmin",
+      resource: "caffeine",
+      version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    });
+    assert.ok(coveragePatch);
+    const account = store.upsertAccount({
+      connectedAt: "2026-01-01T00:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-user-prepared-reconnect",
+      metadata: coveragePatch,
+      nextReconcileAt: null,
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+      status: "active",
+    });
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    });
+    assert.ok(sourceInstanceKey);
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      firstSeenAt: "2026-01-01T00:00:00.000Z",
+      lastSeenAt: "2026-07-28T09:00:00.000Z",
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { caffeine: true },
+      sourceInstanceKey,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      availableAt: now.toISOString(),
+      dedupeKey: "prepared-reconnect-in-flight-projection",
+      kind: "reconcile",
+      payload: {},
+      priority: 200,
+      provider: "junction",
+    });
+
+    server = await startDeviceSyncHttpServer({
+      service,
+      config: {
+        controlToken: "prepared-reconnect-control-token",
+        host: "127.0.0.1",
+        port: 0,
+      },
+    });
+    const baseUrl = `http://${server.control.host}:${server.control.port}/device-sync`;
+    const worker = service.runWorkerOnce();
+    await providerListStarted;
+
+    const startResponse = await fetch(`${baseUrl}/providers/junction/connect`, {
+      body: JSON.stringify({
+        ownerId: "<REDACTED_OWNER_ID>",
+        sourceProviderSlug: "garmin",
+      }),
+      headers: {
+        authorization: "Bearer prepared-reconnect-control-token",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    const startResponseBody = await startResponse.text();
+    assert.equal(startResponse.status, 200, startResponseBody);
+    assert.equal(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    })[0]?.status, "disconnected");
+
+    releaseProviderList();
+    await worker;
+    assert.equal(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    })[0]?.status, "disconnected", "the prepared boundary must survive the older projection");
+
+    const startResult = JSON.parse(startResponseBody) as { state?: unknown };
+    assert.equal(typeof startResult.state, "string");
+    const callbackResponse = await fetch(
+      `${baseUrl}/connect/junction/callback?murph_state=${encodeURIComponent(String(startResult.state))}&state=success`,
+      { redirect: "manual" },
+    );
+    assert.equal(callbackResponse.status, 200);
+    const admittedSource = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    })[0];
+    assert.equal(admittedSource?.status, "connected");
+    assert.equal(admittedSource?.lifecycleEpoch, 2);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), false);
+  } finally {
+    releaseProviderList();
+    await server?.close();
+    close();
+  }
+});
+
 test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
   const now = new Date("2026-07-28T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
