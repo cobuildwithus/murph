@@ -185,6 +185,22 @@ function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
+function controlDirectR2RetryJitter() {
+  const delaySelected = createDeferred<void>();
+  const randomSpy = vi.spyOn(Math, "random").mockImplementation(() => {
+    delaySelected.resolve();
+    return 0;
+  });
+  return {
+    advance: async () => {
+      await delaySelected.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+    },
+    delaySelected: delaySelected.promise,
+    restore: () => randomSpy.mockRestore(),
+  };
+}
+
 async function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     throw signal.reason;
@@ -869,6 +885,333 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("retries a direct R2 transport failure with a fresh body and identical signed binding", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-retry-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      const putBodies: BodyInit[] = [];
+      const putBytes: Uint8Array[] = [];
+      const putRequests: Request[] = [];
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot retry fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        const { init } = requireFetchCallArgs(args, "workspace snapshot retry fetch");
+        if (!init?.body) {
+          throw new Error("Direct R2 retry request body is required.");
+        }
+        putBodies.push(init.body);
+        putRequests.push(request);
+        putBytes.push(new Uint8Array(await request.arrayBuffer()));
+        if (putRequests.length === 1) {
+          throw new TypeError("fetch failed");
+        }
+        return new Response(null, { status: 200 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await retryJitter.advance();
+      const timings = await upload;
+
+      expect(timings).toEqual({
+        snapshotDirectR2PresignElapsedMs: expect.any(Number),
+        snapshotDirectR2PutElapsedMs: expect.any(Number),
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(putBodies).toHaveLength(2);
+      expect(putBodies[0]).not.toBe(putBodies[1]);
+      expect(putBytes.map((bytes) => Array.from(bytes))).toEqual([
+        Array.from(encryptedBytes),
+        Array.from(encryptedBytes),
+      ]);
+      expect(putRequests).toHaveLength(2);
+      expect(putRequests[1]?.url).toBe(putRequests[0]?.url);
+      expect(Array.from(putRequests[1]!.headers.entries())).toEqual(
+        Array.from(putRequests[0]!.headers.entries()),
+      );
+      for (const request of putRequests) {
+        expect(request.method).toBe("PUT");
+        expect(request.url).toBe(putUrl);
+        expect(request.headers.get("if-none-match")).toBe("*");
+        expect(request.headers.get("x-amz-checksum-sha256")).toBe(
+          Buffer.from("c".repeat(64), "hex").toString("base64"),
+        );
+        expect(request.headers.get("x-amz-meta-encryptedsha256")).toBe("c".repeat(64));
+        expect(request.headers.get("x-amz-meta-schema")).toBe(
+          HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+        );
+        expect(request.headers.get("x-amz-meta-snapshotid")).toBe(
+          "snapshot_runner_platform",
+        );
+      }
+    } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("retries HTTP 500 InternalError direct R2 responses once", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-retry-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      let putAttempt = 0;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot InternalError retry fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        putAttempt += 1;
+        await request.arrayBuffer();
+        if (putAttempt === 1) {
+          return new Response(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+              + "<Error><Code>InternalError</Code>"
+              + "<Message>We encountered an internal error. Please try again.</Message>"
+              + "</Error>",
+            {
+              headers: {
+                "content-type": "application/xml",
+              },
+              status: 500,
+            },
+          );
+        }
+        return new Response(null, { status: 200 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await retryJitter.advance();
+      await expect(upload).resolves.toEqual({
+        snapshotDirectR2PresignElapsedMs: expect.any(Number),
+        snapshotDirectR2PutElapsedMs: expect.any(Number),
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(putAttempt).toBe(2);
+    } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("retries documented ClientDisconnect direct R2 responses once", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-retry-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      let putAttempt = 0;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot ClientDisconnect retry fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        putAttempt += 1;
+        await request.arrayBuffer();
+        if (putAttempt === 1) {
+          return new Response(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+              + "<Error><Code>ClientDisconnect</Code>"
+              + "<Message>Client disconnected before request completed.</Message>"
+              + "</Error>",
+            {
+              headers: {
+                "content-type": "application/xml",
+              },
+              status: 400,
+            },
+          );
+        }
+        return new Response(null, { status: 200 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await retryJitter.advance();
+      await expect(upload).resolves.toEqual({
+        snapshotDirectR2PresignElapsedMs: expect.any(Number),
+        snapshotDirectR2PutElapsedMs: expect.any(Number),
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(putAttempt).toBe(2);
+    } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("accepts retry HTTP 412 only after an ambiguous direct R2 transport failure", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-retry-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      let putAttempt = 0;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot transport then 412 fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        putAttempt += 1;
+        await request.arrayBuffer();
+        if (putAttempt === 1) {
+          throw new TypeError("fetch failed");
+        }
+        return new Response("precondition failed", { status: 412 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await retryJitter.advance();
+      await expect(upload).resolves.toEqual({
+        snapshotDirectR2PresignElapsedMs: expect.any(Number),
+        snapshotDirectR2PutElapsedMs: expect.any(Number),
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(putAttempt).toBe(2);
+    } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("preserves cancellation while a direct R2 snapshot presign is pending", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-presign-abort-"));
@@ -988,9 +1331,142 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("stops direct R2 retry jitter immediately on caller cancellation", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-retry-abort-"));
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot retry jitter");
+    let putAttempt = 0;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot retry cancellation fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        putAttempt += 1;
+        await request.arrayBuffer();
+        throw new TypeError("fetch failed");
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        signal: abortController.signal,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await retryJitter.delaySelected;
+      abortController.abort(abortReason);
+
+      await expect(upload).rejects.toBe(abortReason);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(putAttempt).toBe(1);
+    } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("does not start a direct R2 retry without enough presigned lifetime", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-retry-expiry-"));
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-08-13T20:50:28.000Z"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      let putAttempt = 0;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot retry expiry fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 1_500).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        putAttempt += 1;
+        await request.arrayBuffer();
+        throw new TypeError("fetch failed");
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      })).rejects.toThrow(
+        "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure; "
+        + "abandon this snapshot session and start a fresh snapshot before retrying.",
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(putAttempt).toBe(1);
+      expect(randomSpy).toHaveBeenCalledOnce();
+    } finally {
+      randomSpy.mockRestore();
+      vi.useRealTimers();
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("logs redacted direct R2 transport failure text without presigned URL material", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
 
     try {
       const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
@@ -1025,17 +1501,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
         sourceFilePath: encryptedFilePath,
-      })).rejects.toThrow(
+      });
+      await retryJitter.advance();
+      await expect(upload).rejects.toThrow(
         "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure; "
         + "abandon this snapshot session and start a fresh snapshot before retrying.",
       );
 
+      expect(fetchMock).toHaveBeenCalledTimes(3);
       const logs = readHostedExecutionStructuredLogs();
       const failureLog = logs.find((log) =>
         log.message === "Hosted runtime upstream request failed."
@@ -1054,6 +1533,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(tempRoot);
       expect(serializedLogs).not.toContain(putUrl);
     } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
       await rm(tempRoot, {
         force: true,
         recursive: true,
@@ -1061,7 +1542,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("fails direct R2 workspace snapshot PUT status errors as non-resumable sessions", async () => {
+  it("rejects an initial direct R2 HTTP 412 response", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
 
@@ -1119,9 +1600,160 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("rejects retry HTTP 412 after a non-ambiguous direct R2 response", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      let putAttempt = 0;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot response then 412 fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        putAttempt += 1;
+        await request.arrayBuffer();
+        if (putAttempt === 1) {
+          return new Response(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+              + "<Error><Code>InternalError</Code>"
+              + "<Message>We encountered an internal error. Please try again.</Message>"
+              + "</Error>",
+            {
+              headers: {
+                "content-type": "application/xml",
+              },
+              status: 500,
+            },
+          );
+        }
+        return new Response("precondition failed", { status: 412 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await retryJitter.advance();
+      await expect(upload).rejects.toThrow(
+        "Hosted workspace snapshot direct R2 upload is not resumable after HTTP 412; "
+        + "abandon this snapshot session and start a fresh snapshot before retrying.",
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(putAttempt).toBe(2);
+    } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("rejects nonretryable direct R2 status responses without another PUT", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      let putAttempt = 0;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot nonretryable status fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        putAttempt += 1;
+        await request.arrayBuffer();
+        return new Response(
+          "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<Error><Code>InvalidDigest</Code>"
+            + "<Message>The checksum header is malformed.</Message>"
+            + "</Error>",
+          {
+            headers: {
+              "content-type": "application/xml",
+            },
+            status: 400,
+          },
+        );
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      })).rejects.toThrow(
+        "Hosted workspace snapshot direct R2 upload is not resumable after HTTP 400; "
+        + "abandon this snapshot session and start a fresh snapshot before retrying.",
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(putAttempt).toBe(1);
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("retains bounded R2 error diagnostics without presigned URL material", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const retryJitter = controlDirectR2RetryJitter();
 
     try {
       const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
@@ -1168,15 +1800,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await retryJitter.advance();
       let uploadError: unknown;
       try {
-        await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
-          encryptedByteSize: encryptedBytes.byteLength,
-          encryptedObjectSha256: "c".repeat(64),
-          objectKey,
-          snapshotId: "snapshot_runner_platform",
-          sourceFilePath: encryptedFilePath,
-        });
+        await upload;
       } catch (error) {
         uploadError = error;
       }
@@ -1190,7 +1824,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(safeError).not.toContain(objectKey);
       expect(safeError).not.toContain("fixture-secret");
       expect(safeError).not.toContain(putUrl);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     } finally {
+      retryJitter.restore();
+      vi.useRealTimers();
       await rm(tempRoot, {
         force: true,
         recursive: true,
