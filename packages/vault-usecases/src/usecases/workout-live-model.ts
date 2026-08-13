@@ -145,6 +145,10 @@ export function buildLiveWorkoutCardEditor(input: {
       !presentationExercise
       || presentationExercise.name !== exercise.name
       || presentationExercise.sets.length !== sets.length
+      || exercise.mode === 'assisted_bodyweight'
+      || exercise.mode === 'weighted_bodyweight'
+      || exercise.mode === 'duration'
+      || exercise.mode === 'cardio'
     ) {
       return null
     }
@@ -155,6 +159,9 @@ export function buildLiveWorkoutCardEditor(input: {
       const cardSet = presentationExercise.sets[setIndex]
       const logged = hasLoggedWorkoutSet(set)
       if (!cardSet || logged !== (cardSet.status === 'completed')) {
+        return null
+      }
+      if (!logged && set.weightUnit !== undefined) {
         return null
       }
       const result = logged
@@ -203,6 +210,9 @@ function projectWorkoutSessionEditorResult(
   exercise: WorkoutExercise,
   set: WorkoutSet,
 ): WorkoutMemberActionExpectedSetResultV1 | null {
+  if (hasUnsupportedWorkoutEditorResult(set)) {
+    return null
+  }
   const isWeightOriented = exercise.mode === 'weight_reps'
     || typeof set.weight === 'number'
     || exercise.unitOverride !== undefined
@@ -226,17 +236,26 @@ function projectWorkoutSessionEditorResult(
       ? { kind: 'note', note: set.note }
       : null
   }
-  if (isWeightOriented) {
-    return {
-      kind: 'weight_reps',
-      reps: null,
-      weight: null,
-      weightUnit: set.weightUnit ?? null,
-    }
-  }
-  return exercise.mode === 'bodyweight'
-    ? { kind: 'reps', reps: null }
-    : { kind: 'note', note: null }
+  return null
+}
+
+function hasUnsupportedWorkoutEditorResult(set: WorkoutSet): boolean {
+  return (
+    typeof set.durationSeconds === 'number'
+    || typeof set.distanceMeters === 'number'
+    || typeof set.rpe === 'number'
+    || typeof set.bodyweightKg === 'number'
+    || typeof set.assistanceKg === 'number'
+    || typeof set.addedWeightKg === 'number'
+    || (
+      typeof set.note === 'string'
+      && (
+        typeof set.reps === 'number'
+        || typeof set.weight === 'number'
+        || set.weightUnit !== undefined
+      )
+    )
+  )
 }
 
 function encodeWorkoutSessionEditorResult(

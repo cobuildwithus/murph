@@ -49,9 +49,14 @@ The projection preserves the closed result family, canonical zero values,
 nullable reps/weight, the raw optional set unit, and separate exercise unit
 context. A note is eligible only when its exact canonical value fits the
 40-character visible card field; a longer note is never substituted with a
-generic label inside editable state. A read failure, mismatch, completed
-workout, hidden note, or oversized V6 leaves the card as the existing readable
-V4 snapshot.
+generic label inside editable state. Every completed set must fit exactly one
+supported note, reps, or weight/reps family; duration, distance, RPE,
+bodyweight, assistance, added-load, or mixed-result sets keep their original
+readable actual on V4 instead of entering a lossy editor. Duration, cardio,
+assisted-bodyweight, and weighted-bodyweight exercise modes remain V4 even
+before a result is logged because V6 cannot produce their native set shape. A read failure,
+mismatch, completed workout, hidden or unsupported result, or oversized V6
+leaves the card as the existing readable V4 snapshot.
 
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The

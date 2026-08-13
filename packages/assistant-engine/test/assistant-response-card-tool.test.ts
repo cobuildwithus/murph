@@ -288,6 +288,16 @@ async function createChallengeVault(input: {
 
 async function createLiveWorkoutCardVault(input: {
   hiddenNote?: string
+  unsupportedSet?: {
+    actual: string
+    canonical: Record<string, number | string | undefined>
+    mode?:
+      | 'assisted_bodyweight'
+      | 'bodyweight'
+      | 'cardio'
+      | 'duration'
+      | 'weighted_bodyweight'
+  }
 } = {}): Promise<{
   card: AssistantResponseCard
   root: string
@@ -310,7 +320,16 @@ async function createLiveWorkoutCardVault(input: {
       workout: {
         sourceApp: 'murph-live',
         startedAt: '2026-08-12T14:00:00.000Z',
-        exercises: input.hiddenNote === undefined
+        exercises: input.unsupportedSet !== undefined
+          ? [{
+              ...(input.unsupportedSet.mode === undefined
+                ? {}
+                : { mode: input.unsupportedSet.mode }),
+              name: 'Exercise',
+              order: 1,
+              sets: [{ ...input.unsupportedSet.canonical, order: 1 }],
+            }]
+          : input.hiddenNote === undefined
           ? [{
               mode: 'weight_reps',
               name: 'Leg press',
@@ -346,7 +365,16 @@ async function createLiveWorkoutCardVault(input: {
       workout: {
         version: 1,
         state: 'active',
-        exercises: input.hiddenNote === undefined
+        exercises: input.unsupportedSet !== undefined
+          ? [{
+              name: 'Exercise',
+              sets: [{
+                status: 'completed',
+                target: null,
+                actual: input.unsupportedSet.actual,
+              }],
+            }]
+          : input.hiddenNote === undefined
           ? [{
               name: 'Leg press',
               sets: [
@@ -361,6 +389,75 @@ async function createLiveWorkoutCardVault(input: {
             }],
       },
     },
+  }
+}
+
+async function persistWorkoutCardThroughLinq(input: {
+  card: AssistantResponseCard
+  idSuffix: string
+  vaultRoot: string
+}) {
+  const intent = await createAssistantOutboxIntent({
+    actorId: '+15550001',
+    card: input.card,
+    channel: 'linq',
+    dedupeToken: `workout-card-${input.idSuffix}`,
+    message: 'ignored model prose',
+    sessionId: `session-${input.idSuffix}`,
+    threadId: `thread-${input.idSuffix}`,
+    threadIsDirect: true,
+    turnId: `turn-${input.idSuffix}`,
+    vault: input.vaultRoot,
+  })
+  const persisted = await readAssistantOutboxIntent(
+    input.vaultRoot,
+    intent.intentId,
+  )
+  const persistedCard = persisted?.card
+  if (
+    !persistedCard
+    || persistedCard.kind !== 'compact_table'
+    || !('workout' in persistedCard)
+  ) {
+    throw new TypeError('Expected the persisted workout card.')
+  }
+
+  const requests: unknown[] = []
+  const fetchImplementation: LinqFetch = async (_url, init) => {
+    requests.push(
+      typeof init.body === 'string' ? JSON.parse(init.body) : null,
+    )
+    return {
+      arrayBuffer: async () => new ArrayBuffer(0),
+      json: async () => ({ message: { id: 'msg_workout_card' } }),
+      ok: true,
+      status: 200,
+      text: async () => '',
+    }
+  }
+  await sendLinqIMessageAppCard({
+    card: persistedCard,
+    chatId: 'chat_workout_card',
+    idempotencyKey: `workout-card-${input.idSuffix}`,
+  }, {
+    env: { LINQ_API_TOKEN: 'test-token' },
+    fetchImplementation,
+  })
+
+  const request = requests[0] as {
+    message: { parts: Array<{ fallback_text: string; url: string }> }
+  }
+  const encoded = request.message.parts[0]?.url.split('#murph-card=')[1]
+  if (encoded === undefined) {
+    throw new TypeError('Expected the encoded workout card URL.')
+  }
+  return {
+    envelope: JSON.parse(
+      Buffer.from(encoded, 'base64url').toString('utf8'),
+    ) as { card?: unknown; schemaVersion?: unknown },
+    persisted,
+    persistedCard,
+    request,
   }
 }
 
@@ -1140,68 +1237,96 @@ describe('murph.attach_response_card', () => {
     expect(card).not.toHaveProperty('editor')
     expect(JSON.stringify(card)).not.toContain(hiddenNote)
 
-    const intent = await createAssistantOutboxIntent({
-      actorId: '+15550001',
+    const delivery = await persistWorkoutCardThroughLinq({
       card,
-      channel: 'linq',
-      dedupeToken: 'note-privacy-card',
-      message: 'ignored model prose',
-      sessionId: 'session-note-privacy',
-      threadId: 'thread-note-privacy',
-      threadIsDirect: true,
-      turnId: 'turn-note-privacy',
-      vault: fixture.root,
-    })
-    const persisted = await readAssistantOutboxIntent(
-      fixture.root,
-      intent.intentId,
-    )
-    const persistedCard = persisted?.card
-    if (
-      !persistedCard
-      || persistedCard.kind !== 'compact_table'
-      || !('workout' in persistedCard)
-    ) {
-      throw new TypeError('Expected the persisted workout card.')
-    }
-    expect(persistedCard).not.toHaveProperty('editor')
-    expect(JSON.stringify(persistedCard)).not.toContain(hiddenNote)
-
-    const requests: unknown[] = []
-    const fetchImplementation: LinqFetch = async (_url, init) => {
-      requests.push(
-        typeof init.body === 'string' ? JSON.parse(init.body) : null,
-      )
-      return {
-        arrayBuffer: async () => new ArrayBuffer(0),
-        json: async () => ({ message: { id: 'msg_note_privacy' } }),
-        ok: true,
-        status: 200,
-        text: async () => '',
-      }
-    }
-    await sendLinqIMessageAppCard({
-      card: persistedCard,
-      chatId: 'chat_note_privacy',
-      idempotencyKey: 'note-privacy-1',
-    }, {
-      env: { LINQ_API_TOKEN: 'test-token' },
-      fetchImplementation,
+      idSuffix: 'note-privacy',
+      vaultRoot: fixture.root,
     })
 
-    expect(requests).toHaveLength(1)
-    const requestJson = JSON.stringify(requests[0])
-    expect(requestJson).not.toContain(hiddenNote)
-    const request = requests[0] as {
-      message: { parts: Array<{ url: string }> }
+    expect(delivery.persistedCard).not.toHaveProperty('editor')
+    expect(JSON.stringify(delivery.persistedCard)).not.toContain(hiddenNote)
+    expect(JSON.stringify(delivery.request)).not.toContain(hiddenNote)
+    expect(delivery.envelope.schemaVersion).toBe(4)
+    expect(JSON.stringify(delivery.envelope)).not.toContain(hiddenNote)
+  })
+
+  it.each([
+    {
+      actual: '60 seconds',
+      canonical: { durationSeconds: 60 },
+      label: 'duration',
+      mode: 'duration' as const,
+    },
+    {
+      actual: '500 meters in 120 seconds',
+      canonical: { distanceMeters: 500, durationSeconds: 120 },
+      label: 'distance and duration',
+      mode: 'cardio' as const,
+    },
+    {
+      actual: '8 reps with 20 kg assistance',
+      canonical: { assistanceKg: 20, reps: 8 },
+      label: 'assistance',
+      mode: 'assisted_bodyweight' as const,
+    },
+    {
+      actual: '8 reps at 80 kg bodyweight',
+      canonical: { bodyweightKg: 80, reps: 8 },
+      label: 'bodyweight',
+      mode: 'bodyweight' as const,
+    },
+    {
+      actual: '8 reps with 10 kg added',
+      canonical: { addedWeightKg: 10, reps: 8 },
+      label: 'added load',
+      mode: 'weighted_bodyweight' as const,
+    },
+    {
+      actual: 'RPE 8',
+      canonical: { rpe: 8 },
+      label: 'RPE',
+    },
+    {
+      actual: '100 kg × 8 at RPE 8',
+      canonical: { reps: 8, rpe: 8, weight: 100 },
+      label: 'mixed RPE',
+    },
+    {
+      actual: '8 reps · Slow tempo',
+      canonical: { note: 'Slow tempo', reps: 8 },
+      label: 'mixed note',
+    },
+  ])('preserves a canonical $label result through the V4 delivery path', async (fixtureInput, testIndex) => {
+    const fixture = await createLiveWorkoutCardVault({
+      unsupportedSet: fixtureInput,
+    })
+    const attached = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+    const card = attached.responseCardPatch?.card
+    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
+      throw new TypeError('Expected the attached workout card.')
     }
-    const encoded = request.message.parts[0]?.url.split('#murph-card=')[1]
-    expect(encoded).toBeDefined()
-    const envelope = JSON.parse(
-      Buffer.from(encoded ?? '', 'base64url').toString('utf8'),
-    ) as { schemaVersion?: unknown }
-    expect(envelope.schemaVersion).toBe(4)
-    expect(JSON.stringify(envelope)).not.toContain(hiddenNote)
+    expect(card).not.toHaveProperty('editor')
+    expect(card.workout.exercises[0]?.sets[0]?.actual)
+      .toBe(fixtureInput.actual)
+
+    const delivery = await persistWorkoutCardThroughLinq({
+      card,
+      idSuffix: `unsupported-${testIndex}`,
+      vaultRoot: fixture.root,
+    })
+    expect(delivery.persistedCard).not.toHaveProperty('editor')
+    expect(delivery.persistedCard.workout.exercises[0]?.sets[0]?.actual)
+      .toBe(fixtureInput.actual)
+    expect(delivery.persisted?.message).toContain(fixtureInput.actual)
+    expect(delivery.request.message.parts[0]?.fallback_text).toContain('workout')
+    expect(delivery.envelope.schemaVersion).toBe(4)
+    expect(JSON.stringify(delivery.envelope)).toContain(fixtureInput.actual)
   })
 
   it('refuses group cards without a complete read, authorized participants, backed definition scopes, or canonical page', async () => {

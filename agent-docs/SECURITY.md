@@ -666,6 +666,10 @@ Last verified: 2026-08-13
   canonical value fits the visible 40-character result field; a longer hidden
   note forces the authority-free V4 presentation instead of entering either
   persisted card state or the Linq request.
+  The same fail-closed eligibility applies to any duration, distance, RPE,
+  bodyweight, assistance, added-load, or mixed result that the typed V6 families
+  cannot fully represent; runtime preserves the original V4 actual rather than
+  persisting a reduced editable projection.
   The binding is never accepted as authentication and can authorize nothing
   without the separately enrolled scoped bearer; the workout owner uses it
   only as an exact stale-card precondition under the canonical mutation lock.

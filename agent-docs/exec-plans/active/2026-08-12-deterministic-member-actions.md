@@ -105,6 +105,10 @@ Messages extension as the first action family.
   fully visible in the 40-character result field. Longer hidden notes force the
   whole card to the V4/read-only path so they cannot enter persisted card state
   or the provider request under a generic display label.
+- Every completed set enters V6 only when its entire canonical result is exactly
+  one supported note, reps, or weight/reps family. Unsupported or mixed result
+  fields keep the whole immutable card on V4 so attachment cannot replace a
+  truthful actual with a reduced editable value.
 
 ## Verification
 

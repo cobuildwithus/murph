@@ -159,6 +159,92 @@ describe('live workout model', () => {
     }), null)
   })
 
+  test.each([
+    { label: 'duration', set: { durationSeconds: 60 } },
+    {
+      label: 'distance and duration',
+      set: { distanceMeters: 500, durationSeconds: 120 },
+    },
+    { label: 'RPE', set: { rpe: 8 } },
+    { label: 'bodyweight', set: { bodyweightKg: 80, reps: 8 } },
+    { label: 'assisted bodyweight', set: { assistanceKg: 20, reps: 8 } },
+    { label: 'weighted bodyweight', set: { addedWeightKg: 10, reps: 8 } },
+    { label: 'reps with note', set: { note: 'Slow tempo', reps: 8 } },
+    { label: 'note with set unit', set: { note: 'Slow tempo', weightUnit: 'kg' as const } },
+    { label: 'weight and reps with RPE', set: { reps: 8, rpe: 8, weight: 100 } },
+  ])('keeps a canonical $label result on the read-only card', ({ set }) => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Exercise',
+        sets: [{ status: 'completed' as const, target: null, actual: 'Exact result' }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Exercise',
+        order: 1,
+        sets: [{ ...set, order: 1 }],
+      }],
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({ presentation, workout }), null)
+    assert.equal(presentation.exercises[0]?.sets[0]?.actual, 'Exact result')
+  })
+
+  test('keeps a pending set with an unprojected unit on the read-only card', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Exercise',
+        sets: [{ status: 'pending' as const, target: '8 reps', actual: null }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Exercise',
+        order: 1,
+        sets: [{ order: 1, weightUnit: 'kg' }],
+      }],
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({ presentation, workout }), null)
+  })
+
+  test.each([
+    'assisted_bodyweight',
+    'weighted_bodyweight',
+    'duration',
+    'cardio',
+  ] as const)('keeps a pending %s exercise on the read-only card', (mode) => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Exercise',
+        sets: [{ status: 'pending' as const, target: null, actual: null }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        mode,
+        name: 'Exercise',
+        order: 1,
+        sets: [{ order: 1 }],
+      }],
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({ presentation, workout }), null)
+  })
+
   test('starts saved routines as active sessions with unlogged placeholders', () => {
     const template = workoutTemplateSchema.parse({
       routineNote: 'Push day',
