@@ -110,6 +110,23 @@ test("@murphai/device-syncd root barrel exposes the local secret codec API", () 
   assert.equal("buildDeviceSyncTokenCipherOptions" in rootExports, false);
 });
 
+test("Junction provider imports SDK resource subpaths without the aggregate root", async () => {
+  const source = await readFile(
+    new URL("../src/providers/junction-client.ts", import.meta.url),
+    "utf8",
+  );
+  const sdkSpecifiers = [
+    ...source.matchAll(
+      /\b(?:from\s+|import\s*(?:\(\s*)?)["'](@junction-api\/sdk(?:\/[^"']+)?)['"]/gu,
+    ),
+  ].map((match) => match[1]);
+
+  assert.ok(
+    sdkSpecifiers.some((specifier) => specifier?.startsWith("@junction-api/sdk/")),
+  );
+  assert.equal(sdkSpecifiers.includes("@junction-api/sdk"), false);
+});
+
 test("hosted web-safe device-sync graph stays out of provider runtime modules", async () => {
   const failures = await Promise.all(
     WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS.map(async (root) => {

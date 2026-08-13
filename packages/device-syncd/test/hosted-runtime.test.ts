@@ -1088,6 +1088,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyPendingRequest(
         {
+          connectionId: "dsc_123",
           limit: 10,
           stagedDirtyAcks: [
             {
@@ -1100,6 +1101,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         "trusted-user",
       ),
     ).toEqual({
+      connectionId: "dsc_123",
       limit: 10,
       stagedDirtyAcks: [
         {

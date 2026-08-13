@@ -1,6 +1,16 @@
 import { Buffer } from 'node:buffer'
 
-import type { ImageGenerateParamsNonStreaming } from 'openai/resources/images'
+import OpenAI, {
+  APIConnectionTimeoutError,
+  APIError,
+  toFile,
+  type APIPromise,
+} from 'openai'
+import type {
+  ImageEditParamsNonStreaming,
+  ImageGenerateParamsNonStreaming,
+  ImagesResponse,
+} from 'openai/resources/images'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -15,6 +25,17 @@ export const OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION =
 
 type OpenAiImageOperation = 'edit' | 'generation'
 
+type OpenAiImageAbortContext = {
+  signal: AbortSignal
+  timeoutSignal: AbortSignal
+}
+
+type OpenAiImageRequestState = {
+  errorResponse: Response | null
+  transportError: unknown
+  transportSignalAborted: boolean
+}
+
 const OPENAI_IMAGE_ERROR_MESSAGE_MAX_LENGTH = 300
 const OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH = 100
 
@@ -28,20 +49,17 @@ export interface OpenAiImageReferenceInput {
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp'
 }
 
-export interface OpenAiImageGenerationUsage {
-  input_tokens?: number
-  input_tokens_details?: {
-    cached_tokens?: number
-    image_tokens?: number
-    text_tokens?: number
-  }
-  output_tokens?: number
-  output_tokens_details?: {
-    image_tokens?: number
-    reasoning_tokens?: number
-    text_tokens?: number
-  }
-  total_tokens?: number
+export type OpenAiImageGenerationUsage = Partial<
+  Omit<ImagesResponse.Usage, 'input_tokens_details' | 'output_tokens_details'>
+> & {
+  input_tokens_details?:
+    Partial<ImagesResponse.Usage.InputTokensDetails> & {
+      cached_tokens?: number
+    }
+  output_tokens_details?:
+    Partial<ImagesResponse.Usage.OutputTokensDetails> & {
+      reasoning_tokens?: number
+    }
 }
 
 export interface OpenAiImageGenerationResult {
@@ -82,16 +100,17 @@ async function generateOpenAiImageFromPrompt(input: {
   quality: OpenAiImageQuality
   size: OpenAiImageSize
 }): Promise<OpenAiImageGenerationResult> {
+  const request = buildOpenAiImageGenerationRequest(input)
   return await requestOpenAiImage({
     abortSignal: input.abortSignal ?? null,
     apiKey: input.apiKey,
-    body: JSON.stringify(buildOpenAiImageGenerationRequest(input)),
     fetchImpl: input.fetchImpl,
-    headers: {
-      'content-type': 'application/json',
-    },
     operation: 'generation',
-    path: '/images/generations',
+    request: (openAi, signal) => openAi.images.generate(request, {
+      maxRetries: 0,
+      signal,
+      timeout: OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
+    }),
   })
 }
 
@@ -106,57 +125,52 @@ async function editOpenAiImageWithReferences(input: {
   referenceImages: readonly OpenAiImageReferenceInput[]
   size: OpenAiImageSize
 }): Promise<OpenAiImageGenerationResult> {
-  const form = new FormData()
-  form.set('model', OPENAI_IMAGE_GENERATION_MODEL)
-  form.set('prompt', input.prompt)
-  form.set('quality', input.quality)
-  form.set('size', input.size)
-  form.set('output_format', input.outputFormat)
-  if (input.outputCompression !== undefined) {
-    form.set('output_compression', String(input.outputCompression))
-  }
-
-  for (const reference of input.referenceImages) {
-    form.append(
-      'image[]',
-      new Blob([Buffer.from(reference.bytes)], { type: reference.mediaType }),
-      reference.filename,
-    )
-  }
-
+  const request = await buildOpenAiImageEditRequest(input)
   return await requestOpenAiImage({
     abortSignal: input.abortSignal ?? null,
     apiKey: input.apiKey,
-    body: form,
     fetchImpl: input.fetchImpl,
     operation: 'edit',
-    path: '/images/edits',
+    request: (openAi, signal) => openAi.images.edit(request, {
+      maxRetries: 0,
+      signal,
+      timeout: OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
+    }),
   })
 }
 
 async function requestOpenAiImage(input: {
   abortSignal: AbortSignal | null
   apiKey: string
-  body: BodyInit
   fetchImpl: typeof fetch
-  headers?: Record<string, string>
   operation: OpenAiImageOperation
-  path: '/images/edits' | '/images/generations'
+  request: (
+    openAi: OpenAI,
+    signal: AbortSignal,
+  ) => APIPromise<ImagesResponse>
 }): Promise<OpenAiImageGenerationResult> {
   const startedAtMs = Date.now()
+  const abortContext = buildOpenAiImageAbortContext(input.abortSignal)
+  const requestState: OpenAiImageRequestState = {
+    errorResponse: null,
+    transportError: null,
+    transportSignalAborted: false,
+  }
+  const openAi = new OpenAI({
+    adminAPIKey: null,
+    apiKey: input.apiKey,
+    baseURL: OPENAI_IMAGES_BASE_URL,
+    fetch: createOpenAiImageSdkFetch(input.fetchImpl, requestState),
+    logLevel: 'off',
+    maxRetries: 0,
+    organization: null,
+    project: null,
+    timeout: OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
+    webhookSecret: null,
+  })
+
   try {
-    const response = await input.fetchImpl(
-      `${OPENAI_IMAGES_BASE_URL}${input.path}`,
-      {
-        body: input.body,
-        headers: {
-          ...(input.headers ?? {}),
-          authorization: `Bearer ${input.apiKey}`,
-        },
-        method: 'POST',
-        signal: buildOpenAiImageAbortSignal(input.abortSignal),
-      },
-    )
+    const response = await input.request(openAi, abortContext.signal).asResponse()
     return {
       ...await readOpenAiImageGenerationResult(response, input.operation),
       occurredAt: new Date(startedAtMs).toISOString(),
@@ -165,11 +179,55 @@ async function requestOpenAiImage(input: {
     if (error instanceof VaultCliError) {
       throw error
     }
-    if (input.abortSignal?.aborted || isAbortError(error)) {
-      throw error
+
+    const errorResponse = requestState.errorResponse
+    if (errorResponse) {
+      return {
+        ...await readOpenAiImageGenerationResult(errorResponse, input.operation),
+        occurredAt: new Date(startedAtMs).toISOString(),
+      }
     }
 
-    const timedOut = isTimeoutError(error)
+    if (error instanceof APIError && typeof error.status === 'number') {
+      const providerError = readOpenAiImageApiError(error)
+      throw new VaultCliError(
+        'ASSISTANT_IMAGE_GENERATION_FAILED',
+        `OpenAI image ${input.operation} request failed with HTTP ${error.status}.`,
+        {
+          failureStage: 'http',
+          operation: input.operation,
+          provider: 'openai-images',
+          providerErrorCode: providerError.code,
+          providerErrorMessage: providerError.message,
+          providerRequestId: providerError.requestId,
+          retryable:
+            error.status === 408 ||
+            error.status === 429 ||
+            error.status >= 500,
+          status: error.status,
+        },
+      )
+    }
+
+    if (input.abortSignal?.aborted) {
+      throw requestState.transportError
+        ?? input.abortSignal.reason
+        ?? error
+    }
+
+    const transportError = requestState.transportError ?? error
+    if (
+      isAbortError(transportError) &&
+      !requestState.transportSignalAborted &&
+      !abortContext.timeoutSignal.aborted
+    ) {
+      throw transportError
+    }
+
+    const timedOut =
+      abortContext.timeoutSignal.aborted ||
+      isTimeoutError(transportError) ||
+      error instanceof APIConnectionTimeoutError
     throw new VaultCliError(
       'ASSISTANT_IMAGE_GENERATION_FAILED',
       timedOut
@@ -183,19 +241,57 @@ async function requestOpenAiImage(input: {
         retryable: true,
         timedOut,
         timeoutMs: OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
-        transportErrorName: readSafeTransportErrorName(error),
+        transportErrorName: timedOut
+          ? 'TimeoutError'
+          : readSafeTransportErrorName(transportError),
       },
     )
   }
 }
 
-function buildOpenAiImageAbortSignal(abortSignal: AbortSignal | null): AbortSignal {
-  return abortSignal
-    ? AbortSignal.any([
-        abortSignal,
-        AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS),
-      ])
-    : AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS)
+function buildOpenAiImageAbortContext(
+  abortSignal: AbortSignal | null,
+): OpenAiImageAbortContext {
+  const timeoutSignal = AbortSignal.timeout(
+    OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
+  )
+  return {
+    signal: abortSignal
+      ? AbortSignal.any([abortSignal, timeoutSignal])
+      : timeoutSignal,
+    timeoutSignal,
+  }
+}
+
+function createOpenAiImageSdkFetch(
+  fetchImpl: typeof fetch,
+  state: OpenAiImageRequestState,
+): typeof fetch {
+  const sdkFetch = async (
+    request: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    try {
+      const response = await fetchImpl(request, init)
+      if (!response.ok) {
+        try {
+          state.errorResponse = response.clone()
+        } catch {
+          state.errorResponse = null
+        }
+      }
+      return response
+    } catch (error) {
+      state.transportError = error
+      state.transportSignalAborted = init?.signal?.aborted === true
+      throw error
+    }
+  }
+
+  // The Images resource checks this property before encoding multipart data.
+  // Supplying it prevents a synthetic data: probe from reaching the injected
+  // hosted-egress fetch while retaining the exact injected transport.
+  return Object.assign(sdkFetch, { Response })
 }
 
 async function readOpenAiImageGenerationResult(
@@ -261,6 +357,33 @@ function buildOpenAiImageGenerationRequest(input: {
   return request
 }
 
+async function buildOpenAiImageEditRequest(input: {
+  outputCompression?: number
+  outputFormat: OpenAiImageOutputFormat
+  prompt: string
+  quality: OpenAiImageQuality
+  referenceImages: readonly OpenAiImageReferenceInput[]
+  size: OpenAiImageSize
+}): Promise<ImageEditParamsNonStreaming> {
+  const request: ImageEditParamsNonStreaming = {
+    image: await Promise.all(
+      input.referenceImages.map((reference) =>
+        toFile(reference.bytes, reference.filename, {
+          type: reference.mediaType,
+        })),
+    ),
+    model: OPENAI_IMAGE_GENERATION_MODEL,
+    output_format: input.outputFormat,
+    prompt: input.prompt,
+    quality: input.quality,
+    size: input.size,
+  }
+  if (input.outputCompression !== undefined) {
+    request.output_compression = input.outputCompression
+  }
+  return request
+}
+
 async function readOpenAiJsonResponse(
   response: Response,
   input: {
@@ -287,9 +410,9 @@ async function readOpenAiJsonResponse(
 }
 
 // Custom-boundary parse of the OpenAI Images API payload (canonical SDK shape:
-// `ImagesResponse` from `openai/resources/images`). We use raw fetch instead of
-// the openai SDK client to keep auth/timeout/retry on our owners; the runtime
-// only consumes `data[0].b64_json` and an optional `usage` breakdown
+// `ImagesResponse` from `openai/resources/images`). The SDK owns request and
+// multipart construction, while the runtime still defensively consumes only
+// `data[0].b64_json` and an optional `usage` breakdown
 // (`input_tokens`, `output_tokens`, `total_tokens`, and nested
 // `input_tokens_details.{cached_tokens,image_tokens,text_tokens}` /
 // `output_tokens_details.{image_tokens,reasoning_tokens,text_tokens}`). The
@@ -419,13 +542,7 @@ function normalizeTokenDetails(
   return Object.keys(normalized).length > 0 ? normalized : null
 }
 
-interface OpenAiImageErrorBody {
-  code: string | null
-  message: string | null
-  requestId: string | null
-}
-
-function readOpenAiImageErrorBody(payload: unknown): OpenAiImageErrorBody {
+function readOpenAiImageErrorBody(payload: unknown) {
   const record = asRecord(payload)
   const error = asRecord(record?.error)
   return {
@@ -439,6 +556,24 @@ function readOpenAiImageErrorBody(payload: unknown): OpenAiImageErrorBody {
     ),
     requestId: readBoundedErrorString(
       error?.request_id ?? record?.request_id,
+      OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH,
+    ),
+  }
+}
+
+function readOpenAiImageApiError(error: APIError) {
+  const errorRecord = asRecord(error.error)
+  return {
+    code: readBoundedErrorString(
+      errorRecord?.code ?? errorRecord?.type,
+      OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH,
+    ),
+    message: readBoundedErrorString(
+      errorRecord?.message,
+      OPENAI_IMAGE_ERROR_MESSAGE_MAX_LENGTH,
+    ),
+    requestId: readBoundedErrorString(
+      error.requestID ?? error.headers?.get('openai-request-id'),
       OPENAI_IMAGE_ERROR_METADATA_MAX_LENGTH,
     ),
   }

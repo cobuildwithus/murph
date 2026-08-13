@@ -256,10 +256,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // materialization measured a 1,689,721B entry, 7,992,470B static closure, and
 // 9,975,121B total. Ratchet each baseline to that integrated measurement and
 // retain the established cross-platform tolerances.
-// Exhaustive Junction resource activation and direct bounded continuations
-// extend only existing lazy provider/importer chunks. Exact integrated macOS
-// assembly measured 10,136,931B total on 2026-08-13; ratchet that baseline and
-// retain the established 32KB allowance.
+//
+// The official provider-client migration externalizes the exact-pinned SDKs
+// already installed in the runner payload. Its lazy device-sync provider graph
+// measured 10,053,341B on macOS; preserve the boot-path ratchets and the
+// established 32KB total allowance. Exhaustive Junction activation then
+// measured 10,136,931B on macOS, so ratchet the combined integrated baseline.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_136_931 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;

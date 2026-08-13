@@ -676,6 +676,32 @@ Last verified: 2026-08-12
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- Hosted device-sync provider cadence and local job continuation are separate
+  wake domains. Web's canonical `nextReconcileAt` carries only the provider
+  schedule consumed by the global due-reconcile sweep. While a runner is warm,
+  an earlier queued-job wake reaches Temporal through the existing workspace
+  `nextWakeAt`. Hosted provider scheduling runs only for the account named by a
+  connection mailbox wake; only that wake may fetch its exact Web-owned dirty
+  row or claim its account's local jobs. A generic runtime timer admits neither
+  dirty work, provider cadence, nor unrelated-account jobs. The connection-specific encrypted
+  mailbox item stays pending while that account has queued or running work and
+  is narrowed before checkpoint publication from the actual job rows to each
+  manifest-safe payload/window, dedupe identity, priority, next retry time, and
+  remaining attempt limit, including worker-created child jobs. The same wake
+  carries the provider's advanced cadence, but Web does not receive that
+  cadence until a terminal completion-fence checkpoint has made the exact
+  retained state durable. Terminal success or terminal failure then clears the
+  source. Web dirty rows separately remain authoritative until dirty
+  resource/deletion jobs are terminally acknowledged. Because the device-sync
+  SQLite store is intentionally excluded from hosted snapshots, a replacement
+  runner rebuilds from those owners; it never projects local retry timing into
+  `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
+  prevent a future retry for one connection from blocking or advancing due work
+  for another.
+  Future provider cadence remains projected as the workspace follow-up wake and
+  is recorded with a system-mailbox checkpoint handoff; once that cadence is
+  due, only a connection mailbox wake may admit it, so a generic runtime timer
+  cannot self-rearm from stale local cadence.
 - A successful hosted checkpoint gets one best-effort, wake-raced vault-share
   projection opportunity before device-sync dirty acknowledgement or the next
   complete device-sync-only maintenance prefix. A conversation wake preempts
@@ -1257,7 +1283,11 @@ Last verified: 2026-08-12
   failure retains retry ownership. Deploy preflight requires the canonical
   runtime and preview buckets to be ENAM Standard. Runtime code has no fallback
   bucket, migration phase, or storage-specific admission gate; ordinary retry
-  and mailbox durability remain the failure boundary.
+  and mailbox durability remain the failure boundary. A rejected direct
+  snapshot upload may add only the bounded, redacted R2 XML error code, message,
+  and request id to the existing `checkpoint.snapshot_failed` error cause; the
+  raw body, resource path, object key, and presigned request material remain
+  excluded.
 - One-time current-sender Assistant Ask has two target-bound completion adapters
   over the same mailbox lifecycle, deterministic request identity, ten-minute
   expiry, isolated reviewed personal read, and completion identity.

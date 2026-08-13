@@ -150,12 +150,10 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@junction-api/sdk": "1.2.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
-  },
-  "devDependencies": {
-    "@junction-api/sdk": "1.2.0"
   },
   "engines": {
     "node": ">=24.14.1"

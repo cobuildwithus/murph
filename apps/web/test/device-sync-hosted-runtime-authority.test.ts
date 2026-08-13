@@ -727,6 +727,49 @@ function createRuntimeApplyFanoutHarness() {
   };
 }
 
+describe("readHostedDeviceSyncPendingDirtyState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("scopes a dirty pending read to the selected connection", async () => {
+    const listPendingDirtyConnectionsForUser = vi.fn(async () => ({
+      hasMore: false,
+      items: [],
+    }));
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: { listPendingDirtyConnectionsForUser },
+    });
+    const { readHostedDeviceSyncPendingDirtyState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await readHostedDeviceSyncPendingDirtyState({
+      request: new Request("https://example.test/device-sync/runtime/dirty-pending", {
+        body: JSON.stringify({
+          connectionId: "conn_dirty_selected",
+          limit: 10,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(listPendingDirtyConnectionsForUser).toHaveBeenCalledWith({
+      connectionId: "conn_dirty_selected",
+      limit: 10,
+      userId: "user_123",
+    });
+    expect(response).toEqual({
+      hasMore: false,
+      items: [],
+      nextWakeAt: null,
+      userId: "user_123",
+    });
+  });
+});
+
 describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   beforeEach(() => {
     vi.clearAllMocks();

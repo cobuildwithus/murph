@@ -156,7 +156,7 @@ test("Junction ECG grouped fetch admits its explicit dense cap and preserves gro
     sourceInstanceId: first?.sourceInstanceId,
     sourceProviderSlug: "apple-health-kit",
     sourceType: "watch",
-    timestamp: "2026-01-15T12:00:00.000Z",
+    timestamp: new Date("2026-01-15T12:00:00.000Z"),
     type: "lead_i",
     unit: "mV",
     value: -0.1,
