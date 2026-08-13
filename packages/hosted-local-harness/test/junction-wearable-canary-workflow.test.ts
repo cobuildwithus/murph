@@ -113,4 +113,10 @@ describe("live Junction wearable canary workflow", () => {
     expect(disclosureStep).toContain('name: `Continue to ${config.label}`');
     expect(disclosureStep).toContain(".click({ timeout: config.timeoutMs })");
   });
+
+  it("keeps Playwright's closing quote out of redacted navigation URLs", () => {
+    expect(browserRunner).toContain(
+      'message.replace(/https?:\\/\\/[^\\s)"\']+/gu, (rawUrl) => {',
+    );
+  });
 });

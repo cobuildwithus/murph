@@ -482,7 +482,7 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
       message = message.replaceAll(secret, "[redacted]");
     }
   }
-  message = message.replace(/https?:\/\/[^\s)]+/gu, (rawUrl) => {
+  message = message.replace(/https?:\/\/[^\s)"']+/gu, (rawUrl) => {
     try {
       const url = new URL(rawUrl);
       return `${url.origin}${url.pathname}`;
