@@ -11,7 +11,7 @@ Updated: 2026-08-12
 - Preserve the narrow raw-transport exceptions required for presigned byte
   transfers, internal traffic, generic runner proxying, dynamic SMART/FHIR
   endpoints, providers without a verified provider-owned TypeScript SDK, and
-  xAI's OpenAI-compatible extensions.
+  the existing path-scoped xAI `x_search` Responses extension.
 
 ## Success criteria
 
@@ -133,6 +133,15 @@ Updated: 2026-08-12
   defect. If remediation needs another policy owner or materially exceeds this
   central-facts/exact-exception design, pause for a new requirement-level
   retrospective instead of layering another heuristic.
+- Implemented the redesign with one provider-expression fact collector shared
+  by candidate classification and every exception, scoped ESM/CommonJS
+  transport bindings, static-only internal paths, registered transfer-header
+  factories, AST-bound stream piping, and one exact xAI request exception.
+- The correction head changes 4,332 lines, 619 more than the reviewed round-2
+  head. That increase is the retrospective's declared scoped-binding, exact-xAI,
+  and composed-fixture redesign; the parallel provider walker, dynamic-header
+  name heuristic, and source-text stream proof were deleted rather than
+  extended.
 
 ## Verification
 
@@ -145,10 +154,11 @@ Updated: 2026-08-12
 
 Current evidence:
 
-- Focused guard suite: 51 tests passed.
-- Repository-tool suite: 34 files and 557 tests passed.
+- Focused guard suite: 59 tests passed.
+- Repository-tool suite: 34 files and 565 tests passed after the round-2
+  redesign.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
-- `pnpm provider-requests:guard`: intentionally exits 1 with 43 current
+- `pnpm provider-requests:guard`: intentionally exits 1 with 44 current
   low-level provider transports/contracts; sibling migrations own those call
   sites.
 - Diff verification reaches the provider guard and stops on the same expected

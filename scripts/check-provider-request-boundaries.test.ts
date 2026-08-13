@@ -153,6 +153,21 @@ describe("check-provider-request-boundaries", () => {
     ].join("\n"))).toEqual([3, 7]);
   });
 
+  it("covers official provider clients loaded through CommonJS require", () => {
+    expect(
+      findProviderRequestBoundaryViolations(
+        "scripts/openai-client.cjs",
+        [
+          "const OpenAI = require('openai');",
+          "const client = new OpenAI();",
+          "client.responses.create({ model: 'gpt-5', ...payload });",
+        ].join("\n"),
+      ).filter((match) => match.kind === "object-spread").map(
+        (match) => match.line,
+      ),
+    ).toEqual([3]);
+  });
+
   it("covers Composio typed builders and the generated provider client", () => {
     expect(blockedLines([
       "import Composio from '@composio/client';",
@@ -574,6 +589,43 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([4, 5, 6, 7, 8, 9, 10]);
   });
 
+  it("reports scoped CommonJS and namespace-destructured transports", () => {
+    const commonJsMatches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const { request: send } = require('node:https');",
+        "const https = require('node:https');",
+        "const { request: sendFromNamespace } = https;",
+        "const directSend = require('node:https').request;",
+        "const { fetch: undiciFetch } = require('undici');",
+        "send('https://api.openai.com/v1/responses');",
+        "sendFromNamespace('https://api.openai.com/v1/responses');",
+        "directSend('https://api.openai.com/v1/responses');",
+        "undiciFetch('https://api.openai.com/v1/responses');",
+        "function shadow(send: (url: string) => string) {",
+        "  return send('https://api.openai.com/v1/responses');",
+        "}",
+        "function shadowGlobalFetch(unrelated: { fetch: (url: string) => string }) {",
+        "  const { fetch } = unrelated;",
+        "  return fetch('https://api.openai.com/v1/responses');",
+        "}",
+      ].join("\n"),
+      "scripts/provider-http-transports.cjs",
+    );
+    const namespaceMatches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "import * as https from 'node:https';",
+        "const { request: send } = https;",
+        "send('https://api.openai.com/v1/responses');",
+      ].join("\n"),
+      "scripts/provider-http-transports.mjs",
+    );
+
+    expect(commonJsMatches.map((match) => match.line)).toEqual([6, 7, 8, 9]);
+    expect(namespaceMatches.map((match) => match.line)).toEqual([3]);
+  });
+
   it("allows a Node HTTP presigned PUT with a proven piped stream", () => {
     expect(
       violationsOfKind(
@@ -589,6 +641,23 @@ describe("check-provider-request-boundaries", () => {
         "apps/cloudflare/src/openai-presigned-upload.ts",
       ),
     ).toEqual([]);
+  });
+
+  it("requires an AST-proven pipe into the exact presigned request", () => {
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        [
+          "import { request as httpsRequest } from 'node:https';",
+          "function putPresignedPayload(input: { payload: Readable; presignedPutUrl: string }) {",
+          "  const url = new URL(input.presignedPutUrl);",
+          "  const clientRequest = httpsRequest(url, { method: 'PUT' }, () => undefined);",
+          "  // input.payload.pipe(clientRequest);",
+          "}",
+        ].join("\n"),
+        "apps/cloudflare/src/openai-presigned-upload.ts",
+      ).map((match) => match.line),
+    ).toEqual([4]);
   });
 
   it("allows SDK-backed business adapters while retaining provider wire declarations", () => {
@@ -715,7 +784,34 @@ describe("check-provider-request-boundaries", () => {
       "apps/web/src/lib/linq/attachment-upload.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([2, 3, 4, 5]);
+    expect(matches.map((match) => match.line)).toEqual([2, 3, 4, 5, 8]);
+  });
+
+  it("admits only registered presigned transfer-header factories", () => {
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        [
+          "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
+          "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
+          "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "}",
+        ].join("\n"),
+        "packages/operator-config/src/linq-runtime.ts",
+      ),
+    ).toEqual([]);
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        [
+          "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
+          "  const headers = normalizeOtherRequiredHeaders(input.requiredHeaders);",
+          "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "}",
+        ].join("\n"),
+        "packages/operator-config/src/linq-runtime.ts",
+      ).map((match) => match.line),
+    ).toEqual([3]);
   });
 
   it("allows incoming Request pass-through but reports a direct provider call in the same proxy", () => {
@@ -767,7 +863,22 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([3, 4, 7]);
   });
 
-  it("keeps no-verified-SDK providers and xAI extensions as explicit registry exceptions", () => {
+  it("does not erase provider facts in object-form SMART/FHIR requests", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "import { request } from 'node:https';",
+        "const openAiHost = 'api.openai.com';",
+        "const fhirPath = '/v1/responses';",
+        "request({ hostname: openAiHost, path: fhirPath });",
+      ].join("\n"),
+      "apps/web/src/lib/smart-fhir/provider-transport.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4]);
+  });
+
+  it("keeps no-verified-SDK providers explicit and rejects general xAI HTTP", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
       [
@@ -778,13 +889,35 @@ describe("check-provider-request-boundaries", () => {
       "scripts/provider-exceptions.mjs",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([3]);
+    expect(matches.map((match) => match.line)).toEqual([2, 3]);
     expect(
       providerBoundaryRegistry.find((provider) => provider.id === "xai")?.rawHttpPolicy,
-    ).toBe("allow-xai-openai-compatible-extension");
+    ).toBe("require-official-sdk");
     expect(
       providerBoundaryRegistry.find((provider) => provider.id === "telegram")?.rawHttpPolicy,
     ).toBe("allow-no-verified-sdk");
+  });
+
+  it("allows only the path-scoped xAI Responses x_search request", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses';",
+        "async function search(fetchImpl: typeof fetch) {",
+        "  await fetchImpl(XAI_RESPONSES_URL, {",
+        "    body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }),",
+        "    method: 'POST',",
+        "  });",
+        "  await fetchImpl(XAI_RESPONSES_URL, {",
+        "    body: JSON.stringify({ store: false, tools: [{ type: 'web_search' }] }),",
+        "    method: 'POST',",
+        "  });",
+        "}",
+      ].join("\n"),
+      "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([7]);
   });
 
   it("registers the known verified-SDK bypass inventory explicitly", () => {
@@ -810,7 +943,20 @@ describe("check-provider-request-boundaries", () => {
       "internal-same-origin",
       "incoming-request-pass-through",
       "dynamic-smart-fhir",
+      "xai-x-search-responses",
     ]);
+  });
+
+  it("assigns canonical provider hosts to the correct registry owner", () => {
+    expect(
+      providerBoundaryRegistry.find((provider) => provider.id === "retell")?.hosts,
+    ).toContain("api.retellai.com");
+    expect(
+      providerBoundaryRegistry.find((provider) => provider.id === "kernel")?.hosts,
+    ).not.toContain("api.retellai.com");
+    expect(
+      providerBoundaryRegistry.find((provider) => provider.id === "composio")?.hosts,
+    ).toContain("backend.composio.dev");
   });
 
   it("allows provider-adjacent internal traffic without treating request.url as same-origin", () => {
@@ -851,6 +997,21 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => match.line)).toEqual([2, 4, 6]);
+  });
+
+  it("rejects network paths composed through template interpolation", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function replay(input: { request: Request }) {",
+        "  const openAiNetworkPath = '/api.openai.com/v1/responses';",
+        "  await fetch(new URL(`/${openAiNetworkPath}`, input.request.url));",
+        "}",
+      ].join("\n"),
+      "apps/cloudflare/src/provider-url-resolution.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
   });
 
 });
