@@ -28,6 +28,8 @@ import {
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
@@ -648,26 +650,29 @@ export async function readProjectableSleepNights(
       HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
     ) ?? undefined,
   });
-  const providers = sourceHealth
-    .filter((source) => source.provider !== "unknown" && source.sleepNights > 0)
-    .map((source) => source.provider)
+  const providers = [...new Set(sourceHealth
+    .filter((source) => source.sleepNights > 0)
+    .map((source) => source.provider))]
     .sort();
   if (providers.length > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
     return [];
   }
-  const sourceSummaries = await Promise.all(providers.map(async (provider) => ({
-    provider,
-    summaries: await summarizeWearableSleepRuntime(vaultRoot, {
+  const records: HostedVaultShareDeliveryRecord[] = [];
+  for (const provider of providers) {
+    const source = resolveHostedVaultShareDataSource(provider);
+    if (!source) {
+      return [];
+    }
+    const summaries = await summarizeWearableSleepRuntime(vaultRoot, {
       limit: HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW,
       providers: [provider],
-    }),
-  })));
-  const records = sourceSummaries.flatMap(({ provider, summaries }) => {
-    const source = resolveHostedVaultShareDataSource(provider);
-    return source
-      ? selectProjectableSleepNights(summaries, dateContext.currentDate, source)
-      : [];
-  });
+    });
+    records.push(...selectProjectableSleepNights(
+      summaries,
+      dateContext.currentDate,
+      source,
+    ));
+  }
   return records.length <= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS
     ? records.sort(compareHostedVaultShareDeliveryRecords)
     : [];
@@ -689,15 +694,11 @@ export async function readProjectableDailyMetricDays(
   if (!cutoffDate) {
     return [];
   }
-  const publicSourcePoints = await readMetricPointsByPublicSource({
+  const points = await readMetricPointsByPublicSource({
     cutoffDate,
     metricKeys: [spec.metricKey],
     vaultRoot,
   });
-  if (!publicSourcePoints) {
-    return [];
-  }
-  const points = publicSourcePoints;
   const acceptsManualSleepStage = spec.metricKey === "deep-sleep-minutes"
     || spec.metricKey === "rem-sleep-minutes";
   const dayGrainPoints = acceptsManualSleepStage
@@ -788,18 +789,13 @@ async function readMetricPointsByPublicSource(input: {
   cutoffDate: string;
   metricKeys: readonly string[];
   vaultRoot: string;
-}): Promise<MetricPoint[] | null> {
+}): Promise<MetricPoint[]> {
   const sourceHealth = await summarizeWearableSourceHealthRuntime(
     input.vaultRoot,
     { from: input.cutoffDate },
   );
-  const providers = sourceHealth
-    .filter((source) => source.provider !== "unknown")
-    .map((source) => source.provider)
+  const providers = [...new Set(sourceHealth.map((source) => source.provider))]
     .sort();
-  if (providers.length > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
-    return null;
-  }
   const [sourceGroups, fallbackPoints] = await Promise.all([
     listMetricPointsByPublicSource(input.vaultRoot, {
       from: input.cutoffDate,
@@ -919,9 +915,6 @@ export async function readProjectableWorkoutDays(
     metricKeys: ["workout-count", "workout-minutes"],
     vaultRoot,
   });
-  if (!points) {
-    return [];
-  }
   const countRows = selectPublicSourceMetricSeries({
     cutoffDate,
     metricKey: "workout-count",
@@ -971,11 +964,11 @@ export async function readProjectableWorkoutsDays(
   if (!activityRead.complete) {
     return [];
   }
-  return selectProjectableWorkoutsDays({
+  return requireCompleteWorkoutItemSources(selectProjectableWorkoutsDays({
     nowMs,
     rows: activityRead.rows,
     vaultTimeZone,
-  });
+  }));
 }
 
 async function readProjectableVaultTimeZone(
@@ -1030,11 +1023,14 @@ export async function readProjectableActivityMinutesDays(
     cutoffDate,
     context,
   );
-  return selectProjectableActivityMinutesDays({
+  if (!activityRead.complete) {
+    return [];
+  }
+  return requireCompleteRecordSources(selectProjectableActivityMinutesDays({
     currentDate: dateContext.currentDate,
     rows: activityRead.rows,
     spec,
-  });
+  }));
 }
 
 export async function readProjectableActivityDistanceDays(
@@ -1059,11 +1055,14 @@ export async function readProjectableActivityDistanceDays(
     cutoffDate,
     context,
   );
-  return selectProjectableActivityDistanceDays({
+  if (!activityRead.complete) {
+    return [];
+  }
+  return requireCompleteRecordSources(selectProjectableActivityDistanceDays({
     currentDate: dateContext.currentDate,
     rows: activityRead.rows,
     spec,
-  });
+  }));
 }
 
 export async function readProjectableActivitySessionCountDays(
@@ -1088,11 +1087,14 @@ export async function readProjectableActivitySessionCountDays(
     cutoffDate,
     context,
   );
-  return selectProjectableActivitySessionCountDays({
+  if (!activityRead.complete) {
+    return [];
+  }
+  return requireCompleteRecordSources(selectProjectableActivitySessionCountDays({
     currentDate: dateContext.currentDate,
     rows: activityRead.rows,
     spec,
-  });
+  }));
 }
 
 export async function readProjectableHeartRateZoneDays(
@@ -1115,9 +1117,6 @@ export async function readProjectableHeartRateZoneDays(
     metricKeys: HEART_RATE_ZONE_MINUTES_METRIC_KEYS,
     vaultRoot,
   });
-  if (!points) {
-    return [];
-  }
   const rows: HeartRateZoneMetricProjectionRow[] = [];
   for (const metricKey of HEART_RATE_ZONE_MINUTES_METRIC_KEYS) {
     const metricRows = selectPublicSourceMetricSeries({
@@ -1130,7 +1129,9 @@ export async function readProjectableHeartRateZoneDays(
     }
     rows.push(...metricRows);
   }
-  return selectProjectableHeartRateZoneDays(rows, dateContext.currentDate);
+  return requireCompleteRecordSources(
+    selectProjectableHeartRateZoneDays(rows, dateContext.currentDate),
+  );
 }
 
 /**
@@ -1518,6 +1519,41 @@ function sourceDateKey(
   source: HostedVaultShareDataSource | undefined,
 ): string {
   return `${date}\u0000${source?.source ?? ""}`;
+}
+
+function requireCompleteRecordSources(
+  records: HostedVaultShareDeliveryRecord[],
+): HostedVaultShareDeliveryRecord[] {
+  const sources = new Set<string>();
+  for (const record of records) {
+    if (!record.source) {
+      return [];
+    }
+    sources.add(record.source.source);
+  }
+  return sources.size <= HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
+    ? records
+    : [];
+}
+
+function requireCompleteWorkoutItemSources(
+  records: HostedVaultShareDeliveryRecord[],
+): HostedVaultShareDeliveryRecord[] {
+  const sources = new Set<string>();
+  for (const record of records) {
+    if (!("workouts" in record.data)) {
+      return [];
+    }
+    for (const workout of record.data.workouts) {
+      if (!workout.source) {
+        return [];
+      }
+      sources.add(workout.source.source);
+    }
+  }
+  return sources.size <= HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
+    ? records
+    : [];
 }
 
 export function selectProjectableWorkoutsDays(
@@ -1989,7 +2025,14 @@ export function selectProjectableHeartRateZoneDays(
     if (!sourceOwnerKey) {
       continue;
     }
-    const label = sanitizeProjectionText(readContextString(point.context, "zoneLabel"), 80);
+    const rawLabel = readContextString(point.context, "zoneLabel");
+    const label = sanitizeProjectionText(
+      rawLabel,
+      HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+    );
+    if (rawLabel !== null && label === undefined) {
+      return [];
+    }
     const groupKey = `${point.date}\u0000${sourceOwnerKey}`;
     const group = zonesBySourceDay.get(groupKey) ?? {
       date: point.date,
@@ -2022,8 +2065,11 @@ export function selectProjectableHeartRateZoneDays(
     const zones = group.zones
       .sort((left, right) => left.zone - right.zone || (left.label ?? "").localeCompare(right.label ?? ""));
 
-    if (zones.length === 0 || zones.length > HEART_RATE_ZONE_MINUTES_METRIC_KEYS.length) {
-      continue;
+    if (
+      zones.length === 0
+      || zones.length > HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY
+    ) {
+      return [];
     }
 
     records.push({
@@ -2084,13 +2130,6 @@ async function readProjectableActivitySessionRows(
     }
   }
 
-  if (
-    new Set(rows.map((row) => row.source?.source).filter(Boolean)).size
-    > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
-  ) {
-    return { complete: false, rows: [] };
-  }
-
   return { complete: true, rows };
 }
 
@@ -2132,9 +2171,6 @@ function toActivitySessionProjectionRow(
     ?? undefined;
   const distanceMeters = readActivitySessionDistanceMeters(entity);
   const source = resolveActivitySessionPublicSource(entity);
-  if (!source) {
-    return null;
-  }
 
   return {
     activityKind: readActivitySessionKind(entity),
@@ -2148,7 +2184,7 @@ function toActivitySessionProjectionRow(
     recordIds: [entity.entityId],
     sourceFamily: "event",
     sourceKind: entity.kind,
-    source,
+    ...(source ? { source } : {}),
     startedAt: timing.startedAt,
     timeZone: readOptionalString(entity.attributes.timeZone),
   };
@@ -2163,7 +2199,17 @@ function resolveActivitySessionPublicSource(
   }
   const externalRef = readRecord(entity.attributes.externalRef);
   const dataOrigin = entity.attributes.dataOrigin;
-  if (sourceType === "device" || externalRef || dataOrigin) {
+  if (sourceType === "device" || sourceType === "import") {
+    return resolvePublicWearableSource({
+      dataOrigin,
+      externalRef,
+      provider: readOptionalString(externalRef?.system),
+    });
+  }
+  if (sourceType) {
+    return resolveHostedVaultShareDataSource("murph");
+  }
+  if (externalRef || dataOrigin) {
     return resolvePublicWearableSource({
       dataOrigin,
       externalRef,

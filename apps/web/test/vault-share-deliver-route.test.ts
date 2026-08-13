@@ -31,6 +31,8 @@ import {
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
   HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -276,6 +278,54 @@ function sourceAwareSleepDeliveryBody(
   };
 }
 
+function heartRateZonesDeliveryBody(): HostedVaultShareDeliverRequest {
+  const projectionScope = hostedVaultShareProjectionKindToScope(
+    "heart-rate-zones-days.v0",
+  );
+  const sources = Array.from({ length: 8 }, (_, index) => ({
+    label: `${"x".repeat(78)}-${index}`,
+    source: `${"x".repeat(78)}-${index}`,
+  }));
+  return {
+    expectedGenerationToken: CURRENT_GENERATION_TOKEN,
+    projectionKind: projectionScope.projectionKind,
+    projectionScope,
+    records: Array.from(
+      { length: 7 * sources.length },
+      (_, recordIndex): HostedVaultShareDeliveryRecord => {
+        const dayIndex = Math.floor(recordIndex / sources.length);
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        const source = sources[recordIndex % sources.length];
+        if (!source) {
+          throw new Error("Missing bounded public source fixture.");
+        }
+        return {
+          data: {
+            date,
+            zones: Array.from(
+              { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+              (_, zone) => ({
+                durationMinutes: MAXIMUM_WIDTH_WORKOUT_MINUTES,
+                label: "é".repeat(
+                  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+                ),
+                zone,
+              }),
+            ),
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.${source.source}`,
+          source,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    ),
+    sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+  };
+}
+
 describe("vault-share deliver route", () => {
   beforeAll(async () => {
     deliverRoute = await import(
@@ -332,6 +382,30 @@ describe("vault-share deliver route", () => {
     expect(nextBoundBodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
+  });
+
+  it("accepts the maximum heart-rate-zone body within the ingress limit", async () => {
+    const body = heartRateZonesDeliveryBody();
+    const bodyBytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+    const projectionScope = hostedVaultShareProjectionKindToScope(
+      "heart-rate-zones-days.v0",
+    );
+    mocks.findActiveHostedVaultShares.mockResolvedValue([{
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_heart_rate_zones",
+      projectionKind: projectionScope.projectionKind,
+      projectionScope,
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+    }]);
+
+    expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
+    expect(bodyBytes).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+    );
+    const response = await deliverRoute.POST(buildRequest(body));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
   });
 
   it("replaces the snapshot for every active share", async () => {

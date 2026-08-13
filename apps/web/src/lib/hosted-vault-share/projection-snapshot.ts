@@ -14,12 +14,16 @@ import {
   sealHostedUserSecureBoxString,
   type HostedSecureBoxPrismaClient,
 } from "../hosted-crypto/secure-box";
+import {
+  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
+} from "./delivery-limits";
 
 const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA =
   "murph.hosted-vault-share.projection-snapshot.v1" as const;
 const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCOPE =
   "hosted-vault-share-projection-snapshot:v1";
-export const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES = 48 * 1024;
+export const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES =
+  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES;
 
 export interface HostedVaultShareProjectionSnapshotAuthority {
   destinationMemberId: string;

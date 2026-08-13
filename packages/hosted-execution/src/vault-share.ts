@@ -651,6 +651,11 @@ export interface HostedVaultShareHeartRateZoneBucket {
   zone?: number;
 }
 
+// The query projection supports zone indices 0-20. Delivery and snapshot byte
+// ceilings are proven against this full cardinality and the longest legal text.
+export const HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY = 21;
+export const HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH = 80;
+
 export interface HostedVaultShareHeartRateZoneDayData {
   date: string;
   zones: HostedVaultShareHeartRateZoneBucket[];
@@ -2064,9 +2069,12 @@ function parseHostedVaultShareHeartRateZoneDayData(
     parseHostedVaultShareHeartRateZoneBucket(entry, index, "heart-rate-zones-days")
   );
 
-  if (zones.length === 0 || zones.length > 21) {
+  if (
+    zones.length === 0
+    || zones.length > HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY
+  ) {
     throw new TypeError(
-      "Vault share heart-rate-zones-days zones must contain 1-21 entries.",
+      `Vault share heart-rate-zones-days zones must contain 1-${HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY} entries.`,
     );
   }
 
@@ -2090,7 +2098,7 @@ function parseHostedVaultShareHeartRateZoneBucket(
     : parseHostedVaultShareBoundedText(
         data.label,
         `Vault share ${projectionKind} zones[${index}] label`,
-        80,
+        HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
       );
   const durationMinutes = requireNumber(
     data.durationMinutes,

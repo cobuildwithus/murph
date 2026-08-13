@@ -29,7 +29,10 @@ import {
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
 } from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
 
@@ -1611,6 +1614,16 @@ describe("murph.group dynamic tool", () => {
           records: [
             {
               data: {
+                date: "2026-07-17",
+                metricKey: "deep-sleep-minutes",
+                unit: "minutes",
+                value: 55,
+              },
+              occurredAt: "2026-07-17T00:00:00.000Z",
+              recordKey: "2026-07-17",
+            },
+            {
+              data: {
                 date: "2026-07-18",
                 metricKey: "deep-sleep-minutes",
                 unit: "minutes",
@@ -1678,6 +1691,7 @@ describe("murph.group dynamic tool", () => {
           projections: {
             "deep-sleep-sources-days.v1": {
               records: [
+                expect.not.objectContaining({ source: expect.anything() }),
                 expect.objectContaining({
                   data: expect.objectContaining({ value: 64 }),
                   source: { label: "fitbit", source: "fitbit" },
@@ -1699,6 +1713,101 @@ describe("murph.group dynamic tool", () => {
       },
     });
     expect(JSON.stringify(payload)).not.toContain("member_internal_sleep_sources");
+  });
+
+  it("keeps the maximum heart-rate-zone source set within the model boundary", async () => {
+    const sources = Array.from({ length: 8 }, (_, index) => ({
+      label: `${"x".repeat(78)}-${index}`,
+      source: `${"x".repeat(78)}-${index}`,
+    }));
+    const records = Array.from({ length: 7 * sources.length }, (_, recordIndex) => {
+      const dayIndex = Math.floor(recordIndex / sources.length);
+      const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+      const source = sources[recordIndex % sources.length];
+      if (!source) {
+        throw new Error("Missing bounded public source fixture.");
+      }
+      return {
+        data: {
+          date,
+          zones: Array.from(
+            { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+            (_, zone) => ({
+              durationMinutes: 0.0000030024105450300988,
+              label: "x".repeat(
+                HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+              ),
+              zone,
+            }),
+          ),
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: `${date}.${source.source}`,
+        source,
+        sourceRevision: "A".repeat(
+          HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+        ),
+      };
+    });
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_heart_rate_zones",
+        participantId: "participant_heart_rate_zones",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "heart-rate-zones-days.v0" as const,
+          },
+          projectionScopeKey: "heart-rate-zones-days.v0",
+          records,
+        }],
+      }],
+      requestedProjectionScopeKeys: ["heart-rate-zones-days.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "heart-rate-zones-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      result: {
+        members: [{
+          projections: {
+            "heart-rate-zones-days.v0": {
+              records: expect.any(Array),
+              status: "available",
+            },
+          },
+        }],
+        status: "ok",
+      },
+    });
+    const modelText = JSON.stringify(payload);
+    // Each of the 56 records has both a source tag property and its source key.
+    expect(modelText.match(/"source":/gu)).toHaveLength(112);
+    expect(modelText.length).toBeLessThanOrEqual(
+      ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+    );
   });
 
   it("passes bounded workout arrays through the model-facing boundary", async () => {
@@ -2153,7 +2262,9 @@ describe("murph.group dynamic tool", () => {
     for (const omitted of payload.result.omittedParticipantIds) {
       expect(omitted).toMatch(/^participant_oversized_\d+$/u);
     }
-    expect(JSON.stringify(payload).length).toBeLessThanOrEqual(64_000);
+    expect(JSON.stringify(payload).length).toBeLessThanOrEqual(
+      ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+    );
   });
 
   it("parses one bounded group ask without accepting model-supplied authority", () => {

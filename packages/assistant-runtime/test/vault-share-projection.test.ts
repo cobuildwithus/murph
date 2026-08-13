@@ -16,6 +16,8 @@ import {
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -35,6 +37,11 @@ import {
   type MetricPoint,
   type MetricSeriesPoint,
 } from "@murphai/query";
+import {
+  executeScheduledLogOccurrence,
+  initializeVault,
+  upsertScheduledLog,
+} from "@murphai/core";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -49,6 +56,7 @@ import {
   readProjectableWorkoutsDays,
   readProjectableMealNutritionDays,
   readProjectableProfileName,
+  readProjectableSleepNights,
   selectProjectableDailyMetricDays,
   selectProjectableMealNutritionDays,
   selectProjectableActivityDistanceDays,
@@ -2096,6 +2104,67 @@ describe("selectProjectableDailyMetricDays", () => {
     }
   });
 
+  it("fails a daily metric scope closed when a relevant source cannot be tagged", async () => {
+    const vaultRoot = await createActivitySessionVault([
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_steps_resolved",
+        kind: "observation",
+        occurredAt: "2026-07-03T12:00:00.000Z",
+        recordedAt: "2026-07-03T12:01:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        source: "device",
+        title: "Steps",
+        metric: "steps",
+        value: 12_000,
+        unit: "count",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          originConfidence: "high",
+          sourceProviderSlug: "garmin",
+          version: 1,
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-steps",
+          resourceId: "steps_resolved",
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_steps_unresolved",
+        kind: "observation",
+        occurredAt: "2026-07-03T12:00:00.000Z",
+        recordedAt: "2026-07-03T12:02:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        source: "device",
+        title: "Steps",
+        metric: "steps",
+        value: 18_000,
+        unit: "count",
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          originConfidence: "high",
+          version: 1,
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: "steps",
+          resourceId: "steps_unresolved",
+        },
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableDailyMetricDays(vaultRoot, stepsSpec))
+        .resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     {
       label: "UTC+14 Monday",
@@ -3569,6 +3638,87 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
+  it("fails the workout scope closed when a relevant source cannot be tagged", async () => {
+    const vaultRoot = await createActivitySessionVault([
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_resolved_workout",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T18:00:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        recordedAt: "2026-07-03T19:00:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-workouts",
+          resourceId: "resolved-workout",
+        },
+        activityType: "running",
+        durationMinutes: 40,
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_unresolved_workout",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T20:00:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        recordedAt: "2026-07-03T20:30:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "workout",
+          resourceId: "unresolved-workout",
+        },
+        activityType: "cycling",
+        durationMinutes: 30,
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableWorkoutsDays(vaultRoot)).resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts exactly eight workout sources and fails closed at nine", async () => {
+    const records = Array.from({ length: 9 }, (_, index) => ({
+      schemaVersion: "murph.event.v1",
+      id: `evt_source_${index}_workout`,
+      kind: "activity_session",
+      occurredAt: new Date(
+        Date.parse("2026-07-03T07:00:00.000Z") + index * 60 * 60 * 1_000,
+      ).toISOString(),
+      dayKey: ACTIVITY_DAY.date,
+      recordedAt: "2026-07-03T20:00:00.000Z",
+      source: "device",
+      externalRef: {
+        system: "junction",
+        resourceType: `junction-source-${index}-workouts`,
+        resourceId: `source-${index}-workout`,
+      },
+      activityType: "running",
+      durationMinutes: 30,
+    }));
+    const exactBoundVaultRoot = await createActivitySessionVault(records.slice(0, 8));
+    const overBoundVaultRoot = await createActivitySessionVault(records);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const exactBound = await readProjectableWorkoutsDays(exactBoundVaultRoot);
+      expect(findWorkoutsRecord(exactBound, ACTIVITY_DAY.date)?.data.workouts)
+        .toHaveLength(8);
+      await expect(readProjectableWorkoutsDays(overBoundVaultRoot))
+        .resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(exactBoundVaultRoot, { recursive: true, force: true });
+      await rm(overBoundVaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("discloses a generic provider workout instead of emptying the projection", async () => {
     const vaultRoot = await createActivitySessionVault([
       {
@@ -4063,6 +4213,195 @@ describe("selectProjectableActivityMinutesDays", () => {
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails exact activity scopes closed when a relevant source cannot be tagged", async () => {
+    const vaultRoot = await createActivitySessionVault([
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_resolved_run",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T07:00:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        recordedAt: "2026-07-03T08:00:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-activity",
+          resourceId: "resolved-run",
+        },
+        activityType: "running",
+        distanceKm: 5,
+        durationMinutes: 40,
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_unresolved_run",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T09:00:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        recordedAt: "2026-07-03T10:00:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "activity",
+          resourceId: "unresolved-run",
+        },
+        activityType: "running",
+        distanceKm: 4,
+        durationMinutes: 30,
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableActivityMinutesDays(vaultRoot, runningSpec))
+        .resolves.toEqual([]);
+      await expect(readProjectableActivityDistanceDays(
+        vaultRoot,
+        requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
+      )).resolves.toEqual([]);
+      await expect(readProjectableActivitySessionCountDays(
+        vaultRoot,
+        requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
+      )).resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps scheduled activity and intervention records under the Murph source", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-scheduled-source-"));
+    await initializeVault({ vaultRoot });
+    const activity = await upsertScheduledLog({
+      action: {
+        activityType: "running",
+        durationMinutes: 30,
+        kind: "activity_session.add",
+        title: "Scheduled run",
+      },
+      body: "Write the scheduled activity.",
+      schedule: { everyMs: 3_600_000, kind: "every" },
+      scheduledLogId: "slog_01JX8V5QY2M5ZBV64ZP4N1DRB5",
+      slug: "scheduled-run",
+      status: "active",
+      title: "Scheduled run",
+      vaultRoot,
+    });
+    const intervention = await upsertScheduledLog({
+      action: {
+        durationMinutes: 10,
+        interventionType: "sauna",
+        kind: "intervention_session.add",
+        title: "Scheduled sauna",
+      },
+      body: "Write the scheduled intervention.",
+      schedule: { everyMs: 3_600_000, kind: "every" },
+      scheduledLogId: "slog_01JX8V6QY2M5ZBV64ZP4N1DRB6",
+      slug: "scheduled-sauna",
+      status: "active",
+      title: "Scheduled sauna",
+      vaultRoot,
+    });
+    await executeScheduledLogOccurrence({
+      occurrenceAt: "2026-07-03T07:00:00.000Z",
+      scheduledLogId: activity.record.scheduledLogId,
+      vaultRoot,
+    });
+    await executeScheduledLogOccurrence({
+      occurrenceAt: "2026-07-03T08:00:00.000Z",
+      scheduledLogId: intervention.record.scheduledLogId,
+      vaultRoot,
+    });
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const running = await readProjectableActivityMinutesDays(
+        vaultRoot,
+        runningSpec,
+      );
+      const sauna = await readProjectableActivityMinutesDays(
+        vaultRoot,
+        requireActivityMinutesSpec(SAUNA_SCOPE),
+      );
+      const workouts = await readProjectableWorkoutsDays(vaultRoot);
+
+      expect(running).toEqual([expect.objectContaining({
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
+      })]);
+      expect(sauna).toEqual([expect.objectContaining({
+        recordKey: `${ACTIVITY_DAY.date}.murph`,
+        source: MURPH_SOURCE,
+      })]);
+      expect(findWorkoutsRecord(workouts, ACTIVITY_DAY.date)?.data.workouts)
+        .toEqual([expect.objectContaining({ source: MURPH_SOURCE })]);
+      expect(JSON.stringify({ running, sauna, workouts }))
+        .not.toContain("murph-scheduled-log");
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("applies the source cap to the requested activity kind only", async () => {
+    const activityRecord = (input: {
+      activityKind: "running" | "walking";
+      index: number;
+    }) => ({
+      schemaVersion: "murph.event.v1",
+      id: `evt_${input.activityKind}_${input.index}`,
+      kind: "activity_session",
+      occurredAt: new Date(
+        Date.parse("2026-07-03T07:00:00.000Z") + input.index * 60_000,
+      ).toISOString(),
+      dayKey: ACTIVITY_DAY.date,
+      recordedAt: "2026-07-03T20:00:00.000Z",
+      source: "device",
+      externalRef: {
+        system: "junction",
+        resourceType: `junction-source-${input.index}-activity`,
+        resourceId: `${input.activityKind}-${input.index}`,
+      },
+      activityType: input.activityKind,
+      distanceKm: 1 + input.index,
+      durationMinutes: 20 + input.index,
+    });
+    const unrelatedVaultRoot = await createActivitySessionVault([
+      activityRecord({ activityKind: "running", index: 20 }),
+      ...Array.from({ length: 9 }, (_, index) =>
+        activityRecord({ activityKind: "walking", index })),
+    ]);
+    const exactBoundVaultRoot = await createActivitySessionVault(
+      Array.from({ length: 8 }, (_, index) =>
+        activityRecord({ activityKind: "running", index })),
+    );
+    const overBoundVaultRoot = await createActivitySessionVault(
+      Array.from({ length: 9 }, (_, index) =>
+        activityRecord({ activityKind: "running", index })),
+    );
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableActivityMinutesDays(
+        unrelatedVaultRoot,
+        runningSpec,
+      )).resolves.toHaveLength(1);
+      await expect(readProjectableActivityMinutesDays(
+        exactBoundVaultRoot,
+        runningSpec,
+      )).resolves.toHaveLength(8);
+      await expect(readProjectableActivityMinutesDays(
+        overBoundVaultRoot,
+        runningSpec,
+      )).resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(unrelatedVaultRoot, { recursive: true, force: true });
+      await rm(exactBoundVaultRoot, { recursive: true, force: true });
+      await rm(overBoundVaultRoot, { recursive: true, force: true });
     }
   });
 
@@ -4736,7 +5075,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
         observedAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
         pointIds: ["point_zone_2"],
         recordIds: ["evt_activity_2026-07-03"],
-        sourceFamily: "derived",
+        sourceFamily: "derived" as const,
         sourceKind: "activity-summary",
         statistic: "value",
         value: 24,
@@ -4766,6 +5105,50 @@ describe("selectProjectableHeartRateZoneDays", () => {
         records: selected,
       }).records,
     ).toEqual(selected);
+  });
+
+  it("fails the whole scope above the payload-safe zone and label bounds", () => {
+    const points = Array.from(
+      { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+      (_, zone) => ({
+        context: {
+          zoneLabel: "x".repeat(
+            HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+          ),
+        },
+        date: ACTIVITY_DAY.date,
+        grain: "day" as const,
+        metricKey: `heart-rate-zone-${zone}-minutes`,
+        observedAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        pointIds: [`point_zone_${zone}`],
+        recordIds: [`evt_zone_${zone}`],
+        source: GARMIN_SOURCE,
+        sourceFamily: "derived" as const,
+        sourceKind: "activity-summary",
+        statistic: "value" as const,
+        value: 24,
+      }),
+    );
+
+    expect(selectProjectableHeartRateZoneDays(points, utcDateKey(nowMs)))
+      .toHaveLength(1);
+    expect(selectProjectableHeartRateZoneDays([
+      ...points,
+      {
+        ...points[0]!,
+        metricKey: points[0]!.metricKey,
+        pointIds: ["point_zone_over_bound"],
+        recordIds: ["evt_zone_over_bound"],
+      },
+    ], utcDateKey(nowMs))).toEqual([]);
+    expect(selectProjectableHeartRateZoneDays([{
+      ...points[0]!,
+      context: {
+        zoneLabel: "x".repeat(
+          HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH + 1,
+        ),
+      },
+    }], utcDateKey(nowMs))).toEqual([]);
   });
 });
 
@@ -4854,6 +5237,49 @@ function requireActivitySessionCountSpec(
 
 describe("selectProjectableSleepNights", () => {
   const nowMs = Date.parse("2026-06-10T00:00:00.000Z");
+
+  it("fails the sleep scope closed when a relevant source cannot be tagged", async () => {
+    const vaultRoot = await createSleepSourceProjectionVault([{
+      date: ACTIVITY_DAY.date,
+      providers: ["garmin", "unknown"],
+    }]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-07-04T00:00:00.000Z"),
+    );
+
+    try {
+      await expect(readProjectableSleepNights(vaultRoot)).resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts exactly eight sleep sources and fails closed at nine", async () => {
+    const providers = Array.from({ length: 9 }, (_, index) => `source-${index}`);
+    const exactBoundVaultRoot = await createSleepSourceProjectionVault([{
+      date: ACTIVITY_DAY.date,
+      providers: providers.slice(0, 8),
+    }]);
+    const overBoundVaultRoot = await createSleepSourceProjectionVault([{
+      date: ACTIVITY_DAY.date,
+      providers,
+    }]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-07-04T00:00:00.000Z"),
+    );
+
+    try {
+      await expect(readProjectableSleepNights(exactBoundVaultRoot))
+        .resolves.toHaveLength(8);
+      await expect(readProjectableSleepNights(overBoundVaultRoot))
+        .resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(exactBoundVaultRoot, { recursive: true, force: true });
+      await rm(overBoundVaultRoot, { recursive: true, force: true });
+    }
+  });
 
   it("maps recent fully-timed nights to records keyed by night date and drops stale or partial ones", () => {
     const staleDate = "2026-05-01";

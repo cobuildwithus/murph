@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -53,6 +55,9 @@ const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0
 const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
   "workouts.v0",
 );
+const HEART_RATE_ZONES_SCOPE = hostedVaultShareProjectionKindToScope(
+  "heart-rate-zones-days.v0",
+);
 const DEVICE_SCOPE = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
 const PROTEIN_KEY = buildHostedVaultShareProjectionScopeKey(PROTEIN_SCOPE);
 const STEPS_KEY = buildHostedVaultShareProjectionScopeKey(STEPS_SCOPE);
@@ -75,6 +80,7 @@ type TestProjectionScope =
   | typeof DEEP_SLEEP_SOURCES_SCOPE
   | typeof REM_SLEEP_SCOPE
   | typeof WORKOUTS_SCOPE
+  | typeof HEART_RATE_ZONES_SCOPE
   | typeof DEVICE_SCOPE;
 
 beforeEach(() => {
@@ -524,6 +530,58 @@ describe("workouts.v0 snapshot bounds", () => {
         },
       })
     ).toThrow(/snapshot is too large/u);
+  });
+});
+
+describe("heart-rate-zones-days.v0 snapshot bounds", () => {
+  it("keeps the maximum parser-valid source-aware snapshot within its byte limit", () => {
+    const maximumWidthNumber = 0.0000030024105450300988;
+    const sources = Array.from({ length: 8 }, (_, index) => ({
+      label: `${"x".repeat(78)}-${index}`,
+      source: `${"x".repeat(78)}-${index}`,
+    }));
+    const records = Array.from(
+      { length: 7 * sources.length },
+      (_, recordIndex): HostedVaultShareDeliveryRecord => {
+        const dayIndex = Math.floor(recordIndex / sources.length);
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        const source = sources[recordIndex % sources.length];
+        if (!source) {
+          throw new Error("Missing bounded public source fixture.");
+        }
+        return {
+          data: {
+            date,
+            zones: Array.from(
+              { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+              (_, zone) => ({
+                durationMinutes: maximumWidthNumber,
+                label: "é".repeat(
+                  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+                ),
+                zone,
+              }),
+            ),
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.${source.source}`,
+          source,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    );
+
+    const serialized = snapshot({
+      id: "share_heart_rate_zones_maximum",
+      memberId: "member_heart_rate_zones_maximum",
+      projectionScope: HEART_RATE_ZONES_SCOPE,
+      records,
+    });
+    expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+    );
   });
 });
 

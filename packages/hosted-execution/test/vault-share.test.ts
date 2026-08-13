@@ -19,6 +19,8 @@ import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -2087,6 +2089,55 @@ describe("heart-rate-zones-days.v0 delivery records", () => {
         }],
       })
     ).toThrow(/identify the zone/u);
+  });
+
+  it("enforces the payload-safe zone count and label boundaries", () => {
+    const zones = Array.from(
+      { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+      (_, zone) => ({
+        durationMinutes: 24,
+        label: "x".repeat(HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH),
+        zone,
+      }),
+    );
+    const request = {
+      projectionKind: "heart-rate-zones-days.v0",
+      records: [{
+        ...VALID_HEART_RATE_ZONE_RECORD,
+        data: { ...VALID_HEART_RATE_ZONE_RECORD.data, zones },
+      }],
+    };
+
+    expect(() => parseHostedVaultShareDeliverRequest(request)).not.toThrow();
+    expect(() => parseHostedVaultShareDeliverRequest({
+      ...request,
+      records: [{
+        ...VALID_HEART_RATE_ZONE_RECORD,
+        data: {
+          ...VALID_HEART_RATE_ZONE_RECORD.data,
+          zones: [...zones, { durationMinutes: 1, zone: 0 }],
+        },
+      }],
+    })).toThrow(new RegExp(
+      `1-${HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY}`,
+      "u",
+    ));
+    expect(() => parseHostedVaultShareDeliverRequest({
+      ...request,
+      records: [{
+        ...VALID_HEART_RATE_ZONE_RECORD,
+        data: {
+          ...VALID_HEART_RATE_ZONE_RECORD.data,
+          zones: [{
+            durationMinutes: 1,
+            label: "x".repeat(
+              HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH + 1,
+            ),
+            zone: 1,
+          }],
+        },
+      }],
+    })).toThrow(/label/u);
   });
 });
 
