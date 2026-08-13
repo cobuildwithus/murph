@@ -409,11 +409,14 @@ All source-tagged record arrays remain intact; `workouts.v0` additionally
 hoists repeated day, kind, time-semantics, and completion-watermark fields while
 retaining each workout item's source tag. Group email reads use this same model
 adapter, so they cannot silently collapse a source that the ordinary group tool
-would preserve. If whole member rows still
-exceed the model result limit, the adapter returns `status="partial"` with every
-omitted current membership named in `omittedParticipantIds`. It never truncates
-a member row, treats an omitted member as departed, or alters stored or
-Web-returned truth.
+would preserve. The model-result ceiling composes the shared 320 KiB maximum
+serialized projection with the maximum three-scope request and the bounded
+member-identity envelope, including worst-case JSON escaping. One complete
+legal member therefore always fits before roster compaction begins. If whole
+member rows still exceed that composed limit, the adapter returns
+`status="partial"` with every omitted current membership named in
+`omittedParticipantIds`. It never truncates a member row, treats an omitted
+member as departed, or alters stored or Web-returned truth.
 
 `device-sync-status.v0` is explicit consent only. When that exact grant is in
 the captured authority set, Web derives the result live from its bounded device

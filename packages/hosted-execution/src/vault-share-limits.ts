@@ -1,3 +1,5 @@
+/** Maximum serialized request for one complete vault-share projection. */
+export const HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES = 320 * 1024;
 export const HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS = 8;
 export const HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES = 8;
 // Seven recent days across the eight bounded public data sources. Empty and

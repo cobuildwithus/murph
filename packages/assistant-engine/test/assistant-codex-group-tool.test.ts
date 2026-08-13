@@ -32,7 +32,6 @@ import {
   HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
   HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
-  HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
 } from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
 
@@ -119,6 +118,40 @@ const SIGNED_PRIVATE_JPEG_URL =
   SIGNED_PRIVATE_IMAGE_URL.replace("group-avatar.png", "group-avatar.jpg");
 const GROUP_TOOL_INPUT_PROPERTIES =
   MURPH_GROUP_TOOL.inputSchema.allOf[0].properties;
+
+function maximumEscapedHeartRateZoneRecords() {
+  const sources = Array.from({ length: 8 }, (_, index) => ({
+    label: `${"x".repeat(78)}-${index}`,
+    source: `${"x".repeat(78)}-${index}`,
+  }));
+  const records = Array.from({ length: 7 * sources.length }, (_, recordIndex) => {
+    const dayIndex = Math.floor(recordIndex / sources.length);
+    const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+    const source = sources[recordIndex % sources.length];
+    if (!source) {
+      throw new Error("Missing bounded public source fixture.");
+    }
+    return {
+      data: {
+        date,
+        zones: Array.from(
+          { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+          (_, zone) => ({
+            durationMinutes: 0.0000030024105450300988,
+            label: '"'.repeat(
+              HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+            ),
+            zone,
+          }),
+        ),
+      },
+      occurredAt: `${date}T00:00:00.000Z`,
+      recordKey: `${date}.${source.source}`,
+      source,
+    };
+  });
+  return records;
+}
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -1715,40 +1748,8 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(payload)).not.toContain("member_internal_sleep_sources");
   });
 
-  it("keeps the maximum heart-rate-zone source set within the model boundary", async () => {
-    const sources = Array.from({ length: 8 }, (_, index) => ({
-      label: `${"x".repeat(78)}-${index}`,
-      source: `${"x".repeat(78)}-${index}`,
-    }));
-    const records = Array.from({ length: 7 * sources.length }, (_, recordIndex) => {
-      const dayIndex = Math.floor(recordIndex / sources.length);
-      const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
-      const source = sources[recordIndex % sources.length];
-      if (!source) {
-        throw new Error("Missing bounded public source fixture.");
-      }
-      return {
-        data: {
-          date,
-          zones: Array.from(
-            { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
-            (_, zone) => ({
-              durationMinutes: 0.0000030024105450300988,
-              label: "x".repeat(
-                HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
-              ),
-              zone,
-            }),
-          ),
-        },
-        occurredAt: `${date}T00:00:00.000Z`,
-        recordKey: `${date}.${source.source}`,
-        source,
-        sourceRevision: "A".repeat(
-          HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
-        ),
-      };
-    });
+  it("keeps the escaped maximum heart-rate-zone source set within the model boundary", async () => {
+    const records = maximumEscapedHeartRateZoneRecords();
     const groupSharedReadRequest = vi.fn(async () => ({
       members: [{
         currentTurnHandles: [],
@@ -1757,6 +1758,7 @@ describe("murph.group dynamic tool", () => {
         participantId: "participant_heart_rate_zones",
         projections: [{
           dataStatus: "available" as const,
+          grantedAt: "2026-07-25T12:00:00.000Z",
           grantStatus: "granted" as const,
           projectionScope: {
             projectionKind: "heart-rate-zones-days.v0" as const,
@@ -1805,6 +1807,13 @@ describe("murph.group dynamic tool", () => {
     const modelText = JSON.stringify(payload);
     // Each of the 56 records has both a source tag property and its source key.
     expect(modelText.match(/"source":/gu)).toHaveLength(112);
+    expect(modelText.match(/"recordKey":/gu)).toHaveLength(56);
+    expect(modelText.match(/"zone":/gu)).toHaveLength(
+      56 * HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+    );
+    expect(modelText).not.toContain("omittedParticipantIds");
+    expect(modelText).not.toContain("sourceRevision");
+    expect(modelText.length).toBeGreaterThan(200 * 1024);
     expect(modelText.length).toBeLessThanOrEqual(
       ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
     );
@@ -2180,6 +2189,7 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("names omitted members instead of failing an oversized shared read", async () => {
+    const oversizedMemberCount = 200;
     const dates = [
       "2026-07-24",
       "2026-07-23",
@@ -2192,11 +2202,11 @@ describe("murph.group dynamic tool", () => {
     const workoutKinds = Array.from({ length: 13 }, (_unused, index) =>
       `activity-${String(index).padStart(2, "0")}-${"x".repeat(65)}`
     );
-    // This uses the production roster, day, workout-count, and activity-kind
+    // This uses the production member, day, workout-count, and activity-kind
     // bounds. A dense but valid roster must not cost everyone their standings,
     // while capacity-omitted members must remain explicitly current.
     const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
-      members: Array.from({ length: 32 }, (_unused, index) => ({
+      members: Array.from({ length: oversizedMemberCount }, (_unused, index) => ({
         currentTurnHandles: [],
         displayName: `Member ${index}`,
         memberId: `member_oversized_${index}`,
@@ -2251,14 +2261,14 @@ describe("murph.group dynamic tool", () => {
     expect(payload.result.status).toBe("partial");
     // Whole members only: whoever remains is complete.
     expect(payload.result.members.length).toBeGreaterThan(0);
-    expect(payload.result.members.length).toBeLessThan(32);
+    expect(payload.result.members.length).toBeLessThan(oversizedMemberCount);
     for (const member of payload.result.members) {
       expect(Object.keys(member.projections)).toEqual(["workouts.v0"]);
       expect(member.projections["workouts.v0"].days)
         .toHaveProperty("2026-07-24");
     }
     expect(payload.result.omittedParticipantIds.length)
-      .toBe(32 - payload.result.members.length);
+      .toBe(oversizedMemberCount - payload.result.members.length);
     for (const omitted of payload.result.omittedParticipantIds) {
       expect(omitted).toMatch(/^participant_oversized_\d+$/u);
     }
@@ -5864,6 +5874,113 @@ describe("murph.group email actions", () => {
     ]) {
       expect(modelText).not.toContain(hidden);
     }
+  });
+
+  it("keeps the escaped maximum heart-rate-zone source set in group-email reads", async () => {
+    const projectionScope = {
+      projectionKind: "heart-rate-zones-days.v0" as const,
+    };
+    const records = maximumEscapedHeartRateZoneRecords();
+    const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
+      if (request.action !== "prepare_email") {
+        throw new Error("Expected group email preparation.");
+      }
+      return {
+        action: "prepare_email",
+        result: {
+          authorizationProof: "authorization-proof-hidden",
+          groupId: "group-id-hidden",
+          missingEmailParticipants: [],
+          participants: [{
+            authorizedShares: [{
+              projectionScopeKey: "heart-rate-zones-days.v0",
+              shareId: "share-heart-rate-zones-hidden",
+            }],
+            hasEmail: true,
+            memberId: "member_heart_rate_zones_email",
+          }],
+          status: "ok",
+        },
+      };
+    });
+    const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_heart_rate_zones_email",
+        participantId: "participant_heart_rate_zones_email",
+        projections: [{
+          dataStatus: "available" as const,
+          grantedAt: "2026-07-25T12:00:00.000Z",
+          grantStatus: "granted" as const,
+          projectionScope,
+          projectionScopeKey: "heart-rate-zones-days.v0",
+          records,
+        }],
+      }],
+      requestedProjectionScopeKeys: ["heart-rate-zones-days.v0"],
+      status: "ok",
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      audience: "group_email",
+      projectionScopes: [projectionScope],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group email shared-read request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentScheduledAutomationAuthority: () => ({
+          automationId: "automation-heart-rate-zones-update",
+          occurrenceAt: "2026-07-25T13:00:00.000Z",
+        }),
+        groupEmailRequest,
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      audience: "group_email",
+      result: {
+        members: [{
+          participantId: "participant_heart_rate_zones_email",
+          projections: {
+            "heart-rate-zones-days.v0": {
+              grantedAt: "2026-07-25T12:00:00.000Z",
+              records: expect.any(Array),
+              status: "available",
+            },
+          },
+        }],
+        recipientCount: 1,
+        status: "ok",
+      },
+    });
+    const modelText = JSON.stringify(payload);
+    expect(modelText.match(/"source":/gu)).toHaveLength(112);
+    expect(modelText.match(/"recordKey":/gu)).toHaveLength(56);
+    expect(modelText.match(/"zone":/gu)).toHaveLength(
+      56 * HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+    );
+    expect(modelText).not.toContain("omittedParticipantIds");
+    expect(modelText).not.toContain("sourceRevision");
+    expect(modelText).not.toContain("authorization-proof-hidden");
+    expect(modelText.length).toBeGreaterThan(200 * 1024);
+    expect(modelText.length).toBeLessThanOrEqual(
+      ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+    );
   });
 });
 
