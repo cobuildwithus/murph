@@ -1657,7 +1657,7 @@ test('createSetupServices reconciles the prior local email state through real se
   }
 })
 
-test('createSetupServices keeps prompted provider credentials out of provisioning subprocess envs', async () => {
+test('createSetupServices keeps active and retired provider credentials out of provisioning subprocess envs', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-provider-env-'))
   const cwd = path.join(root, 'workspace')
   const homeDirectory = path.join(root, 'home')
@@ -1685,7 +1685,9 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
   await writeFile(whisperModelPath, 'model', 'utf8')
 
   const commandEnvs: NodeJS.ProcessEnv[] = []
+  const logs: string[] = []
   const setupCredentialEnv: NodeJS.ProcessEnv = {
+    AGENTMAIL_API_KEY: 'retired_agentmail_secret_SENTINEL',
     JUNCTION_API_KEY: 'junction_key_SENTINEL',
     JUNCTION_CLIENT_USER_ID_SECRET: 'junction_user_secret_SENTINEL',
     OURA_CLIENT_ID: 'oura_client_id_SENTINEL',
@@ -1714,6 +1716,9 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
       }),
       getCwd: () => cwd,
       getHomeDirectory: () => homeDirectory,
+      log(message) {
+        logs.push(message)
+      },
       platform: () => 'linux',
       resolveCliBinPath: () => cliBinPath,
       async runCommand(input) {
@@ -1780,6 +1785,7 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
     assert.equal(JSON.stringify(result).includes('venice_secret_SENTINEL'), false)
     for (const value of Object.values(setupCredentialEnv)) {
       assert.equal(JSON.stringify(result).includes(value ?? ''), false)
+      assert.equal(logs.some((message) => message.includes(value ?? '')), false)
     }
     assert.deepEqual(
       result.wearables.map((wearable) => [wearable.wearable, wearable.ready]),

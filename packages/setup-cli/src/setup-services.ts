@@ -67,6 +67,7 @@ import {
 } from './setup-services/tool-provisioning.js'
 
 const SETUP_TOOL_PROVISIONING_CREDENTIAL_ENV_KEYS = [
+  'AGENTMAIL_API_KEY',
   'JUNCTION_API_KEY',
   'JUNCTION_CLIENT_USER_ID_SECRET',
   'OURA_CLIENT_ID',
