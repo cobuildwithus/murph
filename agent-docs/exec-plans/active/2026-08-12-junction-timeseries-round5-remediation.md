@@ -67,7 +67,8 @@ Updated: 2026-08-13
 17. [x] Resolve round fifteen's lossy production-parser calendar finding.
 18. [x] Resolve round sixteen's grouped-source alias finding.
 19. [x] Resolve round seventeen's end-to-end alias-equivalence finding.
-20. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+20. [x] Resolve round eighteen's account-owned source identity finding.
+21. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
     the task worktree.
 
 ## Decisions
@@ -194,6 +195,12 @@ Updated: 2026-08-13
   authority and row selection, queries the route's canonical target, and
   projects selected rows onto the job-owned historical identity before strict
   import. No alias table, migration, or second identity comparator was added.
+- Round eighteen's identity finding is accepted. The provider now resolves one
+  established account source before precise or calendar normalization, reuses
+  its persisted spelling and source key to derive canonical event provenance,
+  and rejects multiple route-equivalent source rows as ambiguous. Source
+  projection updates that same row instead of minting an alias row. This adds
+  no alias registry, migration, queue, or persisted state owner.
 
 ## Verification
 
@@ -324,5 +331,20 @@ Updated: 2026-08-13
   in hosted `listed_only` mode, canonical provider query selection, unrelated
   group exclusion, real-value import, and preservation of the job-owned daily
   identity.
+- Round eighteen found that route-equivalent aliases could still mint separate
+  interval and daily identities after passing admission. Focused provider proof
+  now preserves one established source row and opaque canonical source identity
+  across a provider-listing alias change, emits calendar work under that
+  identity, and fails closed on duplicate route-equivalent source rows. A real
+  importer/core replay proves a value and D1-to-D2 correction stays on one
+  revision spine, reports both affected days exactly once, and ignores a stale
+  replay without new work.
+- Passed the final device-sync typecheck and all 995 device-sync tests after
+  narrowing source-identity projection to the precise and calendar paths. The
+  21 normalized wearable-query regressions, owning importer/core/query
+  typechecks, importer build, docs drift, scenario integrity, targeted privacy
+  scan, and `git diff --check` also pass. The full Junction importer file's one
+  unrelated timeout passed when rerun alone, including the new real-core alias
+  replay regression.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

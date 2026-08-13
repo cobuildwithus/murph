@@ -196,6 +196,7 @@ interface JunctionDirectSummaryImportResult {
 
 interface JunctionImportAdmissionSource {
   lastErrorCode?: string | null;
+  sourceInstanceKey?: string;
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
 }
@@ -1863,11 +1864,21 @@ export function createJunctionDeviceSyncProvider(
           retryable: false,
         });
       }
-      const currentSources = context.listConnectionSources
+      const queuedCalendarSourceIdentity = readJunctionSparseCalendarSourceIdentity(job);
+      const currentSources = withJunctionSourceInstanceKeys(
+        context.listConnectionSources
         ? await context.listConnectionSources()
-        : context.account.sources ?? [];
+        : context.account.sources ?? [],
+        context.account.id,
+      );
+      const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
+        currentSources,
+        queuedCalendarSourceIdentity.sourceProviderSlug,
+        context.connectionSourceAdmissionMode !== "listed_only",
+      );
       if (
-        !isJunctionSourceAdmittedForImport(
+        !accountSourceIdentity
+        || !isJunctionSourceAdmittedForImport(
           currentSources,
           sourceProviderSlug,
           context.connectionSourceAdmissionMode !== "listed_only",
@@ -1881,9 +1892,15 @@ export function createJunctionDeviceSyncProvider(
         });
       }
       const sourceProviders = await loadAndProjectSourceProviders();
-      const calendarSourceIdentity = readJunctionSparseCalendarSourceIdentity(job);
+      const calendarSourceIdentity = {
+        ...queuedCalendarSourceIdentity,
+        sourceProviderSlug: accountSourceIdentity.sourceProviderSlug,
+        ...(accountSourceIdentity.sourceInstanceId
+          ? { sourceInstanceId: accountSourceIdentity.sourceInstanceId }
+          : {}),
+      };
       const calendarFetchSourceProviderSlug = resolveJunctionProviderRouteSlug(
-        sourceProviderSlug,
+        queuedCalendarSourceIdentity.sourceProviderSlug,
       );
       const windowStart = `${calendarRefreshDay}T00:00:00.000Z`;
       const dailyImport = await importTimeseriesDailySnapshots(
@@ -1917,7 +1934,6 @@ export function createJunctionDeviceSyncProvider(
             priority: job.priority,
             resource,
             ...calendarSourceIdentity,
-            sourceProviderSlug,
           })
         : null;
       return withJunctionSkippedResourceMetadata(
@@ -2887,6 +2903,42 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
     options: JunctionPreciseTimeseriesImportOptions = {},
   ): Promise<JunctionPreciseTimeseriesImportResult> {
+    const sourceIdentityAuthority = withJunctionSourceInstanceKeys(
+      context.account.sources ?? [],
+      context.account.id,
+    );
+    const importSourceIdentities = resolveJunctionAccountSourceIdentities(
+      sourceIdentityAuthority,
+    );
+    if (
+      sourceProviderSlug
+      && !importSourceIdentities.some((identity) =>
+        areJunctionProviderSlugsRouteEquivalent(
+          identity.sourceProviderSlug,
+          sourceProviderSlug,
+        )
+      )
+    ) {
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: context.account.id,
+        sourceProviderSlug,
+      });
+      const sourceInstanceId = sourceInstanceKey
+        ? resolveJunctionOrigin({
+            sourceInstanceId: sourceInstanceKey,
+            sourceProviderSlug,
+          }).sourceInstanceId
+        : undefined;
+      importSourceIdentities.push({
+        ...(sourceInstanceKey
+          ? {
+              ...(sourceInstanceId ? { sourceInstanceId } : {}),
+              sourceInstanceKey,
+            }
+          : {}),
+        sourceProviderSlug,
+      });
+    }
     const accumulatedTimeseries: Record<string, unknown[]> = {};
     let executionWindowEnd: string | null = null;
     let executionWindowStart: string | null = null;
@@ -2971,11 +3023,15 @@ export function createJunctionDeviceSyncProvider(
         && executionWindowEnd
         && providerRecordCount > 0
         ? identifyJunctionBloodPressureProviderRecords({
-          connections: sanitizeJunctionImportConnections(sourceProviders),
+          connections: sanitizeJunctionImportConnections(
+            sourceProviders,
+            importSourceIdentities,
+          ),
           importedAt: executionWindowEnd,
           timeseries: sanitizeJunctionImportSnapshots(
             dedupedTimeseries,
             sourceProviders,
+            { sourceIdentities: importSourceIdentities },
           ),
           windowStart: executionWindowStart,
           windowEnd: executionWindowEnd,
@@ -3025,7 +3081,9 @@ export function createJunctionDeviceSyncProvider(
           context,
           dedupedTimeseries,
           sourceProviders,
-          {},
+          {
+            sourceIdentities: importSourceIdentities,
+          },
           options.sourceStatusRequirement,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
@@ -3169,7 +3227,12 @@ export function createJunctionDeviceSyncProvider(
         for (const resource of windowResources) {
           timeseries[resource] = filterJunctionSparseCalendarRecordsToSource(
             timeseries[resource] ?? [],
-            emptySparseCalendarSource,
+            {
+              sourceProviderSlug: emptySparseCalendarSource.sourceProviderSlug,
+              ...(emptySparseCalendarSource.sourceType
+                ? { sourceType: emptySparseCalendarSource.sourceType }
+                : {}),
+            },
           );
         }
       }
@@ -3195,6 +3258,16 @@ export function createJunctionDeviceSyncProvider(
         context,
         timeseries,
         sourceProviders,
+        {
+          sourceIdentities: emptySparseCalendarSource
+            ? [{
+                ...(emptySparseCalendarSource.sourceInstanceId
+                  ? { sourceInstanceId: emptySparseCalendarSource.sourceInstanceId }
+                  : {}),
+                sourceProviderSlug: emptySparseCalendarSource.sourceProviderSlug,
+              }]
+            : [],
+        },
       );
       if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
         const receipt = await context.importSnapshot({
@@ -4957,6 +5030,100 @@ function areJunctionProviderSlugsRouteEquivalent(left: unknown, right: unknown):
   return leftRoute !== null && leftRoute === rightRoute;
 }
 
+interface JunctionAccountSourceIdentity {
+  sourceInstanceId?: string;
+  sourceInstanceKey?: string;
+  sourceProviderSlug: string;
+}
+
+function withJunctionSourceInstanceKeys(
+  sources: readonly JunctionImportAdmissionSource[],
+  connectionId: string,
+): JunctionImportAdmissionSource[] {
+  return sources.map((source) => {
+    if (source.sourceInstanceKey) {
+      return source;
+    }
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: source.sourceProviderSlug,
+    });
+    return sourceInstanceKey ? { ...source, sourceInstanceKey } : source;
+  });
+}
+
+function resolveJunctionAccountSourceIdentities(
+  sources: readonly JunctionImportAdmissionSource[],
+): JunctionAccountSourceIdentity[] {
+  const identities: JunctionAccountSourceIdentity[] = [];
+  for (const source of sources) {
+    const identity = resolveJunctionAccountSourceIdentity(
+      sources,
+      source.sourceProviderSlug,
+    );
+    if (
+      identity
+      && !identities.some((candidate) =>
+        candidate.sourceProviderSlug === identity.sourceProviderSlug
+      )
+    ) {
+      identities.push(identity);
+    }
+  }
+  return identities;
+}
+
+function resolveJunctionAccountSourceIdentity(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string | null | undefined,
+  allowUnlistedSource = false,
+): JunctionAccountSourceIdentity | null {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  if (!normalizedSourceProviderSlug) {
+    return null;
+  }
+  const matchingSources = sources.filter((source) =>
+    areJunctionProviderSlugsRouteEquivalent(
+      source.sourceProviderSlug,
+      normalizedSourceProviderSlug,
+    )
+  );
+  if (matchingSources.length > 1) {
+    throw deviceSyncError({
+      code: "JUNCTION_SOURCE_AUTHORITY_AMBIGUOUS",
+      message: "Junction source authority is ambiguous.",
+      retryable: true,
+    });
+  }
+  const [matchingSource] = matchingSources;
+  if (!matchingSource) {
+    return allowUnlistedSource
+      ? { sourceProviderSlug: normalizedSourceProviderSlug }
+      : null;
+  }
+  const establishedSourceProviderSlug = normalizeProviderSlug(
+    matchingSource.sourceProviderSlug,
+  );
+  if (!establishedSourceProviderSlug) {
+    return null;
+  }
+  const sourceInstanceId = matchingSource.sourceInstanceKey
+    ? resolveJunctionOrigin({
+        sourceInstanceId: matchingSource.sourceInstanceKey,
+        sourceProviderSlug: establishedSourceProviderSlug,
+      }).sourceInstanceId
+    : undefined;
+  return {
+    ...(matchingSource.sourceInstanceKey
+      ? {
+          ...(sourceInstanceId ? { sourceInstanceId } : {}),
+          sourceInstanceKey: matchingSource.sourceInstanceKey,
+        }
+      : {}),
+    sourceProviderSlug: establishedSourceProviderSlug,
+  };
+}
+
 function stripUndefined(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
@@ -4965,11 +5132,23 @@ function stripUndefined(value: Record<string, unknown>): Record<string, unknown>
 
 function sanitizeJunctionImportConnections(
   providers: readonly JunctionProviderConnection[],
+  sourceIdentities: readonly JunctionAccountSourceIdentity[] = [],
 ): Array<Record<string, unknown>> {
-  return providers.map((provider) => stripUndefined({
-    sourceProviderSlug: provider.origin.sourceProviderSlug ?? provider.slug,
-    sourceInstanceId: provider.origin.sourceInstanceId,
-  }));
+  return providers.map((provider) => {
+    const sourceProviderSlug = provider.origin.sourceProviderSlug ?? provider.slug;
+    const projectedSourceIdentity = sourceIdentities.find(
+      (identity) => areJunctionProviderSlugsRouteEquivalent(
+        sourceProviderSlug,
+        identity.sourceProviderSlug,
+      ),
+    );
+    return stripUndefined({
+      sourceProviderSlug:
+        projectedSourceIdentity?.sourceProviderSlug ?? sourceProviderSlug,
+      sourceInstanceId:
+        projectedSourceIdentity?.sourceInstanceId ?? provider.origin.sourceInstanceId,
+    });
+  });
 }
 
 async function prepareJunctionImportSnapshot(
@@ -5019,7 +5198,10 @@ function prepareJunctionImportSnapshotForSources(
   );
 
   return {
-    connections: sanitizeJunctionImportConnections(sourceProviders),
+    connections: sanitizeJunctionImportConnections(
+      sourceProviders,
+      options.sourceIdentities,
+    ),
     sourceProviders,
     snapshots: sanitizeJunctionImportSnapshots(
       filterJunctionImportSnapshots(
@@ -5139,6 +5321,7 @@ function buildJunctionSourceReferenceMap(
 interface JunctionImportSnapshotSanitizeOptions {
   blockedStringValues?: readonly string[];
   preserveSourceReferenceKeys?: boolean;
+  sourceIdentities?: readonly JunctionAccountSourceIdentity[];
 }
 
 function sanitizeJunctionImportSnapshotValue(
@@ -5169,12 +5352,24 @@ function sanitizeJunctionImportSnapshotValue(
     hasJunctionSourceReferenceIdentity(record);
   const sourceInstanceId = fallbackSourceInstanceId ??
     (unresolvedPreservedSourceReference ? undefined : origin.sourceInstanceId);
+  const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
+  const projectedSourceIdentity = options.sourceIdentities
+    ?.find((identity) => areJunctionProviderSlugsRouteEquivalent(
+      sourceProviderSlug,
+      identity.sourceProviderSlug,
+    ));
 
   return stripUndefined({
     ...sanitized,
-    sourceProviderSlug: normalizeProviderSlug(origin.sourceProviderSlug) ?? sanitized.sourceProviderSlug,
+    sourceProviderSlug:
+      projectedSourceIdentity?.sourceProviderSlug
+      ?? sourceProviderSlug
+      ?? sanitized.sourceProviderSlug,
     sourceType: origin.sourceType ?? sanitized.sourceType,
-    sourceInstanceId: sourceInstanceId ?? sanitized.sourceInstanceId,
+    sourceInstanceId:
+      projectedSourceIdentity?.sourceInstanceId
+      ?? sourceInstanceId
+      ?? sanitized.sourceInstanceId,
   });
 }
 
@@ -7917,16 +8112,16 @@ async function projectJunctionSources(
     ) {
       continue;
     }
-    const existingByInstanceKey = new Map(
-      existingSources.map((existingSource) => [
-        existingSource.sourceInstanceKey,
-        existingSource,
-      ] as const),
+    const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
+      existingSources,
+      source.sourceProviderSlug,
+      true,
     );
-    const existing = existingByInstanceKey.get(source.sourceInstanceKey) ?? existingSources.find(
-      (candidate) =>
-        normalizeProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,
-    );
+    const existing = accountSourceIdentity?.sourceInstanceKey
+      ? existingSources.find((candidate) =>
+          candidate.sourceInstanceKey === accountSourceIdentity.sourceInstanceKey
+        )
+      : undefined;
     const keepHistoricalReconnect =
       preserveHistoricalReconnect
       && (
@@ -7943,8 +8138,10 @@ async function projectJunctionSources(
       );
     const historicalReconnectError = keepHistoricalReconnect ? existing : null;
     await context.upsertConnectionSource({
-      sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
-      sourceProviderSlug: source.sourceProviderSlug,
+      sourceInstanceKey:
+        accountSourceIdentity?.sourceInstanceKey ?? source.sourceInstanceKey,
+      sourceProviderSlug:
+        accountSourceIdentity?.sourceProviderSlug ?? source.sourceProviderSlug,
       displayName: existing?.displayName ?? null,
       ...(existing?.firstSeenAt ? { firstSeenAt: existing.firstSeenAt } : {}),
       status: keepHistoricalReconnect
@@ -7978,19 +8175,27 @@ function isJunctionSourceAdmittedForImport(
     return true;
   }
 
-  const matchingSources = sources.filter((source) =>
+  const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
+    sources,
+    normalizedSourceProviderSlug,
+    allowUnlistedSources,
+  );
+  if (!accountSourceIdentity) {
+    return false;
+  }
+  const matchingSource = sources.find((source) =>
     areJunctionProviderSlugsRouteEquivalent(
       source.sourceProviderSlug,
-      normalizedSourceProviderSlug,
+      accountSourceIdentity.sourceProviderSlug,
     )
   );
-  return matchingSources.length === 0
-    ? allowUnlistedSources
-    : matchingSources.some((source) =>
-      sourceStatusRequirement === "connected"
-        ? isDeviceSyncSourceAdmitted([source], source.sourceProviderSlug)
-        : source.status !== "disconnected" && !isDeviceSyncSourceDisconnectFenced(source)
-    );
+  if (!matchingSource) {
+    return allowUnlistedSources;
+  }
+  return sourceStatusRequirement === "connected"
+    ? isDeviceSyncSourceAdmitted([matchingSource], matchingSource.sourceProviderSlug)
+    : matchingSource.status !== "disconnected"
+      && !isDeviceSyncSourceDisconnectFenced(matchingSource);
 }
 
 function isJunctionSourceProjectionFenced(
@@ -8002,13 +8207,20 @@ function isJunctionSourceProjectionFenced(
     return false;
   }
 
-  return sources.some((source) =>
+  const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
+    sources,
+    normalizedSourceProviderSlug,
+  );
+  if (!accountSourceIdentity) {
+    return false;
+  }
+  const matchingSource = sources.find((source) =>
     areJunctionProviderSlugsRouteEquivalent(
       source.sourceProviderSlug,
-      normalizedSourceProviderSlug,
+      accountSourceIdentity.sourceProviderSlug,
     )
-    && isDeviceSyncSourceDisconnectFenced(source)
   );
+  return matchingSource ? isDeviceSyncSourceDisconnectFenced(matchingSource) : false;
 }
 
 function hasJunctionSourceListing(
@@ -8021,7 +8233,10 @@ function hasJunctionSourceListing(
   }
 
   return sources.some((source) =>
-    normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
+    areJunctionProviderSlugsRouteEquivalent(
+      source.sourceProviderSlug,
+      normalizedSourceProviderSlug,
+    )
   );
 }
 
@@ -8030,7 +8245,7 @@ async function resolveJunctionCurrentSourceAdmission(
   sourceProviderSlug: string,
 ): Promise<"admitted" | "fenced" | "pending"> {
   const sources = context.listConnectionSources
-    ? await context.listConnectionSources({ sourceProviderSlug })
+    ? await context.listConnectionSources()
     : context.account.sources ?? [];
   if (isJunctionSourceProjectionFenced(sources, sourceProviderSlug)) {
     return "fenced";

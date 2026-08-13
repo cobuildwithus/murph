@@ -4395,6 +4395,103 @@ test("Junction sparse cross-day revisions report both affected provider days", a
   }
 });
 
+test("Junction projected account source identity keeps revisions on one sparse spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-account-source-alias-revision");
+  const sourceInstanceId = "source-aaaaaaaaaaaaaaaaaaaaaaaa";
+  const snapshotFor = (input: {
+    dayKey: string;
+    importedAt: string;
+    updatedAt: string;
+    value: number;
+  }) => ({
+    accountId: "junction-account-source-alias-revision",
+    importedAt: input.importedAt,
+    timeseriesWindowKind: "precise" as const,
+    timeseries: {
+      water: [{
+        calendarDate: input.dayKey,
+        end: `${input.dayKey}T08:01:00.000Z`,
+        id: "water-account-source-alias-revision",
+        sourceInstanceId,
+        sourceProviderSlug: "apple_health_kit",
+        sourceType: "phone",
+        start: `${input.dayKey}T08:00:00.000Z`,
+        updatedAt: input.updatedAt,
+        value: input.value,
+      }],
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    const first = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      vaultRoot,
+      snapshot: snapshotFor({
+        dayKey: "2026-04-21",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        updatedAt: "2026-04-22T08:00:00.000Z",
+        value: 250,
+      }),
+    }, { corePort: coreRuntime });
+    const correction = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      vaultRoot,
+      snapshot: snapshotFor({
+        dayKey: "2026-04-22",
+        importedAt: "2026-04-23T12:00:00.000Z",
+        updatedAt: "2026-04-23T08:00:00.000Z",
+        value: 300,
+      }),
+    }, { corePort: coreRuntime });
+    const staleReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      vaultRoot,
+      snapshot: snapshotFor({
+        dayKey: "2026-04-21",
+        importedAt: "2026-04-24T12:00:00.000Z",
+        updatedAt: "2026-04-22T08:00:00.000Z",
+        value: 250,
+      }),
+    }, { corePort: coreRuntime });
+
+    assert.equal(first.events[0]?.id, correction.events[0]?.id);
+    assert.equal(correction.events[0]?.lifecycle?.revision, 2);
+    assert.deepEqual(correction.affectedEventDayKeys, ["2026-04-21", "2026-04-22"]);
+    assert.deepEqual(correction.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+      "2026-04-21",
+      "2026-04-22",
+    ]);
+    assert.equal(staleReplay.applied, false);
+    assert.equal(staleReplay.affectedSparseCalendarTargets, undefined);
+
+    const records = latestLiveRecords((await Promise.all(
+      [...new Set([...first.eventShardPaths, ...correction.eventShardPaths])].map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )).flat()).filter((record) =>
+      record.kind === "measurement"
+      && typeof record.externalRef === "object"
+      && record.externalRef !== null
+      && !Array.isArray(record.externalRef)
+      && record.externalRef.facet === "interval"
+    );
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.dayKey, "2026-04-22");
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("Junction authoritative empty sparse days clear the prior retained daily sum", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-empty-sparse-calendar-day");
   const snapshotFor = (records: readonly Record<string, unknown>[], importedAt: string) => ({

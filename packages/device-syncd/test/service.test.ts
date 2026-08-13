@@ -2438,17 +2438,21 @@ test("device sync service retains one accepted sparse calendar job until canonic
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     importer: {
-      async importDeviceProviderSnapshot() {
+      async importDeviceProviderSnapshot({ snapshot }) {
         importAttempts += 1;
         if (importAttempts < 3) {
           throw new Error("Synthetic canonical calendar import failure.");
         }
+        const sourceInstanceId = (snapshot as {
+          strictSparseCalendarRepair?: { sourceInstanceId?: string };
+        }).strictSparseCalendarRepair?.sourceInstanceId;
         return {
           events: [{
             externalRef: {
               resourceId: buildJunctionDailyTimeseriesAggregateResourceId({
                 dayKey: "2026-07-08",
                 resource: "water",
+                sourceInstanceId,
                 sourceProviderSlug: "garmin",
                 sourceType: "watch",
               }),
