@@ -1,6 +1,6 @@
 # Unblock hosted browser canaries at runner bundle assembly
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-13
 
@@ -48,8 +48,8 @@ Updated: 2026-08-13
 1. [done] Record the CI reproduction and confirm both workflows share the same blocker.
 2. [done] Ratchet the total-byte baseline and mirrored test to the measured value.
 3. [done] Run focused bundle assembly, tests, typecheck, and inspect the final diff.
-4. [active] Commit/push/open the PR; run preliminary and final ReviewGPT with CI.
-5. [pending] Resolve findings, merge, and monitor fresh protected-main canaries.
+4. [done] Commit/push/open the PR; run preliminary and final ReviewGPT with CI.
+5. [active] Resolve findings, merge, and monitor fresh protected-main canaries.
 
 ## Decisions
 
@@ -74,3 +74,14 @@ Updated: 2026-08-13
 - Expected outcomes: every command passes; bundle output reports the measured
   total under the new baseline plus unchanged allowance; both canaries proceed
   beyond assembly and finish successfully.
+- Results before plan closure:
+  - focused runner entrypoint policy: 42/42 passed
+  - Cloudflare typecheck: passed
+  - production runner assembly: passed at 1,699,473B entry, 8,074,787B static
+    closure, and 10,204,553B total under the retained per-surface allowances
+  - preliminary specialist ReviewGPT: PASS, no findings or patch artifact
+  - final ReviewGPT round 1: PASS, no findings
+  - exact-head release, runner-permission, billing-hermetic, hygiene, viewport,
+    and Vercel checks: passed; PR metadata rerun pending after body-only fixes
+  - post-merge Junction and Stripe canaries remain the final operational proof
+Completed: 2026-08-13
