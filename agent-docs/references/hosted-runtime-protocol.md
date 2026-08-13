@@ -1073,8 +1073,12 @@ that secure-box operation.
 Web may satisfy it without another provider send only when a covering active
 offer already exists. Grants held by current hosted members never suppress the
 offer: a provider-room participant who has not joined the hosted group may be
-the intended recipient. A fresh request returns `sent` only after the provider
-send succeeds and its message binding is durably recorded.
+the intended recipient. Its canonical reaction sentence discloses that offered
+health values include source names and that sleep-stage values also include each
+source's recorded time. The same source-aware meaning applies to existing health
+scope keys and active grants; there is no separate source-details permission.
+A fresh request returns `sent` only after the provider send succeeds and its
+message binding is durably recorded.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime

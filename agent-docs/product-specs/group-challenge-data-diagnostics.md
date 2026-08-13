@@ -363,6 +363,11 @@ durable route does not preserve a Linq iMessage-versus-SMS subtype.
 Web remains the durable authority for the canonical consent sentence, frozen
 scope disclosure, recipient-safe delivery, active-offer/all-granted dedupe, and
 first-party customize page. Native consent grants only the disclosed snapshot.
+A reaction-bound offer that carries health values always says those values
+include source names; a sleep-stage offer also names each source's recorded
+time. This is the same broadened health-scope meaning used by Web joins and
+already-active grants, without a second source-details permission or consent
+owner.
 A returned link grants nothing until the member accepts the first-party page.
 The standings message itself never grants permission.
 
