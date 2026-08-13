@@ -28,8 +28,24 @@ import {
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   parseHostedVaultShareDeliverResponse,
+  parseHostedVaultShareEffectDeadlineAtEpochMs,
   parseHostedVaultShareProjectionScopeKey,
 } from "../src/vault-share.ts";
+
+const TEST_SOURCE_WORKSPACE_VERSION = "7";
+
+function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
+  const {
+    expectedGenerationToken: _generationToken,
+    sourceWorkspaceVersion: _sourceWorkspaceVersion,
+    ...request
+  } = parseHostedVaultShareDeliverRequestContract({
+    expectedGenerationToken: GENERATION_TOKEN,
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    ...value,
+  });
+  return request;
+}
 
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const ACTIVITY_SCOPE = { projectionKind: "activity-days.v0" } as const;
@@ -71,17 +87,6 @@ const VALID_RECORD = {
   recordKey: "2026-06-09",
 };
 const GENERATION_TOKEN = "a".repeat(43);
-
-function parseHostedVaultShareDeliverRequest(
-  value: Record<string, unknown>,
-) {
-  const { expectedGenerationToken: _generationToken, ...parsed } =
-    parseHostedVaultShareDeliverRequestContract({
-      expectedGenerationToken: GENERATION_TOKEN,
-      ...value,
-    });
-  return parsed;
-}
 
 const VALID_ACTIVITY_RECORD = {
   data: {
@@ -241,6 +246,43 @@ const VALID_REVOKE = {
 };
 
 describe("vault-share contracts", () => {
+  it("parses only an exact millisecond effect deadline header", () => {
+    expect(parseHostedVaultShareEffectDeadlineAtEpochMs("1786543200000")).toBe(
+      1_786_543_200_000,
+    );
+    expect(() => parseHostedVaultShareEffectDeadlineAtEpochMs(null)).toThrow(
+      "effect deadline header is invalid",
+    );
+    expect(() => parseHostedVaultShareEffectDeadlineAtEpochMs("178654320000")).toThrow(
+      "effect deadline header is invalid",
+    );
+  });
+
+  it("requires one canonical source workspace version per replacement", () => {
+    expect(parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: GENERATION_TOKEN,
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    })).toMatchObject({
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
+
+    for (const sourceWorkspaceVersion of [
+      undefined,
+      "-1",
+      "07",
+      "9223372036854775808",
+    ]) {
+      expect(() => parseHostedVaultShareDeliverRequestContract({
+        expectedGenerationToken: GENERATION_TOKEN,
+        projectionKind: "sleep-times.v0",
+        records: [VALID_RECORD],
+        sourceWorkspaceVersion,
+      })).toThrow(/sourceWorkspaceVersion/u);
+    }
+  });
+
   it("registers vault-share kinds in the mailbox kind registry", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.delivery");
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");
@@ -400,6 +442,7 @@ describe("vault-share contracts", () => {
       expectedGenerationToken,
       projectionKind: "sleep-times.v0",
       records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     }).expectedGenerationToken).toBe(expectedGenerationToken);
 
     for (const invalidToken of ["short", "a".repeat(44), `${"a".repeat(42)}/`]) {
@@ -420,6 +463,7 @@ describe("vault-share contracts", () => {
     expect(() => parseHostedVaultShareDeliverRequestContract({
       projectionKind: "sleep-times.v0",
       records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     })).toThrow(/expectedGenerationToken/u);
   });
 
@@ -646,6 +690,7 @@ describe("vault-share contracts", () => {
       projectionKind: "sleep-times.v0",
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
       records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     })).toEqual(expect.objectContaining({
       projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     }));
@@ -654,6 +699,7 @@ describe("vault-share contracts", () => {
       projectionKind: "sleep-times.v0",
       projectionMode: "refresh-all",
       records: [VALID_RECORD],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     })).toThrow(/first-materialization/u);
   });
 

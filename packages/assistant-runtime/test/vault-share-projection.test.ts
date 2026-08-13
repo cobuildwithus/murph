@@ -14,6 +14,7 @@ import {
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
@@ -21,9 +22,13 @@ import {
   parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDeliverRequest,
+  type HostedVaultShareProjectionMode,
   type HostedVaultShareWorkoutsDayData,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   selectMetricSeries,
   type MealNutritionDayTotal,
@@ -33,8 +38,9 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  captureHostedVaultShareProjectionBestEffort,
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
-  offerHostedVaultShareProjectionBestEffort,
+  offerCapturedHostedVaultShareProjectionBestEffort,
   readProjectableActivityDistanceDays,
   readProjectableActivityMinutesDays,
   readProjectableActivitySessionCountDays,
@@ -52,6 +58,7 @@ import {
   selectProjectableSleepNights,
   selectProjectableWorkoutDays,
   selectProjectableWorkoutsDays,
+  resolveHostedVaultShareProjectionScopesBestEffort,
   type ActivitySessionProjectionRow,
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
@@ -63,6 +70,62 @@ import {
   setMemoryDisplayName,
   upsertMemoryRecord,
 } from "@murphai/contracts";
+
+const TEST_SOURCE_WORKSPACE_VERSION = "7";
+
+function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
+  const {
+    expectedGenerationToken: _generationToken,
+    sourceWorkspaceVersion: _sourceWorkspaceVersion,
+    ...parsed
+  } = parseHostedVaultShareDeliverRequestContract({
+    expectedGenerationToken: GENERATION_TOKEN,
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    ...value,
+  });
+  return parsed;
+}
+
+async function offerHostedVaultShareProjectionBestEffort(input: {
+  projectionMode?: HostedVaultShareProjectionMode;
+  shouldStop?: () => boolean;
+  vaultRoot: string;
+  vaultSharePort:
+    | Parameters<
+      typeof resolveHostedVaultShareProjectionScopesBestEffort
+    >[0]["vaultSharePort"]
+    | null;
+}) {
+  if (!input.vaultSharePort) {
+    return { outcome: "no-port" as const };
+  }
+  const scopeResolution = await resolveHostedVaultShareProjectionScopesBestEffort({
+    ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
+    vaultSharePort: input.vaultSharePort,
+  });
+  if (scopeResolution.outcome !== "active-scopes") {
+    return scopeResolution;
+  }
+  const capture = await captureHostedVaultShareProjectionBestEffort({
+    generationTokensByProjectionScopeKey:
+      scopeResolution.generationTokensByProjectionScopeKey,
+    hasDeferredProjectionWork: scopeResolution.hasDeferredProjectionWork,
+    ...(scopeResolution.projectionMode
+      ? { projectionMode: scopeResolution.projectionMode }
+      : {}),
+    projectionScopes: scopeResolution.projectionScopes,
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    vaultRoot: input.vaultRoot,
+  });
+  if (capture.outcome !== "captured") {
+    return capture;
+  }
+  return await offerCapturedHostedVaultShareProjectionBestEffort({
+    capture: capture.capture,
+    ...(input.shouldStop ? { shouldStop: input.shouldStop } : {}),
+    vaultSharePort: input.vaultSharePort,
+  });
+}
 
 const NIGHT = {
   date: "2026-06-09",
@@ -79,6 +142,7 @@ const RECORD = {
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const TIME_ZONE_SCOPE = hostedVaultShareProjectionKindToScope("time-zone.v0");
 const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const DEVICE_SYNC_STATUS_SCOPE = hostedVaultShareProjectionKindToScope(
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
@@ -102,17 +166,6 @@ const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
   "workouts.v0",
 );
 const GENERATION_TOKEN = "a".repeat(43);
-
-function parseHostedVaultShareDeliverRequest(
-  value: Record<string, unknown>,
-) {
-  const { expectedGenerationToken: _generationToken, ...parsed } =
-    parseHostedVaultShareDeliverRequestContract({
-      expectedGenerationToken: GENERATION_TOKEN,
-      ...value,
-    });
-  return parsed;
-}
 
 function activeProjectionResponse(
   ...projectionScopes: HostedVaultShareProjectionScope[]
@@ -366,6 +419,25 @@ async function createMemoryDisplayNameVault(displayName: string | null): Promise
   return vaultRoot;
 }
 
+async function createProfileAndTimeZoneVault(
+  displayName: string,
+  timeZone: string,
+): Promise<string> {
+  const vaultRoot = await createMemoryDisplayNameVault(displayName);
+  await writeFile(
+    join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      createdAt: "2026-07-01T00:00:00.000Z",
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      timezone: timeZone,
+      title: "Projection capture test",
+      vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4F",
+    })}\n`,
+    "utf8",
+  );
+  return vaultRoot;
+}
+
 async function createLegacyMemoryDisplayNameVault(...texts: string[]): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-memory-name-"));
   let document = createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z"));
@@ -525,7 +597,191 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         recordKey: "profile-name",
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
+  });
+
+  it("captures every scope before delivery can mutate the shared vault root", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const deliveries: HostedVaultShareDeliverRequest[] = [];
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver(request) {
+          deliveries.push(request);
+          if (request.projectionKind === "profile-name.v0") {
+            await writeFile(
+              join(vaultRoot, "vault.json"),
+              `${JSON.stringify({
+                createdAt: "2026-07-01T00:00:00.000Z",
+                formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+                timezone: "America/Chicago",
+                title: "Successor projection capture test",
+                vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4F",
+              })}\n`,
+              "utf8",
+            );
+          }
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () =>
+          activeProjectionResponse(PROFILE_SCOPE, TIME_ZONE_SCOPE),
+      },
+    });
+
+    expect(result.outcome).toBe("delivered");
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries[1]).toMatchObject({
+      projectionKind: "time-zone.v0",
+      records: [{ data: { timeZone: "UTC" } }],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
+  });
+
+  it("continues after a definitive scope failure and aggregates the attempt as failed", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const deliver = vi.fn().mockImplementation(async (
+      request: HostedVaultShareDeliverRequest,
+    ) => request.projectionKind === "time-zone.v0"
+      ? { status: "scope-failed" as const }
+      : { status: "delivered" as const });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () =>
+          activeProjectionResponse(PROFILE_SCOPE, TIME_ZONE_SCOPE, SLEEP_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "error" });
+    expect(deliver).toHaveBeenCalledTimes(3);
+    expect(deliver.mock.calls.map(([request]) => request.projectionKind)).toEqual([
+      "profile-name.v0",
+      "time-zone.v0",
+      "sleep-times.v0",
+    ]);
+  });
+
+  it("stops the captured delivery chain after an ambiguous failure", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const deliver = vi.fn().mockRejectedValue(new Error("synthetic delivery failure"));
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () =>
+          activeProjectionResponse(PROFILE_SCOPE, TIME_ZONE_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "error" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]?.[0]).toMatchObject({
+      projectionKind: "profile-name.v0",
+    });
+  });
+
+  it("finishes only the active scope after foreground work preempts delivery", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    let foregroundPreempted = false;
+    const deliver = vi.fn().mockImplementation(async () => {
+      foregroundPreempted = true;
+      return { status: "delivered" as const };
+    });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      shouldStop: () => foregroundPreempted,
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () =>
+          activeProjectionResponse(PROFILE_SCOPE, TIME_ZONE_SCOPE, SLEEP_SCOPE),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "preempted" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]?.[0]).toMatchObject({
+      projectionKind: "profile-name.v0",
+    });
+  });
+
+  it("starts no delivery when its owner ended before the first scope", async () => {
+    const deliver = vi.fn();
+
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: false,
+        snapshots: [{
+          generationToken: GENERATION_TOKEN,
+          projectionScope: PROFILE_SCOPE,
+          records: [],
+        }],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      shouldStop: () => true,
+      vaultSharePort: {
+        deliver,
+        async listActiveProjectionScopes() {
+          throw new Error("Immutable delivery must not resolve scopes again.");
+        },
+      },
+    });
+
+    expect(result).toEqual({ outcome: "preempted" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("delivers the maximum projectable registry sequentially", async () => {
+    const projectableScopes = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.filter(
+      ({ projectionKind }) =>
+        projectionKind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND
+        && projectionKind !== "group-email.v0",
+    );
+    const deliveredScopeKeys: string[] = [];
+    let activeDeliveries = 0;
+    let peakActiveDeliveries = 0;
+
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        hasDeferredProjectionWork: false,
+        snapshots: projectableScopes.map((projectionScope) => ({
+          generationToken: GENERATION_TOKEN,
+          projectionScope,
+          records: [],
+        })),
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      vaultSharePort: {
+        async deliver(request) {
+          activeDeliveries += 1;
+          peakActiveDeliveries = Math.max(peakActiveDeliveries, activeDeliveries);
+          await Promise.resolve();
+          deliveredScopeKeys.push(
+            buildHostedVaultShareProjectionScopeKey(request.projectionScope),
+          );
+          activeDeliveries -= 1;
+          return { status: "delivered" };
+        },
+        async listActiveProjectionScopes() {
+          throw new Error("Immutable delivery must not resolve scopes again.");
+        },
+      },
+    });
+
+    expect(projectableScopes).toHaveLength(98);
+    expect(
+      projectableScopes.length * HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+    ).toBe(2_450);
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliveredScopeKeys).toEqual(
+      projectableScopes.map(buildHostedVaultShareProjectionScopeKey),
+    );
+    expect(peakActiveDeliveries).toBe(1);
+    expect(activeDeliveries).toBe(0);
   });
 
   it("does not read or deliver payloads when the control plane reports no active kinds", async () => {
@@ -666,6 +922,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records: [],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });
 
@@ -2359,6 +2616,7 @@ describe("selectProjectableMealNutritionDays", () => {
         projectionKind: "protein-days.v0",
         projectionScope: PROTEIN_SCOPE,
         records: selected,
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
       });
     } finally {
       dateNow.mockRestore();
@@ -4632,6 +4890,7 @@ describe("readProjectableProfileName", () => {
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records,
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });
 
@@ -4763,6 +5022,7 @@ describe("readProjectableProfileName", () => {
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records: [],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });
 });

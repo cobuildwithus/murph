@@ -248,9 +248,16 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Linux CI measured a 7,934,975B static closure on 2026-08-12; the matching
 // macOS production assembly measured 9,960,217B total. Ratchet both measurements
 // and retain the established cross-platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_960_217 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_934_975;
+//
+// Group-projection delivery ownership and its end-to-end deadline extend the
+// same hosted callback graph without adding a forbidden boot input or changing
+// runner permissions. Combined macOS assembly with group-share first
+// materialization measured a 1,689,721B entry, 7,992,470B static closure, and
+// 9,975,121B total. Ratchet each baseline to that integrated measurement and
+// retain the established cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_975_121 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

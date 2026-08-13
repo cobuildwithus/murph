@@ -47,6 +47,53 @@ sharing state or persist a copy in the workspace. Private self-leave atomically
 removes the non-owner membership and its shares under Web ownership. It does
 not append a runtime cleanup wake. Other permission mutations remain on the
 authenticated group join page or route-bound group-chat offer flow.
+After a successful personal checkpoint, the runtime offers complete replacement
+snapshots before a complete device-sync-only maintenance prefix may resume;
+the dedicated system-mailbox lane likewise offers before acknowledging imported
+dirty state. Conversation work still preempts the offer. Group reads query the
+current Web-owned snapshot on demand, so publication adds no per-group wake,
+cache invalidation, fanout, or second projection owner.
+The runtime resolves active Web-owned scopes without touching the vault, then
+materializes every selected record while the invocation still owns the restored
+vault path. Scope resolution receives the invocation's abort signal, so a
+foreground wake cancels and drains that read. An already-started immutable
+delivery instead remains owned and
+finishes its current scope. A foreground wake, exact host abort, or shutdown
+prevents admission of every undispatched captured scope, including the first,
+and that offer reports
+preempted instead of treating its successful prefix as complete. Foreground's
+stop bit belongs only to the active delivery owner, so
+a later opportunity begins fresh and can retry every scope before the existing
+dirty or recording obligation is acknowledged. Web
+owns a finite effect deadline for that current scope, stops admitting destination
+replacements on deadline or request cancellation, and bounds the final database
+transaction by the remaining deadline. Runtime creates that one absolute
+effect deadline and carries it unchanged through the proxy to Web. Transport
+timeouts add a fixed settlement margin. Only a proxy response marked after an
+actual Web response can prove terminal settlement; an unmarked proxy response
+or transport failure retains the invocation owner until the absolute settlement
+boundary. A marked actual-Web failure received before the effect deadline is
+terminal for that scope only when Web has proved the failure is the absence of
+one destination member's ingress-root envelope. The same sequential owner then
+records the attempt as failed and offers later independent scopes. Unknown
+crypto/provider, access-query, database, transaction, deadline, transport, and
+owner-ending failures stop the undispatched suffix.
+Finalization drains that owner
+before release or retry, so projection work never overlaps a successor
+invocation. Local capture is bounded and likewise drains before its result is
+either delivered or discarded. Every captured offer names
+the committed personal-workspace version that produced those bytes. Web
+serializes only the final replacement against that existing workspace row; an
+older in-flight offer becomes a no-op after a newer checkpoint instead of
+overwriting the newer group snapshot. One opportunity has at most one active
+request. One destination's explicitly typed missing-root failure does not starve
+healthy scopes behind it; the aggregate failure retains the durable retry.
+Unclassified or shared-infrastructure failure, foreground preemption, exact host
+abort, shutdown, deadline exhaustion, or ambiguous transport instead drains only
+the active request before leaving the undispatched suffix to the existing continuation.
+Projection
+failure retains the existing dirty or recording obligation and its bounded
+continuation rather than creating a projection-specific queue or watermark.
 After an authenticated group join or sharing save, the page reuses the
 dashboard auth owner's first-checkout decision: a member who still requires
 checkout continues directly to `/join`, while an accessible member retains the

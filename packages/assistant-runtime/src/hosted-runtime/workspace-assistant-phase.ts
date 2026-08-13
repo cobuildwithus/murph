@@ -3800,8 +3800,8 @@ function shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
 function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
   typeof recordHostedDeviceSyncDirtyPostCheckpointRecord
 >[0]): DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
-  return {
-    afterDurableCheckpoint: async () => {
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
+    async () => {
       try {
         const result = await recordHostedDeviceSyncDirtyPostCheckpointRecord(input);
         return result.nextWakeAt
@@ -3836,6 +3836,16 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
         };
       }
     },
+    {
+      vaultShareProjectionFailureWake: {
+        nextWakeAt: resolveHostedDeviceSyncDirtyAckFailureWakeAt(input.record),
+        nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+        requiresFollowUpCheckpoint: true,
+      },
+    },
+  );
+  return {
+    afterDurableCheckpoint,
     nextWakeAt: input.record.nextWakeAt ?? null,
     redactedStatus: {
       hostedDeviceSyncDirtyAckDeferred: true,

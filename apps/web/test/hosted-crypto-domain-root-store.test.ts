@@ -829,7 +829,7 @@ test("web runtime crypto context fails closed instead of provisioning missing wo
   await expect(readHostedRuntimeCryptoContextForWorker({
     prisma: tx.prisma,
     userId: "member-test-1",
-  })).rejects.toThrow(/ingress domain root envelope is not provisioned/u);
+  })).rejects.toThrow(/ingress domain root envelope is not available for decrypt/u);
   assert.equal(tx.persistedEnvelopes.length, 0);
   assert.equal(encryptCalls.length, 0);
   assert.equal(signCalls.length, 0);
@@ -843,7 +843,7 @@ test("hosted web private-field encryption fails closed when control roots are mi
     memberId: "member-test-missing-control",
     prisma: tx.prisma,
     value: "redacted-phone-token",
-  })).rejects.toThrow(/control domain root envelope is not provisioned/u);
+  })).rejects.toThrow(/control domain root envelope is not available for decrypt/u);
 
   assert.equal(tx.persistedEnvelopes.length, 0);
   assert.equal(encryptCalls.length, 0);
