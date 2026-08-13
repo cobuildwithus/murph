@@ -1156,13 +1156,12 @@ describe("check-provider-request-boundaries", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
       [
-        "const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses';",
         "async function search(fetchImpl: typeof fetch) {",
-        "  await fetchImpl(XAI_RESPONSES_URL, {",
+        "  await fetchImpl('https://api.x.ai/v1/responses', {",
         "    body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }),",
         "    method: 'POST',",
         "  });",
-        "  await fetchImpl(XAI_RESPONSES_URL, {",
+        "  await fetchImpl('https://api.x.ai/v1/responses', {",
         "    body: JSON.stringify({ store: false, tools: [{ type: 'web_search' }] }),",
         "    method: 'POST',",
         "  });",
@@ -1171,14 +1170,52 @@ describe("check-provider-request-boundaries", () => {
       "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([7]);
+    expect(matches.map((match) => match.line)).toEqual([6]);
+  });
+
+  it("rejects identifier-bound and reassigned xAI request values", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function search(fetchImpl: typeof fetch, configuredEndpoint: string) {",
+        "  const requestInit: RequestInit = { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST' };",
+        "  await fetchImpl('https://api.x.ai/v1/responses', requestInit);",
+        "  requestInit.body = JSON.stringify({ store: true, tools: [{ type: 'x_search' }] });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', requestInit);",
+        "  let endpoint = 'https://api.x.ai/v1/responses';",
+        "  endpoint = configuredEndpoint;",
+        "  await fetchImpl(endpoint, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST' });",
+        "  await fetchImpl(configuredEndpoint ? 'https://api.x.ai/v1/responses' : endpoint, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST' });",
+        "}",
+      ].join("\n"),
+      "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 5, 8, 9]);
+  });
+
+  it("admits only the direct production xAI exception request", () => {
+    const source = readFileSync(
+      "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
+      "utf8",
+    );
+
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        source,
+        "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
+      ),
+    ).toEqual([]);
+    expect(
+      source.match(/fetchImpl\('https:\/\/api\.x\.ai\/v1\/responses', \{/gu),
+    ).toHaveLength(1);
   });
 
   it("rejects effective-value overrides in the path-scoped xAI exception", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
       [
-        "const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses';",
         "const initOverrides = {};",
         "const payloadOverrides = {};",
         "const toolOverrides = {};",
@@ -1186,28 +1223,28 @@ describe("check-provider-request-boundaries", () => {
         "const computedStore = 'store';",
         "const computedType = 'type';",
         "async function search(fetchImpl: typeof fetch) {",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', ...initOverrides });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], ...payloadOverrides }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', ...toolOverrides }] }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', [computedMethod]: 'GET' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], [computedStore]: true }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', [computedType]: 'web_search' }] }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', method: 'GET' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', body: JSON.stringify({ store: true, tools: [] }) });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, store: true, tools: [{ type: 'x_search' }] }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], tools: [{ type: 'web_search' }] }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', type: 'web_search' }] }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }, null), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], toJSON() { return { store: true, tools: [] }; } }), method: 'POST' });",
-        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], __proto__: { toJSON() { return { store: true, tools: [] }; } } }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', ...initOverrides });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], ...payloadOverrides }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', ...toolOverrides }] }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', [computedMethod]: 'GET' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], [computedStore]: true }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', [computedType]: 'web_search' }] }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', method: 'GET' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', body: JSON.stringify({ store: true, tools: [] }) });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, store: true, tools: [{ type: 'x_search' }] }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], tools: [{ type: 'web_search' }] }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', type: 'web_search' }] }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }, null), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], toJSON() { return { store: true, tools: [] }; } }), method: 'POST' });",
+        "  await fetchImpl('https://api.x.ai/v1/responses', { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], __proto__: { toJSON() { return { store: true, tools: [] }; } } }), method: 'POST' });",
         "}",
       ].join("\n"),
       "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
     );
 
     expect(matches.map((match) => match.line)).toEqual([
-      10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+      9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
     ]);
   });
 
@@ -1445,6 +1482,58 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => match.line)).toEqual([2, 6, 9, 10, 11]);
+  });
+
+  it("follows defaulted, assigned, and exact forwarding fetch transports", () => {
+    const untypedMatches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function defaulted(fetchImpl = fetch) {",
+        "  await fetchImpl('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "}",
+        "let send;",
+        "send = globalThis.fetch;",
+        "await send('https://api.openai.com/v1/responses', { method: 'POST' });",
+      ].join("\n"),
+      "scripts/provider-transports.mjs",
+    );
+    const wrapperMatches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const send = (url, init) => fetch(url, init);",
+        "const openAiUrl = process.env.PROVIDER_URL;",
+        "await send(openAiUrl, { method: 'POST' });",
+        "const reordered = (url, init) => fetch(init, url);",
+        "await reordered(openAiUrl, { method: 'POST' });",
+        "const altered = (url, init) => fetch(`${url}/responses`, init);",
+        "await altered(openAiUrl, { method: 'POST' });",
+        "const callback = (url, init) => ({ url, init });",
+        "callback(openAiUrl, { method: 'POST' });",
+        "let reassigned = globalThis.fetch;",
+        "reassigned = callback;",
+        "await reassigned(openAiUrl, { method: 'POST' });",
+        "let scoped;",
+        "if (openAiUrl) { scoped = globalThis.fetch; }",
+        "await scoped(openAiUrl, { method: 'POST' });",
+      ].join("\n"),
+      "apps/web/src/lib/provider-transports.ts",
+    );
+    const typedMatches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function defaulted(fetchImpl = globalThis.fetch) {",
+        "  await fetchImpl('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "}",
+        "let send: typeof fetch;",
+        "send = fetch;",
+        "await send('https://api.openai.com/v1/responses', { method: 'POST' });",
+      ].join("\n"),
+      "apps/web/src/lib/openai/provider-transports.ts",
+    );
+
+    expect(untypedMatches.map((match) => match.line)).toEqual([2, 6]);
+    expect(wrapperMatches.map((match) => match.line)).toEqual([3, 15]);
+    expect(typedMatches.map((match) => match.line)).toEqual([2, 6]);
   });
 
 });

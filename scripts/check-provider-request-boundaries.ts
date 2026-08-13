@@ -376,6 +376,7 @@ interface MemberBinding {
 }
 
 interface ParameterBinding {
+  readonly defaultExpression: Expression | null;
   readonly name: string;
   readonly ownerName: string | null;
   readonly propertyPath: readonly string[] | null;
@@ -402,7 +403,8 @@ interface ProviderExpressionFacts {
 }
 
 interface TransportBinding {
-  readonly kind: "call" | "namespace" | "shadow";
+  readonly initializer: Expression | null;
+  readonly kind: "call" | "expression" | "namespace" | "shadow";
   readonly scopeEnd: number;
   readonly scopeStart: number;
   readonly start: number;
@@ -865,6 +867,8 @@ function collectHttpTransportBindings(
     kind: TransportBinding["kind"],
     node: Node,
     transport: HttpTransportModuleKind | null,
+    initializer: Expression | null = null,
+    inheritedScope: Pick<TransportBinding, "scopeEnd" | "scopeStart"> | null = null,
   ): boolean => {
     const current = bindings.get(name) ?? [];
     const start = node.start ?? 0;
@@ -872,13 +876,17 @@ function collectHttpTransportBindings(
       current.some((binding) =>
         binding.kind === kind &&
         binding.start === start &&
-        binding.transport === transport
+        binding.transport === transport &&
+        binding.initializer === initializer
       )
     ) {
       return false;
     }
-    const scope = findInnermostLexicalScope(scopes, start);
+    const scope = inheritedScope
+      ? { end: inheritedScope.scopeEnd, start: inheritedScope.scopeStart }
+      : findInnermostLexicalScope(scopes, start);
     current.push({
+      initializer,
       kind,
       scopeEnd: scope.end,
       scopeStart: scope.start,
@@ -1045,9 +1053,22 @@ function collectHttpTransportBindings(
     if (
       isAssignmentExpression(node) &&
       node.operator === "=" &&
-      isIdentifier(node.left)
+      isIdentifier(node.left) &&
+      isExpression(node.right)
     ) {
-      addBinding(node.left.name, "shadow", node, null);
+      const previous = resolveTransportBinding(
+        bindings,
+        node.left.name,
+        node.start ?? 0,
+      );
+      addBinding(
+        node.left.name,
+        "expression",
+        node,
+        null,
+        node.right,
+        previous,
+      );
       return;
     }
     if (!isVariableDeclarator(node)) {
@@ -1101,15 +1122,27 @@ function readBindingPatternNames(node: Node): string[] {
 function readParameterBindingEntries(
   node: Node,
   propertyPath: readonly string[] = [],
-): Array<{ readonly name: string; readonly propertyPath: readonly string[] | null }> {
+): Array<{
+  readonly defaultExpression: Expression | null;
+  readonly name: string;
+  readonly propertyPath: readonly string[] | null;
+}> {
   if (node.type === "TSParameterProperty") {
     return readParameterBindingEntries(node.parameter, propertyPath);
   }
   if (node.type === "AssignmentPattern") {
-    return readParameterBindingEntries(node.left, propertyPath);
+    const entries = readParameterBindingEntries(node.left, propertyPath);
+    if (!isIdentifier(node.left) || !isExpression(node.right)) {
+      return entries;
+    }
+    return entries.map((entry) => ({
+      ...entry,
+      defaultExpression: node.right,
+    }));
   }
   if (node.type !== "ObjectPattern") {
     return readBindingPatternNames(node).map((name) => ({
+      defaultExpression: null,
       name,
       propertyPath: propertyPath.length > 0 ? propertyPath : null,
     }));
@@ -1403,6 +1436,7 @@ function collectParameterBindings(
       for (const entry of readParameterBindingEntries(parameter)) {
         const current = bindings.get(entry.name) ?? [];
         current.push({
+          defaultExpression: entry.defaultExpression,
           name: entry.name,
           ownerName: readCallableName(node),
           propertyPath: entry.propertyPath,
@@ -2137,12 +2171,9 @@ function isXaiXSearchResponsesRequest(input: {
     input.provider.id !== "xai" ||
     normalizeRepoPath(input.relativePath) !==
       "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts" ||
-    resolveStaticString({
-      before: input.call.start ?? Number.MAX_SAFE_INTEGER,
-      bindings: input.bindings,
-      node: input.urlArgument,
-      resolving: new Set(),
-    }) !== "https://api.x.ai/v1/responses"
+    !isStringLiteral(input.urlArgument, {
+      value: "https://api.x.ai/v1/responses",
+    })
   ) {
     return false;
   }
@@ -2161,11 +2192,7 @@ function isXaiXSearchResponsesRequest(input: {
   if (!initArgument || initArgument.type === "SpreadElement") {
     return false;
   }
-  const init = resolveExpressionBinding(
-    initArgument,
-    input.bindings,
-    input.call.start ?? Number.MAX_SAFE_INTEGER,
-  );
+  const init = unwrapExpression(initArgument);
   if (!isObjectExpression(init)) {
     return false;
   }
@@ -2231,40 +2258,6 @@ function readClosedObjectProperties(
     properties.set(key, property);
   }
   return properties;
-}
-
-function resolveStaticString(input: {
-  readonly before: number;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly node: Node;
-  readonly resolving: ReadonlySet<string>;
-}): string | null {
-  const node = unwrapExpression(input.node);
-  if (isStringLiteral(node)) {
-    return node.value;
-  }
-  if (isTemplateLiteral(node) && node.expressions.length === 0) {
-    return node.quasis[0]?.value.cooked ?? node.quasis[0]?.value.raw ?? "";
-  }
-  if (!isIdentifier(node)) {
-    return null;
-  }
-  const key = `static-string:${node.name}`;
-  if (input.resolving.has(key)) {
-    return null;
-  }
-  const binding = resolveBinding(input.bindings, node.name, input.before);
-  if (!binding) {
-    return null;
-  }
-  const resolving = new Set(input.resolving);
-  resolving.add(key);
-  return resolveStaticString({
-    ...input,
-    before: node.start ?? input.before,
-    node: binding.initializer,
-    resolving,
-  });
 }
 
 function isPresignedByteTransfer(input: {
@@ -3333,6 +3326,69 @@ function functionHasFetchCallSignature(
     : looksLikeFetchCallableSignature(signature);
 }
 
+function functionDirectlyForwardsToFetch(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly exact?: boolean;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  if (!isFunction(input.node)) {
+    return false;
+  }
+  const parameters = input.node.params.map(readParameterIdentifier);
+  if (parameters.length === 0 || parameters.some((parameter) => !parameter)) {
+    return false;
+  }
+  let returned: Node | null = null;
+  if (input.node.body.type === "BlockStatement") {
+    const statement = input.node.body.body[0];
+    if (
+      input.node.body.body.length !== 1 ||
+      !statement ||
+      !isReturnStatement(statement)
+    ) {
+      return false;
+    }
+    returned = statement.argument ?? null;
+  } else {
+    returned = input.node.body;
+  }
+  if (!returned) {
+    return false;
+  }
+  const expression = unwrapExpression(returned);
+  const call = expression.type === "AwaitExpression"
+    ? unwrapExpression(expression.argument)
+    : expression;
+  if (
+    (!isCallExpression(call) && !isOptionalCallExpression(call)) ||
+    !isFetchLikeCallTarget({
+      ...input,
+      before: call.start ?? input.before,
+      node: call.callee,
+    })
+  ) {
+    return false;
+  }
+  const callArguments = call.arguments.filter(
+    (argument) => argument.type !== "ArgumentPlaceholder",
+  );
+  if (callArguments.length === 0 || callArguments.length > parameters.length) {
+    return false;
+  }
+  return callArguments.every((argument, index) => {
+    if (argument.type === "SpreadElement") {
+      return false;
+    }
+    const forwarded = unwrapExpression(argument);
+    return isIdentifier(forwarded) &&
+      forwarded.name === parameters[index]?.name;
+  });
+}
+
 function readCallableName(node: Node): string | null {
   if ("id" in node && node.id && isIdentifier(node.id)) {
     return node.id.name;
@@ -3394,13 +3450,32 @@ function isFetchLikeCallTarget(input: {
     ? input.analysis.exactFetchTypeNames
     : input.analysis.fetchTypeNames;
   if (isIdentifier(expression)) {
+    const transport = resolveTransportBinding(
+      input.analysis.transportBindings,
+      expression.name,
+      input.before,
+    );
+    if (transport?.kind === "expression" && transport.initializer) {
+      const key = `${input.exact ? "exact-" : ""}fetch-assignment:${expression.name}:${transport.start}`;
+      if (input.resolving.has(key)) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      return isFetchLikeCallTarget({
+        ...input,
+        before: transport.start,
+        node: transport.initializer,
+        resolving,
+      });
+    }
     const parameter = resolveParameterBinding(
       input.analysis.parameterBindings,
       expression.name,
       input.before,
     );
     if (parameter) {
-      return Boolean(
+      const typedFetch = Boolean(
         parameter.typeAnnotation &&
         (
           parameter.propertyPath?.length
@@ -3418,6 +3493,21 @@ function isFetchLikeCallTarget(input: {
                 : looksLikeFetchFunctionType(parameter.typeAnnotation))
         ),
       );
+      if (typedFetch || !parameter.defaultExpression) {
+        return typedFetch;
+      }
+      const key = `${input.exact ? "exact-" : ""}fetch-parameter-default:${expression.name}:${parameter.scopeStart}`;
+      if (input.resolving.has(key)) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      return isFetchLikeCallTarget({
+        ...input,
+        before: parameter.defaultExpression.start ?? parameter.scopeStart,
+        node: parameter.defaultExpression,
+        resolving,
+      });
     }
 
     const variable = resolveBinding(
@@ -3464,7 +3554,13 @@ function isFetchLikeCallTarget(input: {
           variable.initializer,
           input.contents,
           input.exact,
-        );
+        ) ||
+        functionDirectlyForwardsToFetch({
+          ...input,
+          before: variable.start,
+          node: variable.initializer,
+          resolving,
+        });
     }
 
     const callable = resolveFunctionBinding(
@@ -3473,18 +3569,24 @@ function isFetchLikeCallTarget(input: {
       input.before,
     );
     if (callable) {
+      const key = `${input.exact ? "exact-" : ""}fetch-function:${expression.name}:${callable.start}`;
+      if (input.resolving.has(key)) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
       return functionHasFetchCallSignature(
         callable.node,
         input.contents,
         input.exact,
-      );
+      ) || functionDirectlyForwardsToFetch({
+        ...input,
+        before: callable.start,
+        node: callable.node,
+        resolving,
+      });
     }
 
-    const transport = resolveTransportBinding(
-      input.analysis.transportBindings,
-      expression.name,
-      input.before,
-    );
     return transport ? transport.kind === "call" : expression.name === "fetch";
   }
 

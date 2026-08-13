@@ -302,10 +302,13 @@ Last verified: 2026-08-12
   fetch-call signatures, CommonJS `require`, TypeScript import-equals, direct
   invocation, and destructured transport forms, and strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
-  literals or provider-configured URL data. The lexical census includes
-  destructured parameter shadows, property paths, and types. Assigned CommonJS
-  namespaces remain transports only while the nearest declaration identity is
-  unchanged. Provider facts follow exact properties in closed object/array
+  literals or provider-configured URL data. Untyped fetch parameters retain
+  their exact default expressions, simple identifier assignments retain their
+  chronological right-hand sides and lexical owner, and only exact one-hop
+  wrappers that forward each argument in place inherit transport identity. The
+  lexical census includes destructured parameter shadows, property paths, and
+  types. Assigned CommonJS namespaces remain transports only while the nearest
+  declaration identity is unchanged. Provider facts follow exact properties in closed object/array
   origin maps, statically recoverable fetch tuples, and exact fetch-compatible
   provider-bound call targets without treating loose
   `Request` handlers as HTTP transports. The guard reports only concrete low-level
@@ -331,9 +334,10 @@ Last verified: 2026-08-12
   against the exact static `location.origin` owner;
   registered providers without a verified provider-owned TypeScript SDK, and
   the exact xAI Responses request carrying one `x_search` extension with storage
-  disabled and closed request, payload, and tool object shapes whose effective
-  values cannot be replaced by spreads, computed or duplicate properties,
-  custom serialization, or prototype hooks. These are structural,
+  disabled, a direct static Responses URL literal, and direct closed request,
+  payload, and tool object shapes whose effective values cannot be replaced by
+  later assignment, property writes, spreads, computed or duplicate
+  properties, custom serialization, or prototype hooks. These are structural,
   purpose-specific exceptions, not line- or provider-wide suppression; the
   xAI, transfer URL, transfer-header, and streamed-R2 proofs are restricted to
   their audited owner paths.

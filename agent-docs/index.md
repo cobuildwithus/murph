@@ -141,6 +141,9 @@ Spread-free official provider SDK request construction, including the generated
 Composio client boundary, and the safe opt-in Stripe test-mode resume contract
 probe are jointly specified by
 `agent-docs/SECURITY.md` and `agent-docs/references/testing-ci-map.md`.
+The external-provider guard also recognizes defaulted, assigned, and exact
+one-hop low-level transports while the sole xAI exception proves the direct
+runtime URL and closed request syntax.
 
 Private generated-image failure diagnostics, their failure-only scope,
 untrusted-provider-text boundary, and reader-first hosted compatibility

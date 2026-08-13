@@ -190,6 +190,15 @@ Updated: 2026-08-13
   resolves to a unique registered owner, and the streamed direct-R2 smoke must
   additionally prove the exact request binding and pipe target. This is not a
   provider-wide allowance.
+- ReviewGPT round 6 accepted two review-induced bypass classes. The existing
+  lexical resolver now retains untyped parameter defaults and chronological
+  simple assignment expressions, and it restores only exact one-hop positional
+  forwarding rather than another global fetch-name inventory. Reassignments
+  away from a transport and wrappers that alter or reorder arguments remain
+  non-transports. The xAI exception was reduced: its production owner now calls
+  the direct static Responses literal with the direct closed request object, so
+  declaration-time URL or init state cannot conceal later mutation. The shared
+  fact owner and exception registry remain unchanged.
 
 ## Verification
 
@@ -202,15 +211,17 @@ Updated: 2026-08-13
 
 Current evidence:
 
-- Focused guard suite: 77 tests passed after the round-5 correction.
-- Repository-tool suite: 34 files and 583 tests passed after the round-5
-  correction and current-base merge. The earlier round-4 contended run timed out two
+- Focused guard suite: 80 tests passed after the round-6 correction.
+- Repository-tool suite: 34 files and 586 tests passed after the round-6
+  correction. The earlier round-4 contended run timed out two
   Crabbox repeated-signal cases; that file passed alone and each quiet full
   rerun passed.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
-- `pnpm provider-requests:guard`: intentionally exits 1 with 43 current
+- `pnpm provider-requests:guard`: intentionally exits 1 with 44 current
   low-level provider transports/contracts; sibling migrations own those call
-  sites. The removed 44th item was the actual Linq presigned byte transfer,
-  which policy explicitly retains as raw transport.
+  sites. The round-6 transport correction newly exposes the AgentMail JSON API
+  call hidden behind its defaulted fetch parameter. The actual Linq and
+  AgentMail presigned byte transfers remain outside the inventory as explicitly
+  retained raw transport.
 - Diff verification reaches the provider guard and stops on the same expected
   findings.
