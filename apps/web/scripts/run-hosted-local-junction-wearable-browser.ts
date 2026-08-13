@@ -112,6 +112,15 @@ async function main(): Promise<void> {
       waitUntil: "domcontentloaded",
     });
 
+    stage = "murph_vital_disclosure";
+    await page
+      .getByRole("dialog")
+      .getByRole("button", {
+        exact: true,
+        name: `Continue to ${config.label}`,
+      })
+      .click({ timeout: config.timeoutMs });
+
     stage = "murph_connect_start";
     await page.waitForURL((url) => url.origin !== config.webOrigin, {
       timeout: config.timeoutMs,

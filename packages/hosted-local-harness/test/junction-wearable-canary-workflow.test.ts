@@ -14,6 +14,16 @@ const workflow = readFileSync(
   path.join(repoRoot, ".github", "workflows", "junction-wearable-canary.yml"),
   "utf8",
 );
+const browserRunner = readFileSync(
+  path.join(
+    repoRoot,
+    "apps",
+    "web",
+    "scripts",
+    "run-hosted-local-junction-wearable-browser.ts",
+  ),
+  "utf8",
+);
 
 describe("live Junction wearable canary workflow", () => {
   it("admits secrets only after protected main updates or manual retries", () => {
@@ -88,5 +98,19 @@ describe("live Junction wearable canary workflow", () => {
     for (const actionRef of actionRefs) {
       expect(actionRef[1]).toMatch(/^[a-f0-9]{40}$/u);
     }
+  });
+
+  it("confirms the required Vital disclosure before waiting for provider authorization", () => {
+    const disclosureOffset = browserRunner.indexOf(
+      'stage = "murph_vital_disclosure";',
+    );
+    const connectOffset = browserRunner.indexOf('stage = "murph_connect_start";');
+
+    expect(disclosureOffset).toBeGreaterThan(0);
+    expect(connectOffset).toBeGreaterThan(disclosureOffset);
+    const disclosureStep = browserRunner.slice(disclosureOffset, connectOffset);
+    expect(disclosureStep).toContain('.getByRole("dialog")');
+    expect(disclosureStep).toContain('name: `Continue to ${config.label}`');
+    expect(disclosureStep).toContain(".click({ timeout: config.timeoutMs })");
   });
 });

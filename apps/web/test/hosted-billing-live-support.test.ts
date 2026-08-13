@@ -99,6 +99,23 @@ describe("hosted billing live browser support", () => {
     );
   });
 
+  it("settles browser navigations before reading billing projections", async () => {
+    const driverSource = await readFile(
+      new URL("./support/hosted-billing-browser-driver.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(driverSource).toContain(
+      'await actor.page.waitForLoadState("domcontentloaded");',
+    );
+    expect(driverSource).toContain(
+      'navigation = await actor.page.reload({ waitUntil: "domcontentloaded" });',
+    );
+    expect(driverSource).toContain(
+      'assertSuccessfulNavigation(navigation, "Murph settings");',
+    );
+  });
+
   it("finds interrupted Checkout metadata through the opaque run correlation", () => {
     const runId = "billing_pr_123_run_456";
     const token = buildHostedStripeRunCorrelationToken(runId);
