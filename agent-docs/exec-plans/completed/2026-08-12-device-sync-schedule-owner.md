@@ -1,8 +1,8 @@
 # Separate hosted device sync schedule ownership
 
-Status: active
+Status: completed
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -89,7 +89,7 @@ Updated: 2026-08-12
 9. [completed] Scope hosted provider scheduling to the mailbox connection, derive
    retained work from actual queued/running rows including worker children, and
    fence provider-cadence publication behind a durable terminal checkpoint.
-10. [in progress] Run focused tests, typecheck, parent diff review, PR CI, and ReviewGPT gates.
+10. [completed] Run focused tests, typecheck, parent diff review, PR CI, and ReviewGPT gates.
 
 ## Decisions
 
@@ -140,3 +140,19 @@ Updated: 2026-08-12
     authority from its existing durable owner, not from a generic timestamp.
   - A provider-derived schedule change is still sent to Web.
   - No new dependency, scheduler, or queue is introduced.
+
+- Final evidence:
+  - Assistant-runtime device-sync and maintenance owner files passed 97/97 and
+    82/82 tests; assistant-runtime typecheck passed.
+  - Device-syncd passed 1,010 tests and typecheck; focused Cloudflare and Web
+    authority/store suites passed 154 and 98 tests respectively.
+  - The maximum-cardinality proof converged 500 selected payloads across five
+    cold 100-item passes while ignoring 500 unrelated payloads.
+  - A provider worker-created, different-dedupe child survived checkpoint and
+    fresh-runtime restoration with its exact retained fields.
+  - Exact-head CI initially exposed four stale integration expectations for
+    generic dirty fetches; their scoped correction passed all six affected
+    scenarios before the final exact-head rerun.
+  - The user explicitly authorized merge after required CI, with any remaining
+    ReviewGPT round-5 feedback handled post-merge.
+Completed: 2026-08-13
