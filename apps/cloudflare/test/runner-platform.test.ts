@@ -49,7 +49,11 @@ import {
 } from "@murphai/hosted-execution/routes";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
 } from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
@@ -68,10 +72,17 @@ function buildExpectedSupportedProjectionScopePath(path: string): string {
   return `${path}?${params.toString()}`;
 }
 
-function buildExpectedVaultShareActiveKindsPath(): string {
-  return buildExpectedSupportedProjectionScopePath(
+function buildExpectedVaultShareActiveKindsPath(
+  projectionMode?: typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+): string {
+  const path = buildExpectedSupportedProjectionScopePath(
     HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   );
+  const capabilityPath =
+    `${path}&${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM}=${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION}`;
+  return projectionMode
+    ? `${capabilityPath}&${HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM}=${projectionMode}`
+    : capabilityPath;
 }
 
 function buildExpectedGroupToolPath(): string {
@@ -4494,8 +4505,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (url.pathname.endsWith(HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH)) {
+        const projectionMode = url.searchParams.get(
+          HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
+        );
         return new Response(JSON.stringify({
           projectionKinds: ["activity-days.v0"],
+          ...(projectionMode === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+            ? { projectionMode }
+            : {}),
           projectionScopes: [{ projectionKind: "activity-days.v0" }],
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
@@ -4631,14 +4648,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         action: "read_current",
         result: { group: null, status: "none" },
       });
-    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual([
-      { projectionKind: "activity-days.v0" },
-    ]);
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: ["activity-days.v0"],
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    });
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    })).resolves.toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: ["activity-days.v0"],
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    });
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(14);
+    expect(fetchMock).toHaveBeenCalledTimes(15);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -4656,6 +4683,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
       `http://web-control.worker${buildExpectedGroupToolPath()}`,
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
+      `http://web-control.worker${buildExpectedVaultShareActiveKindsPath(HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE)}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
     for (const request of requests) {

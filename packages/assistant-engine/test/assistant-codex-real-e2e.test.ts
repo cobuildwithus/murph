@@ -4862,6 +4862,220 @@ describeRealCodex('real Codex proactive physical-note address e2e', () => {
   )
 })
 
+describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
+  it(
+    'keeps the final reply owner-correct and never retries a rejected note',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+      const messageRef = `ain_${'5'.repeat(32)}`
+      const imageRef = 'raw/captures/physical-note.png'
+      const imageBytes = new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ])
+      const imageSha256 = createHash('sha256')
+        .update(imageBytes)
+        .digest('hex')
+      const assertMurphOwnedRecovery = (message: string) => {
+        expect(message).toMatch(
+          /no (?:automatic )?(?:retry|follow-up)|not (?:retrying|following up)|won't (?:retry|follow up)/iu,
+        )
+        expect(message).toMatch(
+          /new explicit (?:send )?request|ask me (?:again|to try again)|request (?:it )?again|tell me to try again/iu,
+        )
+        expect(message).not.toMatch(/change.{0,30}address/iu)
+      }
+      const scenarios = [
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/address/iu)
+            expect(message).toMatch(/check|verify/iu)
+            expect(message).not.toMatch(/regenerat|new image/iu)
+          },
+          expectedFeedbackCount: 0,
+          failureReason: 'recipient_address' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/regenerat|new image/iu)
+            expect(message).not.toMatch(/change.{0,30}address/iu)
+          },
+          expectedFeedbackCount: 0,
+          failureReason: 'artwork' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/Murph|print(?:ing)? service|our side/iu)
+            assertMurphOwnedRecovery(message)
+          },
+          expectedFeedbackCount: 0,
+          failureReason: 'service_unavailable' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/Murph|print(?:ing)? request/iu)
+            assertMurphOwnedRecovery(message)
+          },
+          expectedFeedbackCount: 0,
+          failureReason: 'request_invalid' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/investigat|could not identify|not clear|unknown/iu)
+            assertMurphOwnedRecovery(message)
+          },
+          expectedFeedbackCount: 0,
+          failureReason: 'unknown' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/Murph|print(?:ing)? request/iu)
+            assertMurphOwnedRecovery(message)
+          },
+          expectedFeedbackCount: 1,
+          failureReason: 'request_invalid' as const,
+          feedbackContext:
+            'Murph has repeatedly rejected this same note after saying the complete address and artwork were ready. This loop is frustrating.',
+        },
+      ]
+
+      try {
+        for (const scenario of scenarios) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), 'murph-physical-note-rejection-e2e-'),
+          )
+          temporaryPaths.push(workingDirectory)
+          const skillsRoot = path.join(workingDirectory, 'skills')
+          const absoluteImagePath = path.join(workingDirectory, imageRef)
+          await materializePhysicalNoteSkill({ skillsRoot })
+          await mkdir(path.dirname(absoluteImagePath), { recursive: true })
+          await writeFile(absoluteImagePath, imageBytes)
+          let sendCount = 0
+          const feedbackRecords: unknown[] = []
+          const productFeedbackRecorder: AssistantTurnProductFeedbackRecorder = {
+            async recordProductFeedback(feedback) {
+              feedbackRecords.push(feedback)
+              return { recorded: true }
+            },
+            discardProductFeedback() {},
+            readProductFeedback() {
+              return null
+            },
+          }
+          const hostedToolContext = {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef],
+              conversationId: 'conversation-physical-note-rejection',
+              conversationScope: 'direct' as const,
+              inboundMailboxItemIds: ['mailbox-physical-note-rejection'],
+              originSessionId: 'session-physical-note-rejection',
+              recipientKey: 'recipient-physical-note-rejection',
+            }),
+            physicalNotes: {
+              async send() {
+                sendCount += 1
+                return {
+                  complimentary: false,
+                  costUsdMicros: '250000',
+                  failureReason: scenario.failureReason,
+                  physicalNoteId: 'hpn_rejected',
+                  status: 'failed' as const,
+                }
+              },
+            },
+            privateImageUrlPublisher: {
+              async publishPrivateImageUrl() {
+                return {
+                  expiresAt: '2027-08-01T00:00:00.000Z',
+                  url: 'https://private-media.example.test/note',
+                }
+              },
+            },
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied' as const,
+            }),
+            vaultFileSendAvailable: false,
+          } satisfies AssistantHostedToolContext
+          const result = await executeRealCodexAppServerTurn({
+            approvalPolicy: 'never',
+            authorizeAcceptedMessageTarget: async ({ messageRef: requested }) =>
+              requested === messageRef ? { targetInputId: messageRef } : null,
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions: buildDirectConversationDeveloperInstructions(),
+            dynamicTools: resolveMurphDynamicTools({
+              physicalNotesAvailable: true,
+              productFeedbackAvailable: true,
+            }),
+            env: {
+              ...config.env,
+              [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            },
+            excludeResumeTurns: true,
+            hostedToolContext,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            productFeedbackRecorder,
+            prompt: [
+              `Message ref: ${messageRef}`,
+              'I explicitly approve mailing the already generated note below to Casey at 42 Example Lane, Sampleton, GA 30303.',
+              scenario.feedbackContext,
+              `Exact image ref: ${imageRef}`,
+              `Exact image SHA-256: ${imageSha256}`,
+              'Use the physical-note tool exactly once. After it returns, explain the outcome and do not retry.',
+            ].filter((part) => part !== null).join('\n\n'),
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+          const physicalNoteCalls = readCapabilityRoutingActions(
+            result.jsonEvents,
+          ).filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
+          )
+          const feedbackCalls = readCapabilityRoutingActions(
+            result.jsonEvents,
+          ).filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+          )
+
+          expect(physicalNoteCalls).toHaveLength(1)
+          expect(feedbackCalls).toHaveLength(scenario.expectedFeedbackCount)
+          expect(feedbackRecords).toHaveLength(scenario.expectedFeedbackCount)
+          expect(sendCount).toBe(1)
+          expect(result.finalMessage).toMatch(
+            /nothing was sent|was not sent|wasn't sent/iu,
+          )
+          expect(result.finalMessage).not.toMatch(
+            /failureReason|recipient_address|request_invalid|service_unavailable|\bLob\b/iu,
+          )
+          expect(result.finalMessage).not.toMatch(
+            /\bI(?:'ll| will).{0,60}\b(?:fix|follow up|notify|let you know)/iu,
+          )
+          scenario.assertRecovery(result.finalMessage)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex product-feedback summary e2e', () => {
   it(
     'emits specific, non-invented, product-only feedback at the dynamic-tool boundary',
@@ -5356,6 +5570,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-07-28T03:00:00.000Z',
                 }
               },
             },
@@ -5457,6 +5672,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: false,
+                  updatedAt: '2026-08-10T00:00:00.000Z',
                 }
               },
             },
@@ -5566,6 +5782,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
             },
@@ -5663,6 +5880,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   },
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
             },
@@ -5748,6 +5966,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: { everyMs: 86_400_000, kind: 'every' },
                   status: 'active',
                   timingVerified: false,
+                  updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
             },
@@ -5832,6 +6051,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-08-08T12:00:00.000Z',
                 }
               },
             },
@@ -5932,6 +6152,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-07-29T12:00:00.000Z',
                 } as const
               },
             },

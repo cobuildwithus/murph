@@ -64,6 +64,7 @@ import {
 import {
   listConnectionSources as listStoredConnectionSources,
   markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
+  upsertJunctionConnectionSourceProjection as upsertStoredJunctionConnectionSourceProjection,
   upsertConnectionSource as upsertStoredConnectionSource,
   upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
@@ -231,6 +232,12 @@ export class SqliteDeviceSyncStore {
 
   upsertConnectionSource(input: UpsertDeviceConnectionSourceInput): StoredDeviceConnectionSource {
     return upsertStoredConnectionSource(this.database, input);
+  }
+
+  upsertJunctionConnectionSourceProjection(
+    input: UpsertDeviceConnectionSourceInput,
+  ): StoredDeviceConnectionSource {
+    return upsertStoredJunctionConnectionSourceProjection(this.database, input);
   }
 
   listConnectionSources(input: ListDeviceConnectionSourcesInput): StoredDeviceConnectionSource[] {

@@ -197,20 +197,23 @@ explicitly excluded from normal sync: full ECG waveforms must not enter the
 vault, and any future support requires bounded derived features linked to the
 existing ECG recording summary.
 
-The ordinary timeseries backfill remains 14 days. Currently supported sparse
-VO2 max, temperature, basal temperature, caffeine, one-minute heart-rate
-recovery, sleep-breathing-disturbance, and AFib-burden facts receive 180 days
-through the existing per-source resource-job owner. Each continuation fetches
-at most one 30-day provider window and still normalizes into the existing daily
+The ordinary timeseries backfill remains 14 days. Supported sparse VO2 max,
+temperature, basal temperature, caffeine, water, mindfulness, one-minute
+heart-rate recovery, sleep-breathing-disturbance, and AFib-burden facts receive
+180 days through the existing per-source resource-job owner. Each continuation
+handles at most one 30-day execution segment while fetching one complete
+provider calendar date per request and normalizing into the existing daily
 compact facts; it does not retain provider sample arrays or emit canonical
 samples. Scheduling offers at most eight extended-history resource/source jobs
 per reconcile pass and rotates deterministic pages across the bounded Junction
-connect-source catalog. Blood pressure and note keep their existing daily
-history chunks and coverage semantics. Schedule-time chains keep one stable
-identity while retrying, but an obsolete fixed window cannot publish terminal
-coverage once it no longer touches the ordinary rolling daily window. The old
-row finishes without its matrix bit and the existing scheduler supplies one
-current-anchored replacement under the same identity.
+connect-source catalog. Blood pressure keeps exact per-reading completion and
+note history keeps complete-fetch completion; both share the fixed-width
+source-by-resource matrix stored in one existing blood-pressure or note
+metadata slot. Schedule-time chains keep one stable identity while retrying,
+but an obsolete fixed window cannot publish terminal coverage once it no
+longer touches the ordinary rolling daily window. The old row finishes without
+its matrix bit and the existing scheduler supplies one current-anchored
+replacement under the same identity.
 
 The checked-in inventory is guarded against the runtime enums exported by the
 pinned `@junction-api/sdk` package. The test has explicit exclusions for
@@ -239,7 +242,7 @@ When adding a provider, prefer these existing shapes before inventing new ones.
 
 These streams are reserved for explicit CSV/import/debug sample ledgers. Provider adapters should prefer bounded integration-ingest evidence parts plus compact observation metrics and should not emit high-frequency wearable telemetry as normal canonical samples; core rejects oversized device-provider sample batches. Provider adapters also must not mark observations with `queryVisibility`, `visibility`, or `canonicalFact`; display promotion belongs in deliberate projection code.
 
-Junction timeseries are the concrete model for this boundary. Normal sync may fetch only policy-admitted, product-needed timeseries and must aggregate them before persistence. The vault may keep tiny aggregate evidence such as `junction-timeseries-daily-*`, but it must not persist full `junction-timeseries-*` sample arrays or generic provider snapshots for dropped dense resources. Dense/debug streams such as steps, distance, and heart rate, plus sparse resources such as weight, stay out of default sync unless a current product observation needs them. Provider workout/session metrics belong under `activity_session.workout.metrics` unless an explicit projector promotes derived daily facts; the closed companion Strain observation is the documented exception because its redacted identity cannot be joined safely to Junction's workout session. Wearable summaries require compact display-grade facts such as daily activity, sleep, or body observations.
+Junction timeseries are the concrete model for this boundary. Normal sync may fetch only the compact product-needed resources in the exhaustive Junction history-policy table and must aggregate them before persistence, except for the dedicated per-reading blood-pressure and note handlers. Dense daily aggregates keep a bounded 14-day initial window. Admitted sparse daily resources, including AFib burden, VO2 max, heart-rate recovery, body and basal temperatures, sleep-breathing disturbance, caffeine, water, and mindfulness, use the 180-day summary-history window by default through the same source-scoped job owner. Every date-mode timeseries request owns one complete provider calendar date so migration and reconcile both present every offset sample for that daily identity to the importer together. A date with any provider row rejected by the canonical aggregate parser retries only that date on the bounded ladder. Historical-pull status is re-read before coverage: a matching pulled entry takes precedence over contradictory `not_pulled`; terminal empty history requires upstream success, nonterminal state waits, explicit failure remains uncovered, and unavailable status requires canonical history evidence. The migration derives the live reconcile boundary after every completed segment and continues until no middle gap remains. The vault may keep tiny aggregate evidence such as `junction-timeseries-daily-*`, but it must not persist full `junction-timeseries-*` sample arrays or generic provider snapshots for dropped dense resources. Dense/debug streams such as steps, distance, and heart rate, and unsupported sparse resources such as weight, stay out of default sync unless a current product observation needs them. Provider workout/session metrics belong under `activity_session.workout.metrics` unless an explicit projector promotes derived daily facts; the closed companion Strain observation is the documented exception because its redacted identity cannot be joined safely to Junction's workout session. Wearable summaries require compact display-grade facts such as daily activity, sleep, or body observations.
 
 ### Observation metrics already in active use
 

@@ -849,12 +849,15 @@ test("local Junction HTTP reconnect atomically reopens exact-source sparse histo
         const windowEnd = url.searchParams.get("end_date");
         assert.ok(windowStart);
         assert.ok(windowEnd);
-        if (Date.parse(windowEnd) - Date.parse(windowStart) > 14 * dayMs) {
+        if (url.searchParams.get("provider") === "garmin") {
           extendedCaffeineFetches += 1;
         }
+        const effectiveWindowEnd = windowEnd.length === 10
+          ? Date.parse(windowEnd) + dayMs
+          : Date.parse(windowEnd);
         const includesGapFact =
           Date.parse(windowStart) <= Date.parse(factAt)
-          && Date.parse(windowEnd) > Date.parse(factAt);
+          && effectiveWindowEnd > Date.parse(factAt);
         return createJsonResponse({
           groups: includesGapFact
             ? { garmin: [{
@@ -1110,7 +1113,7 @@ test("local Junction HTTP reconnect atomically reopens exact-source sparse histo
     while (epochTwoHistoryJobs().some((job) =>
       job.status === "queued" || job.status === "running"
     )) {
-      assert.ok(workerRuns < 30);
+      assert.ok(workerRuns < 100);
       const processed = await service.runWorkerOnce();
       workerRuns += 1;
       if (!processed) {
@@ -1125,7 +1128,7 @@ test("local Junction HTTP reconnect atomically reopens exact-source sparse histo
         now.setTime(nextAvailableAt);
       }
     }
-    assert.equal(extendedCaffeineFetches, 6);
+    assert.equal(extendedCaffeineFetches, 180);
     assert.equal(importedGapFacts, 1);
     assert.equal(new Set(epochTwoHistoryJobs().map((job) => job.dedupeKey)).size, 1);
     assert.equal(epochTwoHistoryJobs().length, 6);
@@ -1545,7 +1548,7 @@ test("local Junction workers exclude a disconnected source from production-norma
   }
 });
 
-test("persisted provider-projected disconnects can recover an evidence-bearing pressure job", async () => {
+test("provider projection cannot consume a prepared local pressure reconnect boundary", async () => {
   let now = new Date("2026-09-01T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-pressure-recovery");
   const providerState = {
@@ -1670,28 +1673,21 @@ test("persisted provider-projected disconnects can recover an evidence-bearing p
         connectionId: account.id,
         sourceProviderSlug: "omron",
       })[0]?.status,
-      "connected",
+      "disconnected",
     );
-    assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(importedSnapshots.length, 0);
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       store.getAccountById(account.id)?.metadata ?? {},
       "omron",
       "blood_pressure",
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
-    ), true);
-    assert.equal(
-      Object.hasOwn(
-        store.getAccountById(account.id)?.metadata ?? {},
-        "junctionBloodPressureHistoryBackfillCoverage",
-      ),
-      false,
-    );
+      1,
+    ), false);
   } finally {
     close();
   }
 });
 
-test("hosted listed-only recovery publishes connected before pressure egress resumes", async () => {
+test("hosted projection cannot consume a prepared pressure reconnect boundary", async () => {
   let now = new Date("2026-09-01T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory(
     "murph-device-syncd-hosted-junction-pressure-recovery",
@@ -1854,7 +1850,7 @@ test("hosted listed-only recovery publishes connected before pressure egress res
         connectionId: account.id,
         sourceProviderSlug: "omron",
       })[0]?.status,
-      "connected",
+      "disconnected",
     );
     assert.equal(importedSnapshots.length, 0);
     publishLocalSourceToHostedAuthority();
@@ -1864,20 +1860,13 @@ test("hosted listed-only recovery publishes connected before pressure egress res
       await service.runWorkerOnce();
     }
 
-    assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(importedSnapshots.length, 0);
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       store.getAccountById(account.id)?.metadata ?? {},
       "omron",
       "blood_pressure",
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
-    ), true);
-    assert.equal(
-      Object.hasOwn(
-        store.getAccountById(account.id)?.metadata ?? {},
-        "junctionBloodPressureHistoryBackfillCoverage",
-      ),
-      false,
-    );
+      1,
+    ), false);
   } finally {
     close();
   }
@@ -1958,8 +1947,12 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     localMetadata: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
   });
   assert.equal(merged.preservedLocalProgress, true);
-  assert.equal(Object.hasOwn(merged.metadata, "junctionBloodPressureHistoryBackfillCoverage"), false);
-  assert.equal(Object.hasOwn(merged.metadata, "junctionNoteHistoryBackfillCoverage"), false);
+  const mergedCoverageSlots = [
+    "junctionBloodPressureHistoryBackfillCoverage",
+    "junctionNoteHistoryBackfillCoverage",
+  ].filter((key) => Object.hasOwn(merged.metadata, key));
+  assert.equal(mergedCoverageSlots.length, 1);
+  assert.match(String(merged.metadata[mergedCoverageSlots[0] ?? ""]), /^m2\|/u);
   assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
     merged.metadata,
     "omron",
@@ -1970,7 +1963,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     merged.metadata,
     "oura",
     "note",
-    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    2,
   ), true);
   const account = store.upsertAccount({
     provider: "junction",
@@ -2088,20 +2081,24 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
   ]) {
     assert.equal(Object.hasOwn(persisted.metadata, diagnosticKey), true);
   }
-  for (const [source, resource] of [
-    ["garmin", "caffeine"],
-    ["omron", "blood_pressure"],
-    ["oura", "note"],
+  for (const [source, resource, version] of [
+    ["garmin", "caffeine", 1],
+    ["omron", "blood_pressure", 1],
+    ["oura", "note", 2],
   ] as const) {
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       persisted.metadata,
       source,
       resource,
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      version,
     ), true);
   }
-  assert.equal(Object.hasOwn(persisted.metadata, "junctionBloodPressureHistoryBackfillCoverage"), false);
-  assert.equal(Object.hasOwn(persisted.metadata, "junctionNoteHistoryBackfillCoverage"), false);
+  const persistedCoverageSlots = [
+    "junctionBloodPressureHistoryBackfillCoverage",
+    "junctionNoteHistoryBackfillCoverage",
+  ].filter((key) => Object.hasOwn(persisted.metadata, key));
+  assert.equal(persistedCoverageSlots.length, 1);
+  assert.match(String(persisted.metadata[persistedCoverageSlots[0] ?? ""]), /^m2\|/u);
   close();
 
   const reopenedStore = new SqliteDeviceSyncStore(databasePath);
@@ -2122,7 +2119,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
   }
 });
 
-test("Junction empty sparse history exhausts real delayed scans once and records terminal coverage", async () => {
+test("Junction sparse history certifies exhausted empties without certifying malformed days", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-empty-history-terminal");
   let now = new Date("2026-08-11T12:00:00.000Z");
   const historicalRequests = new Map<string, number>();
@@ -2135,6 +2132,7 @@ test("Junction empty sparse history exhausts real delayed scans once and records
     reconcileIntervalMs: 60 * 60_000,
     summaryBackfillDays: 1,
     summaryResources: [],
+    timeseriesBackfillDays: 1,
     timeseriesResources: ["caffeine", "vo2_max"],
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
@@ -2285,7 +2283,7 @@ test("Junction empty sparse history exhausts real delayed scans once and records
       now = new Date(nextAvailableAt);
     }
 
-    assert.equal(historyWorkerRuns, 60, "two resources must complete six chunks across five scans");
+    assert.equal(historyWorkerRuns, 10, "two one-day resources must complete five scans");
     for (const resource of ["caffeine", "vo2_max"]) {
       assert.deepEqual(observedRetryDelays.get(resource), [
         15 * 60_000,
@@ -2294,30 +2292,41 @@ test("Junction empty sparse history exhausts real delayed scans once and records
         24 * 60 * 60_000,
       ]);
     }
-    assert.equal(historicalRequests.get("caffeine"), 30);
-    assert.equal(historicalRequests.get("vo2_max"), 30);
+    assert.equal(historicalRequests.get("caffeine"), 5);
+    assert.equal(historicalRequests.get("vo2_max"), 5);
 
     const persisted = store.getAccountById(account.id);
     assert.ok(persisted);
-    for (const resource of ["caffeine", "vo2_max"]) {
-      assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-        persisted.metadata,
-        "garmin",
-        resource,
-        JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
-      ), true);
-    }
-    const encodedCoverage = persisted.metadata.junctionExtendedHistoryCoverage;
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      persisted.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      persisted.metadata,
+      "garmin",
+      "vo2_max",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), false);
+    const encodedCoverage = [
+      persisted.metadata.junctionBloodPressureHistoryBackfillCoverage,
+      persisted.metadata.junctionNoteHistoryBackfillCoverage,
+    ].find((value) => typeof value === "string" && value.startsWith("m2|"));
     assert.equal(typeof encodedCoverage, "string");
     const encodedBytes = String(encodedCoverage).split("|", 2)[1];
     assert.ok(encodedBytes);
     const setBitCount = [...Buffer.from(encodedBytes, "base64url")]
       .reduce((sum, byte) => sum + byte.toString(2).replaceAll("0", "").length, 0);
-    assert.equal(setBitCount, 2, "each completed source/resource pair owns exactly one bit");
+    assert.equal(setBitCount, 1, "only the proven empty source/resource pair owns a bit");
 
     store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await service.runSchedulerOnce();
-    assert.equal(activeHistoryJobs().length, 0, "terminal coverage must prevent a fresh chain");
+    assert.deepEqual(
+      activeHistoryJobs().map((job) => job.payload.resource),
+      ["vo2_max"],
+      "malformed provider days must remain eligible for one current repair root",
+    );
   } finally {
     close();
   }
@@ -2329,11 +2338,12 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
   let now = new Date("2040-08-01T12:00:00.000Z");
   let dailyBlockerFails = false;
   let dailyCaffeineRequestCount = 0;
+  let historicalPullChecks = 0;
   let historicalRequestCount = 0;
   let importedPostAnchorFactCount = 0;
   const historicalWindows: Array<{ end: string; start: string }> = [];
   const dailyCaffeineWindows: Array<{ end: string; start: string }> = [];
-  const postAnchorFactAt = "2040-08-03T08:00:00.000Z";
+  const postAnchorFactAt = "2040-07-23T08:00:00.000Z";
   await initializeVault({ vaultRoot });
   const canonicalImporter = createImporters();
   const provider = createJunctionDeviceSyncProvider({
@@ -2345,9 +2355,22 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     reconcileIntervalMs: 60 * 60_000,
     summaryBackfillDays: 1,
     summaryResources: [],
+    timeseriesBackfillDays: 31,
     timeseriesResources: ["blood_oxygen", "caffeine"],
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/introspect/historical_pull") {
+        historicalPullChecks += 1;
+        if (historicalRequestCount <= 124) {
+          return createJsonResponse({ code: "historical_pull_unavailable" }, 503);
+        }
+        return createJsonResponse({ data: [{
+          provider: { garmin: { not_pulled: [], pulled: {
+            caffeine: { days_with_data: 0, status: "success" },
+          } } },
+          user_id: "junction-user-moving-history-repair",
+        }] });
+      }
       if (url.pathname === "/v2/user/providers/junction-user-moving-history-repair") {
         return createJsonResponse({ providers: [{
           id: "provider-garmin-moving-history-repair",
@@ -2394,8 +2417,9 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
           dailyCaffeineWindows.push({ end, start });
         }
         const containsPostAnchorFact =
-          Date.parse(start) <= Date.parse(postAnchorFactAt)
-          && Date.parse(end) > Date.parse(postAnchorFactAt);
+          now.getTime() >= Date.parse("2040-08-12T12:00:00.000Z")
+          && Date.parse(start) <= Date.parse(postAnchorFactAt)
+          && Date.parse(end) + 24 * 60 * 60_000 > Date.parse(postAnchorFactAt);
         return createJsonResponse({
           groups: containsPostAnchorFact
             ? { garmin: [{
@@ -2486,6 +2510,7 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
         Number.isFinite(nextAvailableAt),
         JSON.stringify({
           advanceTrace,
+          historicalPullChecks,
           historicalRequestCount,
           now: now.toISOString(),
           pendingJobs: pendingJobs().map((job) => ({
@@ -2516,7 +2541,7 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     const observedRetryAttempts = new Set<number>();
     const observedRetryDelays: number[] = [];
     let workerRuns = 0;
-    while (historicalRequestCount < 24) {
+    while (observedRetryDelays.length < 4) {
       const processed = await runtime.service.runWorkerOnce();
       workerRuns += 1;
       assert.ok(workerRuns < 100);
@@ -2551,9 +2576,10 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     assert.equal(queuedTerminalScan.dedupeKey, stableDedupeKey);
     assert.equal(queuedTerminalScan.payload.emptyBackfillAttempts, 4);
     assert.equal(queuedTerminalScan.payload.historicalNoProgressRescan, true);
+    const historicalRequestCountBeforeTerminalScan = historicalRequestCount;
     advanceToNextJob();
     assert.equal((await runtime.service.runWorkerOnce())?.id, queuedTerminalScan.id);
-    assert.equal(historicalRequestCount, 25);
+    assert.equal(historicalRequestCount, historicalRequestCountBeforeTerminalScan + 30);
     const persistedTerminalContinuation = activeHistoryJobs()[0];
     assert.ok(persistedTerminalContinuation);
     assert.notEqual(persistedTerminalContinuation.id, queuedTerminalScan.id);
@@ -2595,7 +2621,7 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await runtime.service.runSchedulerOnce();
     workerRuns = 0;
-    while (historicalRequestCount < 30) {
+    while (activeHistoryJobs().length > 0) {
       const processed = await runtime.service.runWorkerOnce();
       workerRuns += 1;
       assert.ok(workerRuns < 40);
@@ -2604,9 +2630,10 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
       }
     }
 
-    assert.equal(historicalRequestCount, 30);
+    const historicalRequestCountAfterStaleTerminal = historicalRequestCount;
+    assert.ok(historicalRequestCountAfterStaleTerminal > historicalRequestCountBeforeTerminalScan);
     assert.equal(dailyCaffeineRequestCount, dailyCaffeineRequestCountBeforeBlockedRestart);
-    assert.equal(historicalWindows.slice(24, 30).some((window) =>
+    assert.equal(historicalWindows.slice(-1).some((window) =>
       Date.parse(window.start) <= Date.parse(postAnchorFactAt)
       && Date.parse(window.end) > Date.parse(postAnchorFactAt)
     ), false);
@@ -2652,16 +2679,23 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     while (activeHistoryJobs().length > 0) {
       const processed = await runtime.service.runWorkerOnce();
       workerRuns += 1;
-      assert.ok(workerRuns < 20);
+      assert.ok(workerRuns < 50);
       if (!processed) {
         advanceToNextJob();
       }
     }
-    assert.equal(historicalRequestCount, 36, "one current replacement must use six chunks");
-    assert.equal(historicalWindows.slice(30).length, 6);
-    assert.ok(historicalWindows.slice(30).some((window) =>
+    const currentReplacementWindows = historicalWindows.slice(
+      historicalRequestCountAfterStaleTerminal,
+    );
+    assert.equal(
+      historicalRequestCount,
+      historicalRequestCountAfterStaleTerminal + 31,
+      "one current replacement must scan 31 closed days",
+    );
+    assert.equal(currentReplacementWindows.length, 31);
+    assert.ok(currentReplacementWindows.some((window) =>
       Date.parse(window.start) <= Date.parse(postAnchorFactAt)
-      && Date.parse(window.end) > Date.parse(postAnchorFactAt)
+      && Date.parse(window.end) + 24 * 60 * 60_000 > Date.parse(postAnchorFactAt)
     ));
     assert.equal(importedPostAnchorFactCount, 1);
     persisted = runtime.store.getAccountById(account.id);
@@ -2738,6 +2772,7 @@ test("Junction schedule-time history keeps one durable retry chain across UTC da
     reconcileIntervalMs: 60 * 60_000,
     summaryBackfillDays: 1,
     summaryResources: [],
+    timeseriesBackfillDays: 1,
     timeseriesResources: ["caffeine"],
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
@@ -2866,9 +2901,18 @@ test("a stale Junction history retry finishes without coverage and is replaced o
     reconcileIntervalMs: 60 * 60_000,
     summaryBackfillDays: 1,
     summaryResources: [],
+    timeseriesBackfillDays: 1,
     timeseriesResources: ["caffeine"],
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/introspect/historical_pull") {
+        return createJsonResponse({ data: [{
+          provider: { garmin: { not_pulled: [], pulled: {
+            caffeine: { days_with_data: 1, status: "success" },
+          } } },
+          user_id: "junction-user-stale-history",
+        }] });
+      }
       if (url.pathname === "/v2/user/providers/junction-user-stale-history") {
         return createJsonResponse({ providers: [{
           id: "provider-garmin-stale-history",
@@ -3042,8 +3086,9 @@ test("a stale Junction history retry finishes without coverage and is replaced o
     );
     assert.equal(
       successfulCaffeineWindows.slice(replacementWindowStartIndex).some((window) =>
-        Date.parse(window.start) <= Date.parse("2026-08-01T00:00:00.000Z")
-        && Date.parse(window.end) >= Date.parse("2026-08-04T00:00:00.000Z")
+        Date.parse(window.start) <= Date.parse("2026-08-04T00:00:00.000Z")
+        && Date.parse(window.end) + 24 * 60 * 60_000
+          > Date.parse("2026-08-04T00:00:00.000Z")
       ),
       true,
     );
@@ -3080,9 +3125,18 @@ test("a queued pre-reconnect history job cannot block the exact-source replaceme
     reconcileIntervalMs: 60 * 60_000,
     summaryBackfillDays: 1,
     summaryResources: [],
+    timeseriesBackfillDays: 1,
     timeseriesResources: ["caffeine"],
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/introspect/historical_pull") {
+        return createJsonResponse({ data: [{
+          provider: { garmin: { not_pulled: [], pulled: {
+            caffeine: { days_with_data: 0, status: "success" },
+          } } },
+          user_id: "junction-user-source-epoch",
+        }] });
+      }
       if (url.pathname === "/v2/user/providers/junction-user-source-epoch") {
         return createJsonResponse({ providers: [{
           id: "provider-garmin-source-epoch",
@@ -3798,6 +3852,114 @@ test("device sync service scheduler queues due active jobs and skips unsupported
   assert.equal(countJobsForAccountForTesting(store, disconnected.id), 0);
 
   close();
+});
+
+test("device sync service defers unretainable Junction history without surfacing account errors", async () => {
+  let now = new Date("2026-06-11T12:00:00.000Z");
+  const timeseriesWindowStarts: string[] = [];
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-history-capacity");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { ok: true };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryResources: [],
+        timeseriesResources: ["caffeine"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+          if (url.pathname === "/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [{
+                id: "provider-omron-1",
+                slug: "omron",
+                name: "Omron",
+                status: "connected",
+                resource_availability: { caffeine: true },
+              }],
+            });
+          }
+          if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+            timeseriesWindowStarts.push(url.searchParams.get("start_date") ?? "");
+            return createJsonResponse({ groups: {} });
+          }
+          if (url.pathname.startsWith("/v2/summary/")) {
+            return createJsonResponse({ data: [] });
+          }
+          throw new Error(`Unexpected Junction capacity test request: ${url.toString()}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      metadata: Object.fromEntries(
+        Array.from({ length: 16 }, (_, index) => [`capacityFact${index}`, index]),
+      ),
+      connectedAt: "2026-01-01T00:00:00.000Z",
+      nextReconcileAt: now.toISOString(),
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "omron",
+      sourceProviderSlug: "omron",
+      status: "connected",
+      resourceAvailabilitySummary: { caffeine: true },
+      lastSeenAt: now.toISOString(),
+    });
+
+    await service.runSchedulerOnce();
+    const scheduledKinds = listJobKindsForAccountForTesting(store, account.id);
+    assert.equal(scheduledKinds.includes("reconcile"), true);
+    assert.equal(scheduledKinds.includes("resource"), false);
+    const manualKinds = service.queueManualReconcile(account.id).jobs.map((job) => job.kind);
+    assert.equal(manualKinds.includes("reconcile"), true);
+    assert.equal(manualKinds.includes("resource"), false);
+
+    const processed = await service.runWorkerOnce();
+    assert.equal(processed?.kind, "reconcile");
+    assert.equal(store.getJobById(processed.id)?.status, "succeeded");
+    assert.equal(store.getAccountById(account.id)?.lastErrorCode, null);
+    assert.equal(
+      timeseriesWindowStarts.some((start) => start < "2026-05-28"),
+      false,
+    );
+
+    now = new Date("2026-06-11T13:00:00.000Z");
+    await service.runSchedulerOnce();
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    assert.equal(jobs.filter((job) => job.kind === "resource").length, 0);
+    assert.equal(jobs.filter((job) => job.status === "dead").length, 0);
+    assert.equal(jobs.filter((job) => job.kind === "reconcile").length, 2);
+    assert.equal(store.getAccountById(account.id)?.lastErrorCode, null);
+  } finally {
+    close();
+  }
 });
 
 test("device sync service keeps pending external-link setup out of manual, scheduled, and worker execution", async () => {

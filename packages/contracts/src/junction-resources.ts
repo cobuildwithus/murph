@@ -67,6 +67,10 @@ export type JunctionResourceCategory = "summary" | "timeseries" | "dedicated_str
 export type JunctionResourceFrequency = "very_high" | "high" | "sparse";
 export type JunctionResourceAdmission = "default" | "known" | "opt_in" | "excluded" | "dedicated";
 export type JunctionResourceHistoryAnchor = "schedule_time" | "source_first_seen";
+export type JunctionResourceHistoryCompletion =
+  | "daily_aggregate"
+  | "exact_records"
+  | "fetch_complete";
 export type JunctionResourceRetention =
   | "canonical_per_record"
   | "canonical_aggregate"
@@ -82,6 +86,8 @@ export interface JunctionResourcePolicy {
   frequency: JunctionResourceFrequency;
   historyAnchor: JunctionResourceHistoryAnchor;
   historyChunkDays: number;
+  historyCompletion: JunctionResourceHistoryCompletion;
+  historySemanticVersion: number;
   initialHistoryDays: number;
   retention: JunctionResourceRetention;
 }
@@ -104,6 +110,8 @@ function policy<
   historyChunkDays: number,
   exclusionReason: string | null = null,
   historyAnchor: JunctionResourceHistoryAnchor = "source_first_seen",
+  historyCompletion: JunctionResourceHistoryCompletion = "daily_aggregate",
+  historySemanticVersion = 1,
 ): Readonly<JunctionResourcePolicy & {
   admission: Admission;
   category: Category;
@@ -117,6 +125,8 @@ function policy<
     frequency,
     historyAnchor,
     historyChunkDays,
+    historyCompletion,
+    historySemanticVersion,
     initialHistoryDays,
     retention,
   });
@@ -178,8 +188,8 @@ export const JUNCTION_RESOURCE_POLICIES = Object.freeze({
   body_temperature: sparseDaily(),
   basal_body_temperature: sparseDaily(),
   caffeine: sparseDaily(),
-  water: daily("sparse"),
-  mindfulness_minutes: daily("sparse"),
+  water: sparseDaily(),
+  mindfulness_minutes: sparseDaily(),
   heart_rate_recovery_one_minute: sparseDaily(),
   sleep_breathing_disturbance: sparseDaily(),
   afib_burden: sparseDaily(),
@@ -191,6 +201,10 @@ export const JUNCTION_RESOURCE_POLICIES = Object.freeze({
     "canonical_per_record",
     JUNCTION_LONG_HISTORY_DAYS,
     1,
+    null,
+    "source_first_seen",
+    "exact_records",
+    1,
   ),
   note: policy(
     "timeseries",
@@ -201,6 +215,8 @@ export const JUNCTION_RESOURCE_POLICIES = Object.freeze({
     1,
     null,
     "schedule_time",
+    "fetch_complete",
+    2,
   ),
   body_mass_index: excluded("sparse", "No canonical per-reading importer is registered yet.", "canonical_per_record"),
   calories_basal: excluded("high", "No bounded aggregate importer is registered yet.", "feature_envelope"),

@@ -1040,10 +1040,13 @@ class DeviceSyncServiceController {
         },
         upsertConnectionSource: (input) => {
           ensureExecutionActive();
-          return this.store.upsertConnectionSource({
+          const sourceInput = {
             ...input,
             connectionId: currentAccount.id,
-          });
+          };
+          return currentAccount.provider === "junction"
+            ? this.store.upsertJunctionConnectionSourceProjection(sourceInput)
+            : this.store.upsertConnectionSource(sourceInput);
         },
         listConnectionSources: async (input = {}) => {
           ensureExecutionActive();

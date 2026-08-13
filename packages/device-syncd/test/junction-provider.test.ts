@@ -20,7 +20,6 @@ import { DeviceSyncError } from "../src/errors.ts";
 import {
   clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
-  JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
 } from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
@@ -3036,13 +3035,16 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      const data = new URL(url).searchParams.get("start_date") === "2026-04-02"
+        ? [{
+            start: "2026-04-02T12:00:00.000Z",
+            value: 97,
+          }]
+        : [];
       return createJsonResponse({
         groups: {
           garmin: [{
-            data: [{
-              start: "2026-04-02T12:00:00.000Z",
-              value: 97,
-            }],
+            data,
             source: { provider: "garmin", type: "watch" },
           }],
         },
@@ -3553,6 +3555,9 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse({
         groups: {
           garmin: [{
@@ -4780,17 +4785,24 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     completedMetadata,
     "garmin",
     "blood_pressure",
-    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    1,
   ), true);
   assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
     completedMetadata,
     "omron",
     "blood_pressure",
-    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    1,
   ), true);
   assert.equal(
-    Object.hasOwn(completedMetadata, "junctionBloodPressureHistoryBackfillCoverage"),
-    false,
+    ["garmin", "omron"].every((providerSlug) =>
+      hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        scheduledResult.metadataPatch ?? {},
+        providerSlug,
+        "blood_pressure",
+        1,
+      )
+    ),
+    true,
   );
 });
 
@@ -7037,6 +7049,30 @@ test("Junction scheduled polling uses stable closed-day windows", () => {
   assert.equal(derivedBackfill?.dedupeKey, second?.jobs[1]?.dedupeKey);
 });
 
+test("Junction reconcile cadence cannot schedule faster than once per minute", () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    { reconcileIntervalMs: 1 },
+  );
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+
+  const scheduled = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
+      },
+    }),
+    "2026-04-03T12:34:56.000Z",
+  );
+
+  assert.equal(scheduled?.nextReconcileAt, "2026-04-03T12:35:56.000Z");
+});
+
 test("Junction scheduled pass repairs legacy coverage and honors current or future terminal status", () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);
@@ -9112,6 +9148,9 @@ test("Junction polling updates source projection and imports bounded summary/tim
 
     const timeseriesResource = new URL(url).pathname.match(/\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
     if (timeseriesResource && timeseriesResource in groupedTimeseriesPayloads) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse(groupedTimeseriesPayloads[timeseriesResource]);
     }
 
@@ -14055,10 +14094,10 @@ test("Junction sparse-history scheduling caps global fanout and rotates across e
   }
 
   assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
-  assert.equal(candidateCount, 330);
-  assert.equal(candidateCount % 8, 2);
+  assert.equal(candidateCount, 396);
+  assert.equal(candidateCount % 8, 4);
   assert.equal(scheduledPageSizes.filter((size) => size === 8).length, pageCount - 1);
-  assert.equal(scheduledPageSizes.filter((size) => size === 2).length, 1);
+  assert.equal(scheduledPageSizes.filter((size) => size === 4).length, 1);
   assert.equal(observedPairs.size, candidateCount);
 });
 
@@ -14125,7 +14164,7 @@ test("Junction sparse-history policy keeps schedule-time retry identity stable a
       "garmin",
       "caffeine",
       1,
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      1,
     ]))
     .digest("hex");
   const nextPolicyVersionDedupeKey = createHash("sha256")
@@ -14135,7 +14174,7 @@ test("Junction sparse-history policy keeps schedule-time retry identity stable a
       "garmin",
       "caffeine",
       1,
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION + 1,
+      2,
     ]))
     .digest("hex");
 
@@ -14285,20 +14324,24 @@ test("Junction sparse-history continuation fetches one bounded 30-day window", a
     },
   );
 
-  assert.equal(timeseriesRequests.length, 1);
-  const request = requireValue(timeseriesRequests[0]);
-  const requestStart = requireValue(request.searchParams.get("start_date"));
-  const requestEnd = requireValue(request.searchParams.get("end_date"));
+  assert.equal(timeseriesRequests.length, 30);
+  const firstRequest = requireValue(timeseriesRequests[0]);
+  const lastRequest = requireValue(timeseriesRequests.at(-1));
+  const requestStart = requireValue(firstRequest.searchParams.get("start_date"));
+  const requestEnd = requireValue(lastRequest.searchParams.get("start_date"));
   assert.equal(
     (Date.parse(requestEnd) - Date.parse(requestStart)) / (24 * 60 * 60_000),
-    30,
+    29,
   );
   const continuation = requireValue(
     result.scheduledJobs?.find((candidate) =>
       candidate.kind === "resource" && candidate.payload?.resource === "vo2_max"
     ),
   );
-  assert.equal(continuation.payload?.windowStart, requestEnd);
+  assert.equal(
+    continuation.payload?.windowStart,
+    new Date(Date.parse(requestEnd) + 24 * 60 * 60_000).toISOString(),
+  );
   assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd);
 });
 
@@ -14370,9 +14413,9 @@ test.each([
   };
   let metadata: Record<string, unknown> = {};
 
-  const expectedScanCount = malformed ? 5 : 1;
-  const expectedRequestCount = expectedScanCount * 6;
-  for (let chunkIndex = 0; chunkIndex < expectedRequestCount; chunkIndex += 1) {
+  const expectedExecutionCount = malformed ? 5 : 6;
+  const expectedRequestCount = malformed ? 5 : 180;
+  for (let chunkIndex = 0; chunkIndex < expectedExecutionCount; chunkIndex += 1) {
     const now = new Date(
       Date.parse("2026-08-11T12:00:00.000Z") + chunkIndex * 60_000,
     ).toISOString();
@@ -14392,7 +14435,7 @@ test.each([
     const continuation = result.scheduledJobs?.find((candidate) =>
       candidate.payload?.resource === "caffeine"
     );
-    if (chunkIndex < expectedRequestCount - 1) {
+    if (chunkIndex < expectedExecutionCount - 1) {
       const requiredContinuation = requireValue(continuation);
       job = {
         ...createJob("resource", requiredContinuation.payload ?? {}),
@@ -14409,7 +14452,7 @@ test.each([
       createStoredAccount({ metadata, sources: [source] }),
       "2026-08-20T12:00:00.000Z",
     ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
-    false,
+    malformed,
   );
 
   if (!malformed) {
@@ -14538,8 +14581,8 @@ test("Junction sparse aggregate import failures remain retryable without coverag
   const retry = requireValue(failed.scheduledJobs?.find((job) =>
     job.payload?.resource === "caffeine"
   ));
-  assert.equal(retry.payload?.historicalProviderRecordsSeen, false);
-  assert.equal(retry.payload?.historicalRecordsSeen, false);
+  assert.equal(retry.payload?.historicalProviderRecordsSeen, undefined);
+  assert.equal(retry.payload?.historicalRecordsSeen, undefined);
 });
 
 test.each([404, 422])(
@@ -14607,7 +14650,7 @@ test.each([404, 422])(
         metadata,
         "garmin",
         "caffeine",
-        JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+        1,
       ), false);
       const retry = requireValue(result.scheduledJobs?.find((candidate) =>
         candidate.payload?.resource === "caffeine"
@@ -14698,6 +14741,6 @@ test("Junction retryable 5xx sparse history fails before terminal coverage", asy
     metadata,
     "garmin",
     "caffeine",
-    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    1,
   ), false);
 });
