@@ -3074,6 +3074,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         `blood-pressure-${index.toString(16).padStart(16, "0")}`
       ),
     });
+    const workoutStreamCursor = JSON.stringify({
+      v: 1,
+      i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
+    });
+    const timeseriesResourceCursor = JSON.stringify({ v: 1, i: ["body_mass_index"] });
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {
@@ -3088,7 +3093,9 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             historicalUnresolvedProviderRecordCount: 65,
             historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
-            timeseriesResourceCursor: "blood_pressure",
+            timeseriesPhase: "wide",
+            timeseriesResourceCursor,
+            workoutStreamCursor,
             windowEnd: "2026-04-03T00:00:00Z",
             windowStart: "2026-04-01T00:00:00Z",
           },
@@ -3121,7 +3128,9 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       historicalUnresolvedProviderRecordCount: 65,
       historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
-      timeseriesResourceCursor: "blood_pressure",
+      timeseriesPhase: "wide",
+      timeseriesResourceCursor,
+      workoutStreamCursor,
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-01T00:00:00.000Z",
     });

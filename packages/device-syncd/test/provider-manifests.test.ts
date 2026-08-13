@@ -14,6 +14,7 @@ import {
   deviceSyncProviderRuntimeVariableEnvKeys,
   getConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
   listDeviceSyncProviderCatalog,
   normalizeConfiguredDeviceSyncJobInput,
   normalizeConfiguredDeviceSyncJobRecord,
@@ -103,7 +104,36 @@ describe("deviceSyncProviderManifests", () => {
     expect(config).not.toHaveProperty("baseUrl");
   });
 
-  it("defaults Junction to every code-owned timeseries resource", () => {
+  it("activates the exact code-owned production timeseries list", () => {
+    expect([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]).toEqual([
+      ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+      "body_mass_index",
+      "calories_basal",
+      "carbohydrates",
+      "daylight_exposure",
+      "electrocardiogram_voltage",
+      "fall",
+      "fat",
+      "floors_climbed",
+      "forced_expiratory_volume_1",
+      "forced_vital_capacity",
+      "handwashing",
+      "heart_rate_alert",
+      "inhaler_usage",
+      "insulin_injection",
+      "lean_body_mass",
+      "peak_expiratory_flow_rate",
+      "sleep_apnea_alert",
+      "stand_duration",
+      "stand_hour",
+      "uv_exposure",
+      "waist_circumference",
+      "wheelchair_push",
+      "workout_distance",
+      "workout_duration",
+      "workout_stream",
+      "workout_swimming_stroke",
+    ]);
     const configs = readConfiguredDeviceSyncProviderConfigs({
       JUNCTION_API_KEY: "sk_us_test_manifest",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
@@ -115,7 +145,8 @@ describe("deviceSyncProviderManifests", () => {
     if (!junctionConfig) {
       throw new Error("Expected Junction config to be present.");
     }
-    expect(junctionConfig).not.toHaveProperty("timeseriesResources");
+    expect(junctionConfig.timeseriesResources)
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
     expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-5)).toEqual([
       "steps",
       "distance",
@@ -124,7 +155,7 @@ describe("deviceSyncProviderManifests", () => {
       "weight",
     ]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
-      .toEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
   });
 
@@ -140,7 +171,40 @@ describe("deviceSyncProviderManifests", () => {
       throw new Error("Expected Junction config to be present.");
     }
 
-    expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([]);
+    expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([
+      "body_mass_index",
+      "carbohydrates",
+      "fat",
+      "forced_expiratory_volume_1",
+      "forced_vital_capacity",
+      "heart_rate_alert",
+      "inhaler_usage",
+      "insulin_injection",
+      "lean_body_mass",
+      "peak_expiratory_flow_rate",
+      "sleep_apnea_alert",
+      "waist_circumference",
+      "calories_basal",
+      "daylight_exposure",
+      "fall",
+      "floors_climbed",
+      "handwashing",
+      "stand_duration",
+      "stand_hour",
+      "uv_exposure",
+      "wheelchair_push",
+      "workout_distance",
+      "workout_duration",
+      "workout_swimming_stroke",
+      "electrocardiogram_voltage",
+      "workout_stream",
+    ]);
+    for (const resource of JUNCTION_OPT_IN_TIMESERIES_RESOURCES) {
+      expect(normalizeJunctionDeviceSyncRuntimeConfig({
+        ...junctionConfig,
+        timeseriesResources: [resource],
+      }).timeseriesResources).toEqual([resource]);
+    }
     expect(normalizeJunctionDeviceSyncRuntimeConfig({
       ...junctionConfig,
       timeseriesResources: ["steps", "heart_rate", "body_weight"],
@@ -197,17 +261,23 @@ describe("deviceSyncProviderManifests", () => {
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesPhase: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
       },
     });
-    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "reconcile")).toEqual({
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "reconcile")).toMatchObject({
       payload: {
-        sourceProviderSlug: { kind: "string", includeInHostedHint: true },
+        timeseriesPhase: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
-        windowEnd: { kind: "string", includeInHostedHint: true },
-        windowStart: { kind: "string", includeInHostedHint: true },
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "resource")).toMatchObject({
+      payload: {
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
       },
     });
     expect(getConfiguredDeviceSyncProviderJobDefinition("oura", "resource")).toMatchObject({
@@ -515,6 +585,11 @@ describe("deviceSyncProviderManifests", () => {
   });
 
   it("shapes hosted hint payloads from the provider manifest", () => {
+    const workoutStreamCursor = JSON.stringify({
+      v: 1,
+      i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
+    });
+    const timeseriesResourceCursor = JSON.stringify({ v: 1, i: ["body_mass_index"] });
     expect(
       shapeHostedDeviceSyncJobHintPayload("junction", {
         kind: "backfill",
@@ -522,7 +597,9 @@ describe("deviceSyncProviderManifests", () => {
           emptyBackfillAttempts: 2,
           resources: ["profile"],
           timeseriesCursor: "2026-04-01T00:00:00.000Z",
-          timeseriesResourceCursor: "heartrate",
+          timeseriesPhase: "wide",
+          timeseriesResourceCursor,
+          workoutStreamCursor,
           windowEnd: "2026-04-22T00:00:00.000Z",
           windowStart: "2026-01-22T00:00:00.000Z",
         },
@@ -530,7 +607,9 @@ describe("deviceSyncProviderManifests", () => {
     ).toEqual({
       emptyBackfillAttempts: 2,
       timeseriesCursor: "2026-04-01T00:00:00.000Z",
-      timeseriesResourceCursor: "heartrate",
+      timeseriesPhase: "wide",
+      timeseriesResourceCursor,
+      workoutStreamCursor,
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-01-22T00:00:00.000Z",
     });
@@ -784,5 +863,41 @@ describe("deviceSyncProviderManifests", () => {
     expect(Object.isFrozen(ouraManifest.jobs.resource?.payload ?? {})).toBe(true);
     expect(Object.isFrozen(ouraManifest.jobs.resource?.payload.objectId ?? {})).toBe(true);
     expect(Object.isFrozen(ouraManifest.serializableFields)).toBe(true);
+  });
+});
+
+describe("Junction opt-in timeseries configuration", () => {
+  const baseConfig = {
+    apiKey: "sk_us_test_opt_in",
+    clientUserIdSecret: "junction-opt-in-secret",
+    environment: "sandbox" as const,
+    providerFilter: ["oura"],
+    region: "us" as const,
+  };
+
+  it("keeps defaults unchanged when no code-owned override is supplied", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
+      .toEqual(JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
+  });
+
+  it("preserves an explicit only-opt-in list exactly", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["fat", "insulin_injection", "heart_rate_alert", "fat"],
+    }).timeseriesResources).toEqual(["fat", "insulin_injection", "heart_rate_alert"]);
+  });
+
+  it("preserves the existing dense and weight opt-ins exactly", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["steps", "weight"],
+    }).timeseriesResources).toEqual(["steps", "weight"]);
+  });
+
+  it("rejects unknown resource names", () => {
+    expect(() => normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["not_a_junction_resource"],
+    })).toThrow(/unsupported resource/u);
   });
 });

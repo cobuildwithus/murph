@@ -25,6 +25,10 @@ import {
 } from "../src/index.ts";
 import { normalizeWhoopSnapshot } from "../src/device-providers/whoop.ts";
 import {
+  JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
+  JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+} from "../src/device-providers/junction-bounded-features.ts";
+import {
   makeNormalizedDeviceBatch,
   type NormalizedDeviceBatchOptions,
 } from "../src/device-providers/shared-normalization.ts";
@@ -1602,6 +1606,133 @@ test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of 
   assert.match(compactBloodOxygenPart.content, /"meanValue":96/u);
   assert.doesNotMatch(compactBloodOxygenPart.content, /dense_provider_timeseries_pruned|70|72\.4/u);
 });
+
+interface JunctionCompactIdentityFixture {
+  buildFeature(input: {
+    aggregate: number;
+    stableId: string;
+    timestamp: string;
+  }): Record<string, unknown>;
+  label: string;
+  resource: "electrocardiogram_voltage" | "workout_stream";
+}
+
+const JUNCTION_COMPACT_IDENTITY_FIXTURES: readonly JunctionCompactIdentityFixture[] = [
+  {
+    label: "ECG recording",
+    resource: "electrocardiogram_voltage",
+    buildFeature: ({ aggregate, stableId, timestamp }) => ({
+      schema: JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
+      id: stableId,
+      recordingId: stableId,
+      sourceProviderSlug: "apple_health_kit",
+      sourceType: "watch",
+      sourceInstanceId: "watch-1",
+      sessionStart: timestamp,
+      sessionEnd: new Date(Date.parse(timestamp) + 60_000).toISOString(),
+      durationSeconds: 60,
+      voltageSampleCount: 15_000,
+      voltageUnit: "mV",
+      voltageMin: -0.4,
+      voltageMax: 0.5,
+      voltageMean: aggregate,
+      voltageRms: 0.18,
+      leadType: "lead_i",
+      leadCount: 1,
+    }),
+  },
+  {
+    label: "workout stream",
+    resource: "workout_stream",
+    buildFeature: ({ aggregate, stableId, timestamp }) => ({
+      schema: JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+      id: stableId,
+      workoutId: stableId,
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      sourceInstanceId: "garmin-1",
+      startAt: timestamp,
+      endAt: new Date(Date.parse(timestamp) + 30 * 60_000).toISOString(),
+      durationSeconds: 1_800,
+      distanceMeters: aggregate,
+      averageHeartRate: 130,
+      maxHeartRate: 170,
+      sampleCount: 1_000,
+    }),
+  },
+];
+
+for (const fixture of JUNCTION_COMPACT_IDENTITY_FIXTURES) {
+  test(`importDeviceProviderSnapshot reconciles corrected ${fixture.label} timestamps by stable origin identity`, async () => {
+    const vaultRoot = await makeTempDirectory(`murph-junction-${fixture.resource}-identity`);
+    try {
+      await coreRuntime.initializeVault({
+        createdAt: "2026-07-01T00:00:00.000Z",
+        vaultRoot,
+      });
+      const importFeature = (input: {
+        aggregate: number;
+        importedAt: string;
+        stableId: string;
+        timestamp: string;
+      }) => importDeviceProviderSnapshot<CoreDeviceImportResult>(
+        {
+          provider: "junction",
+          vaultRoot,
+          snapshot: {
+            accountId: "junction-user-compact-identity",
+            importedAt: input.importedAt,
+            timeseries: {
+              [fixture.resource]: [fixture.buildFeature(input)],
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      );
+
+      const first = await importFeature({
+        aggregate: 0.02,
+        importedAt: "2026-07-02T00:00:00.000Z",
+        stableId: "stable-1",
+        timestamp: "2026-07-01T10:00:00.000Z",
+      });
+      const correction = await importFeature({
+        aggregate: fixture.resource === "workout_stream" ? 5_100 : 0.03,
+        importedAt: "2026-07-02T01:00:00.000Z",
+        stableId: "stable-1",
+        timestamp: "2026-07-01T10:05:00.000Z",
+      });
+      const distinct = await importFeature({
+        aggregate: fixture.resource === "workout_stream" ? 4_900 : 0.01,
+        importedAt: "2026-07-02T02:00:00.000Z",
+        stableId: "stable-2",
+        timestamp: "2026-07-01T10:05:00.000Z",
+      });
+      const firstEvent = first.events[0];
+      const correctedEvent = correction.events[0];
+      const distinctEvent = distinct.events[0];
+      assert.ok(firstEvent, `${fixture.label} first event`);
+      assert.ok(correctedEvent, `${fixture.label} corrected event`);
+      assert.ok(distinctEvent, `${fixture.label} distinct event`);
+
+      assert.equal(correctedEvent.id, firstEvent.id);
+      assert.equal(
+        correctedEvent.externalRef?.resourceId,
+        firstEvent.externalRef?.resourceId,
+      );
+      assert.equal(eventRevisionFromLifecycle(firstEvent.lifecycle), 1);
+      assert.equal(eventRevisionFromLifecycle(correctedEvent.lifecycle), 2);
+      assert.notEqual(distinctEvent.id, firstEvent.id);
+      assert.notEqual(
+        distinctEvent.externalRef?.resourceId,
+        firstEvent.externalRef?.resourceId,
+      );
+      assert.equal(distinctEvent.occurredAt, correctedEvent.occurredAt);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+}
 
 test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate legacy aliases", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-daily-aggregate-legacy-conflict");

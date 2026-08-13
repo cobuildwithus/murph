@@ -233,24 +233,20 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // forbidden boot input. Exact merged local assembly measured 9,808,583B total
 // on 2026-08-11, so ratchet the total only and retain the 32KB allowance.
 //
-// Exact conversation mailbox consumption and its accepted-reaction recovery
-// extend the existing hosted callback output without adding a forbidden boot
-// input. Exact current-main assembly measured 9,846,997B total on 2026-08-11,
-// so ratchet the total only and retain the 32KB allowance.
+// Bounded Junction sparse-resource policies and current conversation mailbox
+// recovery extend existing outputs without adding a forbidden boot input.
+// Exact merged production assembly measured a 7,943,465B static closure and
+// 9,957,576B total on 2026-08-11; ratchet those two baselines while retaining
+// the established cross-platform allowances.
 //
-// Frequency-aware Junction sparse-history recovery extends the existing
-// provider and importer outputs without adding a forbidden boot input. Exact
-// current-base Linux CI assembly measured 9,883,360B total on 2026-08-12;
-// retain the startup baselines and established 32KB allowance.
-//
-// The reviewed group-share readiness runtime combined with that current base
-// extends existing hosted-runtime chunks without adding a forbidden boot input.
-// Linux CI measured a 7,934,975B static closure on 2026-08-12; the matching
-// macOS production assembly measured 9,960,217B total. Ratchet both measurements
-// and retain the established cross-platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_960_217 + 32_768;
+// Strict Junction ECG/workout projection, resumable per-workout collection,
+// and production resource activation extend existing lazy provider/importer
+// outputs without adding a forbidden boot input. Exact merged production
+// assembly measured 10,000,690B total on 2026-08-11; ratchet only that baseline
+// and retain the established 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_000_690 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_934_975;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_943_465;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
