@@ -886,6 +886,7 @@ const JUNCTION_SLEEP_UNSPECIFIED_TOTAL_NORMALIZER_VERSION = "junction-sleep-unsp
 type JunctionSleepStage = Exclude<JunctionSleepStageValue, "asleep_unspecified">;
 
 interface JunctionDailyTimeseriesAggregate {
+  authoritativeEmptyCalendarSet: boolean;
   dayKey: string;
   duplicateSampleCount: number;
   entry: PlainObject;
@@ -2379,6 +2380,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       : undefined;
     if (
       isJunctionSparseIntervalResource(input.resource)
+      && entry.authoritativeEmptyCalendarSet !== true
       && fidelityRecordKey
       && input.selectedSparseRecords
       && !sparseSelection
@@ -2411,6 +2413,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     if (!existing) {
       aggregates.set(key, {
+        authoritativeEmptyCalendarSet: entry.authoritativeEmptyCalendarSet === true,
         dayKey,
         duplicateSampleCount: 0,
         entry,
@@ -2435,6 +2438,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     }
 
     existing.sampleCount += 1;
+    existing.authoritativeEmptyCalendarSet ||= entry.authoritativeEmptyCalendarSet === true;
     if (fidelitySample) {
       existing.fidelitySamples.push(fidelitySample);
     }
@@ -2531,7 +2535,10 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
             sourceType: aggregate.resourceContext.origin.sourceType,
             sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
-            sampleCount: aggregate.sampleCount,
+            status: aggregate.authoritativeEmptyCalendarSet
+              ? "authoritative_empty_calendar_set"
+              : undefined,
+            sampleCount: aggregate.authoritativeEmptyCalendarSet ? 0 : aggregate.sampleCount,
             duplicateSampleCount: aggregate.duplicateSampleCount > 0
               ? aggregate.duplicateSampleCount
               : undefined,
@@ -2541,9 +2548,15 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             legacyDayKeys: aggregate.legacyDayKeys.size > 0
               ? [...aggregate.legacyDayKeys].sort()
               : undefined,
-            meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
-            minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
-            maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
+            meanValue: aggregate.authoritativeEmptyCalendarSet
+              ? undefined
+              : roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
+            minValue: aggregate.authoritativeEmptyCalendarSet
+              ? undefined
+              : roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
+            maxValue: aggregate.authoritativeEmptyCalendarSet
+              ? undefined
+              : roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
             unit: junctionDailyTimeseriesAggregateUnit(resource),
           }),
         ),
@@ -7190,7 +7203,7 @@ function normalizeBodyTemperatureCelsius(value: unknown): number | undefined {
 function normalizeCaffeineMilligrams(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric <= 0 || numeric > 2) {
+  if (numeric === undefined || numeric < 0 || numeric > 2) {
     return undefined;
   }
 
@@ -7200,7 +7213,7 @@ function normalizeCaffeineMilligrams(value: unknown): number | undefined {
 function normalizeWaterMilliliters(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric <= 0 || numeric > 10_000) {
+  if (numeric === undefined || numeric < 0 || numeric > 10_000) {
     return undefined;
   }
 
@@ -7210,7 +7223,7 @@ function normalizeWaterMilliliters(value: unknown): number | undefined {
 function normalizeMindfulnessMinutesValue(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric <= 0 || numeric > 1440) {
+  if (numeric === undefined || numeric < 0 || numeric > 1440) {
     return undefined;
   }
 

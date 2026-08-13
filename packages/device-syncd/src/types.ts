@@ -739,7 +739,15 @@ export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
   canonicalEventDayKeys?: readonly string[];
   canonicalEventExternalRefResourceIds?: readonly string[];
+  canonicalSparseCalendarTargets?: readonly ProviderSparseCalendarTarget[];
   durableDeliveryAccepted: boolean;
+}
+
+export interface ProviderSparseCalendarTarget {
+  dayKey: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
 }
 
 export interface ProviderJobConnectionSource {

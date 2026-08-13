@@ -57,9 +57,10 @@ Updated: 2026-08-12
     include provider-day metadata, then rerun substantive round ten.
 12. [x] Resolve round ten's cross-day receipt and transport-dedupe findings,
     then run round eleven against the exact pushed head.
-13. [ ] Resolve round eleven's durable calendar-refresh finding, obtain
-    exact-head green CI and a ReviewGPT PASS, then merge and retire the task
-    worktree.
+13. [x] Resolve round eleven's durable calendar-refresh finding.
+14. [ ] Resolve round twelve's retained-job and authoritative-empty-day
+    findings, obtain exact-head green CI and a ReviewGPT PASS, then merge and
+    retire the task worktree.
 
 ## Decisions
 
@@ -77,8 +78,10 @@ Updated: 2026-08-12
   unversioned daily and dense feature facts.
 - Sparse stable-row revisions remain useful because they order one durable
   identity rather than a changing set.
-- Empty provider collections do not emit aggregate tombstones; the documented
-  revision surface is limited to non-empty set growth and removal.
+- Ordinary empty provider collections do not emit aggregate tombstones. An
+  exact source/day sparse calendar repair treats a successful empty response as
+  an authoritative zero sum through the existing daily event identity; an
+  optional or unavailable endpoint remains retryable and cannot claim success.
 - ReviewGPT round six's global-output finding is pre-existing rather than
   PR-caused: the proposed 11,522-event reproduction also fails the unchanged
   base integration-ingest contract, and live imports always persist a complete
@@ -140,6 +143,15 @@ Updated: 2026-08-12
   before the core write and is rechecked before enqueue. This reuses the
   existing device-job queue and calendar importer; it adds no store, schema,
   service, scheduler, cursor, watermark, or aggregate owner.
+- Round twelve's two review-induced findings are accepted. Calendar repair jobs
+  now reuse the existing retained accepted-work predicate in the store and
+  service, extending the attempt fence when a retryable failure or expired
+  lease consumes it. A later matching obligation renews the same deduplicated
+  row. Successful HTTP 200 empty source/day responses now pass an explicit zero
+  aggregate through the existing calendar importer and canonical event spine;
+  optional 404/422 endpoints remain retryable. Source identity travels on the
+  bounded existing job payload, so this adds no schema, queue, service,
+  scheduler, cursor, watermark, tombstone API, or second aggregate owner.
 
 ## Verification
 
@@ -226,5 +238,18 @@ Updated: 2026-08-12
   Fonts fetch failure. Repeating that exact hosted-web build succeeded with all
   244 pages and runtime checks. The remaining Cloudflare verification then
   passed its typecheck, 2,406 node tests, and 11 Workers tests.
+- Round twelve found that ordinary calendar jobs could dead-letter after five
+  attempts or an exhausted expired lease, and that an authoritative empty
+  calendar response completed without clearing the displaced daily total. The
+  focused regressions now prove same-row lease reclamation beyond the attempt
+  fence, three service-level canonical import attempts from `maxAttempts: 1`,
+  explicit zero-sum replacement on HTTP 200 empty, and retry retention for an
+  optional 422 response. Source/day target fanout remains capped at 64 before
+  core persistence and before job enqueue.
+- Passed the final 175-test Junction importer file, 784-test core suite, and 402
+  focused device-sync provider/store/service/manifest tests plus the owning
+  package typechecks, importer build, 7-test changelog-fragment suite, docs
+  drift, scenario integrity, and `git diff --check` after round-twelve
+  remediation.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

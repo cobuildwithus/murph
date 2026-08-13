@@ -8202,11 +8202,31 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
       typeof normalizeJunctionSnapshot
     >[0], { defaultTimeZone: "America/New_York" });
     assert.ok((normalized.events?.length ?? 0) > 0);
+    const canonicalSparseCalendarTargets = [...new Map((normalized.events ?? []).flatMap((event) =>
+      typeof event.dayKey === "string" && event.dataOrigin?.sourceProviderSlug
+        ? [[JSON.stringify([
+            event.dayKey,
+            event.dataOrigin.sourceProviderSlug,
+            event.dataOrigin.sourceType ?? null,
+            event.dataOrigin.sourceInstanceId ?? null,
+          ]), {
+            dayKey: event.dayKey,
+            sourceProviderSlug: event.dataOrigin.sourceProviderSlug,
+            ...(event.dataOrigin.sourceInstanceId === undefined
+              ? {}
+              : { sourceInstanceId: event.dataOrigin.sourceInstanceId }),
+            ...(event.dataOrigin.sourceType
+              ? { sourceType: event.dataOrigin.sourceType }
+              : {}),
+          }] as const]
+        : []
+    )).values()];
     return {
       canonicalEventCount: normalized.events?.length ?? 0,
       canonicalEventDayKeys: [...new Set((normalized.events ?? []).flatMap((event) =>
         typeof event.dayKey === "string" ? [event.dayKey] : []
       ))],
+      canonicalSparseCalendarTargets,
       durableDeliveryAccepted: true,
     };
   };
@@ -8255,6 +8275,8 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
       calendarRefreshDay: "2026-04-02",
       resource: "caffeine",
       resourceCategory: "timeseries",
+      sourceProviderSlug: "apple_health_kit",
+      sourceType: "phone",
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-02T00:00:00.000Z",
     },
@@ -8262,6 +8284,8 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
     dedupeKey: sha256ForTest(JSON.stringify([
       "junction",
       "sparse-calendar-refresh",
+      "apple_health_kit",
+      "phone",
       null,
       "caffeine",
       "2026-04-02",
@@ -8325,6 +8349,147 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
   );
 });
 
+test("Junction sparse calendar refresh imports an authoritative empty source day", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { water: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              end: "2026-04-02T08:01:00.000Z",
+              sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb",
+              start: "2026-04-02T08:00:00.000Z",
+              value: 250,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, { timeseriesResources: ["water"] });
+  const importedSnapshots: unknown[] = [];
+  const normalizedImports: ReturnType<typeof normalizeJunctionSnapshot>[] = [];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        normalizedImports.push(normalizeJunctionSnapshot(snapshot as Parameters<
+          typeof normalizeJunctionSnapshot
+        >[0], { defaultTimeZone: "America/New_York" }));
+        return { durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("resource", {
+      calendarRefreshDay: "2026-04-02",
+      resource: "water",
+      resourceCategory: "timeseries",
+      sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result.scheduledJobs, undefined);
+  assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(
+    (importedSnapshots[0] as {
+      timeseries?: { water?: Array<Record<string, unknown>> };
+    }).timeseries?.water,
+    [{
+      authoritativeEmptyCalendarSet: true,
+      calendarDate: "2026-04-02",
+      date: "2026-04-02",
+      sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      value: 0,
+    }],
+  );
+  const zeroEvent = normalizedImports[0]?.events?.find((event) =>
+    event.fields && "metric" in event.fields && event.fields.metric === "water"
+  );
+  assert.equal(zeroEvent?.dayKey, "2026-04-02");
+  assert.equal(
+    zeroEvent?.fields && "value" in zeroEvent.fields ? zeroEvent.fields.value : undefined,
+    0,
+  );
+  assert.ok(normalizedImports[0]?.evidenceParts?.some((part) => {
+    const content = part.content;
+    return typeof content === "object"
+      && content !== null
+      && "status" in content
+      && content.status === "authoritative_empty_calendar_set"
+      && "sampleCount" in content
+      && content.sampleCount === 0;
+  }));
+  assert.ok(requests.some((url) =>
+    url.includes("provider=garmin")
+    && url.includes("start_date=2026-04-02")
+    && url.includes("end_date=2026-04-02")
+  ));
+});
+
+test("Junction sparse calendar refresh retains an unavailable optional endpoint", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { water: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+      return createJsonResponse({ message: "Resource unavailable." }, 422);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, { timeseriesResources: ["water"] });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({ now: "2026-04-03T12:00:00.000Z" }),
+      createJob("resource", {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_CALENDAR_REFRESH_UNAVAILABLE"
+      && error.retryable,
+  );
+});
+
 test("Junction sparse corrections reject excessive calendar-refresh fanout", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -8362,6 +8527,11 @@ test("Junction sparse corrections reject excessive calendar-refresh fanout", asy
         importSnapshot: async () => ({
           canonicalEventCount: 1,
           canonicalEventDayKeys: affectedDayKeys,
+          canonicalSparseCalendarTargets: affectedDayKeys.map((dayKey) => ({
+            dayKey,
+            sourceProviderSlug: "garmin",
+            sourceType: "watch",
+          })),
           durableDeliveryAccepted: true,
         }),
       }),

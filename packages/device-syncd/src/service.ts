@@ -8,6 +8,8 @@ import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-se
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
+  isJunctionSparseCalendarRefreshJob,
+  isJunctionSparseCalendarRefreshTerminalFailureCode,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "./junction-resources.ts";
 import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
@@ -803,6 +805,7 @@ class DeviceSyncServiceController {
     }
 
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
+    const retainsAcceptedCalendarRefresh = isJunctionSparseCalendarRefreshJob(job);
 
     if (
       storedAccount.status === "active"
@@ -952,7 +955,7 @@ class DeviceSyncServiceController {
       ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      activeJobs = preservesAcceptedCompanionHrv
+      activeJobs = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh
         ? [normalizedJob]
         : this.claimProviderJobBatch({
             accountId: storedAccount.id,
@@ -985,11 +988,16 @@ class DeviceSyncServiceController {
             snapshot,
             vaultRoot: this.vaultRoot,
           });
+          const canonicalSparseCalendarTargets =
+            readCanonicalDeviceImportSparseCalendarTargets(importResult);
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
             canonicalEventDayKeys: readCanonicalDeviceImportEventDayKeys(importResult),
             canonicalEventExternalRefResourceIds:
               readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
+            ...(canonicalSparseCalendarTargets.length > 0
+              ? { canonicalSparseCalendarTargets }
+              : {}),
             durableDeliveryAccepted: true,
           };
           return receipt;
@@ -1153,7 +1161,13 @@ class DeviceSyncServiceController {
       const failure = normalizeExecutionError(error);
       const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
         && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
-      const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
+      const retainsAcceptedCalendarRefreshUntilSuccess = retainsAcceptedCalendarRefresh
+        && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code);
+      const retainsAcceptedWorkUntilSuccess = retainsAcceptedCompanionHrvUntilSuccess
+        || retainsAcceptedCalendarRefreshUntilSuccess;
+      const retainedFailureRetryable = failure.retryable
+        || retainsAcceptedCompanionHrvUntilSuccess
+        || retainsAcceptedCalendarRefreshUntilSuccess;
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1180,7 +1194,7 @@ class DeviceSyncServiceController {
             failure.message,
             retryAt,
             retainedFailureRetryable,
-            retainsAcceptedCompanionHrvUntilSuccess,
+            retainsAcceptedWorkUntilSuccess,
           );
         })
         .some(Boolean);
@@ -2140,6 +2154,41 @@ function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): s
     return typeof externalRef?.resourceId === "string"
       ? [externalRef.resourceId]
       : [];
+  });
+}
+
+function readCanonicalDeviceImportSparseCalendarTargets(value: unknown): Array<{
+  dayKey: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
+}> {
+  const record = toPlainRecord(value);
+  if (!record || !Array.isArray(record.affectedSparseCalendarTargets)) {
+    return [];
+  }
+  return record.affectedSparseCalendarTargets.flatMap((value) => {
+    const target = toPlainRecord(value);
+    const dayKey = target?.dayKey;
+    const sourceProviderSlug = target?.sourceProviderSlug;
+    if (
+      typeof dayKey !== "string"
+      || !/^\d{4}-\d{2}-\d{2}$/u.test(dayKey)
+      || typeof sourceProviderSlug !== "string"
+      || !sourceProviderSlug
+    ) {
+      return [];
+    }
+    const sourceInstanceId = target.sourceInstanceId;
+    const sourceType = target.sourceType;
+    return [{
+      dayKey,
+      ...(typeof sourceInstanceId === "string" || sourceInstanceId === null
+        ? { sourceInstanceId }
+        : {}),
+      sourceProviderSlug,
+      ...(typeof sourceType === "string" ? { sourceType } : {}),
+    }];
   });
 }
 

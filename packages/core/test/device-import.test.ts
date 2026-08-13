@@ -7460,6 +7460,14 @@ test("importDeviceBatch reports each immediate Junction sparse cross-day transit
       facet: "interval",
       version,
     },
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      sourceInstanceId: "garmin-watch-1",
+      normalizerVersion: "junction-timeseries.v1",
+    },
     fields: {
       measurements: [{ metric: "water", unit: "ml", value: 250 }],
     },
@@ -7473,6 +7481,12 @@ test("importDeviceBatch reports each immediate Junction sparse cross-day transit
     events: [buildEvent("2026-04-01", "2026-04-04T08:00:00.000Z")],
   });
   assert.deepEqual(v1.affectedEventDayKeys, ["2026-04-01"]);
+  assert.deepEqual(v1.affectedSparseCalendarTargets, [{
+    dayKey: "2026-04-01",
+    sourceInstanceId: "garmin-watch-1",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+  }]);
 
   const v2 = await importDeviceBatch({
     vaultRoot,
@@ -7482,6 +7496,10 @@ test("importDeviceBatch reports each immediate Junction sparse cross-day transit
     events: [buildEvent("2026-04-02", "2026-04-05T08:00:00.000Z")],
   });
   assert.deepEqual(v2.affectedEventDayKeys, ["2026-04-01", "2026-04-02"]);
+  assert.deepEqual(v2.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+    "2026-04-01",
+    "2026-04-02",
+  ]);
 
   const v3 = await importDeviceBatch({
     vaultRoot,
@@ -7491,6 +7509,10 @@ test("importDeviceBatch reports each immediate Junction sparse cross-day transit
     events: [buildEvent("2026-04-03", "2026-04-06T08:00:00.000Z")],
   });
   assert.deepEqual(v3.affectedEventDayKeys, ["2026-04-02", "2026-04-03"]);
+  assert.deepEqual(v3.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+    "2026-04-02",
+    "2026-04-03",
+  ]);
 
   const delayedV2 = await importDeviceBatch({
     vaultRoot,
@@ -7505,6 +7527,7 @@ test("importDeviceBatch reports each immediate Junction sparse cross-day transit
     undefined,
     "A delayed stale revision cannot reconstruct older refresh work; the durable day jobs retain it.",
   );
+  assert.equal(delayedV2.affectedSparseCalendarTargets, undefined);
 });
 
 test("importDeviceBatch rejects excessive Junction sparse affected-day fanout atomically", async () => {

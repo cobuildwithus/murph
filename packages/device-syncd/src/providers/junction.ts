@@ -83,6 +83,8 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+  JUNCTION_CALENDAR_REFRESH_EMPTY_IDENTITY_INVALID_CODE,
+  JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
   JunctionCompanionHealthMetadataParseError,
   parseJunctionCompanionHealthMetadataBatch,
   type JunctionCompanionHealthMetadataRecord,
@@ -124,6 +126,7 @@ import type {
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
+  ProviderSparseCalendarTarget,
   ProviderWebhookContext,
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
@@ -164,6 +167,7 @@ interface JunctionTimeseriesImportResult {
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalEventDayKeys: readonly string[];
+  canonicalSparseCalendarTargets: readonly ProviderSparseCalendarTarget[];
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
   fetchComplete: boolean;
@@ -1847,12 +1851,13 @@ export function createJunctionDeviceSyncProvider(
         || !isConfiguredJunctionResource("timeseries", resource)
       ) {
         throw deviceSyncError({
-          code: "JUNCTION_CALENDAR_REFRESH_JOB_INVALID",
+          code: JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
           message: "Junction calendar refresh job did not name an admitted sparse resource.",
           retryable: false,
         });
       }
       const sourceProviders = await loadAndProjectSourceProviders();
+      const calendarSourceIdentity = readJunctionSparseCalendarSourceIdentity(job);
       const windowStart = `${calendarRefreshDay}T00:00:00.000Z`;
       const dailyImport = await importTimeseriesDailySnapshots(
         context,
@@ -1862,12 +1867,14 @@ export function createJunctionDeviceSyncProvider(
         skippedOptionalResources,
         [resource],
         sourceProviderSlug,
+        calendarSourceIdentity,
       );
       const followUp = dailyImport.yieldedAt
         ? buildJunctionSparseCalendarRefreshJob({
             dayKey: calendarRefreshDay,
             priority: job.priority,
             resource,
+            ...calendarSourceIdentity,
             sourceProviderSlug,
           })
         : null;
@@ -2018,6 +2025,7 @@ export function createJunctionDeviceSyncProvider(
                 canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
                 canonicalEventDayKeys: [],
+                canonicalSparseCalendarTargets: [],
                 fetchComplete: false,
                 providerRecordCount: 0,
                 unresolvedProviderRecordIdentities: [],
@@ -2065,6 +2073,7 @@ export function createJunctionDeviceSyncProvider(
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
               canonicalEventDayKeys: [],
+              canonicalSparseCalendarTargets: [],
               fetchComplete: false,
               providerRecordCount: 0,
               unresolvedProviderRecordIdentities: [],
@@ -2197,10 +2206,9 @@ export function createJunctionDeviceSyncProvider(
             && JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
           ? buildJunctionSparseCalendarRefreshJobs({
               asOf: context.now,
-              dayKeys: timeseriesImport.canonicalEventDayKeys,
               priority: job.priority,
               resource: effectiveResource,
-              sourceProviderSlug,
+              targets: timeseriesImport.canonicalSparseCalendarTargets,
             })
           : [];
 
@@ -2840,6 +2848,7 @@ export function createJunctionDeviceSyncProvider(
     let fetchComplete = true;
     let yieldedAt: string | null = null;
     let canonicalEventDayKeys: readonly string[] = [];
+    let canonicalSparseCalendarTargets: readonly ProviderSparseCalendarTarget[] = [];
     let canonicalProviderRecordIdentities: readonly string[] = [];
     let canonicalEventCount = 0;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
@@ -2956,6 +2965,7 @@ export function createJunctionDeviceSyncProvider(
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
               canonicalEventDayKeys: [],
+              canonicalSparseCalendarTargets: [],
               fetchComplete: false,
               postFetchSourceAdmission,
               providerRecordCount,
@@ -2988,6 +2998,7 @@ export function createJunctionDeviceSyncProvider(
           });
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
           canonicalEventDayKeys = readProviderSnapshotCanonicalEventDayKeys(receipt);
+          canonicalSparseCalendarTargets = readProviderSnapshotCanonicalSparseCalendarTargets(receipt);
           if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
               resolveJunctionBloodPressureProviderRecordResolutionEvidence({
@@ -3028,6 +3039,7 @@ export function createJunctionDeviceSyncProvider(
             canonicalProviderRecordIdentities: [],
             canonicalEventCount: 0,
             canonicalEventDayKeys: [],
+            canonicalSparseCalendarTargets: [],
             fetchComplete: false,
             providerRecordCount,
             unresolvedProviderRecordIdentities,
@@ -3042,6 +3054,7 @@ export function createJunctionDeviceSyncProvider(
 
     return {
       canonicalEventDayKeys,
+      canonicalSparseCalendarTargets,
       canonicalProviderRecordIdentities,
       canonicalEventCount,
       fetchComplete,
@@ -3064,6 +3077,7 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
+    emptySparseCalendarSource?: Omit<ProviderSparseCalendarTarget, "dayKey">,
   ): Promise<JunctionTimeseriesImportResult> {
     const requestedResources = resources ?? timeseriesResources;
     const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, context.now);
@@ -3081,6 +3095,7 @@ export function createJunctionDeviceSyncProvider(
       if (windowResources.length === 0) {
         continue;
       }
+      const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
       const timeseries = await fetchTimeseriesSnapshots(
         context,
         window.windowStart,
@@ -3090,7 +3105,39 @@ export function createJunctionDeviceSyncProvider(
         sourceProviderSlug,
         { dateQueryFormat: "date" },
       );
-      if (!hasJunctionSnapshotRecords(timeseries)) {
+      if (
+        emptySparseCalendarSource
+        && skippedOptionalResources.length > skippedResourceCountBeforeFetch
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_CALENDAR_REFRESH_UNAVAILABLE",
+          message: "Junction calendar refresh is temporarily unavailable.",
+          retryable: true,
+        });
+      }
+      if (emptySparseCalendarSource) {
+        for (const resource of windowResources) {
+          timeseries[resource] = filterJunctionSparseCalendarRecordsToSource(
+            timeseries[resource] ?? [],
+            emptySparseCalendarSource,
+          );
+        }
+      }
+      if (!hasJunctionSnapshotRecords(timeseries) && emptySparseCalendarSource) {
+        const [resource] = windowResources;
+        if (!resource || !JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(resource)) {
+          throw deviceSyncError({
+            code: JUNCTION_CALENDAR_REFRESH_EMPTY_IDENTITY_INVALID_CODE,
+            message: "Junction empty calendar refresh lacked an admitted sparse identity.",
+            retryable: false,
+          });
+        }
+        timeseries[resource] = [buildJunctionEmptySparseCalendarAggregate({
+          dayKey: window.windowStart.slice(0, 10),
+          resource,
+          ...emptySparseCalendarSource,
+        })];
+      } else if (!hasJunctionSnapshotRecords(timeseries)) {
         continue;
       }
 
@@ -6385,31 +6432,45 @@ function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
 
 function buildJunctionSparseCalendarRefreshJobs(input: {
   asOf: string;
-  dayKeys: readonly string[];
   priority: number;
   resource: string;
-  sourceProviderSlug?: string | null;
+  targets: readonly ProviderSparseCalendarTarget[];
 }): DeviceSyncJobInput[] {
-  const dayKeys = [...new Set(input.dayKeys)].sort();
-  if (dayKeys.length > JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS) {
+  const targets = [...new Map(input.targets.map((target) => [
+    JSON.stringify([
+      target.dayKey,
+      target.sourceProviderSlug,
+      target.sourceType ?? null,
+      target.sourceInstanceId ?? null,
+    ]),
+    target,
+  ])).values()];
+  const dayKeys = [...new Set(targets.map((target) => target.dayKey))].sort();
+  if (
+    dayKeys.length > JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS
+    || targets.length > JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS
+  ) {
     throw deviceSyncError({
       code: "JUNCTION_CALENDAR_REFRESH_DAY_LIMIT_EXCEEDED",
       message: "Junction sparse import exceeded the calendar refresh day limit.",
       retryable: false,
       details: {
         affectedDayCount: dayKeys.length,
+        affectedTargetCount: targets.length,
         maxAllowed: JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS,
       },
     });
   }
 
-  return dayKeys
-    .filter((dayKey) => isGloballyClosedJunctionProviderDay(dayKey, input.asOf))
-    .map((dayKey) => buildJunctionSparseCalendarRefreshJob({
-      dayKey,
+  return targets
+    .filter((target) => isGloballyClosedJunctionProviderDay(target.dayKey, input.asOf))
+    .map((target) => buildJunctionSparseCalendarRefreshJob({
+      dayKey: target.dayKey,
       priority: input.priority,
       resource: input.resource,
-      sourceProviderSlug: input.sourceProviderSlug,
+      sourceInstanceId: target.sourceInstanceId,
+      sourceProviderSlug: target.sourceProviderSlug,
+      sourceType: target.sourceType,
     }));
 }
 
@@ -6417,18 +6478,24 @@ function buildJunctionSparseCalendarRefreshJob(input: {
   dayKey: string;
   priority: number;
   resource: string;
+  sourceInstanceId?: string | null;
   sourceProviderSlug?: string | null;
+  sourceType?: string | null;
 }): DeviceSyncJobInput {
   const windowStart = `${input.dayKey}T00:00:00.000Z`;
   const windowEnd = addMilliseconds(windowStart, TIMESERIES_CHUNK_MS);
   const sourceProviderSlug = normalizeProviderSlug(input.sourceProviderSlug);
+  const sourceInstanceId = normalizeString(input.sourceInstanceId);
+  const sourceType = normalizeString(input.sourceType);
   return {
     kind: "resource",
     payload: {
       calendarRefreshDay: input.dayKey,
       resource: input.resource,
       resourceCategory: "timeseries",
+      ...(sourceInstanceId ? { sourceInstanceId } : {}),
       ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+      ...(sourceType ? { sourceType } : {}),
       windowEnd,
       windowStart,
     } satisfies JunctionDeviceSyncJobPayloads["resource"],
@@ -6437,6 +6504,8 @@ function buildJunctionSparseCalendarRefreshJob(input: {
       "junction",
       "sparse-calendar-refresh",
       sourceProviderSlug,
+      sourceType,
+      sourceInstanceId,
       input.resource,
       input.dayKey,
     ])),
@@ -6450,12 +6519,69 @@ function readJunctionSparseCalendarRefreshDay(job: DeviceSyncJobRecord): string 
   const dayKey = job.payload.calendarRefreshDay;
   if (!isCanonicalEventDayKey(dayKey)) {
     throw deviceSyncError({
-      code: "JUNCTION_CALENDAR_REFRESH_JOB_INVALID",
+      code: JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
       message: "Junction calendar refresh job had an invalid provider day.",
       retryable: false,
     });
   }
   return dayKey;
+}
+
+function readJunctionSparseCalendarSourceIdentity(
+  job: DeviceSyncJobRecord,
+): Omit<ProviderSparseCalendarTarget, "dayKey"> {
+  const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw deviceSyncError({
+      code: JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
+      message: "Junction calendar refresh job lacked its source provider identity.",
+      retryable: false,
+    });
+  }
+  const sourceInstanceId = normalizeString(job.payload.sourceInstanceId);
+  const sourceType = normalizeString(job.payload.sourceType);
+  return {
+    ...(sourceInstanceId ? { sourceInstanceId } : {}),
+    sourceProviderSlug,
+    ...(sourceType ? { sourceType } : {}),
+  };
+}
+
+function filterJunctionSparseCalendarRecordsToSource(
+  records: readonly unknown[],
+  source: Omit<ProviderSparseCalendarTarget, "dayKey">,
+): unknown[] {
+  const sourceProviderSlug = normalizeProviderSlug(source.sourceProviderSlug);
+  const sourceInstanceId = normalizeString(source.sourceInstanceId);
+  const sourceType = normalizeString(source.sourceType);
+  return records.filter((record) => {
+    const entry = readPlainObject(record);
+    if (!entry) {
+      return false;
+    }
+    const origin = resolveJunctionOrigin(entry);
+    return normalizeProviderSlug(origin.sourceProviderSlug) === sourceProviderSlug
+      && (!sourceType || normalizeString(origin.sourceType) === sourceType)
+      && (!sourceInstanceId || normalizeString(origin.sourceInstanceId) === sourceInstanceId);
+  });
+}
+
+function buildJunctionEmptySparseCalendarAggregate(input: {
+  dayKey: string;
+  resource: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
+}): Record<string, unknown> {
+  return stripUndefined({
+    authoritativeEmptyCalendarSet: true,
+    calendarDate: input.dayKey,
+    date: input.dayKey,
+    sourceInstanceId: input.sourceInstanceId,
+    sourceProviderSlug: input.sourceProviderSlug,
+    sourceType: input.sourceType,
+    value: 0,
+  });
 }
 
 function isGloballyClosedJunctionProviderDay(dayKey: string, asOf: string): boolean {
@@ -8143,6 +8269,34 @@ function readProviderSnapshotCanonicalEventDayKeys(value: unknown): readonly str
   return [...new Set(dayKeys.filter((dayKey): dayKey is string =>
     isCanonicalEventDayKey(dayKey)
   ))].sort();
+}
+
+function readProviderSnapshotCanonicalSparseCalendarTargets(
+  value: unknown,
+): ProviderSparseCalendarTarget[] {
+  const rawTargets = readPlainObject(value)?.canonicalSparseCalendarTargets;
+  if (!Array.isArray(rawTargets)) {
+    return [];
+  }
+  return rawTargets.flatMap((rawTarget) => {
+    const target = readPlainObject(rawTarget);
+    if (!target) {
+      return [];
+    }
+    const sourceProviderSlug = normalizeProviderSlug(target.sourceProviderSlug);
+    if (!isCanonicalEventDayKey(target.dayKey) || !sourceProviderSlug) {
+      return [];
+    }
+    const sourceType = normalizeString(target.sourceType);
+    return [{
+      dayKey: target.dayKey,
+      ...(typeof target.sourceInstanceId === "string" || target.sourceInstanceId === null
+        ? { sourceInstanceId: target.sourceInstanceId }
+        : {}),
+      sourceProviderSlug,
+      ...(sourceType ? { sourceType } : {}),
+    }];
+  });
 }
 
 function isCanonicalEventDayKey(value: unknown): value is string {

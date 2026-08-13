@@ -4394,6 +4394,96 @@ test("Junction sparse cross-day revisions report both affected provider days", a
   }
 });
 
+test("Junction authoritative empty sparse days clear the prior retained daily sum", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-empty-sparse-calendar-day");
+  const snapshotFor = (records: readonly Record<string, unknown>[], importedAt: string) => ({
+    accountId: "junction-account-empty-sparse-calendar-day",
+    importedAt,
+    timeseriesWindowKind: "calendar_day" as const,
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    timeseries: { water: records },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    const populated = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: snapshotFor([{
+          calendarDate: "2026-04-22",
+          date: "2026-04-22",
+          end: "2026-04-22T08:01:00.000Z",
+          id: "water-empty-day-baseline",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          start: "2026-04-22T08:00:00.000Z",
+          value: 250,
+        }], "2026-04-23T12:00:00.000Z"),
+      },
+      { corePort: coreRuntime },
+    );
+    const cleared = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: snapshotFor([{
+          authoritativeEmptyCalendarSet: true,
+          calendarDate: "2026-04-22",
+          date: "2026-04-22",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          value: 0,
+        }], "2026-04-23T13:00:00.000Z"),
+      },
+      { corePort: coreRuntime },
+    );
+
+    const populatedWater = populated.events.find((event) =>
+      event.kind === "observation" && event.metric === "water"
+    );
+    const clearedWater = cleared.events.find((event) =>
+      event.kind === "observation" && event.metric === "water"
+    );
+    assert.equal(
+      populatedWater?.kind === "observation" ? populatedWater.value : undefined,
+      250,
+    );
+    assert.equal(
+      clearedWater?.kind === "observation" ? clearedWater.value : undefined,
+      0,
+    );
+    assert.equal(clearedWater?.id, populatedWater?.id);
+    const preparedEmpty = normalizeJunctionSnapshot(snapshotFor([{
+      authoritativeEmptyCalendarSet: true,
+      calendarDate: "2026-04-22",
+      date: "2026-04-22",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      value: 0,
+    }], "2026-04-23T13:00:00.000Z"));
+    assert.ok(preparedEmpty.evidenceParts?.some((part) => {
+      const content = part.content;
+      return typeof content === "object"
+        && content !== null
+        && "status" in content
+        && content.status === "authoritative_empty_calendar_set"
+        && "sampleCount" in content
+        && content.sampleCount === 0;
+    }));
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("Junction unversioned calendar aggregates reconcile through the serialized event spine", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-unversioned-fidelity-correction");
   const inputFor = (value: number) => ({

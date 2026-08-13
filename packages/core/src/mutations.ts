@@ -323,6 +323,7 @@ interface ImportDeviceBatchInput {
 
 interface ImportDeviceBatchResultBase {
   affectedEventDayKeys?: string[];
+  affectedSparseCalendarTargets?: JunctionSparseCalendarTarget[];
   applied: boolean;
   ingestId: string | null;
   ingestShardPath: string | null;
@@ -1692,6 +1693,13 @@ const JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES = [
 ] as const;
 const MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS = 64;
 
+interface JunctionSparseCalendarTarget {
+  dayKey: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
+}
+
 function isJunctionSparseIntervalExternalRef(externalRef: ExternalRef): boolean {
   return externalRef.system === "junction"
     && externalRef.facet === "interval"
@@ -1700,16 +1708,43 @@ function isJunctionSparseIntervalExternalRef(externalRef: ExternalRef): boolean 
     );
 }
 
-function junctionSparseAffectedDayKeys(
+function junctionSparseAffectedCalendarTargets(
   events: readonly EventRecord[],
   index: EventExternalRefIndex,
-): string[] {
-  const dayKeys = new Set<string>();
+): JunctionSparseCalendarTarget[] {
+  const targets = new Map<string, JunctionSparseCalendarTarget>();
   for (const event of events) {
     if (!event.externalRef || !isJunctionSparseIntervalExternalRef(event.externalRef)) {
       continue;
     }
-    dayKeys.add(event.dayKey);
+    const sourceProviderSlug = event.dataOrigin?.sourceProviderSlug;
+    const externalRefSourceProviderSlug = JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES
+      .find((suffix) => event.externalRef?.resourceType.endsWith(suffix));
+    const resolvedSourceProviderSlug = sourceProviderSlug ?? (
+      externalRefSourceProviderSlug
+        ? event.externalRef.resourceType.slice(
+            "junction-".length,
+            -externalRefSourceProviderSlug.length,
+          )
+        : ""
+    );
+    if (!resolvedSourceProviderSlug) {
+      continue;
+    }
+    const addTarget = (dayKey: string) => {
+      const target: JunctionSparseCalendarTarget = {
+        dayKey,
+        sourceProviderSlug: resolvedSourceProviderSlug,
+        ...(event.dataOrigin?.sourceInstanceId === undefined
+          ? {}
+          : { sourceInstanceId: event.dataOrigin.sourceInstanceId }),
+        ...(event.dataOrigin?.sourceType
+          ? { sourceType: event.dataOrigin.sourceType }
+          : {}),
+      };
+      targets.set(stableStringify(target), target);
+    };
+    addTarget(event.dayKey);
     // Include the immediately displaced provider day so the caller can persist
     // one calendar-refresh job for each side of this accepted transition.
     const previousRevision = eventSpineRevision(event) - 1;
@@ -1723,21 +1758,37 @@ function junctionSparseAffectedDayKeys(
         ? dayHistory.previous.dayKey
         : undefined;
     if (previousDayKey) {
-      dayKeys.add(previousDayKey);
+      addTarget(previousDayKey);
     }
   }
-  const affectedDayKeys = [...dayKeys].sort();
-  if (affectedDayKeys.length > MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS) {
+  const affectedTargets = [...targets.values()].sort((left, right) =>
+    left.dayKey.localeCompare(right.dayKey)
+    || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || (left.sourceType ?? "").localeCompare(right.sourceType ?? "")
+    || (left.sourceInstanceId ?? "").localeCompare(right.sourceInstanceId ?? "")
+  );
+  const affectedDayKeys = new Set(affectedTargets.map((target) => target.dayKey));
+  if (
+    affectedDayKeys.size > MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS
+    || affectedTargets.length > MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS
+  ) {
     throw new VaultError(
       "DEVICE_IMPORT_AFFECTED_DAY_LIMIT_EXCEEDED",
       "Junction sparse import exceeded the affected provider-day limit; nothing was imported.",
       {
-        affectedDayCount: affectedDayKeys.length,
+        affectedDayCount: affectedDayKeys.size,
+        affectedTargetCount: affectedTargets.length,
         maxAllowed: MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS,
       },
     );
   }
-  return affectedDayKeys;
+  return affectedTargets;
+}
+
+function junctionSparseAffectedDayKeys(
+  targets: readonly JunctionSparseCalendarTarget[],
+): string[] {
+  return [...new Set(targets.map((target) => target.dayKey))].sort();
 }
 
 // Device-sync content equality ignores per-import identity (id, lifecycle,
@@ -4874,12 +4925,13 @@ export async function importDeviceBatch({
       sampleRecords,
       storedDelivery,
     });
-    const affectedEventDayKeys = junctionSparseAffectedDayKeys(
+    const affectedSparseCalendarTargets = junctionSparseAffectedCalendarTargets(
       result.events,
       eventIdentityContext.index,
     );
-    return affectedEventDayKeys.length > 0
-      ? { ...result, affectedEventDayKeys }
+    const affectedEventDayKeys = junctionSparseAffectedDayKeys(affectedSparseCalendarTargets);
+    return affectedSparseCalendarTargets.length > 0
+      ? { ...result, affectedEventDayKeys, affectedSparseCalendarTargets }
       : result;
   };
   let fullInspectionAttempted = false;
@@ -5257,10 +5309,11 @@ export async function importDeviceBatch({
       const preparedId = deviceBatchPlan.preparedEvents[index]?.record.id;
       return preparedId !== undefined && associablePreparedEventIds.has(preparedId);
     });
-    const affectedEventDayKeys = junctionSparseAffectedDayKeys(
+    const affectedSparseCalendarTargets = junctionSparseAffectedCalendarTargets(
       canonicalEventRecords,
       eventIdentityContext.index,
     );
+    const affectedEventDayKeys = junctionSparseAffectedDayKeys(affectedSparseCalendarTargets);
     const persistenceEvidenceRolesByPreparedRecordId = new Map(
       deviceBatchPlan.preparedEvents
         .filter((entry) =>
@@ -5352,7 +5405,7 @@ export async function importDeviceBatch({
     );
     const buildNoopResult = (): NoopDeviceBatchImportResult => ({
       ...(affectedEventDayKeys.length > 0
-        ? { affectedEventDayKeys }
+        ? { affectedEventDayKeys, affectedSparseCalendarTargets }
         : {}),
       applied: false,
       ingestId: null,
@@ -5370,6 +5423,7 @@ export async function importDeviceBatch({
     });
     return {
       affectedEventDayKeys,
+      affectedSparseCalendarTargets,
       buildNoopResult,
       eventAppendPlan,
       eventOutputs,
@@ -5427,6 +5481,7 @@ export async function importDeviceBatch({
 
   const {
     affectedEventDayKeys,
+    affectedSparseCalendarTargets,
     buildNoopResult,
     eventAppendPlan,
     eventOutputs,
@@ -5520,7 +5575,7 @@ export async function importDeviceBatch({
 
       return {
         ...(affectedEventDayKeys.length > 0
-          ? { affectedEventDayKeys }
+          ? { affectedEventDayKeys, affectedSparseCalendarTargets }
           : {}),
         applied: true,
         ingestId: persistedImportId,

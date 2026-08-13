@@ -6,6 +6,10 @@ export { normalizeJunctionResourceName };
 export const JUNCTION_COMPANION_HRV_SOURCE_PROVIDER = "whoop_v2";
 export const JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE =
   "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID";
+export const JUNCTION_CALENDAR_REFRESH_EMPTY_IDENTITY_INVALID_CODE =
+  "JUNCTION_CALENDAR_REFRESH_EMPTY_IDENTITY_INVALID";
+export const JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE =
+  "JUNCTION_CALENDAR_REFRESH_JOB_INVALID";
 export {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
@@ -42,6 +46,30 @@ export function isJunctionCompanionHrvRmssdJob(input: {
   return input.provider === "junction"
     && input.kind === "resource"
     && input.payload?.resource === COMPANION_HRV_RMSSD_RESOURCE;
+}
+
+export function isJunctionSparseCalendarRefreshJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+  provider?: string | null;
+}): boolean {
+  return input.provider === "junction"
+    && input.kind === "resource"
+    && typeof input.payload?.calendarRefreshDay === "string";
+}
+
+export function isJunctionRetainedAcceptedWorkJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+  provider?: string | null;
+}): boolean {
+  return isJunctionCompanionHrvRmssdJob(input)
+    || isJunctionSparseCalendarRefreshJob(input);
+}
+
+export function isJunctionSparseCalendarRefreshTerminalFailureCode(code: string): boolean {
+  return code === JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE
+    || code === JUNCTION_CALENDAR_REFRESH_EMPTY_IDENTITY_INVALID_CODE;
 }
 
 function readJunctionWebhookResourceFromEventType(eventType: string): string | null {

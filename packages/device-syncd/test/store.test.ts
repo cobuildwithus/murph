@@ -3027,6 +3027,66 @@ test("device sync store reclaims an expired retained companion lease on the same
   }
 });
 
+test("device sync store reclaims an expired retained calendar lease on the same row past its attempt fence", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-calendar-lease");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-expired-calendar-lease",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const input = {
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: "calendar-expired-final-attempt",
+      kind: "resource",
+      maxAttempts: 1,
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      provider: "junction",
+    } as const;
+    const job = store.enqueueJob(input);
+
+    const firstClaim = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
+    assert.equal(firstClaim?.id, job.id);
+    assert.equal(firstClaim?.attempts, 1);
+    assert.equal(firstClaim?.maxAttempts, 1);
+
+    const refetched = store.enqueueJob({
+      ...input,
+      availableAt: "2026-04-07T00:01:01.000Z",
+    });
+    assert.equal(refetched.id, job.id);
+
+    const reclaimed = store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000);
+    assert.equal(reclaimed?.id, job.id);
+    assert.equal(reclaimed?.status, "running");
+    assert.equal(reclaimed?.leaseOwner, "worker-b");
+    assert.equal(reclaimed?.attempts, 2);
+    assert.equal(reclaimed?.maxAttempts, 2);
+    assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T00:01:02.000Z"), true);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store ignores expired exhausted running rows for dedupe and reaps them before lower-priority follow-up claims", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-final-attempt-dedupe");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
