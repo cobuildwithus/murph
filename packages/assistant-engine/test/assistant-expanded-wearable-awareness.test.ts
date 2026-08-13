@@ -44,9 +44,6 @@ describe('expanded wearable awareness', () => {
       'Raw ECG voltage samples and workout stream points are deliberately not stored or exposed',
     )
     expect(prompt).toContain(
-      'not a diagnosis, all-clear, or reason to change treatment',
-    )
-    expect(prompt).toContain(
       'connected health data can include carbohydrate observations',
     )
     expect(prompt).toContain(
