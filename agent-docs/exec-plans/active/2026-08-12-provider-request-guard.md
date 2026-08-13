@@ -203,8 +203,8 @@ Updated: 2026-08-13
 Current evidence:
 
 - Focused guard suite: 77 tests passed after the round-5 correction.
-- Repository-tool suite: 34 files and 577 tests passed after the round-5
-  diagnostic correction. The earlier round-4 contended run timed out two
+- Repository-tool suite: 34 files and 583 tests passed after the round-5
+  correction and current-base merge. The earlier round-4 contended run timed out two
   Crabbox repeated-signal cases; that file passed alone and each quiet full
   rerun passed.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
