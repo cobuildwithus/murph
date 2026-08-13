@@ -1,8 +1,8 @@
 # Make Strong workout CSV import bounded, replay-safe, and token-efficient
 
-Status: active
+Status: completed
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -382,3 +382,10 @@ Updated: 2026-08-12
   a preview/apply race stores reusable immutable raw evidence but creates no
   event, retry creates only the new session, all earlier identities and the
   tombstone remain authoritative, and exact replay is a no-op.
+- Final ReviewGPT round 16 returned `ROUND_OUTCOME: PASS` with no qualifying
+  findings on exact behavior head `26c94fd01a8241764e8d033ad89578d978ad30f2`.
+  The requested-model sidecar verifies the compatible GPT-5.6 review lane, and
+  exact-head GitHub Actions passed every required check plus the full release
+  coverage surface. ReviewGPT identified only a PR bookkeeping correction:
+  generated CLI lines belong in the generated category rather than source.
+Completed: 2026-08-13
