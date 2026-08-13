@@ -1,12 +1,16 @@
 import {
   DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA,
+  DEVICE_WEBHOOK_TRANSPORT_USER_ID,
+  HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH,
   sealDeviceWebhookQueueEnvelope,
   type DeviceWebhookQueueEnvelopeV1,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { handleHostedDeviceWebhookQueueBatch } from "../src/device-webhook-queue.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import { verifyHostedWebCallbackSignatureHeaders } from "../src/web-callback-auth.ts";
 import { deviceWebhookEnqueueRoutes } from "../src/worker/route-handlers/device-webhook-enqueue.ts";
 import {
   asWorkerStringEnvironment,
@@ -119,18 +123,47 @@ describe("hosted device webhook Queue consumer", () => {
     }
   });
 
-  it("delivers a 30-message Queue batch as serial bounded callbacks and settles individually", async () => {
+  it("delivers a maximum 100-message Queue batch as four signed serial callbacks and settles once", async () => {
     const envelopes = await Promise.all(
-      Array.from({ length: 30 }, (_, index) => createEnvelope(index)),
+      Array.from({ length: 100 }, (_, index) => createEnvelope(index)),
     );
     const observedCallbacks: number[] = [];
+    const observedTransportIds: string[] = [];
     let activeCallbacks = 0;
     let maxActiveCallbacks = 0;
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+    const workerEnv = createWorkerEnv();
+    const environment = readHostedExecutionEnvironment(
+      asWorkerStringEnvironment(workerEnv),
+    );
+    const consumedNonces = new Set<string>();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const callback = new Request(url, init);
+      const body = String(init?.body);
+      expect(callback.headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
+        DEVICE_WEBHOOK_TRANSPORT_USER_ID,
+      );
+      expect(await verifyHostedWebCallbackSignatureHeaders({
+        environment: environment.webCallbackSigning,
+        method: "POST",
+        nonceStore: {
+          async consume(input) {
+            if (consumedNonces.has(input.nonceHash)) return false;
+            consumedNonces.add(input.nonceHash);
+            return true;
+          },
+        },
+        path: HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH,
+        payload: body,
+        request: callback,
+        userId: DEVICE_WEBHOOK_TRANSPORT_USER_ID,
+      })).toBe(true);
       activeCallbacks += 1;
       maxActiveCallbacks = Math.max(maxActiveCallbacks, activeCallbacks);
-      const request = JSON.parse(String(init?.body));
+      const request = JSON.parse(body);
       observedCallbacks.push(request.entries.length);
+      observedTransportIds.push(...request.entries.map(
+        (entry: { transportId: string }) => entry.transportId,
+      ));
       await Promise.resolve();
       activeCallbacks -= 1;
       return Response.json({
@@ -145,10 +178,15 @@ describe("hosted device webhook Queue consumer", () => {
 
     await handleHostedDeviceWebhookQueueBatch(
       createQueueBatch(messages),
-      createWorkerEnv(),
+      workerEnv,
     );
 
-    expect(observedCallbacks).toEqual([25, 5]);
+    expect(observedCallbacks).toEqual([25, 25, 25, 25]);
+    expect(observedTransportIds).toEqual(
+      envelopes.map((envelope) => envelope.transportId),
+    );
+    expect(new Set(observedTransportIds).size).toBe(100);
+    expect(consumedNonces.size).toBe(4);
     expect(maxActiveCallbacks).toBe(1);
     expect(messages.every((message) => message.ack.mock.calls.length === 1)).toBe(true);
     expect(messages.every((message) => message.retry.mock.calls.length === 0)).toBe(true);
