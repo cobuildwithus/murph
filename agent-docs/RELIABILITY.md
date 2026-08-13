@@ -32,6 +32,17 @@ Last verified: 2026-08-12
   credential, or provider body values. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
+- Newly authored ordinary assistant responses attach at most eight images,
+  below Linq's 40-public-media provider ceiling. This keeps full-motion
+  exercise sequences bounded without adding a second message or partial-send
+  lifecycle; Murph teaches fewer movements when the complete useful sequences
+  would exceed the budget. Linq text is rendered and checked against the
+  provider's 10,000-character limit before private media is loaded or uploaded
+  and before message-provider entry. A terminal direct-chat
+  image failure stays image work and cannot recover as text alone. Hosted
+  outbox logs retain metadata-only payload aggregates plus allowlisted request
+  shape, provider correlation tokens, and response-body signatures, never
+  member text, alternative text, URLs, routes, or provider prose.
 - Non-affirmative Linq group reactions retain their consumed-at-ingress durable
   mailbox semantics, deterministic dedupe identity, and post-commit runtime
   signal. Before `BEGIN`, the reaction owner reads one exact canonical route,
@@ -53,6 +64,25 @@ Last verified: 2026-08-12
   attempt. Both prewarm operations settle before transaction entry; signing,
   provider, or KMS failure starts no transaction, and activation's control and
   ingress unwraps must be scoped-cache hits.
+- Standalone generic mailbox-item append resolves an already-durable dedupe
+  replay before crypto work. On a miss it unwraps the exact active ingress root
+  before `BEGIN`; the transaction locks and re-reads that root identity, then
+  seals only from the matching request-scoped cache entry. A root change rolls
+  back and permits one fresh full preparation attempt. The prepared envelope
+  transaction adapter carries the same generic crypto-only token without a
+  mailbox proxy capability or second drift error, and does not replace envelope
+  target or workspace checks. Legacy transaction append adapters stay
+  provider-capable for separately migrated producers and must not be mistaken
+  for the prepared surface.
+- Privy completion settles live provider authority, the exact control-domain
+  root, and existing private projections before `BEGIN`. It drains sibling
+  preparation after a failure and reports the first observed failure. Identity
+  and verified-email writes revalidate the exact root in the transaction and
+  seal locally; exact root drift rolls back and permits one fresh full
+  preparation attempt. The token is crypto identity only and is not member,
+  invite, routing, or email authority. Cross-member phone conflict suppression
+  reads only the blind-index owner id, so it neither decrypts the other
+  member's private identity nor needs that member's root in the transaction.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
@@ -112,6 +142,15 @@ Last verified: 2026-08-12
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- A hosted-group projection grant that needs its first private projection and
+  one generation-stable `runtime.maintenance-requested` control row commit in
+  the same Web transaction. An append failure therefore rolls back the grant
+  instead of admitting unrecoverable work. After commit, Web signals that exact
+  mailbox pointer in parallel with bounded join-confirmation recovery, and the
+  scheduled mailbox-handoff sweep includes an unconsumed row when the immediate
+  signal fails or the process stops. Either best-effort signal can stall without
+  starving the other. The durable null snapshot remains an explicit `pending`
+  shared-read state until the member runtime materializes it.
 - Direct hosted Codex process projection includes the selected core provider
   and only that provider's signed egress credential. Changing providers
   therefore changes the warm-process launch identity; the replacement process
@@ -637,6 +676,81 @@ Last verified: 2026-08-12
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- A successful hosted checkpoint gets one best-effort, wake-raced vault-share
+  projection opportunity before device-sync dirty acknowledgement or the next
+  complete device-sync-only maintenance prefix. A conversation wake preempts
+  immediately and leaves acknowledgement replayable. Projection errors remain
+  fail-soft to the completed personal import and foreground reply, but they do
+  not consume the existing dirty or system-mailbox recording obligation; that
+  owner reuses its bounded device-sync continuation before acknowledgement.
+  Active-scope resolution is a side-effect-free network read and receives the
+  owning invocation's abort signal. Once
+  scopes resolve, the runtime materializes all selected records before releasing
+  its restored-vault ownership; a wake during those bounded local reads is
+  observed after capture drains, and the capture is discarded without delivery.
+  Delivery remains owned by the same invocation. Once immutable delivery
+  starts, foreground conversation work may proceed without waiting for
+  publication. The first foreground preemption marks the remaining captured
+  scopes deferred: the current scope reaches a terminal boundary, no later scope
+  starts, and the partial offer reports preempted rather than aggregating its
+  successful prefix as complete. That stop bit belongs only to the active
+  delivery promise; after it settles, a later opportunity starts unpreempted and
+  the existing dirty or recording owner retries every undispatched scope before
+  acknowledgement. The same between-scope predicate observes exact host abort
+  and shutdown before every scope, so those owner-ending conditions drain an
+  active request but never admit a request that has not started. The invocation
+  starts no second projection and does not release its
+  runner ownership until the real proxy-to-Web response is terminal. Web owns a
+  finite effect deadline for each delivery, stops admitting destination
+  replacements on deadline or request cancellation, and gives the final
+  database transaction only the remaining deadline. The runtime creates one
+  absolute effect deadline and forwards it unchanged to the proxy and Web;
+  neither hop restarts the budget. Runtime-to-proxy and proxy-to-Web transport
+  timeouts add a fixed settlement margin. The proxy marks a response only after
+  receiving the actual Web response. A transport failure or unmarked
+  proxy-local response remains ambiguous, so invocation ownership stays
+  occupied until the absolute effect-deadline-plus-margin boundary; a marked
+  Web response settles immediately. Web returns the terminal scope-failure code
+  only when an explicitly typed missing ingress-root envelope proves one
+  destination is unavailable independently of later scopes. The same sequential
+  owner records an aggregate error and continues those scopes, preventing that
+  destination from starving a healthy suffix while retaining the dirty or
+  recording retry obligation. Unknown crypto/provider failures, access queries,
+  database or transaction errors, deadline exhaustion, an unmarked response,
+  transport loss, and owner-ending conditions stop the undispatched suffix.
+  Abort, shutdown, and normal
+  finalization join that same owner before a successor invocation or the
+  existing continuation may retry. No projection stage continues detached.
+  Every delivery carries the committed source
+  workspace version bound to those bytes. Web
+  encrypts first, then briefly locks that existing workspace row before the
+  final share replacement; a delivery older than the current checkpoint becomes
+  a no-op, so wake-raced work cannot finish last or read successor-owned
+  vault state.
+  This ordering adds no projection retry queue, group wake fanout, persisted
+  projection watermark, or second freshness owner.
+- The composed maximum for one projection opportunity is one active-scope read,
+  at most 98 sequential projectable-scope deliveries from the closed registry,
+  and at most 25 sequential share-replacement transactions per delivery under
+  the existing grant cap: 2,450 replacement transactions at maximum admitted
+  cardinality. There is at most one active scope-resolution or delivery request
+  per opportunity. One destination's typed missing-root failure continues to
+  later scopes sequentially and leaves the aggregate attempt failed. An unknown
+  or shared-infrastructure error stops the remaining destinations and scopes,
+  bounding a dependency outage to the current failed replacement attempt.
+  Deadline exhaustion, foreground wake, exact host abort, or shutdown finishes
+  only the already-started scope; and the
+  existing continuation cannot retry until that request reaches its server-owned
+  terminal boundary. Repeated
+  wakes may admit conversation work but cannot start another projection. Each
+  replacement adds one source-workspace row lock/check at its final write
+  boundary. The runtime starts no concurrent per-scope or per-share transactions,
+  and publication wakes no destination group runtime. Ordinary load is
+  proportional only to scopes and destinations with active grants. Boundary
+  tests derive the 98-scope and 25-destination composition from the owning
+  registries, prove ordered peak-one delivery/replacement work, and assert the
+  per-replacement encryption, two access checks, source lock, and exact-generation
+  update.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;
@@ -748,7 +862,12 @@ Last verified: 2026-08-12
   valid stamps with no execution evidence. It derives one effective latency
   origin from ingress, staging, provider, delivery, and consumption facts
   before applying its 24-hour window, bounded scan, or delivery/provider
-  grouping. Post-denial execution is measured from its earliest milestone even
+  grouping. Candidate admission unions trace identities from five independently
+  time-indexed ingress, staging, provider, delivery, and consumption branches,
+  then exactly hydrates those traces before chronology, origin, grouping, and
+  the 20,001-row truncation probe. Retained history outside the window therefore
+  does not participate in the cross-owner candidate scan. Post-denial execution
+  is measured from its earliest milestone even
   when the original ingress is older than the window. An unblocked row sharing
   the same reply remains alertable. The existing seven-day ingress-trace cleanup
   retires a trace only after both its original ingress and latest activity are

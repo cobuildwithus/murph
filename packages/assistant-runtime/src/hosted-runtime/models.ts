@@ -176,10 +176,14 @@ export type HostedSystemMailboxPostCheckpointRecord =
       nextWakeAt?: null;
       phase: "connected" | "disconnected";
     }
-  | {
+    | {
       kind: "member-action.outcome-recorded";
       nextWakeAt?: null;
       outcome: MemberActionOutcomeV1;
+    }
+    | {
+      kind: "vault-share.projection";
+      nextWakeAt?: null;
     };
 
 export interface HostedConversationWakeMetrics {

@@ -5,12 +5,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  findNextHostedSystemMailboxQueueItem,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxHandledThroughSeq,
   resolveHostedSystemMailboxNextWakeCandidate,
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
   updateHostedSystemMailboxPendingItem,
+  updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -348,6 +350,76 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
+  it("serializes projection retries without blocking unrelated runtime controls", async () => {
+    const projectionRetry = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_projection_retry",
+      mailboxDedupeKey: "runtime-control:group-share-projection:generation_1",
+      mailboxLaneSeq: "1",
+      nextAttemptAt: "2026-04-27T00:01:00.000Z",
+      postCheckpointRecord: { kind: "vault-share.projection" },
+      wakeKind: "runtime.maintenance-requested",
+    });
+    const laterProjection = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_projection_later",
+      mailboxDedupeKey: "runtime-control:group-share-projection:generation_2",
+      mailboxLaneSeq: "2",
+      wakeKind: "runtime.maintenance-requested",
+    });
+    const codexDisconnect = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_codex_disconnect",
+      mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
+      mailboxLaneSeq: "3",
+      wakeKind: "runtime.codex-auth-requested",
+    });
+    const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_browser_vault_refresh",
+      mailboxDedupeKey: "runtime-control:browser-vault-refresh:generation_1",
+      mailboxLaneSeq: "4",
+      wakeKind: "runtime.browser-vault-refresh-requested",
+    });
+
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: ["apply-runtime-control-request"],
+      now: "2026-04-27T00:00:00.000Z",
+      state: { pending: [projectionRetry, laterProjection, codexDisconnect] },
+    })).toEqual(codexDisconnect);
+
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: ["apply-runtime-control-request"],
+      now: "2026-04-27T00:01:00.000Z",
+      state: { pending: [projectionRetry, laterProjection, codexDisconnect] },
+    })).toEqual(projectionRetry);
+
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: ["apply-runtime-control-request"],
+      now: "2026-04-27T00:00:00.000Z",
+      state: { pending: [projectionRetry, laterProjection, browserVaultRefresh] },
+    })).toEqual(browserVaultRefresh);
+
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: ["apply-runtime-control-request"],
+      now: "2026-04-27T00:00:00.000Z",
+      state: { pending: [laterProjection] },
+    })).toEqual(laterProjection);
+
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [projectionRetry, laterProjection, codexDisconnect],
+      }));
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        allowedRouteActions: ["apply-runtime-control-request"],
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "assistant",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps a distinct dense raw retention successor after dirty receipt recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
@@ -571,5 +643,50 @@ function buildPendingSystemMailboxItem(input: {
       },
       userId: "member_123",
     },
+  };
+}
+
+function buildPendingRuntimeControlMailboxItem(input: {
+  itemId: string;
+  mailboxDedupeKey: string;
+  mailboxLaneSeq: string;
+  nextAttemptAt?: string | null;
+  postCheckpointRecord?: HostedSystemMailboxPendingItem["postCheckpointRecord"];
+  wakeKind:
+    | "runtime.browser-vault-refresh-requested"
+    | "runtime.codex-auth-requested"
+    | "runtime.maintenance-requested";
+}): HostedSystemMailboxPendingItem {
+  const wake = input.wakeKind === "runtime.codex-auth-requested"
+    ? {
+        action: "disconnect" as const,
+        attemptId: "hca_abcdefghijklmnop",
+        eventId: input.mailboxDedupeKey,
+        kind: input.wakeKind,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_123",
+      }
+    : {
+        eventId: input.mailboxDedupeKey,
+        kind: input.wakeKind,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_123",
+      };
+  return {
+    attemptCount: 1,
+    itemId: input.itemId,
+    lastAttemptAt: "2026-04-27T00:00:00.000Z",
+    lastErrorCode: input.nextAttemptAt ? "projection_failed" : null,
+    lastErrorMessage: input.nextAttemptAt ? "redacted" : null,
+    mailboxDedupeKey: input.mailboxDedupeKey,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: input.nextAttemptAt ?? null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: input.postCheckpointRecord ?? null,
+    preferenceCausalSeq: null,
+    requestId: null,
+    routeAction: "apply-runtime-control-request",
+    status: input.postCheckpointRecord ? "recording" : "pending",
+    wake,
   };
 }

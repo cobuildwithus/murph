@@ -1,7 +1,11 @@
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantMessageInput } from './service-contracts.js'
-import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
+import {
+  resolveAssistantAcceptedTurnInputReferenceWindow,
+  type AssistantAcceptedTurnInputItemInput,
+  type AssistantAcceptedTurnInputReferenceWindow,
+} from './active-turn-input-journal.js'
 import type {
   AssistantActiveTurnInputAdmissionHook,
   AssistantActiveTurnInputAdmissionInput,
@@ -52,6 +56,7 @@ interface QueuedAssistantActiveTurnInputAdmission {
   providerInputAck?: Promise<boolean> | null
   providerInputAckTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
   providerInputAcknowledgedTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
+  relativeDateReferenceWindow: AssistantAcceptedTurnInputReferenceWindow | null
 }
 
 interface AssistantActiveTurnManualInputCompletion {
@@ -121,14 +126,21 @@ class AssistantActiveTurnInputController {
       }
     }
     const id = `manual-${this.nextInputOrdinal}`
+    const acceptedAt = new Date().toISOString()
     const manualCompletion = createAssistantActiveTurnManualInputCompletion()
+    const admission = buildManualAcceptedActiveTurnInputAdmission({
+      acceptedAt,
+      id,
+      input,
+    })
     const queued: QueuedAssistantActiveTurnInputAdmission = {
-      admission: buildManualAcceptedActiveTurnInputAdmission({
-        id,
-        input,
-      }),
+      admission,
       manualCompletion,
       providerInputAcknowledgedTurnKey: null,
+      relativeDateReferenceWindow:
+        resolveAssistantAcceptedTurnInputReferenceWindow(
+          admission.acceptedInputs,
+        ),
     }
     this.pending.push(queued)
     this.manualCompletions.push(manualCompletion)
@@ -426,6 +438,10 @@ class AssistantActiveTurnInputController {
     const queued = {
       admission: normalizeAcceptedActiveTurnInputAdmission(result),
       providerInputAcknowledgedTurnKey: null,
+      relativeDateReferenceWindow:
+        resolveAssistantAcceptedTurnInputReferenceWindow(
+          result.acceptedInputs,
+        ),
     }
     this.pending.push(queued)
     this.tryStartLiveSteers()
@@ -531,6 +547,7 @@ class AssistantActiveTurnInputController {
           })
           await liveProviderTurn.steer({
             prompt: normalizeNullableString(item.admission.prompt) ?? '',
+            relativeDateReferenceWindow: item.relativeDateReferenceWindow,
             userMessageContent: item.admission.userMessageContent ?? null,
           })
         })
@@ -1059,12 +1076,14 @@ function buildQueuedActiveTurnUserMessageContent(
 }
 
 function buildManualAcceptedActiveTurnInputAdmission(input: {
+  acceptedAt: string
   id: string
   input: AssistantMessageInput
 }): AssistantAcceptedActiveTurnInputAdmission {
   return {
     acceptedInputs: [
       {
+        acceptedAt: input.acceptedAt,
         id: input.id,
         promptFallbackReason: 'manual-input',
         promptFallbackText: normalizeNullableString(input.input.prompt) ?? undefined,

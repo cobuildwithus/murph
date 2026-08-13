@@ -762,6 +762,9 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // Stable provenance for replay-safe imports that originate from a durable
+  // outbox delivery rather than a provider turn.
+  sourceOutboxIntentId: assistantOutboxIntentIdSchema.optional(),
   // The message receipt that owns the content-retention deadline. This may
   // precede createdAt when accepted work waits before entering a transcript.
   // New user entries always stamp it; legacy and non-message entries may omit
@@ -924,6 +927,30 @@ export const assistantTurnReceiptSummarySchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
+const assistantPrivateCompletionContinuitySchema = z.discriminatedUnion(
+  'status',
+  [
+    z
+      .object({
+        baseTurnCount: z.number().int().nonnegative(),
+        preparedAt: isoTimestampSchema,
+        sessionId: assistantSessionIdSchema,
+        status: z.literal('prepared'),
+        transcriptCreatedAt: isoTimestampSchema,
+      })
+      .strict(),
+    z
+      .object({
+        appliedAt: isoTimestampSchema,
+        baseTurnCount: z.number().int().nonnegative(),
+        preparedAt: isoTimestampSchema,
+        sessionId: assistantSessionIdSchema,
+        status: z.literal('applied'),
+        transcriptCreatedAt: isoTimestampSchema,
+      })
+      .strict(),
+  ],
+)
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -939,6 +966,10 @@ export const assistantOutboxIntentSchema = z
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string(),
     reviewedAssistantAskCompletionExpiresAt: isoTimestampSchema.optional(),
+    privateCompletionContinuitySessionId:
+      assistantSessionIdSchema.nullable().optional(),
+    privateCompletionContinuity:
+      assistantPrivateCompletionContinuitySchema.nullable().optional(),
     emailHtml: z.string().max(500_000).nullable().optional(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     card: assistantResponseCardSchema.nullable().default(null),
