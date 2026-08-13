@@ -1,6 +1,6 @@
 # Replace handwritten provider transports with official SDKs
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-13
 
@@ -84,7 +84,7 @@ Updated: 2026-08-13
 3. [x] Inspect, apply, and integrate accepted patches with exact dependency
    pins and one combined lockfile update.
 4. [x] Run focused tests, typechecks, dependency checks, and parent diff review.
-5. [ ] Push the exact candidate, run preliminary and final ReviewGPT audits
+5. [x] Push the exact candidate, run preliminary and final ReviewGPT audits
    concurrently with CI, remediate findings through subsequent ReviewGPT
    rounds, and close the plan.
 
@@ -102,6 +102,11 @@ Updated: 2026-08-13
 - KMS credential refresh uses its own bounded no-retry lifecycle so one caller
   cannot cancel a refresh shared by another operation. Individual KMS RPCs
   remain caller-cancellable and use the official generated client boundary.
+- Review-driven coverage now proves both Cloudflare Linq 256 KiB response-cap
+  cancellation paths through the scheduled monitor.
+- Junction SDK `Date` values are normalized to finite ISO timestamps before
+  import-snapshot object sanitization so canonical occurrence dates, day keys,
+  and per-resource identities survive the SDK boundary.
 
 ## Review anomaly retrospective
 
@@ -136,7 +141,8 @@ provider abstraction was introduced.
   - Web full suite: 775 files considered, 728 passed / 47 skipped; 10,171 tests
     considered, 9,768 passed / 403 skipped.
   - Device-syncd full suite: 46 files and 979 tests passed. Final Junction
-    focused suite: 226 tests passed after the streamed response-cap correction.
+    focused suite: 227 tests passed after the streamed response-cap and SDK
+    `Date` preservation corrections.
   - Repository tooling suite: 35 files and 540 tests passed.
   - Web, Cloudflare, operator-config, CLI, assistant-engine, device-syncd, and
     hosted-execution owner typechecks passed.
@@ -146,5 +152,16 @@ provider abstraction was introduced.
   - Dependency audit still reports the repository baseline of 76 transitive
     findings (6 low, 38 moderate, 31 high, 1 critical); none names an SDK added
     by this migration.
-  - Exact-head CI plus preliminary and final ReviewGPT completion gates remain
-    pending until the candidate is pushed.
+  - The preliminary coverage specialist identified missing Cloudflare Linq
+    response-cap proof; both declared-length and underreported-stream branches
+    were added and pass with the Cloudflare typecheck.
+  - The subsequent full review identified Junction SDK `Date` loss during
+    snapshot sanitization; the correction and SDK-backed importer proof pass.
+  - Final ReviewGPT round 3 returned `PASS` for exact production head
+    `10211e8c7de7937cc4ea77e12b9ccac9350572ae` after verifying both accepted
+    findings, exact dependency pins, and the AgentMail exclusion. The launcher
+    selected GPT-5.6 Sol; captured model metadata reported the provider's
+    `gpt-5-6-pro` response slug.
+  - Exact production-head CI passed all 16 completed checks; the live
+    hosted-local Stripe browser matrix was the expected skipped check.
+Completed: 2026-08-13
