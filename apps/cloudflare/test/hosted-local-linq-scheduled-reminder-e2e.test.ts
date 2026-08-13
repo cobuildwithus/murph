@@ -300,6 +300,8 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     });
 
     expect(sendRequest.method).toBe("POST");
+    expect(requireObservedRequestTimestamp(sendRequest))
+      .toBeGreaterThanOrEqual(Date.parse(scheduledReminderTimes.dueAtIso));
     expect(requireLinqStub().readObservedMessageText(sendRequest))
       .toBe(scheduledReminderDeliveredText);
     expect(readObservedLinqMessageParts(sendRequest)).toEqual([
@@ -609,6 +611,16 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
     expect(resolveScheduledReminderTimes(now, fastTiming.leadMs)).toEqual({
       dueAtIso: "2026-06-18T12:02:00.000Z",
     });
+    const nearMinuteEndNow = new Date("2026-06-18T12:00:50.000Z");
+    const nearMinuteEndTimes = resolveScheduledReminderTimes(
+      nearMinuteEndNow,
+      fullTiming.leadMs,
+    );
+    expect(nearMinuteEndTimes).toEqual({
+      dueAtIso: "2026-06-18T12:03:00.000Z",
+    });
+    expect(Date.parse(nearMinuteEndTimes.dueAtIso) - nearMinuteEndNow.getTime())
+      .toBe(130_000);
     expect(resolveScheduledReminderLocalAt("2026-06-18T12:02:00.000Z")).toEqual({
       date: "2026-06-18",
       time: "12:02",
