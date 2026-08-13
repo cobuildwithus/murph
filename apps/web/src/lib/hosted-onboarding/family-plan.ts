@@ -4816,6 +4816,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   }) => Promise<void>;
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber: string;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   text: string | null | undefined;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
@@ -4874,6 +4875,9 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
     onAcceptedMemberActivated: input.onAcceptedMemberActivated,
     phoneNumber: input.phoneNumber,
+    ...(input.preparedCryptoDomainRoots
+      ? { preparedCryptoDomainRoots: input.preparedCryptoDomainRoots }
+      : {}),
     requirePhoneBinding: !isFullyUnbound,
     tx: input.tx,
   });

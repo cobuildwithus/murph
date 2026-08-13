@@ -39,6 +39,7 @@ import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   readHostedMemberRoutingControlRootKeyIds,
+  resolveHostedLinqDirectPreparationMemberId,
   resolveHostedLinqThreadContainerCryptoPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
@@ -72,8 +73,11 @@ import {
   runWithHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
+  prepareHostedCryptoDomainRootCandidates,
+  prewarmPreparedHostedCryptoDomainRootForWeb,
   unwrapHostedDomainRootForWeb,
   unwrapHostedDomainRootsForWebByRootKeyIds,
+  type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
@@ -149,7 +153,11 @@ import {
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import { readHostedRuntimeAiAccessDecision } from "./member-access";
+import {
+  readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
+} from "./member-access";
+import { resolveHostedFamilyInviteTokenForInbound } from "./family-plan";
 import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
@@ -550,8 +558,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
             })
           : null;
-      const runPlan = (instantStartAllowed = true) =>
-        runHostedThreadRoutingPreparedTransaction({
+      const runPlan = (instantStartAllowed = true) => {
+        let reusableDirectCryptoDomainRoots: {
+          memberId: string;
+          preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+        } | null = null;
+        return runHostedThreadRoutingPreparedTransaction({
           plan: ({ preparation, transaction }) =>
             planHostedOnboardingLinqWebhook({
               affirmativeReaction,
@@ -601,23 +613,38 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               requireFirstContactAdmission,
               prisma: transaction,
             }),
-          prepare: ({ attempt }) =>
-            prepareHostedLinqThreadRoutingCrypto({
+          prepare: async ({ attempt }) => {
+            const preparation = await prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
+              ...(reusableDirectCryptoDomainRoots
+                ? { reusableDirectCryptoDomainRoots }
+                : {}),
               // The resolver already performed the first authority read. A
               // route-conflict retry must read again so it can prepare for the
               // winning container instead of reusing a stale snapshot.
               threadRoute: attempt === 0
                 ? planningResolution.threadRoute
                 : undefined,
-            }),
+            });
+            if (preparation.preparedDirectMailboxPayloadRoot) {
+              reusableDirectCryptoDomainRoots = {
+                memberId:
+                  preparation.preparedDirectMailboxPayloadRoot.memberId,
+                preparedCryptoDomainRoots:
+                  preparation.preparedDirectMailboxPayloadRoot
+                    .preparedCryptoDomainRoots,
+              };
+            }
+            return preparation;
+          },
           prisma,
         });
+      };
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
           ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))
@@ -1948,11 +1975,14 @@ interface HostedThreadRoutingCryptoPreparation {
   failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
   pendingGroupSetupPreparationFailure?: unknown;
   preparedDirectMailboxPayloadRoot?: {
-    activeControlRootKeyId: string;
+    activeControlRootKeyId: string | null;
+    activeIngressRootKeyId: string | null;
     memberId: string;
+    preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+    preparedFamilyInviteCode: string | null;
     routingRecord: HostedMemberRoutingRecord | null;
     routingState: HostedMemberRoutingStateSnapshot | null;
-    rootKeyId: string;
+    rootKeyId: string | null;
   } | null;
   threadContainerPreparationFailure?: unknown;
   preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
@@ -1999,6 +2029,10 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
+  reusableDirectCryptoDomainRoots?: {
+    memberId: string;
+    preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  };
   threadRoute?: HostedThreadRouteSnapshot | null;
 }): Promise<HostedThreadRoutingCryptoPreparation> {
   if (input.event.event_type !== "message.received") {
@@ -2114,6 +2148,12 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
         await prepareHostedLinqDirectMailboxPayloadRoot({
           event: input.event,
           prisma: input.prisma,
+          ...(input.reusableDirectCryptoDomainRoots
+            ? {
+                reusableDirectCryptoDomainRoots:
+                  input.reusableDirectCryptoDomainRoots,
+              }
+            : {}),
         }),
     };
   } catch (error) {
@@ -2343,34 +2383,72 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
+  reusableDirectCryptoDomainRoots?: {
+    memberId: string;
+    preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  };
 }): Promise<{
-  activeControlRootKeyId: string;
+  activeControlRootKeyId: string | null;
+  activeIngressRootKeyId: string | null;
   memberId: string;
+  preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  preparedFamilyInviteCode: string | null;
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
-  rootKeyId: string;
+  rootKeyId: string | null;
 } | null> {
-  const memberId = await resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
+  const memberId = await resolveHostedLinqDirectPreparationMemberId({
     event: input.event,
     prisma: input.prisma,
-    threadRoute: null,
   });
   if (!memberId) {
     return null;
   }
 
-  const routingRecord = await readHostedMemberRoutingRecord({
-    memberId,
-    prisma: input.prisma,
-  });
+  const context = resolveHostedOnboardingLinqMessageContext(input.event);
+  const [routingRecord, accessAllowed, preparedFamilyInviteCode] =
+    await Promise.all([
+      readHostedMemberRoutingRecord({
+        memberId,
+        prisma: input.prisma,
+      }),
+      readActiveHostedMemberAccess({
+        memberId,
+        prisma: input.prisma,
+      }),
+      context.participantContact?.kind === "phone"
+        ? resolveHostedFamilyInviteTokenForInbound({
+            prisma: input.prisma,
+            text: context.summary.text,
+          })
+        : null,
+    ]);
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      ...(preparedFamilyInviteCode
+        ? {}
+        : {
+            domains: accessAllowed
+              ? (["control", "ingress"] as const)
+              : (["control"] as const),
+          }),
+      maxConcurrency: 2,
+      prisma: input.prisma,
+      ...(input.reusableDirectCryptoDomainRoots?.memberId === memberId
+        ? {
+            reusableCandidates:
+              input.reusableDirectCryptoDomainRoots.preparedCryptoDomainRoots,
+          }
+        : {}),
+      userId: memberId,
+    });
+  const shouldPrepareIngress =
+    accessAllowed || preparedFamilyInviteCode !== null;
 
-  // The direct planner encrypts the mailbox payload under ingress and may
-  // rewrite the member's private Linq routing under control. Project the exact
-  // persisted routing row here as well. The ingress lane runs beside one
-  // explicit control-lane owner: it warms the active control root, then each
-  // distinct historical root sequentially, and only then projects plaintext
-  // from cache. External KMS concurrency is therefore bounded at two even when
-  // all six encrypted routing fields use different historical generations.
+  // Candidate signing finishes before unwrap preparation begins. Each phase is
+  // bounded at two concurrent provider operations: ingress runs beside one
+  // control lane, and that control lane warms historical roots sequentially
+  // before projecting the exact raw routing row from the request cache.
   let firstPreparationError: unknown;
   let hasPreparationError = false;
   const preserveFirstPreparationError = async <T>(
@@ -2386,25 +2464,47 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       throw error;
     }
   };
-  const [ingressRootResult, controlRoutingResult] = await Promise.allSettled([
-    preserveFirstPreparationError(() => warmHostedDomainRootForWeb({
-      domain: getHostedCryptoDomainForLane("mailbox-payload"),
+  const prepareDomainRoot = async (
+    domain: "control" | "ingress",
+  ): Promise<{
+    activeRootKeyId: string | null;
+    rootKeyId: string;
+  }> => {
+    const candidate = preparedCryptoDomainRoots.get(domain);
+    if (candidate) {
+      await prewarmPreparedHostedCryptoDomainRootForWeb({
+        domain,
+        prepared: preparedCryptoDomainRoots,
+        userId: memberId,
+      });
+      return {
+        activeRootKeyId: null,
+        rootKeyId: candidate.rootKeyId,
+      };
+    }
+    const rootKeyId = await warmHostedDomainRootForWeb({
+      domain,
       memberId,
       prisma: input.prisma,
-    })),
+    });
+    return {
+      activeRootKeyId: rootKeyId,
+      rootKeyId,
+    };
+  };
+  const [ingressRootResult, controlRoutingResult] = await Promise.allSettled([
+    shouldPrepareIngress
+      ? preserveFirstPreparationError(() => prepareDomainRoot("ingress"))
+      : Promise.resolve({ activeRootKeyId: null, rootKeyId: null }),
     preserveFirstPreparationError(async () => {
-      const activeControlRootKeyId = await warmHostedDomainRootForWeb({
-        domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
-        memberId,
-        prisma: input.prisma,
-      });
+      const controlRoot = await prepareDomainRoot("control");
       await warmHostedLinqRoutingControlRoots({
         memberId,
         prisma: input.prisma,
         routingRecord,
       });
       return {
-        activeControlRootKeyId,
+        activeControlRootKeyId: controlRoot.activeRootKeyId,
         routingState: routingRecord
           ? await projectHostedMemberRoutingState(
               routingRecord,
@@ -2426,10 +2526,13 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   }
   return {
     activeControlRootKeyId: controlRoutingResult.value.activeControlRootKeyId,
+    activeIngressRootKeyId: ingressRootResult.value.activeRootKeyId,
     memberId,
+    preparedCryptoDomainRoots,
+    preparedFamilyInviteCode,
     routingRecord,
     routingState: controlRoutingResult.value.routingState,
-    rootKeyId: ingressRootResult.value,
+    rootKeyId: ingressRootResult.value.rootKeyId,
   };
 }
 

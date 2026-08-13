@@ -2053,6 +2053,37 @@ describe("hosted Family plan", () => {
     ).not.toHaveProperty("preparedCryptoDomainRoots");
   });
 
+  it("forwards prepared roots through phone-bound Family activation", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]) as never;
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      now,
+      phoneNumber: "+48 600 000 000",
+      preparedCryptoDomainRoots,
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        memberId: "member_mom",
+        preparedCryptoDomainRoots,
+      }));
+  });
+
   it("rejects a phone plus Telegram invite from the wrong Telegram username", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({

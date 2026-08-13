@@ -187,11 +187,15 @@ async function unwrapWithScopedCache(
  * GCP KMS round trips, so the candidates are built here, before any transaction
  * or advisory lock is taken. Candidates are ephemeral: one that loses the
  * insert race is discarded, and a root key that was never persisted decrypts
- * nothing and is referenced by nothing.
+ * nothing and is referenced by nothing. A caller retrying after its transaction
+ * rolled back may reuse its prior candidates so the scoped unwrap cache stays
+ * bound to the same ephemeral roots.
  */
 export async function prepareHostedCryptoDomainRootCandidates(input: {
   domains?: readonly HostedCryptoDomain[];
+  maxConcurrency?: number;
   prisma?: HostedCryptoClient;
+  reusableCandidates?: PreparedHostedCryptoDomainRootCandidates;
   userId: string;
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   const prisma = input.prisma ?? getPrisma();
@@ -205,31 +209,66 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (missing.length === 0) {
     return new Map();
   }
+  const preparedEntries: Array<readonly [
+    HostedCryptoDomain,
+    HostedDomainRootKeyEnvelopeV1,
+  ]> = [];
+  const pending = missing.flatMap((domain, index) => {
+    const reusable = input.reusableCandidates?.get(domain);
+    if (!reusable) {
+      return [{ domain, index }];
+    }
+    if (reusable.domain !== domain || reusable.userId !== input.userId) {
+      throw new TypeError(
+        "Reusable hosted domain root candidate does not match the requested user/domain.",
+      );
+    }
+    preparedEntries[index] = [domain, reusable];
+    return [];
+  });
+  if (pending.length === 0) {
+    return new Map(preparedEntries);
+  }
+  const maxConcurrency = input.maxConcurrency ?? missing.length;
+  if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency <= 0) {
+    throw new TypeError("Hosted domain-root preparation concurrency must be a positive integer.");
+  }
   let firstError: unknown;
   let hasError = false;
-  const settled = await Promise.allSettled(missing.map(async (domain) => {
-    try {
-      return [
-        domain,
-        await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
-      ] as const;
-    } catch (error) {
-      if (!hasError) {
-        firstError = error;
-        hasError = true;
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(maxConcurrency, pending.length) },
+    async () => {
+      while (!hasError) {
+        const pendingEntry = pending[nextIndex];
+        nextIndex += 1;
+        if (!pendingEntry) {
+          return;
+        }
+        const { domain, index } = pendingEntry;
+        try {
+          preparedEntries[index] = [
+            domain,
+            await createSignedHostedDomainRootEnvelope({
+              domain,
+              userId: input.userId,
+            }),
+          ];
+        } catch (error) {
+          if (!hasError) {
+            firstError = error;
+            hasError = true;
+          }
+          return;
+        }
       }
-      throw error;
-    }
-  }));
+    },
+  );
+  await Promise.all(workers);
   if (hasError) {
     throw firstError;
   }
-  return new Map(settled.map((result) => {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
-    return result.value;
-  }));
+  return new Map(preparedEntries);
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -272,6 +311,28 @@ export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
       userId: input.userId,
     });
   }
+}
+
+/**
+ * Commits one already-signed domain-root candidate. This is the narrow
+ * prepared-only counterpart to the provider-capable single-domain legacy
+ * surface below; it never signs or unwraps a root while the transaction is
+ * open.
+ */
+export async function provisionPreparedHostedCryptoDomainRootTx(input: {
+  domain: HostedCryptoDomain;
+  prepared: PreparedHostedCryptoDomainRootCandidates;
+  reason?: string;
+  tx: HostedCryptoTx;
+  userId: string;
+}): Promise<HostedDomainRootKeyEnvelopeV1> {
+  return provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+    candidate: input.prepared.get(input.domain),
+    domain: input.domain,
+    reason: input.reason ?? "hosted-crypto.provision-domain-root",
+    tx: input.tx,
+    userId: input.userId,
+  });
 }
 
 /**

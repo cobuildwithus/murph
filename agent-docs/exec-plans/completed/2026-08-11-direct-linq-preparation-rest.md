@@ -25,6 +25,10 @@ Updated: 2026-08-12
   member-row lock, then home-route and chat-route authority.
 - Direct root preparation performs at most two concurrent KMS operations even
   when all six encrypted routing fields reference distinct historical roots.
+- Stable inactive existing members prepare a missing control root before
+  private Family, group-reply, instant-start, signup, or route policy runs;
+  active mailbox work additionally prepares ingress, while a Family token
+  prepares every activation domain.
 - Focused hosted Web tests, Web typecheck, scoped lint, privacy/no-JS guards,
   exact-head CI, and required ReviewGPT gates pass.
 
@@ -87,6 +91,14 @@ Updated: 2026-08-12
    routing projection, and uncached KMS while the transaction is open.
    Mitigation: perform the one bounded daily-state read immediately after
    duplicate/access handling and rethrow before every Family or group owner.
+10. Risk: an existing but inactive direct member is excluded from mailbox-root
+    prewarm even though Family, group-reply, instant-start, signup, and route
+    policy can still decrypt or rewrite that member's private routing and a
+    Family acceptance can provision every activation root.
+    Mitigation: split narrow direct-member resolution from mailbox eligibility;
+    pre-sign a control candidate for ordinary inactive handling or all four
+    domain candidates for a valid Family token, then commit only prepared roots
+    after revalidating control, member, home, chat, routing, and invite state.
 
 ## Tasks
 
@@ -122,6 +134,16 @@ Updated: 2026-08-12
 - The quota exception sits before Family token resolution and group-outreach
   classification. Neither owner is consulted when direct preparation failed;
   a below-limit message rethrows immediately after one exact daily-state read.
+- Existing-member preparation is no longer synonymous with mailbox access.
+  The outer phase always prepares control for a stable direct member, prepares
+  ingress only for active mailbox work, and prepares all activation domains
+  for the exact Family token revalidated by the transaction. Candidate signing
+  and control/ingress unwrap lanes are independently capped at two provider
+  operations.
+- A bounded route-authority retry reuses any still-uncommitted signed
+  candidates from the rolled-back attempt after re-reading active domains.
+  This keeps the request-scoped `@active` unwrap cache bound to one candidate
+  while still discarding a candidate when another writer has committed a root.
 
 ## Review retrospective
 
@@ -161,6 +183,21 @@ Updated: 2026-08-12
   otherwise eligible group delivery and a valid Family token, then assert the
   exact original error, zero Family/group traversal, zero post-`BEGIN` provider
   work, and no route, mailbox, daily-count, invite, or response mutation.
+- ReviewGPT round 7 found that the mailbox-eligibility resolver still excluded
+  stable inactive existing members even though later direct branches could
+  project private routing or activate all Family crypto domains. The correction
+  introduces a narrower preparation-member resolver, commits a prepared
+  control candidate before any private routing policy, forwards the exact
+  preflight Family candidate set through phone acceptance, and defers ingress
+  authority until an active mailbox path is actually reached.
+- Regression proof now covers inactive group handling with control-only
+  preparation, Family acceptance with all four candidates signed and warmed
+  before `BEGIN`, candidate-signing failure with zero Family/group/daily/route/
+  mailbox mutation, and a real PostgreSQL inactive-to-active transition.
+- The final retry review also retained the same ephemeral candidates across a
+  rolled-back direct-authority retry. The domain-root unit proof verifies that
+  reuse performs no additional signing calls, and dispatch proof verifies that
+  the second preparation receives the prior candidate set.
 
 ## Verification
 

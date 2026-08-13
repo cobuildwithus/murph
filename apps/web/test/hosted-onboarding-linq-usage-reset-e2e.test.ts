@@ -124,6 +124,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
       mocks.hasActiveHostedCryptoDomainRootsForUserTx,
     lockAndReadActiveHostedDomainRootKeyIdTx:
       mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+    prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
     unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
   };
 });

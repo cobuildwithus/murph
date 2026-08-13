@@ -31,6 +31,7 @@ import {
   requireHostedLinqTypingIndicatorStartedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
+  resolveHostedLinqDirectPreparationMemberId,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
@@ -205,6 +206,32 @@ describe("hosted Linq mailbox-root prewarm target", () => {
         tx: prisma,
         userId: "member_direct",
       });
+  });
+
+  it("keeps a stable inactive existing member in the routing preparation boundary", async () => {
+    const prisma = buildPrisma({
+      phoneMemberIds: ["member_inactive_direct"],
+    });
+    accessMocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    accessMocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(false);
+
+    await expect(resolveHostedLinqDirectPreparationMemberId({
+      event: buildMessageEvent({ chatIsGroup: false }),
+      prisma: prisma as never,
+    })).resolves.toBe("member_inactive_direct");
+    expect(accessMocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(accessMocks.hasActiveHostedCryptoDomainRootsForUserTx)
+      .not.toHaveBeenCalled();
+
+    await expect(resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
+      event: buildMessageEvent({ chatIsGroup: false }),
+      prisma: prisma as never,
+      threadRoute: null,
+    })).resolves.toBeNull();
+    expect(accessMocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
+      memberId: "member_inactive_direct",
+      prisma,
+    });
   });
 
   it("resolves typing only through an established eligible home chat", async () => {

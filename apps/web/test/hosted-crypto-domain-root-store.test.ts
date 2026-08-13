@@ -469,6 +469,70 @@ test("candidate preparation drains every started KMS operation before returning 
   )).toBe(true);
 });
 
+test("candidate preparation bounds signing work to the requested concurrency", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const operationMetrics = createLocalKmsOperationMetrics();
+  gcpKmsMock.client = createLocalKmsClient({
+    encryptCalls,
+    operationMetrics,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+  const { prepareHostedCryptoDomainRootCandidates } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createCapturingTransaction();
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 2,
+    prisma: recorder.prisma,
+    userId: "member-test-bounded-candidate-signing",
+  });
+
+  assert.deepEqual([...prepared.keys()], [
+    "control",
+    "device",
+    "ingress",
+    "runtime",
+  ]);
+  assert.equal(encryptCalls.length, 3);
+  assert.equal(signCalls.length, 4);
+  assert.equal(operationMetrics.callCount, 7);
+  assert.equal(operationMetrics.maxConcurrent, 2);
+
+  const reused = await prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 2,
+    prisma: recorder.prisma,
+    reusableCandidates: prepared,
+    userId: "member-test-bounded-candidate-signing",
+  });
+  assert.deepEqual(
+    [...reused].map(([domain, envelope]) => [domain, envelope.rootKeyId]),
+    [...prepared].map(([domain, envelope]) => [domain, envelope.rootKeyId]),
+  );
+  assert.equal(operationMetrics.callCount, 7);
+});
+
+test("candidate preparation rejects a non-positive concurrency bound", async () => {
+  const { prepareHostedCryptoDomainRootCandidates } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createCapturingTransaction();
+
+  await expect(prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 0,
+    prisma: recorder.prisma,
+    userId: "member-test-invalid-candidate-concurrency",
+  })).rejects.toThrow(/positive integer/u);
+});
+
 test("legacy transaction provisioning prepares every candidate before its first advisory lock", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();

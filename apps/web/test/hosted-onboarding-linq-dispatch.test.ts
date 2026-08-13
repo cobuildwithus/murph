@@ -1,7 +1,14 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { unwrapHostedDomainRootForWeb } from "@/src/lib/hosted-crypto/domain-root-store";
+import {
+  prepareHostedCryptoDomainRootCandidates,
+  prewarmPreparedHostedCryptoDomainRootForWeb,
+  unwrapHostedDomainRootForWeb,
+} from "@/src/lib/hosted-crypto/domain-root-store";
+import {
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import type { HostedAiUsageGateDecision } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -161,9 +168,17 @@ const mocks = vi.hoisted(() => {
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       vi.fn<() => Promise<string | null>>(async () => null),
-    lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(async () =>
-      "root-control-active"
-    ),
+    lockAndReadActiveHostedDomainRootKeyIdTx:
+      vi.fn(async (): Promise<string | null> => "root-control-active"),
+    provisionPreparedHostedCryptoDomainRootTx: vi.fn(async (input: {
+      domain: "control" | "ingress";
+      prepared: ReadonlyMap<string, { rootKeyId: string }>;
+      userId: string;
+    }) => input.prepared.get(input.domain) ?? {
+      domain: input.domain,
+      rootKeyId: `root-${input.domain}-active`,
+      userId: input.userId,
+    }),
     resolveHostedLinqTypingPrewarmMemberId:
       vi.fn(async (): Promise<string | null> => null),
     unwrapHostedDomainRootForWebByRootKeyId: vi.fn(),
@@ -224,6 +239,8 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
     }),
     planHostedLinqMessageEditedWebhook:
       mocks.planHostedLinqMessageEditedWebhook,
+    resolveHostedLinqDirectPreparationMemberId:
+      mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
     resolveHostedLinqTypingPrewarmMemberId:
@@ -405,6 +422,8 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
     prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
     prewarmPreparedHostedCryptoDomainRootForWeb: vi.fn(async () => undefined),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+    provisionPreparedHostedCryptoDomainRootTx:
+      mocks.provisionPreparedHostedCryptoDomainRootTx,
     provisionPreparedHostedCryptoDomainRootsTx: vi.fn(async () => undefined),
     unwrapHostedDomainRootForWeb: vi.fn(async (input: {
       domain: "control" | "ingress";
@@ -747,7 +766,9 @@ async function createDirectRootPreparationFailureFixture(input: {
   };
 }
 
-async function createDirectPreparationTransitionFixture() {
+async function createDirectPreparationTransitionFixture(input: {
+  billingStatus?: HostedBillingStatus;
+} = {}) {
   mocks.enforceDirectMailboxPreparation = true;
   const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
     linqChatIdEncrypted: await encryptHostedWebNullableString({
@@ -829,7 +850,7 @@ async function createDirectPreparationTransitionFixture() {
     hostedMember: {
       findUnique: vi.fn().mockResolvedValue({
         accountGroupMemberships: [],
-        billingStatus: HostedBillingStatus.active,
+        billingStatus: input.billingStatus ?? HostedBillingStatus.active,
         createdAt: new Date("2026-03-26T00:00:00.000Z"),
         id: "member_123",
         invites: [],
@@ -4376,6 +4397,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
       .toHaveBeenCalledTimes(2);
+    expect(prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(2);
+    expect(prepareHostedCryptoDomainRootCandidates).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        reusableCandidates: expect.any(Map),
+      }),
+    );
     expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
       .toHaveBeenCalledTimes(4);
     expect(lockOrder.slice(0, 10)).toEqual([
@@ -4985,7 +5013,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
         .toHaveBeenCalledTimes(2);
       expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(2);
-      expect(mocks.resolveHostedFamilyInviteTokenForInbound).toHaveBeenCalledTimes(1);
+      expect(mocks.resolveHostedFamilyInviteTokenForInbound).toHaveBeenCalledTimes(2);
       expect(hostedLinqDeliveryFindMany).toHaveBeenCalledTimes(2);
       expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
       expect(hostedInviteCreate).toHaveBeenCalledTimes(1);
@@ -4994,6 +5022,253 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         .not.toHaveBeenCalled();
       expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
       expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+    } finally {
+      restoreRootMock();
+    }
+  });
+
+  it("prepares stable inactive group-reply routing before the webhook transaction", async () => {
+    const {
+      hostedInviteCreate,
+      hostedLinqDeliveryFindMany,
+      hostedMemberRouting,
+      prisma,
+      providerDomainsAfterTransactionStart,
+      restoreRootMock,
+    } = await createDirectPreparationTransitionFixture({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          eventId: "evt_stable_inactive_group_prepared",
+        }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "sent-signup-link",
+      });
+
+      expect(prisma.$transaction?.mock.calls.length ?? 0).toBeGreaterThanOrEqual(1);
+      expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+        .toHaveBeenCalledExactlyOnceWith({
+          domain: "control",
+          tx: prisma,
+          userId: "member_123",
+        });
+      expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
+        isFullHostedMemberRoutingRecordQuery(query)
+      )).toHaveLength(2);
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+      expect(hostedLinqDeliveryFindMany).toHaveBeenCalledTimes(2);
+      expect(hostedInviteCreate).toHaveBeenCalledTimes(1);
+      expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+        .not.toHaveBeenCalled();
+      expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    } finally {
+      restoreRootMock();
+    }
+  });
+
+  it("signs and forwards stable inactive Family activation roots before BEGIN", async () => {
+    const {
+      hostedMemberRouting,
+      prisma,
+      providerDomainsAfterTransactionStart,
+      restoreRootMock,
+    } = await createDirectPreparationTransitionFixture({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue(null);
+    const preparedCryptoDomainRoots = new Map([
+      ["control", {
+        domain: "control",
+        rootKeyId: "root-control-candidate",
+        userId: "member_123",
+      }],
+      ["device", {
+        domain: "device",
+        rootKeyId: "root-device-candidate",
+        userId: "member_123",
+      }],
+      ["ingress", {
+        domain: "ingress",
+        rootKeyId: "root-ingress-candidate",
+        userId: "member_123",
+      }],
+      ["runtime", {
+        domain: "runtime",
+        rootKeyId: "root-runtime-candidate",
+        userId: "member_123",
+      }],
+    ]) as unknown as Awaited<ReturnType<
+      typeof prepareHostedCryptoDomainRootCandidates
+    >>;
+    const prepareRootCandidates = vi.mocked(
+      prepareHostedCryptoDomainRootCandidates,
+    );
+    const defaultPrepareRootCandidates =
+      prepareRootCandidates.getMockImplementation();
+    if (!defaultPrepareRootCandidates) {
+      throw new Error("Expected the default root-candidate preparation mock.");
+    }
+    prepareRootCandidates.mockImplementation(async (input) =>
+      input.maxConcurrency === 2
+        ? preparedCryptoDomainRoots
+        : defaultPrepareRootCandidates(input));
+    const prewarmPreparedRoot = vi.mocked(
+      prewarmPreparedHostedCryptoDomainRootForWeb,
+    );
+    const defaultPrewarmPreparedRoot =
+      prewarmPreparedRoot.getMockImplementation();
+    prewarmPreparedRoot.mockImplementation(async (input) => {
+      const envelope = input.prepared.get(input.domain);
+      if (!envelope) {
+        throw new Error("Expected a prepared root candidate.");
+      }
+      const pending = Promise.resolve({
+        envelope,
+        rootKey: new Uint8Array(32),
+      });
+      const cache = getHostedDomainRootUnwrapCache();
+      cache?.set(`${input.userId}|${input.domain}|@active`, pending);
+      cache?.set(
+        `${input.userId}|${input.domain}|${envelope.rootKeyId}`,
+        pending,
+      );
+    });
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
+      groupId: "group_family_prepared",
+      memberId: "member_123",
+      role: "member",
+      status: "active",
+    });
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          data: {
+            parts: [{ type: "text", value: "family_phone_token" }],
+          },
+          eventId: "evt_stable_inactive_family_prepared",
+        }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "family-invite-accepted",
+      });
+
+      expect(prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+        maxConcurrency: 2,
+        prisma,
+        userId: "member_123",
+      });
+      expect(prewarmPreparedHostedCryptoDomainRootForWeb)
+        .toHaveBeenCalledTimes(2);
+      expect(prewarmPreparedHostedCryptoDomainRootForWeb)
+        .toHaveBeenCalledWith({
+          domain: "control",
+          prepared: preparedCryptoDomainRoots,
+          userId: "member_123",
+        });
+      expect(prewarmPreparedHostedCryptoDomainRootForWeb)
+        .toHaveBeenCalledWith({
+          domain: "ingress",
+          prepared: preparedCryptoDomainRoots,
+          userId: "member_123",
+        });
+      expect(
+        vi.mocked(prepareHostedCryptoDomainRootCandidates).mock
+          .invocationCallOrder[0],
+      ).toBeLessThan(
+        prisma.$transaction?.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phoneNumber: "+15551234567",
+          preparedCryptoDomainRoots,
+          text: "family_phone_token",
+          tx: prisma,
+        }),
+      );
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+      expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
+        isFullHostedMemberRoutingRecordQuery(query)
+      )).toHaveLength(2);
+      expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+        .not.toHaveBeenCalled();
+    } finally {
+      prepareRootCandidates.mockReset();
+      prepareRootCandidates.mockImplementation(defaultPrepareRootCandidates);
+      prewarmPreparedRoot.mockReset();
+      if (defaultPrewarmPreparedRoot) {
+        prewarmPreparedRoot.mockImplementation(defaultPrewarmPreparedRoot);
+      }
+      mocks.acceptHostedFamilyInviteFromPhoneTx.mockReset();
+      mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
+      restoreRootMock();
+    }
+  });
+
+  it("preserves a Family candidate-signing failure before transactional owners", async () => {
+    const {
+      hostedInviteCreate,
+      hostedLinqDeliveryFindMany,
+      hostedMemberRouting,
+      prisma,
+      providerDomainsAfterTransactionStart,
+      restoreRootMock,
+    } = await createDirectPreparationTransitionFixture({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    const signingError = new Error("Family root candidate signing unavailable");
+    vi.mocked(prepareHostedCryptoDomainRootCandidates)
+      .mockRejectedValueOnce(signingError);
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          data: {
+            parts: [{ type: "text", value: "family_phone_token" }],
+          },
+          eventId: "evt_inactive_family_signing_failure",
+        }),
+        signature: null,
+        timestamp: null,
+      })).rejects.toBe(signingError);
+
+      expect(prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+        maxConcurrency: 2,
+        prisma,
+        userId: "member_123",
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
+      expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+      expect(hostedLinqDeliveryFindMany).not.toHaveBeenCalled();
+      expect(hostedInviteCreate).not.toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+        .not.toHaveBeenCalled();
       expect(providerDomainsAfterTransactionStart).toEqual([]);
     } finally {
       restoreRootMock();
@@ -5314,8 +5589,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           .not.toHaveBeenCalled();
         expect(mocks.unwrapHostedDomainRootsForWebByRootKeyIds)
           .not.toHaveBeenCalled();
+        // One bounded pre-transaction lookup decides whether missing Family
+        // activation roots must be signed before BEGIN. The carried provider
+        // failure still prevents every transactional Family owner below.
         expect(mocks.resolveHostedFamilyInviteTokenForInbound)
-          .not.toHaveBeenCalled();
+          .toHaveBeenCalledTimes(1);
         expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
         expect(prisma.hostedLinqDelivery.findMany).not.toHaveBeenCalled();
         expect(prisma.hostedLinqDelivery.findFirst).not.toHaveBeenCalled();

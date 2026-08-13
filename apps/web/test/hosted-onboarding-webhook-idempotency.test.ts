@@ -62,6 +62,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
       mocks.hasActiveHostedCryptoDomainRootsForUserTx,
     lockAndReadActiveHostedDomainRootKeyIdTx:
       mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+    prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
     unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
   };
 });
@@ -1750,15 +1751,18 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
     const refreshedAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[3]!;
-    const reclassificationLockOrder =
+    const preparedRoutingLockOrder =
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+    const reclassificationLockOrder =
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1]!;
     expect(initialAccessReadOrder).toBeLessThan(exactAccessReadOrder);
-    expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
+    expect(exactAccessReadOrder).toBeLessThan(preparedRoutingLockOrder);
+    expect(preparedRoutingLockOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
     expect(
       refreshedAccessReadOrder,
     ).toBeLessThan(
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1],
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[2],
     );
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
   });

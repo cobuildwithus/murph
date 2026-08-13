@@ -81,6 +81,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   >();
   return {
     ...actual,
+    prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
     unwrapHostedDomainRootForWeb: vi.fn(async (input: {
       domain: HostedCryptoDomain;
       userId: string;
@@ -124,6 +125,26 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
         };
       });
     }),
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/member-access")
+  >();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: vi.fn(async () => true),
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >();
+  return {
+    ...actual,
+    resolveHostedFamilyInviteTokenForInbound: vi.fn(async () => null),
   };
 });
 
@@ -289,6 +310,9 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
         response: { ok: true as const, reason: "prewarm-owner-boundary-plan" },
       };
     }),
+    resolveHostedLinqDirectPreparationMemberId: vi.fn(
+      async () => "member_direct_prewarm",
+    ),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(
       async ({ threadRoute }: {
         threadRoute: { containerMemberId: string } | null;
@@ -569,7 +593,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     } = await import("@/src/lib/hosted-crypto/domain-root-store");
     const {
       planHostedOnboardingLinqWebhook,
-      resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+      resolveHostedLinqDirectPreparationMemberId,
     } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
     const { readHostedThreadRouteByThreadIdentity } = await import(
       "@/src/lib/hosted-routing/thread-route-store"
@@ -580,7 +604,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     );
     const readRoute = vi.mocked(readHostedThreadRouteByThreadIdentity);
     const resolver = vi.mocked(
-      resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+      resolveHostedLinqDirectPreparationMemberId,
     );
     const planner = vi.mocked(planHostedOnboardingLinqWebhook);
     const defaultUnwrapActiveRoot = unwrapActiveRoot.getMockImplementation();
@@ -758,7 +782,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     } = await import("@/src/lib/hosted-crypto/domain-root-store");
     const {
       planHostedOnboardingLinqWebhook,
-      resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+      resolveHostedLinqDirectPreparationMemberId,
     } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
     const { readHostedThreadRouteByThreadIdentity } = await import(
       "@/src/lib/hosted-routing/thread-route-store"
@@ -769,7 +793,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     );
     const readRoute = vi.mocked(readHostedThreadRouteByThreadIdentity);
     const resolver = vi.mocked(
-      resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+      resolveHostedLinqDirectPreparationMemberId,
     );
     const planner = vi.mocked(planHostedOnboardingLinqWebhook);
     const defaultUnwrapActiveRoot = unwrapActiveRoot.getMockImplementation();
@@ -1134,14 +1158,14 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       );
       const {
         planHostedOnboardingLinqWebhook,
-        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+        resolveHostedLinqDirectPreparationMemberId,
       } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
       const { readHostedThreadRouteByThreadIdentity } = await import(
         "@/src/lib/hosted-routing/thread-route-store"
       );
       const readRoute = vi.mocked(readHostedThreadRouteByThreadIdentity);
       const resolver = vi.mocked(
-        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+        resolveHostedLinqDirectPreparationMemberId,
       );
       const planner = vi.mocked(planHostedOnboardingLinqWebhook);
       const defaultReadRoute = readRoute.getMockImplementation();
@@ -1165,7 +1189,10 @@ describe("hosted Linq mailbox payload root prewarm", () => {
             calls.push("plan-conflict");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
               activeControlRootKeyId: "rk_1",
+              activeIngressRootKeyId: "rk_1",
               memberId: "member_direct_a",
+              preparedCryptoDomainRoots: new Map(),
+              preparedFamilyInviteCode: null,
               routingRecord: null,
               routingState: null,
               rootKeyId: "rk_1",
@@ -1185,7 +1212,10 @@ describe("hosted Linq mailbox payload root prewarm", () => {
             calls.push("plan");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
               activeControlRootKeyId: "rk_1",
+              activeIngressRootKeyId: "rk_1",
               memberId: "member_direct_b",
+              preparedCryptoDomainRoots: new Map(),
+              preparedFamilyInviteCode: null,
               routingRecord: null,
               routingState: null,
               rootKeyId: "rk_1",
@@ -1240,14 +1270,14 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       );
       const {
         planHostedOnboardingLinqWebhook,
-        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+        resolveHostedLinqDirectPreparationMemberId,
       } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
       const { readHostedThreadRouteByThreadIdentity } = await import(
         "@/src/lib/hosted-routing/thread-route-store"
       );
       const readRoute = vi.mocked(readHostedThreadRouteByThreadIdentity);
       const resolver = vi.mocked(
-        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+        resolveHostedLinqDirectPreparationMemberId,
       );
       const planner = vi.mocked(planHostedOnboardingLinqWebhook);
       const defaultReadRoute = readRoute.getMockImplementation();
@@ -1311,14 +1341,14 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       );
       const {
         planHostedOnboardingLinqWebhook,
-        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+        resolveHostedLinqDirectPreparationMemberId,
       } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
       const { readHostedThreadRouteByThreadIdentity } = await import(
         "@/src/lib/hosted-routing/thread-route-store"
       );
       const readRoute = vi.mocked(readHostedThreadRouteByThreadIdentity);
       const resolver = vi.mocked(
-        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+        resolveHostedLinqDirectPreparationMemberId,
       );
       const planner = vi.mocked(planHostedOnboardingLinqWebhook);
       const unwrapRoot = vi.mocked(unwrapHostedDomainRootForWeb);

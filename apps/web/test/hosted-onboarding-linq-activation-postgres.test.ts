@@ -663,21 +663,79 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           threadRoute: null,
         })).resolves.toBeNull();
 
+        const controlCandidate = buildRootEnvelope({
+          domain: "control",
+          rootKeyId: controlRootKeyId,
+          userId: memberId,
+        });
+        const inactiveRoutingRecord = await readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        });
+        const routingBeforeInactivePlan = await readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        });
+        const inactiveRoutingState = await readHostedMemberRoutingState({
+          memberId,
+          prisma: observer,
+        });
+        if (!inactiveRoutingRecord || !inactiveRoutingState) {
+          throw new Error("Expected routing before the stable inactive plan.");
+        }
+        await expect(runPreparedLinqPlanTransaction({
+          controlRootKeyId,
+          event,
+          ingressRootKeyId: null,
+          memberId,
+          preparedDirectMailboxPayloadRoot: {
+            activeControlRootKeyId: null,
+            activeIngressRootKeyId: null,
+            memberId,
+            preparedCryptoDomainRoots: new Map([
+              ["control", controlCandidate],
+            ]),
+            preparedFamilyInviteCode: null,
+            rootKeyId: null,
+            routingRecord: inactiveRoutingRecord,
+            routingState: inactiveRoutingState,
+          },
+          prisma: inbound,
+        })).resolves.toMatchObject({
+          response: {
+            ok: true,
+            reason: "sent-signup-link",
+          },
+        });
+        await expect(observer.hostedUserCryptoEnvelope.findFirst({
+          select: { rootKeyId: true },
+          where: {
+            domain: "control",
+            status: "active",
+            userId: memberId,
+          },
+        })).resolves.toEqual({ rootKeyId: controlRootKeyId });
+        await expect(observer.hostedLinqDailyState.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+        await expect(observer.hostedMailboxItem.count({
+          where: { userId: memberId },
+        })).resolves.toBe(0);
+        await expect(readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        })).resolves.toEqual(routingBeforeInactivePlan);
+
         await observer.$transaction(async (tx) => {
-          await Promise.all([
-            insertActiveRootEnvelope({
-              domain: "control",
-              prisma: tx,
-              rootKeyId: controlRootKeyId,
-              userId: memberId,
-            }),
-            insertActiveRootEnvelope({
-              domain: "ingress",
-              prisma: tx,
-              rootKeyId: ingressRootKeyId,
-              userId: memberId,
-            }),
-          ]);
+          await insertActiveRootEnvelope({
+            domain: "ingress",
+            prisma: tx,
+            rootKeyId: ingressRootKeyId,
+            userId: memberId,
+          });
           await tx.hostedMember.update({
             data: { billingStatus: HostedBillingStatus.active },
             where: { id: memberId },
@@ -721,10 +779,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
         await expect(observer.hostedLinqDailyState.count({
           where: { memberId },
-        })).resolves.toBe(0);
+        })).resolves.toBe(1);
         await expect(observer.hostedInvite.count({
           where: { memberId },
-        })).resolves.toBe(0);
+        })).resolves.toBe(1);
         await expect(observer.hostedMailboxItem.count({
           where: { userId: memberId },
         })).resolves.toBe(0);
@@ -766,6 +824,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(observer.hostedLinqDailyState.count({
           where: { memberId },
         })).resolves.toBe(1);
+        await expect(observer.hostedLinqDailyState.findFirst({
+          select: { inboundCount: true },
+          where: { memberId },
+        })).resolves.toEqual({ inboundCount: 2 });
         await expect(observer.hostedInvite.count({
           where: { memberId },
         })).resolves.toBe(1);
@@ -800,7 +862,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 async function runPreparedLinqPlanTransaction(input: {
   controlRootKeyId: string;
   event: ReturnType<typeof buildDirectLinqEvent>;
-  ingressRootKeyId: string;
+  ingressRootKeyId: string | null;
   memberId: string;
   preparedDirectMailboxPayloadRoot: NonNullable<
     Parameters<typeof planHostedOnboardingLinqWebhook>[0][
@@ -823,11 +885,13 @@ async function runPreparedLinqPlanTransaction(input: {
         rootKeyId: input.controlRootKeyId,
         userId: input.memberId,
       });
-      seedPreparedRoot({
-        domain: "ingress",
-        rootKeyId: input.ingressRootKeyId,
-        userId: input.memberId,
-      });
+      if (input.ingressRootKeyId) {
+        seedPreparedRoot({
+          domain: "ingress",
+          rootKeyId: input.ingressRootKeyId,
+          userId: input.memberId,
+        });
+      }
     },
   );
 }
