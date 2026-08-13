@@ -34,7 +34,12 @@ vi.mock('../src/inbox-services/state.ts', () => ({
   ensureConfigFile: ensureConfigFileMock,
   ensureDirectory: ensureDirectoryMock,
   findConnector: findConnectorMock,
-  readConfig: readConfigMock,
+  async readConfigWithReconciliation(...args: unknown[]) {
+    return {
+      config: await readConfigMock(...args),
+      removedLegacyEmailConnectorCount: 0,
+    }
+  },
   rebuildRuntime: rebuildRuntimeMock,
 }))
 
@@ -378,6 +383,10 @@ beforeEach(() => {
   ensureConfigFileMock.mockImplementation(
     async (_paths: ReturnType<typeof createPaths>, createdPaths: string[]) => {
       createdPaths.push('.runtime/operations/inbox/config.json')
+      return {
+        config: { connectors: [] },
+        removedLegacyEmailConnectorCount: 0,
+      }
     },
   )
   readConfigMock.mockResolvedValue({ connectors: [] })

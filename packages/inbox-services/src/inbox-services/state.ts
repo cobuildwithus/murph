@@ -5,6 +5,7 @@ import {
   resolveRuntimePaths,
   writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   inboxRuntimeConfigSchema,
   type InboxConnectorConfig,
@@ -24,7 +25,33 @@ import {
 } from './shared.js'
 
 const INBOX_RUNTIME_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
-const INBOX_RUNTIME_CONFIG_SCHEMA_VERSION = 1
+const INBOX_RUNTIME_CONFIG_SCHEMA_VERSION = 2
+const LEGACY_INBOX_RUNTIME_CONFIG_SCHEMA_VERSION = 1
+
+const legacyInboxConnectorOptionsSchema = z.object({
+  backfillLimit: z.number().int().positive().max(5000).optional(),
+  emailAddress: z.string().min(1).nullable().optional(),
+  linqWebhookHost: z.string().min(1).nullable().optional(),
+  linqWebhookPath: z.string().min(1).nullable().optional(),
+  linqWebhookPort: z.number().int().positive().max(65535).nullable().optional(),
+})
+
+const legacyInboxRuntimeConfigSchema = z.object({
+  connectors: z.array(
+    z.object({
+      id: z.string().min(1),
+      source: z.enum(['telegram', 'email', 'linq']),
+      enabled: z.boolean(),
+      accountId: z.string().min(1).nullable(),
+      options: legacyInboxConnectorOptionsSchema,
+    }),
+  ),
+})
+
+export interface InboxConfigReconciliation {
+  config: InboxRuntimeConfig
+  removedLegacyEmailConnectorCount: number
+}
 
 export async function ensureInitialized(
   loadInbox: () => Promise<InboxRuntimeModule>,
@@ -86,9 +113,9 @@ export async function ensureDirectory(
 export async function ensureConfigFile(
   paths: InboxPaths,
   createdPaths: string[],
-): Promise<void> {
+): Promise<InboxConfigReconciliation> {
   if (await hasLocalStatePath({ currentPath: paths.inboxConfigPath })) {
-    return
+    return readConfigWithReconciliation(paths)
   }
 
   const emptyConfig: InboxRuntimeConfig = {
@@ -103,11 +130,22 @@ export async function ensureConfigFile(
     ),
   })
   createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath))
+  return {
+    config: emptyConfig,
+    removedLegacyEmailConnectorCount: 0,
+  }
 }
 
 export async function readConfig(
   paths: InboxPaths,
 ): Promise<InboxRuntimeConfig> {
+  return (await readConfigWithReconciliation(paths)).config
+}
+
+export async function readConfigWithReconciliation(
+  paths: InboxPaths,
+): Promise<InboxConfigReconciliation> {
+  let currentError: unknown
   try {
     const { value } = await readVersionedJsonStateFile({
       currentPath: paths.inboxConfigPath,
@@ -120,13 +158,48 @@ export async function readConfig(
       schema: INBOX_RUNTIME_CONFIG_SCHEMA,
       schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
     })
-    return value
+    return {
+      config: value,
+      removedLegacyEmailConnectorCount: 0,
+    }
   } catch (error) {
+    currentError = error
+  }
+
+  try {
+    const { value: legacyConfig } = await readVersionedJsonStateFile({
+      currentPath: paths.inboxConfigPath,
+      label: 'Legacy inbox runtime config',
+      parseValue(value) {
+        return legacyInboxRuntimeConfigSchema.parse(value)
+      },
+      schema: INBOX_RUNTIME_CONFIG_SCHEMA,
+      schemaVersion: LEGACY_INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
+    })
+    const removedLegacyEmailConnectorCount = legacyConfig.connectors.filter(
+      (connector) => connector.source === 'email',
+    ).length
+    const config = normalizeInboxRuntimeConfig(
+      inboxRuntimeConfigSchema.parse({
+        connectors: legacyConfig.connectors.filter(
+          (connector) => connector.source !== 'email',
+        ),
+      }),
+    )
+    await writeConfig(paths, config)
+    return {
+      config,
+      removedLegacyEmailConnectorCount,
+    }
+  } catch {
     throw new VaultCliError(
       'INBOX_CONFIG_INVALID',
       'Inbox runtime config is invalid.',
       {
-        error: error instanceof Error ? error.message : String(error),
+        error:
+          currentError instanceof Error
+            ? currentError.message
+            : String(currentError),
       },
     )
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 
 import {
   resolveRuntimePaths,
@@ -85,6 +85,7 @@ import {
   ensureInitializedWithInbox,
   findConnector,
   readConfig,
+  readConfigWithReconciliation,
   rebuildRuntime,
   requireConnector,
   sortConnectors,
@@ -925,12 +926,76 @@ test('readConfig rejects unsupported connector sources in the stored config', as
       () => readConfig(paths),
       (error: unknown) =>
         error instanceof VaultCliError &&
-        error.code === 'INBOX_CONFIG_INVALID' &&
-        typeof error.context?.error === 'string' &&
-        error.context.error.includes(
-          'Invalid option: expected one of \\"telegram\\"|\\"linq\\"',
-        ),
+        error.code === 'INBOX_CONFIG_INVALID',
     )
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('readConfig removes prior local email sources while preserving supported connectors exactly once', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'inbox-services-state-upgrade-'))
+  try {
+    const paths = resolveRuntimePaths(tempDir)
+    await ensureDirectory(
+      path.dirname(paths.inboxConfigPath),
+      [],
+      paths.absoluteVaultRoot,
+    )
+    await writeFile(
+      paths.inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [
+            {
+              id: 'email:primary',
+              source: 'email',
+              enabled: true,
+              accountId: 'primary@example.test',
+              options: { emailAddress: 'primary@example.test' },
+            },
+            {
+              id: 'email:disabled',
+              source: 'email',
+              enabled: false,
+              accountId: 'disabled@example.test',
+              options: { emailAddress: 'disabled@example.test' },
+            },
+            {
+              id: 'telegram:bot',
+              source: 'telegram',
+              enabled: true,
+              accountId: 'bot',
+              options: { backfillLimit: 25 },
+            },
+          ],
+        },
+      }),
+      'utf8',
+    )
+
+    const first = await readConfigWithReconciliation(paths)
+    assert.equal(first.removedLegacyEmailConnectorCount, 2)
+    assert.deepEqual(first.config, {
+      connectors: [
+        {
+          id: 'telegram:bot',
+          source: 'telegram',
+          enabled: true,
+          accountId: 'bot',
+          options: { backfillLimit: 25 },
+        },
+      ],
+    })
+    const afterFirstRead = await readFile(paths.inboxConfigPath, 'utf8')
+    assert.equal(JSON.parse(afterFirstRead).schemaVersion, 2)
+
+    const second = await readConfigWithReconciliation(paths)
+    assert.equal(second.removedLegacyEmailConnectorCount, 0)
+    assert.deepEqual(second.config, first.config)
+    assert.equal(await readFile(paths.inboxConfigPath, 'utf8'), afterFirstRead)
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }

@@ -6,6 +6,7 @@ import {
   type AssistantCronTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { isVaultError, patchAutomation } from '@murphai/core'
 import { withAssistantCronWriteLock } from './cron/locking.ts'
 import { buildAssistantCronSchedule } from './cron/schedule.ts'
 import {
@@ -635,6 +636,14 @@ export async function processDueAssistantCronJobsLocal(
     return summary
   }
 
+  if (
+    assistantCronDeliveryRouteValidationProfileForExecutionContext(
+      input.executionContext,
+    ) === 'local'
+  ) {
+    await pauseUnsupportedLocalEmailAutomations({ vault: input.vault })
+  }
+
   await repairPendingAssistantCronDeliveries({
     paths,
     vault: input.vault,
@@ -722,6 +731,58 @@ export async function processDueAssistantCronJobsLocal(
   }
 
   return summary
+}
+
+export async function pauseUnsupportedLocalEmailAutomations(input: {
+  now?: Date
+  vault: string
+}): Promise<{ pausedAutomationCount: number }> {
+  const records = await listCanonicalAssistantCronRecords(input.vault, ['active'])
+  let pausedAutomationCount = 0
+
+  for (const record of records) {
+    if (
+      record.kind !== 'automation' ||
+      record.route.channel.trim().toLowerCase() !== 'email'
+    ) {
+      continue
+    }
+
+    const pause = async (expectedUpdatedAt: string) =>
+      patchAutomation({
+        expectedUpdatedAt,
+        lookup: record.automationId,
+        now: input.now,
+        status: 'paused',
+        vaultRoot: input.vault,
+      })
+
+    try {
+      await pause(record.updatedAt)
+    } catch (error) {
+      if (!isVaultError(error) || error.code !== 'VAULT_AUTOMATION_CONFLICT') {
+        throw error
+      }
+      const refreshed = (
+        await listCanonicalAssistantCronRecords(input.vault, ['active'])
+      ).find(
+        (candidate) =>
+          candidate.kind === 'automation' &&
+          candidate.automationId === record.automationId,
+      )
+      if (
+        !refreshed ||
+        refreshed.kind !== 'automation' ||
+        refreshed.route.channel.trim().toLowerCase() !== 'email'
+      ) {
+        continue
+      }
+      await pause(refreshed.updatedAt)
+    }
+    pausedAutomationCount += 1
+  }
+
+  return { pausedAutomationCount }
 }
 
 function assistantCronRunCountsAsProcessSuccess(

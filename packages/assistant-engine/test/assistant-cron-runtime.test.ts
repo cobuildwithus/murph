@@ -73,6 +73,7 @@ const cronMocks = vi.hoisted(() => ({
   loadRuntimeModule: vi.fn(),
   loadVault: vi.fn(),
   nextAutomationId: 1,
+  patchAutomation: vi.fn(),
   persistDueExperimentOutcomes: vi.fn(),
   prepareExperimentLifecycleAutomations: vi.fn(),
   renderAutoLoggedFoodMealNote: vi.fn(),
@@ -101,6 +102,7 @@ vi.mock('@murphai/core', async (importOriginal) => ({
     error.code.startsWith('VAULT_'),
   ),
   loadVault: cronMocks.loadVault,
+  patchAutomation: cronMocks.patchAutomation,
   setScheduledLogStatus: cronMocks.setScheduledLogStatus,
   upsertAutomation: cronMocks.upsertAutomation,
 }))
@@ -553,6 +555,46 @@ beforeEach(() => {
       records.push(created)
       return {
         record: created,
+      }
+    },
+  )
+  cronMocks.patchAutomation.mockReset().mockImplementation(
+    async (input: {
+      expectedUpdatedAt?: string
+      lookup: string
+      now?: Date
+      status?: MockAutomationRecord['status']
+      vaultRoot: string
+    }) => {
+      const records = getVaultAutomationStore(input.vaultRoot)
+      const index = records.findIndex(
+        (record) =>
+          record.automationId === input.lookup || record.slug === input.lookup,
+      )
+      if (index < 0) {
+        throw Object.assign(new Error('Automation was not found.'), {
+          code: 'VAULT_AUTOMATION_MISSING',
+        })
+      }
+      const existing = records[index] as MockAutomationRecord
+      if (
+        input.expectedUpdatedAt !== undefined &&
+        input.expectedUpdatedAt !== existing.updatedAt
+      ) {
+        throw Object.assign(new Error('Automation changed.'), {
+          code: 'VAULT_AUTOMATION_CONFLICT',
+        })
+      }
+      const record = {
+        ...existing,
+        status: input.status ?? existing.status,
+        updatedAt: (input.now ?? new Date()).toISOString(),
+      }
+      records[index] = record
+      return {
+        auditPath: '',
+        created: false,
+        record,
       }
     },
   )
@@ -10321,6 +10363,7 @@ describe('assistant cron runtime orchestration', () => {
       processed: 1,
       succeeded: 1,
     })
+    expect(cronMocks.patchAutomation).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: 'team@example.com',
@@ -10657,7 +10700,7 @@ describe('assistant cron runtime orchestration', () => {
     )?.status).toBe('archived')
   })
 
-  it('fails an existing local email automation before running the assistant turn', async () => {
+  it('pauses an existing local email automation before a turn or retry', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
     cronMocks.loadVault.mockResolvedValue({
@@ -10700,27 +10743,25 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(summary).toEqual({
-      failed: 1,
-      processed: 1,
+      failed: 0,
+      processed: 0,
       succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    await expect(
-      listAssistantCronRuns({
-        job: automationId,
-        vault: vaultRoot,
-      }),
-    ).resolves.toMatchObject({
-      jobId: automationId,
-      runs: [
-        expect.objectContaining({
-          error: expect.stringContaining(
-            'Local email automation delivery is not supported',
-          ),
-          status: 'failed',
-        }),
-      ],
+    expect(cronMocks.patchAutomation).toHaveBeenCalledOnce()
+    expect(getVaultAutomationStore(vaultRoot).find(
+      (record) => record.automationId === automationId,
+    )?.status).toBe('paused')
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
     })
+    expect(cronMocks.patchAutomation).toHaveBeenCalledOnce()
   })
 
   it('keeps pinning the response session for a preserve route without conversation locators', async () => {

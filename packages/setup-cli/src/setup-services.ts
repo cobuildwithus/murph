@@ -6,6 +6,7 @@ import {
   type InboxServices,
 } from '@murphai/inbox-services'
 import { enableAssistantAutoReplyChannelLocal } from '@murphai/assistant-engine/assistant-state'
+import { pauseUnsupportedLocalEmailAutomations } from '@murphai/assistant-engine/assistant-cron'
 import {
   createIntegratedVaultServices,
   type VaultServices,
@@ -220,6 +221,7 @@ export function createSetupServices(
     const tools = provisioning.tools
 
     let bootstrap: InboxBootstrapResult | null = null
+    let pausedLocalEmailAutomationCount = 0
     const vaultMetadataPath = path.join(vault, 'vault.json')
     const hasExistingVault = await fileExists(vaultMetadataPath)
 
@@ -264,6 +266,10 @@ export function createSetupServices(
         }),
       )
 
+      pausedLocalEmailAutomationCount = (
+        await pauseUnsupportedLocalEmailAutomations({ vault })
+      ).pausedAutomationCount
+
       bootstrap = await inboxServices.bootstrap({
         ffmpegCommand: tools.ffmpegCommand ?? undefined,
         rebuild: input.rebuild,
@@ -283,6 +289,22 @@ export function createSetupServices(
           title: 'Inbox bootstrap',
         }),
       )
+
+      const retiredLocalEmailCheck = bootstrap.doctor.checks.find(
+        (check) => check.name === 'retired-local-email',
+      )
+      const removedLocalEmailConnectorCount =
+        typeof retiredLocalEmailCheck?.details?.removedConnectorCount === 'number'
+          ? retiredLocalEmailCheck.details.removedConnectorCount
+          : 0
+      if (
+        removedLocalEmailConnectorCount > 0 ||
+        pausedLocalEmailAutomationCount > 0
+      ) {
+        notes.push(
+          `Removed ${removedLocalEmailConnectorCount} retired local email inbox source${removedLocalEmailConnectorCount === 1 ? '' : 's'} and paused ${pausedLocalEmailAutomationCount} local email automation${pausedLocalEmailAutomationCount === 1 ? '' : 's'}. Use Telegram for local inbox messaging, and retarget paused automations to Telegram or Linq before reactivating them.`,
+        )
+      }
     }
 
     await ensureCliShims({
