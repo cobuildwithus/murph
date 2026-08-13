@@ -11,6 +11,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   resolveHostedAiUsageTokenPricingBasis,
@@ -85,9 +86,10 @@ import {
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
-import type {
-  AssistantAcceptedTurnInputItemInput,
-  AssistantCodexContinuation,
+import {
+  resolveAssistantAcceptedTurnInputReferenceWindow,
+  type AssistantAcceptedTurnInputItemInput,
+  type AssistantCodexContinuation,
 } from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
@@ -560,6 +562,11 @@ async function executeAssistantCodexAttempt(input: {
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
+    const ordinaryHostedWorkspaceTurn =
+      Boolean(executionPlan.executionContext?.hosted) &&
+      !restrictedOneShotTurn &&
+      !nativeCapabilitiesRestrictedTurn &&
+      !groupEmailTurn
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy:
@@ -595,6 +602,10 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+        automationRelativeDateReferenceWindow:
+          resolveAssistantAcceptedTurnInputReferenceWindow(
+            executionPlan.acceptedInputItems ?? [],
+          ),
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
@@ -686,7 +697,9 @@ async function executeAssistantCodexAttempt(input: {
               ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
               : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
-              : null,
+              : ordinaryHostedWorkspaceTurn
+                ? MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
+                : null,
         ...(restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
@@ -710,7 +723,8 @@ async function executeAssistantCodexAttempt(input: {
           !hostedRuntimeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&
           Boolean(executionPlan.executionContext?.hosted),
-        runtimeWorkspaceRoots: restrictedOneShotTurn
+        runtimeWorkspaceRoots:
+          restrictedOneShotTurn || ordinaryHostedWorkspaceTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
         resume: readOnlyAutomationTurn ? null : attemptPlan.routePlan.resume,

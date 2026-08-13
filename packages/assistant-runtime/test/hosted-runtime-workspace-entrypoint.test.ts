@@ -36834,9 +36834,15 @@ for line in sys.stdin:
         send({
             "id": request.get("id"),
             "result": {
+                "activePermissionProfile": (
+                    {"id": params.get("permissions")}
+                    if params.get("permissions")
+                    else None
+                ),
                 "approvalPolicy": params.get("approvalPolicy"),
                 "cwd": params.get("cwd"),
                 "modelProvider": params.get("modelProvider"),
+                "runtimeWorkspaceRoots": params.get("runtimeWorkspaceRoots"),
                 "sandbox": sandbox,
                 "thread": {"id": params.get("threadId", thread_id)},
             },

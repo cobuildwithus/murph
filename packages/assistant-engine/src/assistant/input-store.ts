@@ -509,6 +509,12 @@ export type AssistantInputEventRecord = z.infer<
   typeof assistantInputEventRecordSchema
 >
 
+export function resolveAssistantInputEventReferenceAt(
+  event: Pick<AssistantInputEventRecord, 'occurredAt' | 'receivedAt'>,
+): string {
+  return event.receivedAt ?? event.occurredAt
+}
+
 export interface UpsertAssistantInputEventInput {
   content?: z.input<typeof assistantInputContentSchema>
   conversation?: AssistantInputConversationRef | null
