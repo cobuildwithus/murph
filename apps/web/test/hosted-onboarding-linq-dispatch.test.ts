@@ -1,9 +1,15 @@
+import {
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  type HostedCryptoDomain,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
   prewarmPreparedHostedCryptoDomainRootForWeb,
+  type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
 } from "@/src/lib/hosted-crypto/domain-root-store";
 import {
@@ -37,6 +43,30 @@ import { resolveHostedLinqFirstContactContentDisposition } from "@/src/lib/hoste
 
 type HostedRuntimeAiAccessDecisionReader =
   typeof import("@/src/lib/hosted-onboarding/member-access").readHostedRuntimeAiAccessDecision;
+
+function buildPreparedDomainRootCandidate(input: {
+  domain: HostedCryptoDomain;
+  rootKeyId: string;
+  userId: string;
+}): HostedDomainRootKeyEnvelopeV1 {
+  const now = "2026-08-13T00:00:00.000Z";
+  return {
+    authoritySignature: {
+      alg: "GCP-KMS-EC-P256-SHA256",
+      keyVersionName: "test-authority-key-version",
+      signature: "test-authority-signature",
+      signedAt: now,
+    },
+    createdAt: now,
+    domain: input.domain,
+    generation: 1,
+    rootKeyId: input.rootKeyId,
+    schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+    updatedAt: now,
+    userId: input.userId,
+    wraps: [],
+  };
+}
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -162,6 +192,7 @@ const mocks = vi.hoisted(() => {
       };
     }),
     appendHostedMailboxEnvelopeWithSourceMessageTx: vi.fn(),
+    appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
@@ -169,7 +200,13 @@ const mocks = vi.hoisted(() => {
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       vi.fn<() => Promise<string | null>>(async () => null),
     lockAndReadActiveHostedDomainRootKeyIdTx:
-      vi.fn(async (): Promise<string | null> => "root-control-active"),
+      vi.fn<(input: {
+        domain: "control" | "ingress";
+        tx: unknown;
+        userId: string;
+      }) => Promise<string | null>>(
+        async () => "root-control-active",
+      ),
     provisionPreparedHostedCryptoDomainRootTx: vi.fn(async (input: {
       domain: "control" | "ingress";
       prepared: ReadonlyMap<string, { rootKeyId: string }>;
@@ -216,6 +253,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     appendHostedMailboxEnvelopeWithSourceMessageTx:
       mocks.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+      mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
@@ -412,43 +451,136 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
 }));
 
-vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
   const { getHostedDomainRootUnwrapCache } = await vi.importActual<
     typeof import("@/src/lib/hosted-crypto/domain-root-unwrap-cache")
   >("@/src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const preparedCandidateTokens = new WeakSet<object>();
+  const prepareCandidates = vi.fn(async () => new Map());
+  const prewarmPrepared = vi.fn(async (input: {
+    domain: "control" | "ingress";
+    prepared: ReadonlyMap<string, {
+      domain: "control" | "ingress";
+      rootKeyId: string;
+      userId: string;
+    }>;
+    userId: string;
+  }) => {
+    const envelope = input.prepared.get(input.domain);
+    if (!envelope) {
+      throw new Error("Expected a prepared root candidate.");
+    }
+    const pendingRoot = Promise.resolve({
+      envelope,
+      rootKey: new Uint8Array(32),
+    } as never);
+    const cache = getHostedDomainRootUnwrapCache();
+    cache?.set(`${input.userId}|${input.domain}|@active`, pendingRoot);
+    cache?.set(
+      `${input.userId}|${input.domain}|${envelope.rootKeyId}`,
+      pendingRoot,
+    );
+  });
+  const unwrapRoot = vi.fn(async (input: {
+    domain: "control" | "ingress";
+    userId: string;
+  }) => {
+    const root = {
+      envelope: {
+        domain: input.domain,
+        rootKeyId: "root-control-active",
+        userId: input.userId,
+      },
+      rootKey: new Uint8Array(32),
+    };
+    const pendingRoot = Promise.resolve(root as never);
+    const cache = getHostedDomainRootUnwrapCache();
+    cache?.set(`${input.userId}|${input.domain}|@active`, pendingRoot);
+    cache?.set(
+      `${input.userId}|${input.domain}|${root.envelope.rootKeyId}`,
+      pendingRoot,
+    );
+    return {
+      envelope: root.envelope,
+      rootKey: Uint8Array.from(root.rootKey),
+    };
+  });
+  const prepareRoot = vi.fn(async (input: {
+    domain: "control" | "ingress";
+    reusableCandidates?: ReadonlyMap<string, {
+      domain: "control" | "ingress";
+      rootKeyId: string;
+      userId: string;
+    }>;
+    userId: string;
+  }) => {
+    const candidate = input.reusableCandidates?.get(input.domain);
+    let rootKeyId: string;
+    if (candidate) {
+      await prewarmPrepared({
+        domain: input.domain,
+        prepared: input.reusableCandidates ?? new Map(),
+        userId: input.userId,
+      });
+      rootKeyId = candidate.rootKeyId;
+    } else {
+      const root = await unwrapRoot(input);
+      root.rootKey.fill(0);
+      rootKeyId = root.envelope.rootKeyId;
+    }
+    const prepared = Object.freeze({
+      domain: input.domain,
+      rootKeyId,
+      userId: input.userId,
+    });
+    if (candidate) {
+      preparedCandidateTokens.add(prepared);
+    }
+    return prepared;
+  });
+  const revalidateRoot = vi.fn(async (input: {
+    prepared: {
+      domain: "control" | "ingress";
+      rootKeyId: string;
+      userId: string;
+    };
+    tx: unknown;
+  }) => {
+    const activeRootKeyId = await mocks.lockAndReadActiveHostedDomainRootKeyIdTx({
+      domain: input.prepared.domain,
+      tx: input.tx,
+      userId: input.prepared.userId,
+    });
+    if (
+      (activeRootKeyId === null && !preparedCandidateTokens.has(input.prepared))
+      || (activeRootKeyId !== null && activeRootKeyId !== input.prepared.rootKeyId)
+    ) {
+      throw new actual.HostedDomainRootPreparationMismatchError();
+    }
+    const root = getHostedDomainRootUnwrapCache()?.get(
+      `${input.prepared.userId}|${input.prepared.domain}|${input.prepared.rootKeyId}`,
+    ) ?? Promise.resolve({
+      envelope: input.prepared,
+      rootKey: new Uint8Array(32),
+    } as never);
+    return { root, rootKeyId: input.prepared.rootKeyId };
+  });
   return {
+    ...actual,
     lockAndReadActiveHostedDomainRootKeyIdTx:
       mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
-    prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
-    prewarmPreparedHostedCryptoDomainRootForWeb: vi.fn(async () => undefined),
+    prepareHostedCryptoDomainRootCandidates: prepareCandidates,
+    prepareHostedDomainRootForWeb: prepareRoot,
+    prewarmPreparedHostedCryptoDomainRootForWeb: prewarmPrepared,
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
     provisionPreparedHostedCryptoDomainRootTx:
       mocks.provisionPreparedHostedCryptoDomainRootTx,
     provisionPreparedHostedCryptoDomainRootsTx: vi.fn(async () => undefined),
-    unwrapHostedDomainRootForWeb: vi.fn(async (input: {
-      domain: "control" | "ingress";
-      userId: string;
-    }) => {
-      const root = {
-        envelope: {
-          domain: input.domain,
-          rootKeyId: "root-control-active",
-          userId: input.userId,
-        },
-        rootKey: new Uint8Array(32),
-      };
-      const pendingRoot = Promise.resolve(root as never);
-      const cache = getHostedDomainRootUnwrapCache();
-      cache?.set(`${input.userId}|${input.domain}|@active`, pendingRoot);
-      cache?.set(
-        `${input.userId}|${input.domain}|root-control-active`,
-        pendingRoot,
-      );
-      return {
-        envelope: root.envelope,
-        rootKey: Uint8Array.from(root.rootKey),
-      };
-    }),
+    revalidatePreparedHostedDomainRootForWebTx: revalidateRoot,
+    unwrapHostedDomainRootForWeb: unwrapRoot,
     unwrapHostedDomainRootForWebByRootKeyId:
       mocks.unwrapHostedDomainRootForWebByRootKeyId,
     unwrapHostedDomainRootsForWebByRootKeyIds:
@@ -990,6 +1122,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       status: 204,
     });
     mocks.appendHostedMailboxEnvelopeWithSourceMessageTx.mockImplementation(
+      async (input: { envelope: { eventId: string }; tx: unknown }) =>
+        mocks.appendHostedMailboxEnvelopeTx({
+          envelope: input.envelope,
+          tx: input.tx,
+        }),
+    );
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(
       async (input: { envelope: { eventId: string }; tx: unknown }) =>
         mocks.appendHostedMailboxEnvelopeTx({
           envelope: input.envelope,
@@ -4928,7 +5067,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     })).rejects.toThrow("Temporal unavailable");
     expect(hostedLinqDeliveryFindMany).toHaveBeenCalledTimes(1);
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
@@ -4947,7 +5086,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(2);
     expect(hostedLinqDeliveryFindMany).toHaveBeenCalledTimes(1);
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(2, {
@@ -4977,7 +5116,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(hostedLinqDeliveryFindMany).toHaveBeenCalledTimes(3);
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(2);
-    expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
     expect(hostedInviteCreate).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
@@ -5091,30 +5230,28 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       "member_123",
     );
     mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue(null);
-    const preparedCryptoDomainRoots = new Map([
-      ["control", {
+    const preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates = new Map([
+      ["control", buildPreparedDomainRootCandidate({
         domain: "control",
         rootKeyId: "root-control-candidate",
         userId: "member_123",
-      }],
-      ["device", {
+      })],
+      ["device", buildPreparedDomainRootCandidate({
         domain: "device",
         rootKeyId: "root-device-candidate",
         userId: "member_123",
-      }],
-      ["ingress", {
+      })],
+      ["ingress", buildPreparedDomainRootCandidate({
         domain: "ingress",
         rootKeyId: "root-ingress-candidate",
         userId: "member_123",
-      }],
-      ["runtime", {
+      })],
+      ["runtime", buildPreparedDomainRootCandidate({
         domain: "runtime",
         rootKeyId: "root-runtime-candidate",
         userId: "member_123",
-      }],
-    ]) as unknown as Awaited<ReturnType<
-      typeof prepareHostedCryptoDomainRootCandidates
-    >>;
+      })],
+    ]);
     const prepareRootCandidates = vi.mocked(
       prepareHostedCryptoDomainRootCandidates,
     );

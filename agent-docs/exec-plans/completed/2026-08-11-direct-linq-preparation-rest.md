@@ -2,7 +2,7 @@
 
 Status: completed
 Created: 2026-08-11
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -18,7 +18,7 @@ Updated: 2026-08-12
 - Member, owner, or root drift rolls back and receives at most one fresh
   prepare-before-transaction attempt; repeated drift fails closed.
 - Preparation failure may open one transaction to recover an exact durable
-  duplicate or settle stable consent/quota owners without private routing;
+  duplicate or settle a withdrawn-consent owner without private routing;
   an eligible append rethrows the original failure without route mutation,
   append work, or KMS under locks.
 - Prepared direct ingress takes control-root authority before a nonblocking
@@ -81,16 +81,17 @@ Updated: 2026-08-12
    preparation; direct preparation resolves from participant and saved-home
    authority and always returns a package, explicit null, or failure marker.
 8. Risk: carrying one preparation failure across the whole active-member path
-   can suppress consent-withdrawn and daily-quota outcomes that require no
-   private route or mailbox append.
-   Mitigation: exact duplicates retain first precedence; stable consent and
-   already-at-limit quota owners settle without crypto, while the first branch
-   that still needs private routing or append rethrows the original error.
-9. Risk: moving the quota terminal owner too late can carry the failure through
-   Family and group classification first, reopening collection scans, private
-   routing projection, and uncached KMS while the transaction is open.
-   Mitigation: perform the one bounded daily-state read immediately after
-   duplicate/access handling and rethrow before every Family or group owner.
+   can suppress a consent-withdrawn outcome that requires no private route or
+   mailbox append, while carrying it into quota policy can let new policy state
+   mask required preparation failure.
+   Mitigation: exact duplicates retain first precedence and withdrawn consent
+   settles without crypto; quota, Family, group, and other branches retain the
+   original preparation failure before their policy or private-state work.
+9. Risk: evaluating quota, Family, or group owners before the failure gate can
+   reopen policy reads, collection scans, private routing projection, or KMS
+   while the transaction is open.
+   Mitigation: rethrow immediately after exact duplicate and consent handling,
+   before quota admission or any Family or group owner.
 10. Risk: an existing but inactive direct member is excluded from mailbox-root
     prewarm even though Family, group-reply, instant-start, signup, and route
     policy can still decrypt or rewrite that member's private routing and a
@@ -127,13 +128,13 @@ Updated: 2026-08-12
   The recipient account key remains mandatory for explicit thread/container
   routes, while sparse direct events use their participant and durable home
   route to prepare outside the transaction.
-- A direct preparation failure is deferred only across exact duplicate,
-  consent-withdrawn, and already-at-limit quota owners. It is not a new policy
-  authority: eligible append, group join, and other private-route work retain
-  the exact original failure.
-- The quota exception sits before Family token resolution and group-outreach
-  classification. Neither owner is consulted when direct preparation failed;
-  a below-limit message rethrows immediately after one exact daily-state read.
+- A direct preparation failure is deferred only across exact duplicate and
+  consent-withdrawn owners. It is not a new policy authority: quota, eligible
+  append, group join, and other private-route work retain the exact original
+  failure.
+- The failure gate sits before quota admission, Family token resolution, and
+  group-outreach classification. None of those owners is consulted when direct
+  preparation failed.
 - Existing-member preparation is no longer synonymous with mailbox access.
   The outer phase always prepares control for a stable direct member, prepares
   ingress only for active mailbox work, and prepares all activation domains
@@ -144,6 +145,11 @@ Updated: 2026-08-12
   candidates from the rolled-back attempt after re-reading active domains.
   This keeps the request-scoped `@active` unwrap cache bound to one candidate
   while still discarding a candidate when another writer has committed a root.
+- After the shared prepared-crypto capability landed on main, direct control
+  and ingress authority use its request-local opaque tokens and exact prepared
+  mailbox append. The raw candidate map remains only for all-domain Family
+  activation; transaction-local private reads run cache-only and typed root
+  drift is converted into the existing bounded direct-preparation retry.
 
 ## Review retrospective
 
@@ -171,18 +177,16 @@ Updated: 2026-08-12
   root/member/home/chat/ingress lock order, one append and wake, and sparse
   duplicate failure recovery with the original no-row error preserved.
 - ReviewGPT then found that the carried crypto failure still ran ahead of
-  canonical consent-withdrawn and daily-quota terminal owners. The correction
-  keeps exact duplicate precedence, allows stable consent and quota reply or
-  suppression to settle without private routing, and preserves the identical
-  failure object for an eligible append.
-- ReviewGPT round 4 found the first quota correction at the wrong boundary: it
-  ran after Family and group owners. That review-induced ordering could perform
-  group collection fanout and private routing/KMS under transaction locks.
-- The correction moves bounded quota admission directly after exact duplicate
-  and consent handling. Control- and ingress-root failure proofs seed an
-  otherwise eligible group delivery and a valid Family token, then assert the
-  exact original error, zero Family/group traversal, zero post-`BEGIN` provider
-  work, and no route, mailbox, daily-count, invite, or response mutation.
+  canonical consent-withdrawn handling. An intermediate correction also let an
+  already-at-limit quota outcome cross the failure, but later audit verification
+  removed that shortcut because mutable quota policy must not mask required
+  preparation failure. The final boundary retains exact duplicate precedence,
+  lets withdrawn consent settle without private routing, and rethrows the
+  identical failure before quota, Family, group, or eligible-append work.
+- Control- and ingress-root failure proofs seed an otherwise eligible group
+  delivery and a valid Family token, then assert the exact original error, zero
+  quota/Family/group traversal, zero post-`BEGIN` provider work, and no route,
+  mailbox, daily-count, invite, or response mutation.
 - ReviewGPT round 7 found that the mailbox-eligibility resolver still excluded
   stable inactive existing members even though later direct branches could
   project private routing or activate all Family crypto domains. The correction
@@ -193,7 +197,9 @@ Updated: 2026-08-12
 - Regression proof now covers inactive group handling with control-only
   preparation, Family acceptance with all four candidates signed and warmed
   before `BEGIN`, candidate-signing failure with zero Family/group/daily/route/
-  mailbox mutation, and a real PostgreSQL inactive-to-active transition.
+  mailbox mutation, and opaque prepared-root drift across the inactive-to-active
+  transition. The earlier manual-root PostgreSQL fixture was retired after the
+  shared prepared-capability contract landed on main.
 - The final retry review also retained the same ephemeral candidates across a
   rolled-back direct-authority retry. The domain-root unit proof verifies that
   reuse performs no additional signing calls, and dispatch proof verifies that
@@ -201,16 +207,16 @@ Updated: 2026-08-12
 
 ## Verification
 
-- Commands to run: focused hosted Web Vitest files selected from the final
-  diff; opt-in real-PostgreSQL activation concurrency; Web typecheck; scoped
-  ESLint; `pnpm test:diff`; privacy and architecture/diff guards; exact-head
-  GitHub checks and ReviewGPT gates.
+- Commands run: focused hosted Web Vitest files selected from the final diff;
+  Web and workspace typechecks; scoped ESLint; `pnpm test:diff`; privacy and
+  architecture/diff guards. Exact-head GitHub checks remain the publish gate.
 - Expected outcomes: the direct route is unchanged for a stable identity/root;
   drift or member contention gets one fresh pre-transaction preparation;
-  preparation/KMS failure recovers an exact duplicate or settles an existing
-  no-append policy owner; no new persisted state or privacy expansion.
-- Focused proof after the terminal corrections: 224 direct-dispatch and
-  mailbox-root-prewarm tests pass, including sparse direct preparation,
-  consent drift, quota reply/suppression, exact duplicate recovery, and exact
-  eligible-append failure preservation.
-Completed: 2026-08-12
+  preparation/KMS failure recovers an exact duplicate or settles withdrawn
+  consent; no new persisted state or privacy expansion.
+- Final affected slice: 708 tests pass across nine hosted crypto, Family,
+  mailbox, dispatch, prewarm, thread-route, usage-reset, and idempotency files.
+  Workspace typecheck and the authoritative diff verifier pass; the latter
+  covers 730 passing files and 9,890 passing tests, zero-error lint, dev smoke,
+  and a production build.
+Completed: 2026-08-13

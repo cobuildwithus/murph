@@ -56,6 +56,49 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/src/lib/hosted-crypto/domain-root-store")
   >();
+  const preparedMissingRoots = new WeakSet<object>();
+  const prepareHostedDomainRootForWeb = vi.fn(async (input: {
+    domain: HostedCryptoDomain;
+    userId: string;
+  }) => {
+    const root = await mocks.unwrapHostedDomainRootForWeb(input);
+    root.rootKey.fill(0);
+    const prepared = Object.freeze({
+      domain: input.domain,
+      rootKeyId: root.envelope.rootKeyId,
+      userId: input.userId,
+    });
+    preparedMissingRoots.add(prepared);
+    return prepared;
+  });
+  const revalidatePreparedHostedDomainRootForWebTx = vi.fn(async (input: {
+    prepared: {
+      domain: HostedCryptoDomain;
+      rootKeyId: string;
+      userId: string;
+    };
+    tx: unknown;
+  }) => {
+    const activeRootKeyId = await mocks.lockAndReadActiveHostedDomainRootKeyIdTx({
+      domain: input.prepared.domain,
+      tx: input.tx,
+      userId: input.prepared.userId,
+    });
+    if (
+      (activeRootKeyId === null && !preparedMissingRoots.has(input.prepared))
+      || (activeRootKeyId !== null
+        && activeRootKeyId !== input.prepared.rootKeyId)
+    ) {
+      throw new actual.HostedDomainRootPreparationMismatchError();
+    }
+    const root = getHostedDomainRootUnwrapCache()?.get(
+      `${input.prepared.userId}|${input.prepared.domain}|${input.prepared.rootKeyId}`,
+    );
+    if (!root) {
+      throw new TypeError("Expected prepared hosted domain root in test cache.");
+    }
+    return { root, rootKeyId: input.prepared.rootKeyId };
+  });
   return {
     ...actual,
     hasActiveHostedCryptoDomainRootsForUserTx:
@@ -63,6 +106,8 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
     lockAndReadActiveHostedDomainRootKeyIdTx:
       mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
     prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
+    prepareHostedDomainRootForWeb,
+    revalidatePreparedHostedDomainRootForWebTx,
     unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
   };
 });
@@ -70,6 +115,14 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx: (input: {
+    envelope: unknown;
+    tx: unknown;
+  }) =>
+    mocks.appendHostedMailboxEnvelopeTx({
+      envelope: input.envelope,
+      tx: input.tx,
+    }),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: (input: {
     envelope: unknown;
     tx: unknown;
   }) =>

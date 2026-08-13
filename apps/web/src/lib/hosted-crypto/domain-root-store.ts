@@ -138,6 +138,7 @@ export async function prepareHostedDomainRootForWeb(input: {
   prepareMissing?: boolean;
   prisma?: HostedCryptoClient;
   reason: string;
+  reusableCandidates?: PreparedHostedCryptoDomainRootCandidates;
   signal?: AbortSignal;
   userId: string;
 }): Promise<PreparedHostedDomainRootForWeb> {
@@ -157,6 +158,9 @@ export async function prepareHostedDomainRootForWeb(input: {
     : await prepareHostedCryptoDomainRootCandidates({
         domains: [input.domain],
         prisma: input.prisma,
+        ...(input.reusableCandidates
+          ? { reusableCandidates: input.reusableCandidates }
+          : {}),
         userId: input.userId,
       });
   const candidate = preparedCandidates.get(input.domain);
@@ -487,28 +491,6 @@ export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
       userId: input.userId,
     });
   }
-}
-
-/**
- * Commits one already-signed domain-root candidate. This is the narrow
- * prepared-only counterpart to the provider-capable single-domain legacy
- * surface below; it never signs or unwraps a root while the transaction is
- * open.
- */
-export async function provisionPreparedHostedCryptoDomainRootTx(input: {
-  domain: HostedCryptoDomain;
-  prepared: PreparedHostedCryptoDomainRootCandidates;
-  reason?: string;
-  tx: HostedCryptoTx;
-  userId: string;
-}): Promise<HostedDomainRootKeyEnvelopeV1> {
-  return provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
-    candidate: input.prepared.get(input.domain),
-    domain: input.domain,
-    reason: input.reason ?? "hosted-crypto.provision-domain-root",
-    tx: input.tx,
-    userId: input.userId,
-  });
 }
 
 /**

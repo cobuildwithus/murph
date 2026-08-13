@@ -71,13 +71,16 @@ import {
 } from "./logging";
 import {
   runWithHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootProviderCallsDisabled,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
+  HostedDomainRootPreparationMismatchError,
+  prepareHostedDomainRootForWeb,
   prepareHostedCryptoDomainRootCandidates,
-  prewarmPreparedHostedCryptoDomainRootForWeb,
   unwrapHostedDomainRootForWeb,
   unwrapHostedDomainRootsForWebByRootKeyIds,
   type PreparedHostedCryptoDomainRootCandidates,
+  type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
@@ -564,55 +567,80 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
         } | null = null;
         return runHostedThreadRoutingPreparedTransaction({
-          plan: ({ preparation, transaction }) =>
-            planHostedOnboardingLinqWebhook({
-              affirmativeReaction,
-              event: planningEvent,
-              firstContactAdmissionDecision,
-              instantStartAllowed,
-              pendingGroupParticipantMemberIds:
-                planningResolution.pendingGroupParticipantMemberIds ?? null,
-              pendingGroupRosterUnavailable:
-                planningResolution.pendingGroupRosterUnavailable ?? false,
-              ...(preparation.failedPendingGroupSetupPreparationClaim
-                ? {
-                    failedPendingGroupSetupPreparationClaim:
-                      preparation.failedPendingGroupSetupPreparationClaim,
-                  }
-                : {}),
-              ...("directMailboxPreparationFailure" in preparation
-                ? {
-                    directMailboxPreparationFailure:
-                      preparation.directMailboxPreparationFailure,
-                  }
-                : {}),
-              ...("preparedDirectMailboxPayloadRoot" in preparation
-                ? {
-                    preparedDirectMailboxPayloadRoot:
-                      preparation.preparedDirectMailboxPayloadRoot ?? null,
-                  }
-                : {}),
-              ...(preparation.preparedPendingGroupSetupClaim
-                ? {
-                    preparedPendingGroupSetupClaim:
-                      preparation.preparedPendingGroupSetupClaim,
-                  }
-                : {}),
-              ...(preparation.preparedThreadContainerCreation
-                ? {
-                    preparedThreadContainerCreation:
-                      preparation.preparedThreadContainerCreation,
-                  }
-                : {}),
-              ...(preparation.preparedThreadDeliveryRoute
-                ? {
-                    preparedThreadDeliveryRoute:
-                      preparation.preparedThreadDeliveryRoute,
-                  }
-                : {}),
-              requireFirstContactAdmission,
-              prisma: transaction,
-            }),
+          plan: async ({ preparation, transaction }) => {
+            const planPreparedWebhook = () =>
+              planHostedOnboardingLinqWebhook({
+                affirmativeReaction,
+                event: planningEvent,
+                firstContactAdmissionDecision,
+                instantStartAllowed,
+                pendingGroupParticipantMemberIds:
+                  planningResolution.pendingGroupParticipantMemberIds ?? null,
+                pendingGroupRosterUnavailable:
+                  planningResolution.pendingGroupRosterUnavailable ?? false,
+                ...(preparation.failedPendingGroupSetupPreparationClaim
+                  ? {
+                      failedPendingGroupSetupPreparationClaim:
+                        preparation.failedPendingGroupSetupPreparationClaim,
+                    }
+                  : {}),
+                ...("directMailboxPreparationFailure" in preparation
+                  ? {
+                      directMailboxPreparationFailure:
+                        preparation.directMailboxPreparationFailure,
+                    }
+                  : {}),
+                ...("preparedDirectMailboxPayloadRoot" in preparation
+                  ? {
+                      preparedDirectMailboxPayloadRoot:
+                        preparation.preparedDirectMailboxPayloadRoot ?? null,
+                    }
+                  : {}),
+                ...(preparation.preparedPendingGroupSetupClaim
+                  ? {
+                      preparedPendingGroupSetupClaim:
+                        preparation.preparedPendingGroupSetupClaim,
+                    }
+                  : {}),
+                ...(preparation.preparedThreadContainerCreation
+                  ? {
+                      preparedThreadContainerCreation:
+                        preparation.preparedThreadContainerCreation,
+                    }
+                  : {}),
+                ...(preparation.preparedThreadDeliveryRoute
+                  ? {
+                      preparedThreadDeliveryRoute:
+                        preparation.preparedThreadDeliveryRoute,
+                    }
+                  : {}),
+                requireFirstContactAdmission,
+                prisma: transaction,
+              });
+            if (!preparation.preparedDirectMailboxPayloadRoot) {
+              return planPreparedWebhook();
+            }
+            try {
+              return await runWithHostedDomainRootProviderCallsDisabled(
+                planPreparedWebhook,
+              );
+            } catch (error) {
+              if (!(error instanceof HostedDomainRootPreparationMismatchError)) {
+                throw error;
+              }
+              throw hostedOnboardingError({
+                cause: error,
+                code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+                details: {
+                  preparationTarget: "direct_linq_mailbox",
+                  reason: "routing",
+                },
+                httpStatus: 503,
+                message: "Hosted Linq direct mailbox preparation is stale.",
+                retryable: true,
+              });
+            }
+          },
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
@@ -1975,14 +2003,13 @@ interface HostedThreadRoutingCryptoPreparation {
   failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
   pendingGroupSetupPreparationFailure?: unknown;
   preparedDirectMailboxPayloadRoot?: {
-    activeControlRootKeyId: string | null;
-    activeIngressRootKeyId: string | null;
     memberId: string;
+    preparedControlRoot: PreparedHostedDomainRootForWeb;
     preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
     preparedFamilyInviteCode: string | null;
+    preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
     routingRecord: HostedMemberRoutingRecord | null;
     routingState: HostedMemberRoutingStateSnapshot | null;
-    rootKeyId: string | null;
   } | null;
   threadContainerPreparationFailure?: unknown;
   preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
@@ -2388,14 +2415,13 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   };
 }): Promise<{
-  activeControlRootKeyId: string | null;
-  activeIngressRootKeyId: string | null;
   memberId: string;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyInviteCode: string | null;
+  preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
-  rootKeyId: string | null;
 } | null> {
   const memberId = await resolveHostedLinqDirectPreparationMemberId({
     event: input.event,
@@ -2464,47 +2490,29 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       throw error;
     }
   };
-  const prepareDomainRoot = async (
-    domain: "control" | "ingress",
-  ): Promise<{
-    activeRootKeyId: string | null;
-    rootKeyId: string;
-  }> => {
-    const candidate = preparedCryptoDomainRoots.get(domain);
-    if (candidate) {
-      await prewarmPreparedHostedCryptoDomainRootForWeb({
-        domain,
-        prepared: preparedCryptoDomainRoots,
-        userId: memberId,
-      });
-      return {
-        activeRootKeyId: null,
-        rootKeyId: candidate.rootKeyId,
-      };
-    }
-    const rootKeyId = await warmHostedDomainRootForWeb({
+  const prepareDomainRoot = (domain: "control" | "ingress") =>
+    prepareHostedDomainRootForWeb({
       domain,
-      memberId,
       prisma: input.prisma,
+      reason: domain === "control"
+        ? "hosted-linq.direct-routing"
+        : "hosted-linq.direct-mailbox",
+      reusableCandidates: preparedCryptoDomainRoots,
+      userId: memberId,
     });
-    return {
-      activeRootKeyId: rootKeyId,
-      rootKeyId,
-    };
-  };
   const [ingressRootResult, controlRoutingResult] = await Promise.allSettled([
     shouldPrepareIngress
       ? preserveFirstPreparationError(() => prepareDomainRoot("ingress"))
-      : Promise.resolve({ activeRootKeyId: null, rootKeyId: null }),
+      : Promise.resolve(null),
     preserveFirstPreparationError(async () => {
-      const controlRoot = await prepareDomainRoot("control");
+      const preparedControlRoot = await prepareDomainRoot("control");
       await warmHostedLinqRoutingControlRoots({
         memberId,
         prisma: input.prisma,
         routingRecord,
       });
       return {
-        activeControlRootKeyId: controlRoot.activeRootKeyId,
+        preparedControlRoot,
         routingState: routingRecord
           ? await projectHostedMemberRoutingState(
               routingRecord,
@@ -2525,14 +2533,13 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     throw controlRoutingResult.reason;
   }
   return {
-    activeControlRootKeyId: controlRoutingResult.value.activeControlRootKeyId,
-    activeIngressRootKeyId: ingressRootResult.value.activeRootKeyId,
     memberId,
+    preparedControlRoot: controlRoutingResult.value.preparedControlRoot,
     preparedCryptoDomainRoots,
     preparedFamilyInviteCode,
+    preparedIngressRoot: ingressRootResult.value,
     routingRecord,
     routingState: controlRoutingResult.value.routingState,
-    rootKeyId: ingressRootResult.value.rootKeyId,
   };
 }
 

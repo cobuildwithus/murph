@@ -79,28 +79,41 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/src/lib/hosted-crypto/domain-root-store")
   >();
+  const unwrapRoot = vi.fn(async (input: {
+    domain: HostedCryptoDomain;
+    userId: string;
+  }) => {
+    calls.push("unwrap");
+    const master = buildTestUnwrappedHostedDomainRoot({
+      domain: input.domain,
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+      rootKeyId: "rk_1",
+      userId: input.userId,
+    });
+    const pendingRoot = Promise.resolve(master);
+    const cache = getHostedDomainRootUnwrapCache();
+    cache?.set(`${input.userId}|${input.domain}|@active`, pendingRoot);
+    cache?.set(`${input.userId}|${input.domain}|rk_1`, pendingRoot);
+    const rootKey = Uint8Array.from(master.rootKey);
+    issuedRootKeys.push(rootKey);
+    return { envelope: master.envelope, rootKey };
+  });
   return {
     ...actual,
     prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
-    unwrapHostedDomainRootForWeb: vi.fn(async (input: {
+    prepareHostedDomainRootForWeb: vi.fn(async (input: {
       domain: HostedCryptoDomain;
       userId: string;
     }) => {
-      calls.push("unwrap");
-      const master = buildTestUnwrappedHostedDomainRoot({
+      const root = await unwrapRoot(input);
+      root.rootKey.fill(0);
+      return Object.freeze({
         domain: input.domain,
-        rootKey: new Uint8Array([1, 2, 3, 4]),
-        rootKeyId: "rk_1",
+        rootKeyId: root.envelope.rootKeyId,
         userId: input.userId,
       });
-      const pendingRoot = Promise.resolve(master);
-      const cache = getHostedDomainRootUnwrapCache();
-      cache?.set(`${input.userId}|${input.domain}|@active`, pendingRoot);
-      cache?.set(`${input.userId}|${input.domain}|rk_1`, pendingRoot);
-      const rootKey = Uint8Array.from(master.rootKey);
-      issuedRootKeys.push(rootKey);
-      return { envelope: master.envelope, rootKey };
     }),
+    unwrapHostedDomainRootForWeb: unwrapRoot,
     unwrapHostedDomainRootsForWebByRootKeyIds: vi.fn(async (input: {
       references: Array<{
         domain: HostedCryptoDomain;
@@ -676,9 +689,17 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       planner.mockImplementationOnce(async (input) => {
         calls.push("plan");
         expect(input.preparedDirectMailboxPayloadRoot).toMatchObject({
-          activeControlRootKeyId: activeRootKeyIds.control,
           memberId,
-          rootKeyId: activeRootKeyIds.ingress,
+          preparedControlRoot: {
+            domain: "control",
+            rootKeyId: activeRootKeyIds.control,
+            userId: memberId,
+          },
+          preparedIngressRoot: {
+            domain: "ingress",
+            rootKeyId: activeRootKeyIds.ingress,
+            userId: memberId,
+          },
           routingState: {
             linqChatId: "chat_historical_root",
             memberId,
@@ -959,9 +980,17 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       planner.mockImplementationOnce(async (input) => {
         calls.push("plan");
         expect(input.preparedDirectMailboxPayloadRoot).toMatchObject({
-          activeControlRootKeyId: "root_control_active",
           memberId,
-          rootKeyId: "root_ingress_active",
+          preparedControlRoot: {
+            domain: "control",
+            rootKeyId: "root_control_active",
+            userId: memberId,
+          },
+          preparedIngressRoot: {
+            domain: "ingress",
+            rootKeyId: "root_ingress_active",
+            userId: memberId,
+          },
           routingState: {
             linqChatId: "chat_six_roots",
             memberId,
@@ -1188,14 +1217,21 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan-conflict");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
-              activeControlRootKeyId: "rk_1",
-              activeIngressRootKeyId: "rk_1",
               memberId: "member_direct_a",
+              preparedControlRoot: {
+                domain: "control",
+                rootKeyId: "rk_1",
+                userId: "member_direct_a",
+              },
               preparedCryptoDomainRoots: new Map(),
               preparedFamilyInviteCode: null,
+              preparedIngressRoot: {
+                domain: "ingress",
+                rootKeyId: "rk_1",
+                userId: "member_direct_a",
+              },
               routingRecord: null,
               routingState: null,
-              rootKeyId: "rk_1",
             });
             throw hostedOnboardingError({
               code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
@@ -1211,14 +1247,21 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
-              activeControlRootKeyId: "rk_1",
-              activeIngressRootKeyId: "rk_1",
               memberId: "member_direct_b",
+              preparedControlRoot: {
+                domain: "control",
+                rootKeyId: "rk_1",
+                userId: "member_direct_b",
+              },
               preparedCryptoDomainRoots: new Map(),
               preparedFamilyInviteCode: null,
+              preparedIngressRoot: {
+                domain: "ingress",
+                rootKeyId: "rk_1",
+                userId: "member_direct_b",
+              },
               routingRecord: null,
               routingState: null,
-              rootKeyId: "rk_1",
             });
             return {
               desiredSideEffects: [],

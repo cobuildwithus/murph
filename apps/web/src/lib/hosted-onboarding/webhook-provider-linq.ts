@@ -78,6 +78,7 @@ import {
   type HostedLinqChatHandleSummary,
 } from "./linq-client";
 import {
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
   readHostedMailboxItemByDedupeKey,
   readHostedMailboxSourceConversationEntriesTx,
@@ -189,10 +190,11 @@ import {
   type HostedOnboardingReadClient,
 } from "./shared";
 import {
+  HostedDomainRootPreparationMismatchError,
   hasActiveHostedCryptoDomainRootsForUserTx,
-  lockAndReadActiveHostedDomainRootKeyIdTx,
-  provisionPreparedHostedCryptoDomainRootTx,
+  revalidatePreparedHostedDomainRootForWebTx,
   type PreparedHostedCryptoDomainRootCandidates,
+  type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import {
   getHostedDomainRootUnwrapCache,
@@ -681,14 +683,13 @@ function hostedLinqDirectMailboxPreparationRequired(
 }
 
 interface PreparedHostedLinqDirectMailboxPayloadRoot {
-  activeControlRootKeyId: string | null;
-  activeIngressRootKeyId?: string | null;
   memberId: string;
-  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
-  preparedFamilyInviteCode?: string | null;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  preparedFamilyInviteCode: string | null;
+  preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
-  rootKeyId: string | null;
 }
 
 async function revalidatePreparedHostedLinqDirectMailboxControlRootTx(input: {
@@ -700,31 +701,24 @@ async function revalidatePreparedHostedLinqDirectMailboxControlRootTx(input: {
     throw hostedLinqDirectMailboxPreparationRequired("member");
   }
 
-  // Root lifecycle owners take this authority lock before member rows. Direct
-  // ingress follows that order, then uses a nonblocking member-row attempt so
-  // a member-first activation transaction can finish instead of deadlocking.
-  const activeControlRootKeyId =
-    await lockAndReadActiveHostedDomainRootKeyIdTx({
-      domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+  const preparedControlRoot = input.prepared.preparedControlRoot;
+  if (
+    preparedControlRoot.domain !== "control"
+    || preparedControlRoot.userId !== input.memberId
+  ) {
+    throw hostedLinqDirectMailboxPreparationRequired("control-root");
+  }
+  try {
+    await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: preparedControlRoot,
       tx: input.prisma,
-      userId: input.memberId,
     });
-  if (activeControlRootKeyId !== input.prepared.activeControlRootKeyId) {
-    throw hostedLinqDirectMailboxPreparationRequired("control-root");
+  } catch (error) {
+    if (error instanceof HostedDomainRootPreparationMismatchError) {
+      throw hostedLinqDirectMailboxPreparationRequired("control-root");
+    }
+    throw error;
   }
-  const expectedControlRootKeyId = input.prepared.activeControlRootKeyId
-    ?? input.prepared.preparedCryptoDomainRoots?.get("control")?.rootKeyId
-    ?? null;
-  if (!expectedControlRootKeyId) {
-    throw hostedLinqDirectMailboxPreparationRequired("control-root");
-  }
-  await assertPreparedHostedLinqRootCached({
-    cacheRootKey: "@active",
-    expectedRootKeyId: expectedControlRootKeyId,
-    lane: "hosted-member-private-field",
-    memberId: input.memberId,
-    reason: "control-root",
-  });
   return input.prepared;
 }
 
@@ -739,31 +733,6 @@ async function tryLockPreparedHostedLinqDirectMemberRowTx(input: {
     for update skip locked
   `;
   return lockedRows.length === 1;
-}
-
-async function provisionPreparedHostedLinqDirectControlRootTx(input: {
-  memberId: string;
-  prepared: PreparedHostedLinqDirectMailboxPayloadRoot;
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  if (input.prepared.activeControlRootKeyId) {
-    return;
-  }
-  const prepared = input.prepared.preparedCryptoDomainRoots;
-  const candidate = prepared?.get("control");
-  if (!candidate || !prepared) {
-    throw hostedLinqDirectMailboxPreparationRequired("control-root");
-  }
-  const committed = await provisionPreparedHostedCryptoDomainRootTx({
-    domain: "control",
-    prepared,
-    reason: "hosted-linq.direct-routing",
-    tx: input.prisma,
-    userId: input.memberId,
-  });
-  if (committed.rootKeyId !== candidate.rootKeyId) {
-    throw hostedLinqDirectMailboxPreparationRequired("control-root");
-  }
 }
 
 async function revalidatePreparedHostedLinqDirectRoutingTx(input: {
@@ -868,50 +837,25 @@ async function revalidatePreparedHostedLinqDirectIngressRootTx(input: {
   prepared: PreparedHostedLinqDirectMailboxPayloadRoot;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  const expectedRootKeyId = input.prepared.rootKeyId;
-  if (!expectedRootKeyId) {
+  const preparedIngressRoot = input.prepared.preparedIngressRoot;
+  if (
+    !preparedIngressRoot
+    || preparedIngressRoot.domain !== "ingress"
+    || preparedIngressRoot.userId !== input.memberId
+  ) {
     throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
   }
-  const expectedActiveRootKeyId = Object.prototype.hasOwnProperty.call(
-    input.prepared,
-    "activeIngressRootKeyId",
-  )
-    ? input.prepared.activeIngressRootKeyId ?? null
-    : expectedRootKeyId;
-  const activeRootKeyId = await lockAndReadActiveHostedDomainRootKeyIdTx({
-    domain: "ingress",
-    tx: input.prisma,
-    userId: input.memberId,
-  });
-  if (activeRootKeyId !== expectedActiveRootKeyId) {
-    throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
-  }
-  if (!activeRootKeyId) {
-    const prepared = input.prepared.preparedCryptoDomainRoots;
-    const candidate = prepared?.get("ingress");
-    if (!candidate || !prepared || candidate.rootKeyId !== expectedRootKeyId) {
-      throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
-    }
-    const committed = await provisionPreparedHostedCryptoDomainRootTx({
-      domain: "ingress",
-      prepared,
-      reason: "hosted-linq.direct-mailbox",
+  try {
+    await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: preparedIngressRoot,
       tx: input.prisma,
-      userId: input.memberId,
     });
-    if (committed.rootKeyId !== expectedRootKeyId) {
+  } catch (error) {
+    if (error instanceof HostedDomainRootPreparationMismatchError) {
       throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
     }
-  } else if (activeRootKeyId !== expectedRootKeyId) {
-    throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
+    throw error;
   }
-  await assertPreparedHostedLinqRootCached({
-    cacheRootKey: "@active",
-    expectedRootKeyId,
-    lane: "mailbox-payload",
-    memberId: input.memberId,
-    reason: "ingress-root",
-  });
 }
 
 const HOSTED_MEMBER_ROUTING_RECORD_KEYS = [
@@ -1808,15 +1752,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
       if (
         exactMemberAccess.allowed
-        && !preparedDirectMailboxControlAuthority.rootKeyId
+        && !preparedDirectMailboxControlAuthority.preparedIngressRoot
       ) {
         throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
       }
-      await provisionPreparedHostedLinqDirectControlRootTx({
-        memberId: existingMember.id,
-        prepared: preparedDirectMailboxControlAuthority,
-        prisma: input.prisma,
-      });
       preparedDirectRoutingAuthority =
         await revalidatePreparedHostedLinqDirectRoutingTx({
           chatId: summary.chatId,
@@ -2006,6 +1945,20 @@ export async function planHostedOnboardingLinqWebhook(input: {
             };
           }
         },
+        ...(preparedFamilyCryptoDomainRoots && preparedDirectRoutingAuthority
+          ? {
+              onAcceptedMemberValidated: async ({ acceptedMemberId }) => {
+                if (acceptedMemberId !== preparedDirectRoutingAuthority.memberId) {
+                  throw hostedLinqDirectMailboxPreparationRequired("member");
+                }
+                await revalidatePreparedHostedLinqDirectIngressRootTx({
+                  memberId: acceptedMemberId,
+                  prepared: preparedDirectRoutingAuthority,
+                  prisma: input.prisma,
+                });
+              },
+            }
+          : {}),
         phoneNumber: participantContact.value,
         ...(preparedFamilyCryptoDomainRoots
           ? { preparedCryptoDomainRoots: preparedFamilyCryptoDomainRoots }
@@ -2430,11 +2383,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
     const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
       summary.messageId,
     );
-    const mailboxAppend = await appendHostedMailboxEnvelopeWithSourceMessageTx({
-      envelope: mailboxWake,
-      sourceMessageLookupKey,
-      tx: input.prisma,
-    });
+    const mailboxAppend = preparedDirectMailbox?.preparedIngressRoot
+      ? await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: mailboxWake,
+          prepared: preparedDirectMailbox.preparedIngressRoot,
+          sourceMessageLookupKey,
+          tx: input.prisma,
+        })
+      : await appendHostedMailboxEnvelopeWithSourceMessageTx({
+          envelope: mailboxWake,
+          sourceMessageLookupKey,
+          tx: input.prisma,
+        });
 
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildActiveMemberDirectPlan({
