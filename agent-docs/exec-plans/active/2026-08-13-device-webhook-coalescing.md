@@ -14,7 +14,7 @@ Updated: 2026-08-13
 - Duplicate and at-least-once deliveries are idempotent; level hints coalesce while exact durable webhook work remains lossless and explicitly acknowledged.
 - Withdrawal, disconnect/reconnect, source lifecycle, setup, and private-application races fail closed at final Web-owned admission.
 - Provider receives success only after the encrypted/allowlisted ingress envelope is durably accepted; retry and dead-letter behavior has a finite recovery owner.
-- The design composes with PRs #1736 and #1696 and does not duplicate PR #1743's outside-transaction crypto work.
+- The design composes with PRs #1736 and #1696 and absorbs PR #1743's final outside-transaction crypto work so the queue path has one deployable admission boundary.
 - Focused deterministic load/privacy/race tests, typechecks, ReviewGPT specialist/final gates, and required PR CI pass.
 
 ## Scope
@@ -40,10 +40,10 @@ Updated: 2026-08-13
 
 ## Tasks
 
-1. Map current per-webhook database/crypto/wake boundaries and inspect #1736, #1696, and #1743.
-2. Have ReviewGPT research official Queue, Durable Object, Workflow, and Temporal semantics; select the smallest current primitive and return an implementation patch.
-3. Inspect and integrate the patch, proving privacy, authority, event-vs-level semantics, 100-message batch load, retry, and deploy skew.
-4. Push the exact candidate, run specialist and final ReviewGPT gates with CI, and open the PR.
+1. [x] Map current per-webhook database/crypto/wake boundaries and inspect #1736, #1696, and #1743.
+2. [x] Have ReviewGPT research official Queue, Durable Object, Workflow, and Temporal semantics; select the smallest current primitive and return an implementation patch.
+3. [x] Inspect and integrate the patch, proving privacy, authority, event-vs-level semantics, 100-message batch load, retry, and deploy skew.
+4. [ ] Push the exact candidate, run specialist and final ReviewGPT gates with CI, and complete the PR handoff.
 
 ## Decisions
 
@@ -51,6 +51,7 @@ Updated: 2026-08-13
 - ReviewGPT selected Cloudflare Queues as encrypted, non-canonical burst transport. Postgres remains the only device-sync authority; Durable Objects, Workflows, Temporal ingress state, a second database, and raw-body Postgres staging were rejected as unnecessary owners.
 - Provider verification and parsing run once before enqueue because Junction, Oura, Strava, and WHOOP enforce replay windows. Queue replay consumes only the strict prepared meaning and never reruns a provider verifier; the original receipt instant remains immutable evidence while all mutable provider registration, consent, application, connection, and source authority is revalidated at dequeue.
 - Delayed Junction source-registration work uses the existing health-data admission owner on both sides of its provider status read. The first short transaction establishes current authority and an exact ephemeral source/account proof, the provider read runs outside Postgres, and the second short transaction revalidates that proof before source activation and canonical webhook admission commit together. Terminal authority loss completes only the trace; indeterminate provider/account state remains retryable.
+- PR #1743's prepared dirty-payload and mailbox crypto boundary is merged into this candidate. Payload classification, root unwrap, and provider reads occur before the final transaction; the final lock only revalidates roots/authority, performs local sealing, and commits receipt, source, trace, dirty, mailbox, and signal state atomically.
 
 ## Verification
 
