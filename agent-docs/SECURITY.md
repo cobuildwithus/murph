@@ -294,9 +294,9 @@ Last verified: 2026-08-12
   `Object.assign`. Build the SDK-typed object first, then assign each optional
   field explicitly; this preserves excess-property checking that TypeScript
   otherwise loses across composed objects. `pnpm provider-requests:guard`
-  enforces the registered Stripe, Kernel, Linq, Retell, Temporal, OpenAI, and
-  Junction boundaries across production apps, packages, and scripts. Register
-  each new official SDK boundary when it is introduced. The opt-in
+  enforces the registered Composio, Stripe, Kernel, Linq, Retell, Temporal,
+  OpenAI, and Junction boundaries across production apps, packages, and
+  scripts. Register each new official SDK boundary when it is introduced. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode secret key and calls the real resume endpoint with a synthetic
   missing Subscription, so parameter drift fails without creating, charging,

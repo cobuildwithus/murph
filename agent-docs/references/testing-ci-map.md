@@ -8,7 +8,7 @@ Last verified: 2026-08-12
 | --- | --- | --- |
 | `pnpm typecheck` | Full workspace type proof through stable TypeScript 7. Independent guards overlap the clean contracts prerequisite; package/app no-emit checks use bounded no-sort fanout. The hosted web invokes the root compiler explicitly while retaining local TypeScript 5 only for framework/Solana tools that still require the legacy compiler API or peer range. Repo-owned source-analysis checks use Babel's parser instead of a TypeScript compiler API, leaving the web-local TypeScript 5 boundary independently removable once its consumers support TypeScript 7. Tsconfig path-map discovery reads root configs shallowly and scans only `packages/**` plus `apps/**`, avoiding unrelated local residue. Repo tools reuse an ignored incremental cache. | `scripts/*.{sh,mjs,ts}`, `e2e/smoke/verify-scenario-integrity.ts`, `packages/contracts/**`, `packages/clinical-records/**`, `packages/hosted-execution/**`, `packages/hosted-local-harness/**`, `packages/runtime-state/**`, `packages/operator-config/**`, `packages/assistant-engine/**`, `packages/assistant-cli/**`, `packages/setup-cli/**`, `packages/cli/**`, `packages/openclaw-plugin/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**`, `packages/inboxd/**`, `packages/parsers/**`, `packages/assistantd/**`, `packages/assistant-runtime/**`, `packages/health-metrics/**`, `packages/query/**`, `apps/web/**`, `apps/cloudflare/**`, `config/workspace-source-resolution.ts` |
 | `pnpm test:repo-tools` | Focused Vitest coverage for repo-owned verification/config helpers. `test:diff` selects it for `scripts/**` and `config/**` changes, and the host-support release typecheck job runs it directly. The design-proof uploader tests use fixture-only credentials and a stubbed fetch boundary while proving primary-checkout env discovery from a real temporary linked worktree, lossless high-resolution input gates, and creation or validation of the dedicated non-downscaling delivery variant. | `scripts/**/*.test.ts` plus the shared config helpers those tests import, including `scripts/upload-design-proof-image.ts` |
-| `pnpm provider-requests:guard` | Babel-based static guard, included in root typecheck and diff preflight, that rejects object spreads, `Object.assign`, and untyped object-literal request variables at registered official provider SDK boundaries. It covers Stripe, Kernel, Linq, Retell, Temporal, OpenAI, and Junction calls and typed builders across production apps, packages, and scripts so optional provider keys remain visible to the SDK declarations. | `apps/**`, `packages/**`, `scripts/**`, `scripts/check-provider-request-boundaries.ts`, and `scripts/check-provider-request-boundaries.test.ts` |
+| `pnpm provider-requests:guard` | Babel-based static guard, included in root typecheck and diff preflight, that rejects object spreads, `Object.assign`, and untyped object-literal request variables at registered official provider SDK boundaries. It covers Composio, Stripe, Kernel, Linq, Retell, Temporal, OpenAI, and Junction calls and typed builders across production apps, packages, and scripts so optional provider keys remain visible to the SDK declarations. | `apps/**`, `packages/**`, `scripts/**`, `scripts/check-provider-request-boundaries.ts`, and `scripts/check-provider-request-boundaries.test.ts` |
 | `pnpm hosted-billing:ci-guard` | Source-level drift guard for the hosted Stripe billing workflow. It forbids `pull_request_target`, requires the every-PR hermetic Starter-checkout/migration/config/support proof, pins the same-repository and dependency-bot exclusion, keeps writable authority out of pre-live jobs, requires serial non-canceling cleanup, and allows only the redacted matrix diagnostic artifact. Repo Hygiene runs this guard, and focused mutation tests live under `scripts/check-hosted-stripe-billing-ci.test.ts`. | `.github/workflows/hosted-stripe-billing.yml`, `.github/workflows/repo-hygiene.yml`, `packages/hosted-local-harness/src/e2e.ts`, the five-case browser matrix, and the root command contract |
 | `pnpm hosted-local e2e stripe-billing-browser-matrix` | Manual/local or trusted-CI production-shaped billing proof against a dedicated Stripe test sandbox. It drives Murph, Stripe Checkout/Portal, real test APIs, the harness-owned webhook listener, local PostgreSQL reconciliation, Settings projections, a renewal schedule, and web Family activation. It is intentionally excluded from default hosted-local E2E and requires preflighted operator configuration. | `apps/cloudflare/test/hosted-local-stripe-billing-browser-e2e.test.ts`, browser/Stripe/testkit support under `apps/web/test/support/**`, and canonical hosted-local lifecycle |
 | `pnpm test:frontend-design-proof` | Focused Node tests for the pull-request design-proof guard. The guard requires every user-facing hosted-web UI diff to update the reusable-component or composed-section design catalog and to provide hosted desktop and mobile design-page screenshots in the PR body. It validates GitHub-rendered GFM so comments, code blocks, and raw HTML cannot be mistaken for visible proof. | `scripts/check-frontend-design-proof.mjs`, `scripts/check-frontend-design-proof.test.mjs`, `.github/workflows/frontend-design-proof.yml`, and `.github/pull_request_template.md` |
@@ -548,6 +548,14 @@ supported provider credential.
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, active-incident coalescing, recovery/rearm, and
   independence from the latency monitor.
+- `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
+  opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
+  latency monitor. It runs the production query against 50,000 stale rows per
+  trace, delivery, and mailbox owner, admits one row through each recent
+  accepted, staged, provider-started, delivery-accepted, and mailbox-consumed
+  branch, and requires PostgreSQL to use the matching time indexes without a
+  sequential scan of those owners. It then proves the exact hydration keeps
+  usage-denial restart chronology and the 20,001-row truncation boundary.
 - `apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts` is an opt-in
   local-PostgreSQL proof that the usage-denial write marks only the observed
   conversation sequence window with database-owned chronology and leaves a
@@ -563,7 +571,13 @@ supported provider credential.
   prove strict per-family metric normalization, explicit unknowns for missing
   required series, continued evaluation of available signals, positive
   direct-port counter deltas with reset/new-series suppression across complete
-  and partial samples, SQLite sample persistence and 30-day pruning, concrete
+  and partial samples, one bounded confirmation for a safe direct-counter-only
+  omission, multi-family confirmation rejection, cross-scrape evidence
+  composition, immediate unsafe-signal paging before that confirmation, unsafe
+  confirmation-signal paging, failed-confirmation retention, positive
+  recovered-counter deltas, persistent-gap telemetry paging, and the scheduled
+  Durable Object boundary for that retry,
+  SQLite sample persistence and 30-day pruning, concrete
   connection thresholds, two-failure collection hysteresis, one acknowledged
   page per unresolved telemetry-notification window, recovered threshold
   coalescing before acknowledgment, truthful partial-then-unavailable,

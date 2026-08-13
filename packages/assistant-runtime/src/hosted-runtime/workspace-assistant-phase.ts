@@ -3797,7 +3797,8 @@ interface DeferredHostedSystemMailboxPostCheckpointRecord {
 function shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
   input: HostedSystemMailboxPendingItem,
 ): boolean {
-  return input.postCheckpointRecord?.kind === "codex-auth.updated";
+  return input.postCheckpointRecord?.kind === "codex-auth.updated"
+    || input.postCheckpointRecord?.kind === "vault-share.projection";
 }
 
 function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
@@ -6452,6 +6453,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
     await writeHostedOutboxDeliveryRuntimeLog({
+      deliveryEffects: input.assistantDeliveryEffects,
       input: input.input,
       outcomes,
       postNextWakeAt,
@@ -6826,6 +6828,9 @@ function renderHostedTerminalOutboxFailureSystemNote(input: {
     "unknown",
   );
   const mediaDescription = renderHostedFailureNoteMedia(input.effect);
+  const hasImage = input.effect?.payload.media.some((item) =>
+    item.kind === "image" || item.kind === "vault_image"
+  ) === true;
   const hasVaultFile = input.effect?.payload.media.some((item) =>
     item.kind === "vault_file"
   ) === true;
@@ -6841,6 +6846,11 @@ function renderHostedTerminalOutboxFailureSystemNote(input: {
       "Any consumed vault-file approval must be re-requested before retrying.",
     );
   }
+  if (hasImage) {
+    lines.push(
+      "Image delivery remains outstanding. A text-only substitute is not equivalent; do not offer or send one as recovery. Any recovery attempt must attach images and stay within the current response-media limit.",
+    );
+  }
   lines.push("Do not claim the failed message or file was sent.");
   return lines.join(" ");
 }
@@ -6853,15 +6863,20 @@ function renderHostedFailureNoteMedia(
     return "none";
   }
 
-  return media.map((item) => {
-    if (item.kind === "vault_file") {
-      return `vault file "${normalizeHostedFailureNoteFilename(item.filename)}"`;
-    }
-    if (item.kind === "voice_memo") {
-      return "voice memo";
-    }
-    return "image";
-  }).join(", ");
+  const imageCount = media.filter((item) =>
+    item.kind === "image" || item.kind === "vault_image"
+  ).length;
+  const voiceMemoCount = media.filter((item) => item.kind === "voice_memo").length;
+  const descriptions = [
+    imageCount > 0 ? `${imageCount} ${imageCount === 1 ? "image" : "images"}` : null,
+    voiceMemoCount > 0
+      ? `${voiceMemoCount} ${voiceMemoCount === 1 ? "voice memo" : "voice memos"}`
+      : null,
+    ...media
+      .filter((item) => item.kind === "vault_file")
+      .map((item) => `vault file "${normalizeHostedFailureNoteFilename(item.filename)}"`),
+  ];
+  return descriptions.filter((value): value is string => value !== null).join(", ");
 }
 
 function normalizeHostedFailureNoteFilename(filename: string): string {
@@ -7941,6 +7956,7 @@ function isHostedRuntimeRedactedLogStringValue(value: string): boolean {
 }
 
 async function writeHostedOutboxDeliveryRuntimeLog(input: {
+  deliveryEffects: HostedAssistantDeliveryEffects;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   outcomes: HostedAssistantDeliveryOutcome[];
   postNextWakeAt: string | null;
@@ -7974,6 +7990,7 @@ async function writeHostedOutboxDeliveryRuntimeLog(input: {
         deliveryErrorCodeSummary: summarizeHostedOutboxDeliveryErrorCodes(
           input.outcomes.map((outcome) => outcome.deliveryErrorCode),
         ),
+        ...buildHostedOutboxDeliveryPayloadLogFields(input.deliveryEffects),
         ...buildHostedOutboxDeliveryErrorLogFields(input.outcomes),
         failed,
         journalStatusSummary: summarizeHostedOutboxDeliveryCodes(
@@ -7995,6 +8012,40 @@ async function writeHostedOutboxDeliveryRuntimeLog(input: {
     },
     platform: input.input.platform,
   });
+}
+
+function buildHostedOutboxDeliveryPayloadLogFields(
+  effects: HostedAssistantDeliveryEffects,
+): HostedRuntimeRedactedObject {
+  const media = effects.flatMap((effect) => effect.payload.media);
+  const imageMedia = media.filter((item) =>
+    item.kind === "image" || item.kind === "vault_image"
+  );
+  const mediaCounts = effects.map((effect) => effect.payload.media.length);
+  const messageLengths = effects.map((effect) => effect.payload.message.length);
+  return {
+    imageBearingIntentCount: effects.filter((effect) => effect.payload.media.some((item) =>
+      item.kind === "image" || item.kind === "vault_image"
+    )).length,
+    imageMediaItemCount: imageMedia.length,
+    maxMediaItemsPerIntent: Math.max(0, ...mediaCounts),
+    maxMessageLength: Math.max(0, ...messageLengths),
+    mediaItemCount: media.length,
+    mediaKindSummary: summarizeHostedOutboxDeliveryCodes(
+      media.map((item) => item.kind),
+    ),
+    privateImageMediaItemCount:
+      imageMedia.filter((item) => item.kind === "vault_image").length,
+    publicImageMediaItemCount:
+      imageMedia.filter((item) => item.kind === "image").length,
+    totalImageAltTextLength: imageMedia.reduce(
+      (total, item) => total + (item.alt?.length ?? 0),
+      0,
+    ),
+    totalMessageLength: messageLengths.reduce((total, length) => total + length, 0),
+    vaultFileMediaItemCount: media.filter((item) => item.kind === "vault_file").length,
+    voiceMemoMediaItemCount: media.filter((item) => item.kind === "voice_memo").length,
+  };
 }
 
 function summarizeHostedOutboxDeliveryCodes(values: readonly (string | null)[]): string {
@@ -8085,23 +8136,57 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     sanitizedDetails,
     ["errorCode", "errorCodeDetail", "providerErrorCode"],
   ));
-  appendHostedOutboxDeliveryErrorDetail(output, "Description", readFirstHostedOutboxDeliveryErrorDetail(
-    sanitizedDetails,
-    ["description", "errorDetail", "safeErrorMessage"],
-  ));
   appendHostedOutboxDeliveryErrorDetail(output, "Operation", readFirstHostedOutboxDeliveryErrorDetail(
     sanitizedDetails,
     ["operation", "action"],
   ));
   appendHostedOutboxDeliveryErrorDetail(output, "FailureStage", sanitizedDetails.failureStage);
   appendHostedOutboxDeliveryErrorDetail(output, "Method", sanitizedDetails.method);
-  appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
-  appendHostedOutboxDeliveryErrorDetail(output, "TimedOut", sanitizedDetails.timedOut);
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "RequestSummary",
+    buildHostedOutboxDeliveryDiagnosticSummary(sanitizedDetails, [
+      ["messageLength", "requestMessageLength"],
+      ["partCount", "requestMessagePartCount"],
+      ["textPartCount", "requestTextPartCount"],
+      ["mediaPartCount", "requestMediaPartCount"],
+      ["publicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+      ["attachmentMediaPartCount", "requestAttachmentMediaPartCount"],
+      ["bodyShape", "requestBodyShape"],
+    ]),
+  );
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "ResponseSummary",
+    buildHostedOutboxDeliveryDiagnosticSummary(sanitizedDetails, [
+      ["kind", "responseBodyKind"],
+      ["textLength", "responseBodyTextLength"],
+      ["keyCount", "responseBodyKeyCount"],
+      ["keySummary", "responseBodyKeySummary"],
+      ["stringFieldCount", "responseBodyStringFieldCount"],
+      ["stringFieldSummary", "responseBodyStringFieldSummary"],
+    ]),
+  );
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "ProviderRequestId",
+    sanitizedDetails.providerRequestId,
+  );
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "ResponseSignature",
+    sanitizedDetails.responseBodySha256,
+  );
   appendHostedOutboxDeliveryErrorDetail(
     output,
     "TransportErrorName",
     sanitizedDetails.transportErrorName,
   );
+  appendHostedOutboxDeliveryErrorDetail(output, "TimedOut", sanitizedDetails.timedOut);
+  appendHostedOutboxDeliveryErrorDetail(output, "Description", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["description", "errorDetail", "safeErrorMessage"],
+  ));
   appendHostedOutboxDeliveryErrorDetail(output, "ErrorName", readFirstHostedOutboxDeliveryErrorDetail(
     sanitizedDetails,
     ["name", "errorName"],
@@ -8114,8 +8199,29 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     sanitizedDetails,
     ["errorCause", "cause"],
   ));
-  output.deliveryErrorDetailFieldCount = Object.keys(sanitizedDetails).length;
+  appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
+  if (Object.keys(output).length < 9) {
+    output.deliveryErrorDetailFieldCount = Object.keys(sanitizedDetails).length;
+  }
   return output;
+}
+
+function buildHostedOutboxDeliveryDiagnosticSummary(
+  details: Record<string, HostedRuntimeRedactedScalar>,
+  fields: readonly (readonly [label: string, key: string])[],
+): string | undefined {
+  const summary: Record<string, HostedRuntimeRedactedScalar> = {};
+  for (const [label, key] of fields) {
+    const value = details[key];
+    if (value === undefined) {
+      continue;
+    }
+    const normalized = normalizeHostedOutboxDeliveryErrorDetail(value);
+    if (normalized !== null) {
+      summary[label] = normalized;
+    }
+  }
+  return Object.keys(summary).length > 0 ? JSON.stringify(summary) : undefined;
 }
 
 function normalizeHostedOutboxDeliveryErrorDetails(
@@ -8152,7 +8258,9 @@ function appendHostedOutboxDeliveryErrorDetail(
   suffix: string,
   value: HostedRuntimeRedactedScalar | undefined,
 ): void {
-  if (value === undefined) {
+  // A delivery summary always has seven base fields. Keep details to nine so
+  // every summary satisfies the hosted runtime parser's 16-key object bound.
+  if (value === undefined || Object.keys(output).length >= 9) {
     return;
   }
 

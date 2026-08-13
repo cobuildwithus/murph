@@ -98,4 +98,15 @@ describe('assistant response media', () => {
       },
     ])
   })
+
+  it('keeps the wider persisted-media compatibility budget readable', () => {
+    const legacyMedia = Array.from({ length: 40 }, (_, index) => ({
+      alt: `Legacy frame ${index + 1}`,
+      kind: 'image' as const,
+      source: `legacy:${index + 1}`,
+      url: `https://cdn.example.test/legacy/frame-${index + 1}.png`,
+    }))
+
+    expect(normalizeAssistantResponseMediaList(legacyMedia)).toHaveLength(40)
+  })
 })

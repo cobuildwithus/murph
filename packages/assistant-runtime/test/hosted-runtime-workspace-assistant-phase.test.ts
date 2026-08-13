@@ -7689,7 +7689,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["fitbit"],
+            providerFilter: ["fitbit", "dexcom_v3", "dexcom"],
             region: "us",
           },
           strava: {
@@ -7713,6 +7713,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
+          { label: "Dexcom (G6 and older)", provider: "dexcom" },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
@@ -7795,7 +7796,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "connect",
       provider: "strava",
     })).rejects.toThrow("not available to connect");
-    expect(connectLinkRequests).toHaveLength(1);
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom_v3",
+    })).rejects.toThrow("not available to connect");
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom",
+    })).resolves.toEqual({
+      action: "connect",
+      link: expect.objectContaining({ provider: "dexcom" }),
+    });
+    expect(connectLinkRequests).toEqual([
+      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
+      { connectTarget: "dexcom", messagingReturnTarget: "telegram" },
+    ]);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -7804,8 +7819,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 2,
-        deviceConnectProviders: ["whoop", "fitbit"],
+        deviceConnectProviderCount: 3,
+        deviceConnectProviders: ["whoop", "fitbit", "dexcom"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -7821,6 +7836,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectReturnTarget: "telegram",
         expiresAtPresent: true,
         provider: "whoop",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "requested",
+        deviceConnectReturnTarget: "telegram",
+        provider: "dexcom",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "issued",
+        deviceConnectReturnTarget: "telegram",
+        expiresAtPresent: true,
+        provider: "dexcom",
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
@@ -8160,7 +8188,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
     expect(prompt).toContain("Strava currently needs reconnect");
-    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).toContain("Reconnect is not currently available for this wearable/source");
+    expect(prompt).toContain("Do not offer or issue a reconnect link");
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 
@@ -8713,8 +8742,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("writes an outbox delivery summary after committed delivery effects drain", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const deliveryEffect = {
+      ...createDeliveryEffect(),
+      payload: {
+        ...createDeliveryEffect().payload,
+        media: [
+          {
+            alt: "Start",
+            kind: "image" as const,
+            source: "exercise_catalog:movement:1",
+            url: "https://cdn.example.test/exercises/start.png",
+          },
+          {
+            alt: "Finish",
+            contentType: "image/png" as const,
+            filename: "finish.png",
+            kind: "vault_image" as const,
+            ref: "generated/finish.png",
+            sha256: "a".repeat(64),
+            sizeBytes: 1234,
+            source: "murph.generate_image",
+          },
+        ],
+      },
+    };
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      createDeliveryEffect(),
+      deliveryEffect,
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
@@ -8756,9 +8809,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         attempted: 1,
         failed: 0,
+        imageBearingIntentCount: 1,
+        imageMediaItemCount: 2,
+        maxMediaItemsPerIntent: 2,
+        maxMessageLength: "Synthetic delivery".length,
+        mediaItemCount: 2,
+        mediaKindSummary: "image:1,vault_image:1",
+        privateImageMediaItemCount: 1,
+        publicImageMediaItemCount: 1,
         retryable: 0,
         sent: 1,
         statusSummary: "sent:1",
+        totalImageAltTextLength: "Start".length + "Finish".length,
+        totalMessageLength: "Synthetic delivery".length,
+        vaultFileMediaItemCount: 0,
+        voiceMemoMediaItemCount: 0,
       }),
     }));
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
@@ -9392,6 +9457,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             ref: "documents/lab-results.pdf",
             sha256: "a".repeat(64),
             sizeBytes: 1234,
+          }, {
+            alt: "Start position",
+            kind: "image" as const,
+            source: "exercise_catalog:movement:1",
+            url: "https://cdn.example.test/exercises/start.png",
           }],
         },
       };
@@ -9499,6 +9569,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "outgoing message failed to send and was NOT delivered",
       );
       expect(event?.content.text).toContain('vault file "lab-results.pdf"');
+      expect(event?.content.text).toContain("1 image");
+      expect(event?.content.text).toContain(
+        "A text-only substitute is not equivalent; do not offer or send one as recovery",
+      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -12319,6 +12393,102 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(serializedLog).not.toContain("REDACTED_TOKEN");
     expect(serializedLog).not.toContain("private-object");
     expect(serializedLog).not.toContain("uploads.example.test");
+    expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
+  });
+
+  it("projects Linq payload shape and response signatures without provider content", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+        deliveryErrorDetails: {
+          failureStage: "http",
+          method: "POST",
+          name: "VaultCliError",
+          operation: "send_message",
+          providerErrorCode: "INVALID_MEDIA",
+          providerErrorMessage: "provider response prose",
+          providerRequestId: "trace_safe_123",
+          requestAttachmentMediaPartCount: 1,
+          requestBodyShape: "object:message|message:idempotency_key,parts",
+          requestMediaPartCount: 8,
+          requestMessageLength: 4321,
+          requestMessagePartCount: 9,
+          requestPublicUrlMediaPartCount: 7,
+          requestTextPartCount: 1,
+          responseBodyKeyCount: 4,
+          responseBodyKeySummary: "code,errors,trace_id",
+          responseBodyKind: "json_object",
+          responseBodySha256: "a".repeat(64),
+          responseBodyStringFieldCount: 3,
+          responseBodyStringFieldSummary: "code,trace_id",
+          responseBodyTextLength: 246,
+          retryable: false,
+          status: 400,
+        },
+        deliveryErrorMessage:
+          "Linq request POST /chats/[chat]/messages failed with HTTP 400.",
+        effectId: "effect_linq_payload_diagnostics",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+    const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests)[1];
+
+    expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      deliveryErrorSummaries: [
+        expect.objectContaining({
+          deliveryErrorDetailFailureStage: "http",
+          deliveryErrorDetailMethod: "POST",
+          deliveryErrorDetailOperation: "send_message",
+          deliveryErrorDetailProviderCode: "INVALID_MEDIA",
+          deliveryErrorDetailProviderRequestId: "trace_safe_123",
+          deliveryErrorDetailRequestSummary: JSON.stringify({
+            messageLength: 4321,
+            partCount: 9,
+            textPartCount: 1,
+            mediaPartCount: 8,
+            publicUrlMediaPartCount: 7,
+            attachmentMediaPartCount: 1,
+            bodyShape: "object:message|message:idempotency_key,parts",
+          }),
+          deliveryErrorDetailResponseSummary: JSON.stringify({
+            kind: "json_object",
+            textLength: 246,
+            keyCount: 4,
+            keySummary: "code,errors,trace_id",
+            stringFieldCount: 3,
+            stringFieldSummary: "code,trace_id",
+          }),
+          deliveryErrorDetailResponseSignature: "a".repeat(64),
+          deliveryErrorDetailStatus: 400,
+        }),
+      ],
+    }));
+    const deliveryErrorSummaries = deliveryLogRequest?.entries[0]?.redactedJson
+      ?.deliveryErrorSummaries;
+    expect(Array.isArray(deliveryErrorSummaries)).toBe(true);
+    if (!Array.isArray(deliveryErrorSummaries)) {
+      throw new Error("Expected delivery error summaries.");
+    }
+    const deliveryErrorSummary = deliveryErrorSummaries[0];
+    expect(deliveryErrorSummary).toBeDefined();
+    if (
+      deliveryErrorSummary === null
+      || typeof deliveryErrorSummary !== "object"
+      || Array.isArray(deliveryErrorSummary)
+    ) {
+      throw new Error("Expected a delivery error summary object.");
+    }
+    expect(Object.keys(deliveryErrorSummary)).toHaveLength(16);
+    expect(JSON.stringify(deliveryLogRequest)).not.toContain("provider response prose");
     expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });
 
@@ -15172,6 +15342,48 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: codexAuthItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
+  it("defers vault-share projection work until after the durable checkpoint", async () => {
+    const vaultShareItem = createVaultShareProjectionSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: vaultShareItem,
+      itemId: vaultShareItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Array),
+      checkpointReason: "system_mailbox_receipt",
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecordDeferred: true,
+      }),
+    }));
+
+    const effects = postCheckpoint?.afterDurableCheckpoint;
+    const effect = typeof effects === "function" ? effects : effects?.[0];
+    if (!effect) {
+      throw new Error("Expected deferred vault-share projection effect.");
+    }
+    await effect();
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: vaultShareItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
@@ -18488,6 +18700,24 @@ function createCodexAuthSystemMailboxItem() {
       attemptId: "hca_abcdefghijklmnop",
       eventId: "runtime-control:codex-auth",
       kind: "runtime.codex-auth-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createVaultShareProjectionSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_vault_share_projection",
+    mailboxDedupeKey: "runtime-control:group-share-projection:synthetic",
+    postCheckpointRecord: {
+      kind: "vault-share.projection" as const,
+    },
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      eventId: "runtime-control:group-share-projection:synthetic",
+      kind: "runtime.maintenance-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },

@@ -53,6 +53,7 @@ const skippedDirectoryNames = new Set([
   "tests",
 ]);
 const providerModulePrefixes = [
+  "@composio/client",
   "@junction-api/sdk",
   "@linqapp/sdk",
   "@onkernel/sdk",
@@ -62,6 +63,7 @@ const providerModulePrefixes = [
   "stripe",
 ] as const;
 const providerSourceMarkers = [
+  "@composio/client",
   "@junction-api/sdk",
   "@linqapp/sdk",
   "@onkernel/sdk",

@@ -6760,8 +6760,8 @@ function createAbortGuardedHostedRuntimePlatform(
           vaultSharePort: {
             deliver: (deliverInput) =>
               guard(() => platform.vaultSharePort!.deliver(deliverInput)),
-            listActiveProjectionScopes: () =>
-              guard(() => platform.vaultSharePort!.listActiveProjectionScopes()),
+            listActiveProjectionScopes: (listInput) =>
+              guard(() => platform.vaultSharePort!.listActiveProjectionScopes(listInput)),
           },
         }
       : {}),
