@@ -4,7 +4,7 @@ import { ID_PREFIXES, MURPH_PRODUCT_ORIGIN } from "./constants.ts";
 import { contractIdMaxLength, idPattern } from "./ids.ts";
 import { isStrictIsoDateTime } from "./time.ts";
 import {
-  buildWorkoutSessionAppCardEnvelopeV4,
+  buildWorkoutSessionAppCardEnvelopeV6,
   parseWorkoutSessionAppCardEnvelopeV4,
   workoutSessionDetailV1Schema,
 } from "./workout-session-card.ts";
@@ -178,7 +178,8 @@ const compactTableWorkoutResponseCardV1Schema = z
   })
   .strict()
   .superRefine((card, context) => {
-    const envelope = buildWorkoutSessionAppCardEnvelopeV4({
+    const envelope = buildWorkoutSessionAppCardEnvelopeV6({
+      actionBinding: "0".repeat(64),
       title: card.title,
       subtitle: card.subtitle,
       footer: card.footer,
@@ -239,7 +240,7 @@ export function parseCompactTableAppCardEnvelope(
     return presentation;
   }
 
-  if (value.schemaVersion === 4) {
+  if (value.schemaVersion === 4 || value.schemaVersion === 6) {
     const parsed = parseWorkoutSessionAppCardEnvelopeV4(value);
     return parsed === null
       ? null

@@ -21,6 +21,7 @@ describe("hosted member action runtime", () => {
   it("applies the typed action directly without an assistant turn", async () => {
     const action = {
       expectedWorkout: {
+        actionBinding: "a".repeat(64),
         exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
       },
       kind: "workout.live.apply" as const,
@@ -36,7 +37,7 @@ describe("hosted member action runtime", () => {
       version: 1 as const,
     };
 
-    await expect(executeHostedMemberActionWake({
+    const outcome = await executeHostedMemberActionWake({
       vaultRoot: "/vault",
       wake: {
         eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
@@ -50,14 +51,76 @@ describe("hosted member action runtime", () => {
         },
         userId: "member-1",
       },
-    })).resolves.toMatchObject({
+    });
+    expect(outcome).toMatchObject({
       conversationMetrics: null,
       mailboxLane: "member-action",
+      postCheckpointRecord: {
+        kind: "member-action.outcome-recorded",
+        outcome: {
+          actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+          reason: null,
+          schemaVersion: 1,
+          status: "applied",
+        },
+      },
     });
+    expect(Date.parse(
+      outcome.postCheckpointRecord?.kind === "member-action.outcome-recorded"
+        ? outcome.postCheckpointRecord.outcome.completedAt
+        : "",
+    )).not.toBeNaN();
     expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledWith({
       acceptedAt: "2026-08-12T15:00:00.000Z",
       action,
       vault: "/vault",
+    });
+  });
+
+  it("records a typed terminal rejection for the client", async () => {
+    mocks.applyLiveWorkoutMemberAction.mockResolvedValueOnce({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+
+    const outcome = await executeHostedMemberActionWake({
+      vaultRoot: "/vault",
+      wake: {
+        eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        kind: "member.action.requested",
+        occurredAt: "2026-08-12T15:00:00.000Z",
+        request: {
+          action: {
+            expectedWorkout: {
+              actionBinding: "a".repeat(64),
+              exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+            },
+            kind: "workout.live.apply",
+            mutations: [{
+              exerciseName: "Leg press",
+              exercisePosition: 1,
+              expectedResult: null,
+              kind: "set.put",
+              requiresExistingSet: true,
+              result: { kind: "reps", reps: 8 },
+              setPosition: 1,
+            }],
+            version: 1,
+          },
+          actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+          requestedAt: "2026-08-12T15:00:00.000Z",
+          schemaVersion: 1,
+        },
+        userId: "member-1",
+      },
+    });
+
+    expect(outcome.postCheckpointRecord).toMatchObject({
+      kind: "member-action.outcome-recorded",
+      outcome: {
+        reason: "workout_changed",
+        status: "rejected",
+      },
     });
   });
 });

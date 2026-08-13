@@ -6,6 +6,7 @@ import {
 import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
+import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
   parseHostedClinicalRecordsRecordOutcomeRequest,
 } from "@murphai/hosted-execution/clinical-records-boundary";
@@ -627,6 +628,18 @@ function parseHostedSystemMailboxRecordRequest(
     return {
       audioKey,
       kind: "environment-voice.audio-delete",
+    };
+  }
+
+  if (record.kind === "member-action.outcome-recorded") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["kind", "outcome"],
+      "hosted system mailbox member-action postCheckpointRecord",
+    );
+    return {
+      kind: "member-action.outcome-recorded",
+      outcome: parseMemberActionOutcomeV1(record.outcome),
     };
   }
 

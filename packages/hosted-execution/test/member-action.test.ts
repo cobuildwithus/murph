@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedExecutionMemberActionCompletedWake,
   buildHostedExecutionMemberActionRequestedWake,
 } from "../src/builders.ts";
 import {
@@ -11,6 +12,7 @@ import {
 const request = {
   action: {
     expectedWorkout: {
+      actionBinding: "a".repeat(64),
       exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
     },
     kind: "workout.live.apply" as const,
@@ -59,5 +61,31 @@ describe("hosted member action", () => {
       request: { ...request, token: "not-allowed" },
       userId: "member-1",
     })).toThrow();
+  });
+
+  it("round-trips the typed terminal outcome wake", () => {
+    const wake = buildHostedExecutionMemberActionCompletedWake({
+      eventId: `member.action.completed:${request.actionId}`,
+      memberId: "member-1",
+      occurredAt: "2026-08-12T15:00:01.000Z",
+      outcome: {
+        actionId: request.actionId,
+        completedAt: "2026-08-12T15:00:01.000Z",
+        reason: null,
+        schemaVersion: 1,
+        status: "applied",
+      },
+    });
+
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(parseHostedExecutionEvent({
+      kind: wake.kind,
+      outcome: wake.outcome,
+      userId: wake.userId,
+    })).toEqual({
+      kind: wake.kind,
+      outcome: wake.outcome,
+      userId: wake.userId,
+    });
   });
 });

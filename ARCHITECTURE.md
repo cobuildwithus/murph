@@ -2109,15 +2109,21 @@ The Messages bridge submits one generic, versioned `MemberActionRequestV1`
 envelope whose `action` is a closed discriminated union. The first action family,
 `workout.live.apply`, contains only bounded workout snapshot preconditions and
 typed exercise/set mutations; it is not an arbitrary path, patch, database, or
-tool-call surface. Web authenticates and validates the request, locks and
+tool-call surface. The native V6 card adds one opaque SHA-256 action binding;
+it contains no canonical id and grants no authority, but lets the workout owner
+prove under its existing lock that an old card still names the exact active
+workout. Web authenticates and validates the request, locks and
 re-checks member access and consent, then appends one encrypted
 `member.action.requested:<actionId>` item to the existing system mailbox before
 signaling the existing Temporal runtime. Runtime dispatches the action directly
 to the canonical vault use case without starting an assistant turn. The workout
 owner takes the existing live-workout mutation lock, requires exactly one active
-workout matching the authority-free visible shape and accepted before any
-replacement workout started, applies the complete batch in one canonical write,
-converges exact retries, and rejects stale or ambiguous state. A future data
+workout matching both that binding and the authority-free visible shape, applies
+the complete batch in one canonical write, converges exact retries, and rejects
+stale or ambiguous state. Runtime appends a typed terminal outcome through the
+same mailbox owner before the original request checkpoint is released. The
+scoped client reads that action-id-keyed receipt and reports success only for an
+applied or already-converged result. A future data
 editor extends the closed action union and delegates to its
 existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
 instead of adding another queue, state store, or generic mutation engine.
@@ -2871,19 +2877,19 @@ for recipients without the extension. A compact card is a bounded
 presentation snapshot, never a mutable tracker: canonical workout events remain
 the only workout authority, qualitative set annotations live on canonical set
 notes, and an update is complete only after a successful workout re-read
-followed by a new V4 workout snapshot. Generic compact tables continue to use
-V3.
+followed by a new V6 native workout snapshot and V4 static fallback. Generic
+compact tables continue to use V3.
 
 The optional tracking reference is one exact canonical event ULID plus a
 canonical UTC snapshot instant. That reference remains in semantic transcript
 history so a later turn can reopen the workout without a second table store;
 both presentation projections omit it before encoding the card URL. Linq
-requires an HTTPS app-card URL, so V3 generic-table and V4 workout envelopes use
-a bounded Base64URL fragment on the fixed canonical
+requires an HTTPS app-card URL, so V3 generic-table and V6 native-workout
+envelopes use a bounded Base64URL fragment on the fixed canonical
 `https://www.withmurph.ai/` origin. The fragment stays inside the immutable
 message URL, is not sent to the Web origin by an HTTPS request, and is decoded
 locally by the Messages extension. Recipients without that extension receive a
-provider static layout whose `image_url` carries the exact same authority-free
+provider static layout whose `image_url` carries the authority-free V4 workout
 envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
 stateless Web renderer accepts only strict V1-V5 presentation envelopes, reads
 no database or remote service, logs no card values, and returns private
@@ -2891,8 +2897,9 @@ no-store/no-index headers. Linq uses that image as its static card fallback;
 Telegram daily-nutrition Rich Messages reuse the same image inside their native
 table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain only the bounded values permitted by its
-versioned delivery contract. V1-V4 carry the same private-direct presentation
-values; V5 uses the identity-free public challenge projection. Neither may
+versioned delivery contract. V1-V4 carry private-direct presentation values;
+V5 uses the identity-free public challenge projection, and native-only V6 adds
+the opaque exact-workout binding. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
 Generic V3 tables choose their one shared-header grid solely from the exact
@@ -2905,12 +2912,13 @@ delivery. Compact-table provider chrome uses only bounded title, optional
 generic subtitle, and derived workout-progress fields; complete detail remains
 owned by the semantic text renderer. Nutrition V1 and V2 cards use the
 same bounded fragment and image-path family without a tracking field. The card
-remains offline, read-only presentation. For an active V4 workout only, the
+remains offline, read-only presentation. For an active V6 workout only, the
 Messages extension may use the separately enrolled Messages-scoped credential
 to submit a bounded member action derived from the visible snapshot. The URL
 still carries no identity, canonical id, credential, or authority, and all other
 card kinds remain local presentation. This adds no mutable card state, card
-database, background synchronization owner, queue, or model turn.
+database, background synchronization owner, queue, or model turn. V4 workout
+cards already in transcripts remain readable but cannot open the direct editor.
 
 ## Scheduled assistant tool authority
 

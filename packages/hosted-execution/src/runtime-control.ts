@@ -166,6 +166,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "environment-voice.captured",
   "meal-photo.captured",
   "member.action.requested",
+  "member.action.completed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_RETIRED_MAILBOX_KINDS,

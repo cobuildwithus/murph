@@ -33,7 +33,6 @@ export async function submitMemberAction(input: {
   prisma: PrismaClient;
   request: MemberActionRequestV1;
 }): Promise<SubmitMemberActionResult> {
-  const occurredAt = new Date().toISOString();
   const appended = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
@@ -50,7 +49,7 @@ export async function submitMemberAction(input: {
       envelope: buildHostedExecutionMemberActionRequestedWake({
         eventId: `member.action.requested:${input.request.actionId}`,
         memberId: input.memberId,
-        occurredAt,
+        occurredAt: input.request.requestedAt,
         request: input.request,
       }),
       tx,

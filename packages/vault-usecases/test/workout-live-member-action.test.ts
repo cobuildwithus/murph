@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkoutSession } from "@murphai/contracts";
+import { deriveWorkoutActionBinding } from "@murphai/operator-config/workout-action-binding";
 
 const mocks = vi.hoisted(() => ({
   findActiveLiveWorkouts: vi.fn(),
@@ -30,12 +31,16 @@ const BASE_WORKOUT: WorkoutSession = {
   startedAt: "2026-08-12T14:00:00.000Z",
 };
 const ACCEPTED_AT = "2026-08-12T15:00:00.000Z";
+const ACTION_BINDING = deriveWorkoutActionBinding("evt_test_workout");
 
-function shownWorkout(workout: WorkoutSession = BASE_WORKOUT) {
+function shownWorkout(
+  workout: WorkoutSession = BASE_WORKOUT,
+  id = "evt_test_workout",
+) {
   return {
     entity: {
       data: { workout },
-      id: "evt_test_workout",
+      id,
     },
     vault: "/vault",
   };
@@ -44,6 +49,7 @@ function shownWorkout(workout: WorkoutSession = BASE_WORKOUT) {
 function setAction(result: { kind: "reps"; reps: number }) {
   return {
     expectedWorkout: {
+      actionBinding: ACTION_BINDING,
       exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
     },
     kind: "workout.live.apply" as const,
@@ -93,6 +99,22 @@ describe("live workout member action", () => {
         name: "Back squat",
       }],
     })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction({ kind: "reps", reps: 8 }),
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("does not retarget an old card to a later same-shaped workout", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([
+      shownWorkout(BASE_WORKOUT, "evt_later_workout"),
+    ]);
 
     await expect(applyLiveWorkoutMemberAction({
       acceptedAt: ACCEPTED_AT,
@@ -162,6 +184,7 @@ describe("live workout member action", () => {
   it("appends an exercise and fills its sets in the same write", async () => {
     const action = {
       expectedWorkout: {
+        actionBinding: ACTION_BINDING,
         exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
       },
       kind: "workout.live.apply" as const,

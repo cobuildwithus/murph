@@ -156,6 +156,13 @@ export type WorkoutSessionAppCardEnvelopeV4 = {
   };
 };
 
+export type WorkoutSessionAppCardEnvelopeV6 = {
+  schemaVersion: 6;
+  card: WorkoutSessionAppCardEnvelopeV4["card"] & {
+    b: string;
+  };
+};
+
 export type WorkoutSessionAppCardPresentationV4 = {
   title: string;
   subtitle: string | null;
@@ -194,17 +201,42 @@ export function buildWorkoutSessionAppCardEnvelopeV4(input: {
   };
 }
 
+export function buildWorkoutSessionAppCardEnvelopeV6(input: {
+  actionBinding: string;
+  title: string;
+  subtitle: string | null;
+  footer: string | null;
+  workout: WorkoutSessionDetailV1;
+}): WorkoutSessionAppCardEnvelopeV6 {
+  if (!isWorkoutActionBinding(input.actionBinding)) {
+    throw new TypeError("Workout action binding is invalid.");
+  }
+  const legacy = buildWorkoutSessionAppCardEnvelopeV4(input);
+  return {
+    schemaVersion: 6,
+    card: {
+      ...legacy.card,
+      b: input.actionBinding,
+    },
+  };
+}
+
 /**
- * Restores the readable, authority-free presentation snapshot from the compact
- * V4 wire. Canonical workout tracking remains intentionally absent.
+ * Restores the readable presentation snapshot from either workout-card wire.
+ * The V6 action binding is validated and intentionally omitted from presentation.
  */
 export function parseWorkoutSessionAppCardEnvelopeV4(
   value: unknown,
 ): WorkoutSessionAppCardPresentationV4 | null {
   if (
     !isExactRecord(value, ["schemaVersion", "card"])
-    || value.schemaVersion !== 4
-    || !isExactRecord(value.card, ["k", "v", "t", "u", "s", "e", "f"])
+    || (value.schemaVersion !== 4 && value.schemaVersion !== 6)
+    || !isExactRecord(
+      value.card,
+      value.schemaVersion === 6
+        ? ["k", "v", "t", "u", "s", "e", "f", "b"]
+        : ["k", "v", "t", "u", "s", "e", "f"],
+    )
   ) {
     return null;
   }
@@ -220,6 +252,7 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
     || (card.s !== "a" && card.s !== "c")
     || !Array.isArray(card.e)
     || !isNullableSingleLineText(card.f, workoutSessionCardV1Bounds.footer)
+    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.b))
   ) {
     return null;
   }
@@ -283,6 +316,10 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
     footer: card.f,
     workout: workout.data,
   };
+}
+
+function isWorkoutActionBinding(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
 }
 
 function isExactRecord(

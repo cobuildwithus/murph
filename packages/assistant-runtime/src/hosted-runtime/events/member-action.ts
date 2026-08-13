@@ -16,7 +16,7 @@ export async function executeHostedMemberActionWake(input: {
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.request.action.kind) {
     case "workout.live.apply":
-      await applyLiveWorkoutMemberAction({
+      const result = await applyLiveWorkoutMemberAction({
         acceptedAt: input.wake.occurredAt,
         action: input.wake.request.action,
         vault: input.vaultRoot,
@@ -24,6 +24,16 @@ export async function executeHostedMemberActionWake(input: {
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: input.wake.request.actionId,
+            completedAt: new Date().toISOString(),
+            reason: result.status === "rejected" ? result.reason : null,
+            schemaVersion: 1,
+            status: result.status,
+          },
+        },
       });
   }
 }

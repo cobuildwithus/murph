@@ -13,6 +13,7 @@ import {
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
+import { deriveWorkoutActionBinding } from '../src/workout-action-binding.js'
 
 const ACTIVE_WORKOUT_CARD = {
   kind: 'compact_table',
@@ -95,14 +96,22 @@ function decodeAppCardUrl(url: string): unknown {
   )
 }
 
+function decodeImageCardUrl(url: string): unknown {
+  const encoded = new URL(url).pathname
+    .replace(/^\/imessage\/card\/v1\//u, '')
+    .replace(/\.png$/u, '')
+  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+}
+
 describe('workout session response cards', () => {
-  it('keeps canonical tracking out of the compact V4 payload', () => {
+  it('binds the native editor without exposing canonical workout identity', () => {
     const url = encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD)
 
     expect(url.length).toBeLessThan(2_048)
     expect(decodeAppCardUrl(url)).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 6,
       card: {
+        b: deriveWorkoutActionBinding(ACTIVE_WORKOUT_CARD.tracking.entityId),
         k: 'w',
         v: 1,
         t: 'Push day',
@@ -131,9 +140,14 @@ describe('workout session response cards', () => {
     })
     expect(JSON.stringify(decodeAppCardUrl(url))).not.toContain('evt_')
     expect(JSON.stringify(decodeAppCardUrl(url))).not.toContain('snapshotAt')
+    const imageEnvelope = decodeImageCardUrl(
+      buildLinqIMessageAppLayout(ACTIVE_WORKOUT_CARD).image_url ?? '',
+    )
+    expect(imageEnvelope).toMatchObject({ schemaVersion: 4 })
+    expect(JSON.stringify(imageEnvelope)).not.toContain('"b"')
   })
 
-  it('routes enhanced compact tables through V4 and ordinary tables through V3', () => {
+  it('routes enhanced compact tables through V6 and ordinary tables through V3', () => {
     expect(encodeCompactTableAppCardUrl(ACTIVE_WORKOUT_CARD)).toBe(
       encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD),
     )
@@ -204,7 +218,7 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1403, 1612, 1624])
+    expect(urls.map((url) => url.length)).toEqual([1497, 1707, 1719])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 
@@ -239,7 +253,7 @@ describe('workout session response cards', () => {
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(legacyCard),
     )).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 6,
       card: { u: '3/6 sets complete' },
     })
   })
@@ -453,7 +467,7 @@ describe('workout session response cards', () => {
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(completedCard),
     )).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 6,
       card: {
         s: 'c',
         u: null,

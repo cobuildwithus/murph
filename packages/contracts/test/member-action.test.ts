@@ -9,6 +9,7 @@ function validRequest() {
   return {
     action: {
       expectedWorkout: {
+        actionBinding: "a".repeat(64),
         exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
       },
       kind: "workout.live.apply" as const,
@@ -61,6 +62,7 @@ describe("member action contract", () => {
       action: {
         ...request.action,
         expectedWorkout: {
+          actionBinding: request.action.expectedWorkout.actionBinding,
           exercises: Array.from({ length: 9 }, (_, index) => ({
             name: `Exercise ${index + 1}`,
             sets: [{ logged: false }],
@@ -75,6 +77,16 @@ describe("member action contract", () => {
         mutations: [],
       },
     }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: Array.from(
+          { length: 72 },
+          () => request.action.mutations[0],
+        ),
+      },
+    }).success).toBe(true);
     expect(memberActionRequestV1Schema.safeParse({
       ...request,
       action: {

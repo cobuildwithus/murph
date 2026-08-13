@@ -15,6 +15,7 @@ import {
   normalizeStoredAssistantPersonaId,
   normalizeIanaTimeZone,
   parseMemberActionRequestV1,
+  parseMemberActionOutcomeV1,
 } from "@murphai/contracts";
 
 import {
@@ -56,6 +57,7 @@ import type {
   HostedExecutionEnvironmentVoiceCapturedPayload,
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionMemberActionRequestedEvent,
+  HostedExecutionMemberActionCompletedEvent,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDirectRoute,
   HostedExecutionWake,
@@ -97,6 +99,7 @@ import {
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionRequestedWake,
+  buildHostedExecutionMemberActionCompletedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
@@ -382,6 +385,20 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
         request: parseMemberActionRequestV1(record.request),
+      });
+    case "member.action.completed":
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "outcome",
+        "userId",
+      ], "Hosted execution member.action.completed wake");
+      return buildHostedExecutionMemberActionCompletedWake({
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        outcome: parseMemberActionOutcomeV1(record.outcome),
       });
     case "device-sync.wake":
       return buildHostedExecutionDeviceSyncWake({
@@ -1418,6 +1435,17 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         request: parseMemberActionRequestV1(record.request),
         userId,
       } satisfies HostedExecutionMemberActionRequestedEvent;
+    case "member.action.completed":
+      assertExactHostedExecutionKeys(record, [
+        "kind",
+        "outcome",
+        "userId",
+      ], "Hosted execution member.action.completed event");
+      return {
+        kind,
+        outcome: parseMemberActionOutcomeV1(record.outcome),
+        userId,
+      } satisfies HostedExecutionMemberActionCompletedEvent;
     case "device-sync.wake":
       return {
         ...(record.connectionId === undefined

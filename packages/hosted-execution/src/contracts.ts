@@ -13,6 +13,7 @@ import type {
   AssistantTonePreference,
   AssistantVoiceOptionId,
   MemberActionRequestV1,
+  MemberActionOutcomeV1,
 } from "@murphai/contracts";
 import type {
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -69,6 +70,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "member.action.requested",
+  "member.action.completed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -93,6 +95,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "environment-voice.captured",
   "meal-photo.captured",
   "member.action.requested",
+  "member.action.completed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -491,6 +494,12 @@ export interface HostedExecutionMemberActionRequestedEvent
   request: MemberActionRequestV1;
 }
 
+export interface HostedExecutionMemberActionCompletedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "member.action.completed";
+  outcome: MemberActionOutcomeV1;
+}
+
 export type HostedExecutionDirectRoute =
   | {
       channel: "linq" | "telegram";
@@ -537,6 +546,7 @@ export type HostedExecutionEvent =
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionMemberActionRequestedEvent
+  | HostedExecutionMemberActionCompletedEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -837,6 +847,12 @@ export interface HostedExecutionMemberActionRequestedWake
   request: MemberActionRequestV1;
 }
 
+export interface HostedExecutionMemberActionCompletedWake
+  extends HostedExecutionBaseWake {
+  kind: "member.action.completed";
+  outcome: MemberActionOutcomeV1;
+}
+
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
@@ -876,6 +892,7 @@ export type HostedExecutionWake =
   | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionMemberActionRequestedWake
+  | HostedExecutionMemberActionCompletedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;

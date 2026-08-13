@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
+  buildWorkoutSessionAppCardEnvelopeV6,
   compactTableResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
   workoutSessionCardV1Bounds,
@@ -109,6 +110,37 @@ describe("workout session compact-table contract", () => {
         e: [["Bench press", [["c", "185 lb × 8", null]]]],
       },
     })).toBeNull();
+  });
+
+  it("validates but does not expose the V6 workout action binding", () => {
+    if (!("workout" in TRACKED_WORKOUT_CARD)) {
+      throw new TypeError("Expected the workout card fixture.");
+    }
+    const envelope = buildWorkoutSessionAppCardEnvelopeV6({
+      actionBinding: "a".repeat(64),
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+
+    expect(envelope.schemaVersion).toBe(6);
+    expect(envelope.card.b).toBe("a".repeat(64));
+    expect(parseCompactTableAppCardEnvelope(envelope)).toEqual({
+      kind: "compact_table",
+      version: 1,
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+    expect(() => buildWorkoutSessionAppCardEnvelopeV6({
+      actionBinding: "A".repeat(64),
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    })).toThrow(/binding/iu);
   });
 
   it("accepts a completed workout with completed and skipped sets", () => {

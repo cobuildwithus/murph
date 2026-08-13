@@ -912,7 +912,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   switch (input.record.kind) {
     case "clinical-records.outcome-recorded": {
       const port = input.runtime.platform.clinicalRecordsPort;
-      if (!port) {
+      if (!port?.recordOutcome) {
         throw new Error(
           "Hosted clinical records outcome checkpoint requires a configured clinical records port.",
         );
@@ -958,6 +958,23 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         );
       }
       await deleteEnvironmentVoice(input.record.audioKey);
+      return {
+        nextWakeAt: null,
+        recorded: 1,
+        stillDirty: false,
+      };
+    }
+    case "member-action.outcome-recorded": {
+      const port = input.runtime.platform.mailboxPort;
+      if (!port?.recordMemberActionOutcome) {
+        throw new Error(
+          "Hosted member-action outcome checkpoint requires a configured mailbox port.",
+        );
+      }
+      await port.recordMemberActionOutcome(
+        input.record.outcome,
+        input.signal ? { signal: input.signal } : undefined,
+      );
       return {
         nextWakeAt: null,
         recorded: 1,

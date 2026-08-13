@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   authenticateAgentSessionByTokenHash: vi.fn(),
   readJsonObject: vi.fn(async (request: Request) => await request.json()),
+  readHostedMailboxWakeByDedupeKey: vi.fn(),
   requirePrivyMemberAuthFromBearerToken: vi.fn(),
   revokeAgentSession: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
@@ -75,6 +76,7 @@ vi.mock("@/src/lib/device-sync/prisma-store/agent-sessions", () => ({
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
@@ -82,9 +84,11 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 
 type EnrollmentRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/enrollment/route");
 type MemberActionRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/member-actions/route");
+type MemberActionStatusRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/member-actions/[actionId]/route");
 
 let enrollmentRoute: EnrollmentRoute;
 let memberActionRoute: MemberActionRoute;
+let memberActionStatusRoute: MemberActionStatusRoute;
 
 function jsonRequest(url: string, token: string, method: "POST" | "DELETE", body?: unknown) {
   return createBearerRequest(url, token, {
@@ -98,6 +102,7 @@ describe("iMessage mini-app routes", () => {
   beforeAll(async () => {
     enrollmentRoute = await import("../app/api/device-sync/companion/imessage-mini-app/enrollment/route");
     memberActionRoute = await import("../app/api/device-sync/companion/imessage-mini-app/member-actions/route");
+    memberActionStatusRoute = await import("../app/api/device-sync/companion/imessage-mini-app/member-actions/[actionId]/route");
   });
 
   beforeEach(() => {
@@ -132,6 +137,7 @@ describe("iMessage mini-app routes", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member-1",
     });
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
     mocks.revokeAgentSession.mockResolvedValue({
       ...ACTIVE_SESSION,
       revokedAt: "2026-07-10T12:10:00.000Z",
@@ -391,6 +397,93 @@ describe("iMessage mini-app routes", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("re-signals an exact duplicate action with the original stable timestamp", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox-action-1",
+        lane: "system",
+        laneSeq: "7",
+      },
+    });
+    const body = validMemberActionRequest();
+
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      body,
+    ));
+
+    expect(response.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({ occurredAt: body.requestedAt }),
+      tx: transactionClient,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toMatchObject({ duplicate: true });
+  });
+
+  it("reads pending and terminal action status from the authenticated member mailbox", async () => {
+    const actionId = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+    const request = createBearerRequest(
+      `https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/${actionId}`,
+      MESSAGES_TOKEN,
+      { method: "GET" },
+    );
+
+    const pending = await memberActionStatusRoute.GET(request, {
+      params: Promise.resolve({ actionId }),
+    });
+    expect(pending.status).toBe(200);
+    await expect(pending.json()).resolves.toEqual({
+      actionId,
+      schemaVersion: 1,
+      status: "pending",
+    });
+
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValueOnce({
+      eventId: `member.action.completed:${actionId}`,
+      kind: "member.action.completed",
+      occurredAt: "2026-08-12T15:00:01.000Z",
+      outcome: {
+        actionId,
+        completedAt: "2026-08-12T15:00:01.000Z",
+        reason: null,
+        schemaVersion: 1,
+        status: "applied",
+      },
+      userId: "member-1",
+    });
+    const terminal = await memberActionStatusRoute.GET(request, {
+      params: Promise.resolve({ actionId }),
+    });
+    await expect(terminal.json()).resolves.toMatchObject({
+      actionId,
+      status: "applied",
+    });
+    expect(mocks.readHostedMailboxWakeByDedupeKey).toHaveBeenLastCalledWith({
+      dedupeKey: `member.action.completed:${actionId}`,
+      prisma,
+      userId: "member-1",
+    });
+  });
+
+  it("rejects a malformed member action status identity", async () => {
+    const response = await memberActionStatusRoute.GET(createBearerRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions/not-an-action",
+      MESSAGES_TOKEN,
+      { method: "GET" },
+    ), {
+      params: Promise.resolve({ actionId: "not-an-action" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.readHostedMailboxWakeByDedupeKey).not.toHaveBeenCalled();
+  });
+
   it("fails closed when launch consent was never granted", async () => {
     mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_CONSENT_REQUIRED",
@@ -476,6 +569,7 @@ function validMemberActionRequest() {
   return {
     action: {
       expectedWorkout: {
+        actionBinding: "a".repeat(64),
         exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
       },
       kind: "workout.live.apply",

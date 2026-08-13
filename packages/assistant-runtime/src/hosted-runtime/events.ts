@@ -238,6 +238,11 @@ async function executeHostedSystemWake(input: {
         wake: input.wake,
       });
     }
+    case "member.action.completed":
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+      });
     case "assistant.notification.requested": {
       const { executeHostedAssistantNotificationWake } = await import(
         "./events/assistant-notification.ts"

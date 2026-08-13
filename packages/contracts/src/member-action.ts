@@ -133,6 +133,7 @@ export const workoutLiveApplyMemberActionV1Schema = z
   .object({
     expectedWorkout: z
       .object({
+        actionBinding: z.string().regex(/^[0-9a-f]{64}$/u),
         exercises: z
           .array(workoutMemberActionExpectedExerciseV1Schema)
           .min(1)
@@ -158,13 +159,15 @@ export const memberActionV1Schema = z.discriminatedUnion("kind", [
 
 export type MemberActionV1 = z.infer<typeof memberActionV1Schema>;
 
+export const memberActionIdV1Schema = z
+  .string()
+  .length(memberActionV1Bounds.actionId)
+  .regex(UUID_PATTERN, "Expected a UUID action identity.");
+
 export const memberActionRequestV1Schema = z
   .object({
     action: memberActionV1Schema,
-    actionId: z
-      .string()
-      .length(memberActionV1Bounds.actionId)
-      .regex(UUID_PATTERN, "Expected a UUID action identity."),
+    actionId: memberActionIdV1Schema,
     requestedAt: z.string().datetime({ offset: true }),
     schemaVersion: z.literal(1),
   })
@@ -174,8 +177,54 @@ export type MemberActionRequestV1 = z.infer<
   typeof memberActionRequestV1Schema
 >;
 
+export const memberActionRejectionReasonV1Schema = z.enum([
+  "multiple_active_workouts",
+  "no_active_workout",
+  "workout_changed",
+]);
+
+export type MemberActionRejectionReasonV1 = z.infer<
+  typeof memberActionRejectionReasonV1Schema
+>;
+
+export const memberActionOutcomeV1Schema = z
+  .object({
+    actionId: memberActionIdV1Schema,
+    completedAt: z.string().datetime({ offset: true }),
+    reason: memberActionRejectionReasonV1Schema.nullable(),
+    schemaVersion: z.literal(1),
+    status: z.enum(["applied", "rejected", "unchanged"]),
+  })
+  .strict()
+  .superRefine((outcome, context) => {
+    if ((outcome.status === "rejected") !== (outcome.reason !== null)) {
+      context.addIssue({
+        code: "custom",
+        message: "Only a rejected member action carries a reason.",
+        path: ["reason"],
+      });
+    }
+  });
+
+export type MemberActionOutcomeV1 = z.infer<typeof memberActionOutcomeV1Schema>;
+
+export const memberActionStatusV1Schema = z.union([
+  z.object({
+    actionId: memberActionIdV1Schema,
+    schemaVersion: z.literal(1),
+    status: z.literal("pending"),
+  }).strict(),
+  memberActionOutcomeV1Schema,
+]);
+
+export type MemberActionStatusV1 = z.infer<typeof memberActionStatusV1Schema>;
+
 export function parseMemberActionRequestV1(
   value: unknown,
 ): MemberActionRequestV1 {
   return memberActionRequestV1Schema.parse(value);
+}
+
+export function parseMemberActionOutcomeV1(value: unknown): MemberActionOutcomeV1 {
+  return memberActionOutcomeV1Schema.parse(value);
 }

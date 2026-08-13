@@ -249,6 +249,7 @@ function validMemberActionRequest() {
   return {
     action: {
       expectedWorkout: {
+        actionBinding: "a".repeat(64),
         exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
       },
       kind: "workout.live.apply" as const,

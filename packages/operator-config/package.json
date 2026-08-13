@@ -168,6 +168,11 @@
       "types": "./dist/assistant-response-cards.d.ts",
       "import": "./dist/assistant-response-cards.js",
       "default": "./dist/assistant-response-cards.js"
+    },
+    "./workout-action-binding": {
+      "types": "./dist/workout-action-binding.d.ts",
+      "import": "./dist/workout-action-binding.js",
+      "default": "./dist/workout-action-binding.js"
     }
   },
   "files": [

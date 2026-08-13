@@ -7,6 +7,7 @@ import {
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { deriveWorkoutActionBinding } from '@murphai/operator-config/workout-action-binding'
 
 import { showWorkoutFormat } from './workout-format.js'
 import { addStructuredWorkoutRecord, editWorkoutRecord } from './workout.js'
@@ -67,6 +68,12 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   }
 
   const shown = active[0]!
+  if (
+    input.action.expectedWorkout.actionBinding
+      !== deriveWorkoutActionBinding(shown.entity.id)
+  ) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
   let workout: WorkoutSession
   try {
     workout = parseShownWorkout(shown)

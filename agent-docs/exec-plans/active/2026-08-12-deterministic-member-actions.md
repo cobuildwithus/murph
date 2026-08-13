@@ -21,6 +21,8 @@ Messages extension as the first action family.
 - A workout edit targets one exact canonical workout snapshot and fails closed
   on stale, ambiguous, completed, malformed, oversized, or unauthorized input.
 - Replayed requests converge without duplicate exercises or sets.
+- The client observes one durable terminal receipt and never reports an
+  asynchronously rejected edit as saved.
 - The generic transport can accept future explicitly implemented action kinds
   without adding another auth, mailbox, or persistence stack.
 - The companion app exchanges and shares only the existing narrow derived
@@ -61,20 +63,21 @@ Messages extension as the first action family.
 ## Decisions
 
 - The public iMessage card remains an immutable presentation snapshot. Direct
-  editing derives bounded preconditions from that snapshot; runtime revalidates
-  them against exactly one active canonical workout instead of turning the
-  message URL into a capability or adding a separate read API.
+  editing derives bounded preconditions plus one opaque exact-workout binding
+  from that snapshot; runtime revalidates them against exactly one active
+  canonical workout. The binding is not authentication and exposes no canonical
+  id, so the message URL remains capability-less.
 - The member-action transport owns only request admission and delivery. Each
   action handler delegates to an existing domain use case; workout is the first
   closed handler, not a generic data-store abstraction.
-- Core mutation completion remains asynchronous behind the durable mailbox.
-  The client may optimistically retain its draft after an accepted request, but
-  it must not claim canonical completion until the product has an evidence-
-  backed receipt surface.
-- Server admission time and the visible prior result are optimistic
+- Core mutation completion remains asynchronous behind the durable mailbox. A
+  typed terminal mailbox event is the evidence-backed receipt surface; no new
+  table or state owner is added.
+- The exact-workout binding and visible prior result are optimistic
   preconditions owned by the workout use case. They prevent delayed delivery
   from targeting a later workout or overwriting a newer set correction without
-  adding a second version store.
+  adding a second version store. The client timestamp stays stable across an
+  exact retry and remains bounded by the credential lifetime at admission.
 
 ## Verification
 

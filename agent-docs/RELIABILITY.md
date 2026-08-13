@@ -1353,3 +1353,16 @@ reader and an ephemeral update could arrive after the final outbox reply. The
 planner therefore continues to omit `send_progress_update` while exposing the
 durable/final-result tools. Accepted-input personalization retains its existing
 message and route checks.
+
+## Deterministic member action delivery
+
+Direct editors reuse the existing encrypted system mailbox rather than adding a
+queue or result table. Admission deduplicates the exact action id, body, and
+client timestamp and re-signals an exact duplicate. Runtime applies the closed
+action through its canonical domain owner, then records the typed terminal
+outcome as an existing post-checkpoint effect before releasing the requested
+item. The scoped client reads that action-id-keyed outcome from the same member
+mailbox and reports success only for `applied` or `unchanged`; a rejected or
+missing outcome retains the local draft. The first workout editor additionally
+requires the V6 card's opaque exact-workout binding under the existing workout
+mutation lock, so delayed or forwarded cards cannot retarget a later workout.

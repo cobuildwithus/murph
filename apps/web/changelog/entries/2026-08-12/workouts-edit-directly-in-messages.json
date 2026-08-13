@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Log workouts directly in Messages",
     "summary": "Active workout cards now let you enter sets, add exercises, and send the update to Murph without composing a chat message.",
-    "details": "Murph accepts the update through short-lived Messages access and applies it only while the active workout still matches the card; stale or ambiguous updates fail closed.",
+    "details": "Murph accepts the update through short-lived Messages access, verifies that the exact active workout still matches the card, and confirms the applied result before the editor reports success; stale or ambiguous updates fail closed.",
     "relevanceTags": ["imessage", "workouts", "companion"],
     "sourcePullRequests": [1748, 68]
   }

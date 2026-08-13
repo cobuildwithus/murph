@@ -36,9 +36,18 @@ Workout state and progress summaries are derived from the structured exercise/se
 
 Tracked workout detail requires a canonical tracking marker in durable transcript context. The native URL strips the event id and snapshot time.
 
-Generic compact tables keep the existing schema-version-3 native envelope. Enhanced workout tables use the bounded schema-version-4 envelope. Both stay under the existing 2,048-character URL ceiling.
+Generic compact tables keep the existing schema-version-3 native envelope. The
+static workout image keeps the authority-free schema-version-4 envelope. The
+installed native editor uses schema version 6, which adds only an opaque
+64-character action binding and still stays under the existing 2,048-character
+URL ceiling.
 
-The readable response-card contract remains object-shaped for authoring and runtime validation. Only the immutable V4 native wire uses positional exercise tuples `[name, sets]` and set tuples `[status, target, actual]`; removing repeated wire keys keeps realistic six-exercise, four-set initial, late-active, and completed snapshots below the same URL ceiling without adding another projection owner.
+The readable response-card contract remains object-shaped for authoring and
+runtime validation. Only the immutable V4/V6 workout wires use positional
+exercise tuples `[name, sets]` and set tuples `[status, target, actual]`;
+removing repeated wire keys keeps realistic six-exercise, four-set initial,
+late-active, and completed snapshots below the same URL ceiling without adding
+another projection owner.
 
 ## Static fallback
 
@@ -101,24 +110,26 @@ An active workout may have zero pending sets after the final result is logged; i
 ## Direct action loop
 
 The expanded native editor derives one bounded expected shape from the visible
-V4 workout snapshot and emits only closed `exercise.append` and `set.put`
+V6 workout snapshot and emits only closed `exercise.append` and `set.put`
 mutations. Positions are one-based presentation coordinates. The action carries
-no member id or canonical workout id; the server derives the member from the
-scoped credential and the workout owner requires exactly one active workout
-whose ordered exercise names, set counts, and logged states still match. Each
+no member id or canonical workout id. Its one-way action binding is a stale-card
+precondition, not authentication: the server derives the member from the scoped
+credential and the workout owner requires exactly one active workout whose
+binding, ordered exercise names, set counts, and logged states still match. Each
 edit to an existing set also carries the bounded previous result visible in the
 card; the canonical owner rejects the batch when that target changed instead of
 overwriting a newer correction.
 
 Web validates the whole envelope, re-checks active access and historical launch
 consent under the existing member locks, and durably appends the action before
-returning `202 Accepted`. The UI says the updates were sent, not saved. Runtime
-applies the complete batch under the existing live-workout mutation lock with
-one canonical write and no model call. Exact retries converge; a missing,
-completed, ambiguous, or changed workout is rejected without retargeting. The
-server admission time is part of that guard: delayed work cannot target a
-different workout that started after the action was durably accepted, even if
-its visible shape happens to match.
+returning `202 Accepted`. An ambiguous network retry reuses the exact action id,
+body, and client timestamp, so mailbox dedupe remains stable. Runtime applies the
+complete batch under the existing live-workout mutation lock with one canonical
+write and no model call, then records an `applied`, `unchanged`, or typed
+`rejected` receipt through the same mailbox checkpoint. The editor stays locked
+while polling that receipt and says the changes were saved only after an applied
+or converged result. A missing, completed, ambiguous, bound-to-another, or
+changed workout is rejected without retargeting.
 
 This is the first family on the generic member-action delivery primitive. A
 future direct editor adds another explicit action variant and delegates to its
@@ -127,13 +138,22 @@ operations, assistant tools, or a new queue.
 
 ## Rollout
 
-Deploy the native schema-version-4 reader first, the shared Web image route
-second, and the Worker and runner producer last. Older app versions retain
+Deploy the native schema-version-6 reader first, the shared Web action and image
+routes second, and the Worker and runner producer last. Older app versions retain
 truthful captions and the static image but do not provide the drill-down workout
 interface. Keep the Web route available while any sent image URL may still be
 fetched.
 
-The backend also has a persisted-state compatibility floor. Deploy V4-capable Worker and runner bundles before any V4 card can be emitted. The accepted outbox intent and hosted delivery side effect both persist the full response card; after the first V4-bearing record exists, those bundle versions are the rollback floor. A warm older bundle must not process that state because its strict parser rejects the workout branch, and the local runner can quarantine the pending intent out of the retry inventory. Recovery is a coordinated forward fix or explicit restoration of the quarantined intent after the compatible bundle is live, not rollback below the floor. Focused local-outbox and hosted-side-effect round-trip tests pin both persisted owners.
+The backend also has a persisted-state compatibility floor. Deploy V6-capable
+Worker and runner bundles before any V6 card can be emitted. The accepted outbox
+intent and hosted delivery side effect both persist the full response card;
+after the first V6-bearing record exists, those bundle versions are the rollback
+floor. A warm older bundle must not process that state because its strict parser
+rejects the workout branch, and the local runner can quarantine the pending
+intent out of the retry inventory. Recovery is a coordinated forward fix or
+explicit restoration of the quarantined intent after the compatible bundle is
+live, not rollback below the floor. Focused local-outbox and hosted-side-effect
+round-trip tests pin both persisted owners.
 
 Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store

@@ -15,6 +15,84 @@ const mailboxRequest = {
 };
 
 describe("createHostedWebMailboxPort", () => {
+  it("records a typed member-action outcome through the existing control plane", async () => {
+    const requests: Array<{ body: string; path: string }> = [];
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = request instanceof Request ? request.url : String(request);
+      requests.push({
+        body: typeof init?.body === "string" ? init.body : "",
+        path: new URL(url).pathname,
+      });
+      return new Response(JSON.stringify({ recorded: true, schemaVersion: 1 }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    const mailboxPort = createHostedWebMailboxPort({
+      boundUserId: "member_action_outcome",
+      fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+    const outcome = {
+      actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      completedAt: "2026-08-12T15:00:01.000Z",
+      reason: null,
+      schemaVersion: 1 as const,
+      status: "applied" as const,
+    };
+
+    await expect(mailboxPort.recordMemberActionOutcome(outcome)).resolves.toBeUndefined();
+
+    expect(requests).toEqual([{
+      body: JSON.stringify(outcome),
+      path: "/api/internal/hosted-mailbox/member-action-outcome",
+    }]);
+  });
+
+  it("replays the exact member-action outcome once after a retryable response", async () => {
+    const bodies: string[] = [];
+    const fetchImpl = vi.fn(async (_request: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      if (bodies.length === 1) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "HOSTED_MEMBER_ACTION_OUTCOME_UNAVAILABLE",
+            message: "Member action outcome recording is temporarily unavailable.",
+            retryable: true,
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 503,
+        });
+      }
+      return new Response(JSON.stringify({ recorded: true, schemaVersion: 1 }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    const mailboxPort = createHostedWebMailboxPort({
+      boundUserId: "member_action_outcome_retry",
+      fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+    const outcome = {
+      actionId: "4027542e-0187-4d04-bc68-7e429be68077",
+      completedAt: "2026-08-12T15:00:01.000Z",
+      reason: null,
+      schemaVersion: 1 as const,
+      status: "unchanged" as const,
+    };
+
+    await expect(mailboxPort.recordMemberActionOutcome(outcome)).resolves.toBeUndefined();
+
+    expect(bodies).toEqual([
+      JSON.stringify(outcome),
+      JSON.stringify(outcome),
+    ]);
+  });
+
   it("forwards an initial mailbox fetch abort and preserves its exact reason", async () => {
     const fetchController = new AbortController();
     const wakeReason = new Error("Foreground runtime wake interrupted mailbox fetch.");
