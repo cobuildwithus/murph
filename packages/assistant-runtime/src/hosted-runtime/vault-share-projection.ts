@@ -783,20 +783,22 @@ function selectPublicSourceMetricSeries(input: {
       metricKey: input.metricKey,
       points,
       statistic: "value",
-    }).rows.map((row) => ({
-      ...row,
-      ...(preservesRecordedAt
-        ? {
-            recordedAt: row.pointIds?.length === 1
-              ? readContextString(
-                  pointById.get(row.pointIds[0] ?? "")?.context,
-                  "recordedAt",
-                ) ?? null
-              : null,
-          }
-        : {}),
-      source,
-    }));
+    }).rows.map((row) => {
+      const selectedPoint = row.pointIds?.length === 1
+        ? pointById.get(row.pointIds[0] ?? "")
+        : undefined;
+      return {
+        ...row,
+        ...(preservesRecordedAt
+          ? {
+              recordedAt: selectedPoint?.recordedAt
+                ?? readContextString(selectedPoint?.context, "recordedAt")
+                ?? null,
+            }
+          : {}),
+        source,
+      };
+    });
   });
 }
 

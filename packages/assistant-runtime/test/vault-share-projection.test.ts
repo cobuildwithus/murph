@@ -1549,6 +1549,7 @@ describe("selectProjectableDailyMetricDays", () => {
             data: expect.objectContaining({
               date: ACTIVITY_DAY.date,
               metricKey,
+              recordedAt: "2026-07-03T13:00:00.000Z",
               unit: "minutes",
               value: 91,
             }),
