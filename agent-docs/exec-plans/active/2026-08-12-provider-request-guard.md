@@ -91,6 +91,49 @@ Updated: 2026-08-12
   The branch stays non-mergeable until the sibling provider migrations remove
   every current finding, matching the user-requested sequencing gate.
 
+### ReviewGPT round 2 requirement-level retrospective
+
+- Original requirement: one fail-closed guard must identify low-level requests
+  and handwritten wire contracts for SDK-backed providers, while raw transport
+  remains possible only through exact, structurally proven exceptions.
+- First reviewed head `a55eb238e9cc69def11720b26a901e7489b07488`
+  changed 3,097 lines. The round-2 head changed 3,713 lines, an increase of 616
+  lines driven mainly by transport/evidence fixes and their regression matrix.
+- The growth exposed a repeated mechanism: provider evidence, SMART/FHIR
+  admission, presigned-transfer admission, and transport discovery each gained
+  syntax-specific walkers or name heuristics. Those parallel owners can
+  disagree, so a stronger fact discovered by the main classifier can be lost
+  by an exception.
+- Redesign decision: continue this PR because the guard, its executable matrix,
+  and its policy documentation are one verification owner, but shrink and
+  centralize the implementation before further tactical fixes. Provider
+  migrations remain separate.
+- One expression-fact collector will own resolved provider identities and
+  explicit provider signals. Candidate classification and every exception will
+  consume that same result. Delete the separate explicit-provider walker.
+- Internal traffic will be limited to a statically known single-slash relative
+  path or an exact trusted same-origin base. Dynamic template composition is not
+  internal proof.
+- Transport bindings will cover scoped ESM and CommonJS forms, including direct
+  imports/requires, destructuring, namespace destructuring, and shadowing, for
+  every scanned extension the guard advertises.
+- Presigned transfers will accept only literal safe headers or the result of an
+  explicit audited transfer-header factory, together with an opaque URL and an
+  exact byte/stream method and payload shape. Variable-name and source-text
+  heuristics will be deleted; stream piping will be established through AST
+  bindings.
+- xAI will no longer have a provider-wide exception. The only admitted raw xAI
+  operation will be the existing path-scoped Responses request whose method and
+  request body structurally prove the single `x_search` extension shape.
+- Retell and Composio host ownership will be asserted directly, and composed
+  fixtures will cross transport syntax, provider evidence, and exception shape
+  so isolated helper tests cannot conceal disagreements.
+- Accepted all round-2 implementation findings above. The intentionally red
+  repository scan remains an accepted sequencing gate rather than a guard
+  defect. If remediation needs another policy owner or materially exceeds this
+  central-facts/exact-exception design, pause for a new requirement-level
+  retrospective instead of layering another heuristic.
+
 ## Verification
 
 - `pnpm provider-requests:guard`
