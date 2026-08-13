@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,6 +9,7 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_DYNAMIC_TOOLS,
+  MURPH_PROVIDER_SETUP_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
@@ -22,7 +24,7 @@ import {
 } from "./support/codex-app-server.ts";
 
 describe("murph computer dynamic tools", () => {
-  it("advertises raw Playwright act and generic pause primitives", () => {
+  it("advertises the generic provider setup contract beside ordinary computer tools", () => {
     const computerTools = MURPH_DYNAMIC_TOOLS.filter((tool) =>
       tool.name.startsWith("computer_")
     );
@@ -35,6 +37,7 @@ describe("murph computer dynamic tools", () => {
       "computer_pause_for_user",
       "computer_finish_run",
     ]);
+    expect(MURPH_DYNAMIC_TOOLS.map((tool) => tool.name)).toContain("provider_setup");
     expect(
       computerToolNames.filter((name) => /approval|confirm/u.test(name)),
     ).toEqual([]);
@@ -46,13 +49,11 @@ describe("murph computer dynamic tools", () => {
       tool.name === "computer_act"
     );
     const actToolSchema = JSON.stringify(actTool?.inputSchema);
-    expect(actToolSchema).toContain("\"code\"");
-    expect(actToolSchema).not.toContain("steps");
-    expect(actToolSchema).not.toContain("\"action\"");
-    expect(actToolSchema).not.toContain('"const":"goto"');
-    expect(actToolSchema).not.toContain('"const":"css"');
-    expect(actToolSchema).not.toContain('"locator"');
-    expect(actToolSchema).not.toContain('"selector"');
+    expect(actToolSchema).toContain('"code"');
+    expect(actToolSchema).toContain('"steps"');
+    expect(actToolSchema).toContain('"action"');
+    expect(actToolSchema).toContain('"goto"');
+    expect(actToolSchema).toContain('"selector"');
     expect(actToolSchema).toContain(`"maxLength":${HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH}`);
     expect(actToolSchema).toContain('"type":"integer"');
     expect(actToolSchema).toContain('"minimum":1000');
@@ -60,11 +61,20 @@ describe("murph computer dynamic tools", () => {
       `"maximum":${HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS}`,
     );
     expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
+
+    const providerSchema = JSON.stringify(MURPH_PROVIDER_SETUP_TOOL.inputSchema);
+    expect(providerSchema).toContain('"begin"');
+    expect(providerSchema).toContain('"capture"');
+    expect(providerSchema).toContain('"prepare_delete"');
+    expect(providerSchema).toContain('"confirm_missing"');
+    expect(providerSchema).toContain('"clientSecretSelector"');
+    expect(providerSchema).not.toContain('"clientSecret"');
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("managed_login");
     const openTool = computerTools.find((tool) =>
       tool.name === "computer_open"
     );
+    expect(JSON.stringify(openTool?.inputSchema)).toContain('"runId"');
     expect(JSON.stringify(openTool?.inputSchema)).not.toContain(
       "resumeAfterUserReply",
     );
@@ -75,7 +85,6 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(openTool?.inputSchema)).not.toContain(
       "resumeDeliveryContext",
     );
-    expect(JSON.stringify(openTool?.inputSchema)).not.toContain("resumeRunId");
     expect(JSON.stringify(openTool?.inputSchema)).not.toContain("profileKey");
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain(
       "pauseDeliveryContext",
@@ -84,47 +93,32 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
   });
 
-  it("keeps Computer descriptions to authorization and retry-safe call contracts", () => {
+  it("states the secret-isolation and trusted-submit browser contract", () => {
+    const providerTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "provider_setup");
     const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
     const openTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_open");
     const osControlTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_os_control");
     const pauseTool = MURPH_DYNAMIC_TOOLS.find(
       (tool) => tool.name === "computer_pause_for_user",
     );
+    const providerDescription = providerTool?.description ?? "";
     const actDescription = actTool?.description ?? "";
     const openDescription = openTool?.description ?? "";
     const osControlDescription = osControlTool?.description ?? "";
     const pauseDescription = pauseTool?.description ?? "";
 
-    expect(actDescription.length).toBeLessThanOrEqual(320);
-    expect(actDescription).toMatch(/macro-step/iu);
-    expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain("No missing or sensitive input or final confirmation");
-    expect(actDescription).toContain("Before browser call two this turn");
-    expect(actDescription).toContain(
-      "call send_progress_update if available and not yet sent",
-    );
-    expect(actDescription).toContain("outcome uncertain");
-    expect(actDescription).toContain("call computer_open before retry/next action");
-
-    expect(openDescription.length).toBeLessThanOrEqual(250);
-    expect(openDescription).toContain("authorized browser");
-    expect(openDescription).toContain("Returns runId, URL, title, text");
-    expect(openDescription).toContain("Before multi-step browsing each turn");
-    expect(openDescription).toContain("call send_progress_update if available");
-    expect(openDescription).toContain("prior-turn progress does not count");
-    expect(openDescription).toContain("reopen after handoff/uncertainty");
-    expect(openDescription).toContain("prior outcome stays unknown");
-
-    expect(osControlDescription.length).toBeLessThanOrEqual(310);
-    expect(osControlDescription).toContain("only when Playwright cannot operate");
-    expect(osControlDescription).toContain("Never enter sensitive data");
-    expect(osControlDescription).toContain("outcome may be unknown");
-    expect(osControlDescription).toContain("call computer_open before any retry or next action");
-
-    expect(pauseDescription.length).toBeLessThanOrEqual(300);
-    expect(pauseDescription).toContain("current authorized run");
-    expect(pauseDescription).toContain("This does not message the user");
+    expect(providerDescription).toContain("never enter model context");
+    expect(providerDescription).toContain("live page at call time");
+    expect(providerDescription).toContain("capture");
+    expect(actDescription).toContain("typed steps only");
+    expect(actDescription).toContain("blocks code");
+    expect(actDescription).toContain("network writes");
+    expect(actDescription).toContain("provider_setup for capture/deletion");
+    expect(openDescription).toContain("provider_setup's exact runId");
+    expect(openDescription).toContain("safe page state");
+    expect(osControlDescription).toContain("Forbidden for provider_setup");
+    expect(osControlDescription).toContain("sensitive data");
+    expect(pauseDescription).toContain("persist a checkpoint");
     expect(pauseDescription).toContain("does not prove handoff completion");
   });
 
@@ -138,6 +132,7 @@ describe("murph computer dynamic tools", () => {
       computerToolsAvailable: true,
     }).map((tool) => tool.name);
     expect(availableToolNames).toContain("send_progress_update");
+    expect(availableToolNames).toContain("provider_setup");
     expect(availableToolNames.filter((name) => name.startsWith("computer_"))).toEqual([
       "computer_open",
       "computer_act",
@@ -164,6 +159,7 @@ describe("murph computer dynamic tools", () => {
         goal: "Hosted computer task.",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
+        runId: null,
         startUrl: null,
       });
 
@@ -190,6 +186,7 @@ describe("murph computer dynamic tools", () => {
     }
 
     expect(request.args).toEqual({
+      runId: null,
       startUrl: null,
     });
 
@@ -220,6 +217,7 @@ describe("murph computer dynamic tools", () => {
           recipientKey: "recipient-123",
           returnContactKind: null,
         },
+        runId: null,
         startUrl: "https://shop.example.test/checkout",
       });
 
@@ -331,6 +329,7 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
+          runId: null,
           startUrl: null,
         },
         kind: "computer-open",
@@ -355,6 +354,7 @@ describe("murph computer dynamic tools", () => {
   it.each([
     ["computer-open", {
       args: {
+        runId: null,
         startUrl: null,
       },
       kind: "computer-open" as const,
@@ -416,7 +416,7 @@ describe("murph computer dynamic tools", () => {
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
-        args: { startUrl: null },
+        args: { runId: null, startUrl: null },
         kind: "computer-open",
       },
     });
@@ -453,6 +453,7 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
+          runId: null,
           startUrl: "https://shop.example.test",
         },
         kind: "computer-open",
@@ -1025,6 +1026,73 @@ describe("murph computer dynamic tools", () => {
       status: "awaiting_user",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("never returns provider credentials from the setup transport to the model", async () => {
+    const credentialSentinels = {
+      clientId: randomUUID(),
+      clientSecret: randomUUID(),
+      oauthToken: randomUUID(),
+    };
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      ...credentialSentinels,
+      run: {
+        awaitingReason: null,
+        reused: false,
+        runId: "hcr_setup",
+        status: "running",
+      },
+      setup: {
+        action: "none",
+        applicationRevision: 4,
+        connected: false,
+        message: "Credentials sealed.",
+        provider: "strava",
+        setupId: "dps_setup",
+        status: "oauth_ready",
+        updatedAt: "2026-08-12T12:00:00.000Z",
+      },
+    }));
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: { action: "begin", provider: "strava" },
+      tool: "provider_setup",
+    }));
+    if (!request || request.kind !== "provider-setup") {
+      throw new Error("Expected provider_setup request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    const text = result.rpcResult.contentItems[0]!.text;
+    expect(text).not.toContain(credentialSentinels.clientId);
+    expect(text).not.toContain(credentialSentinels.clientSecret);
+    expect(text).not.toContain(credentialSentinels.oauthToken);
+    expect(JSON.parse(text)).toEqual({
+      run: {
+        awaitingReason: null,
+        reused: false,
+        runId: "hcr_setup",
+        status: "running",
+      },
+      setup: {
+        action: "none",
+        applicationRevision: 4,
+        connected: false,
+        message: "Credentials sealed.",
+        provider: "strava",
+        setupId: "dps_setup",
+        status: "oauth_ready",
+        updatedAt: "2026-08-12T12:00:00.000Z",
+      },
+    });
   });
 });
 

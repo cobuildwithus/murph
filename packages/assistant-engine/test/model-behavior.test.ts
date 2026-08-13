@@ -1625,13 +1625,13 @@ describe('assistant local PDF evidence guidance', () => {
       ))
 
     expect(directGuidance).toContain(
-      'For Strava (`strava`) and Trailbox (`trailbox`), the link starts or resumes durable private-app setup',
+      'For Strava (`strava`) and Trailbox (`trailbox`), /connect Continue authorizes; it starts no work',
     )
     expect(directGuidance).toContain(
-      'Murph creates it and immediately seals its client credentials; the member handles sign-in, MFA/CAPTCHA, any provider-required developer prerequisite, and OAuth consent',
+      'Capture owns submit/blind seal; never expose credentials',
     )
     expect(directGuidance).toContain(
-      'Never ask for, accept, quote, or redisplay credentials, or keep setup progress in conversation memory',
+      'Pause for sign-in, MFA/CAPTCHA/prerequisites, then begin after return',
     )
     // The approved direct wearable line stays bounded after prerequisite disclosure.
     expect(directGuidance?.length).toBeLessThanOrEqual(900)

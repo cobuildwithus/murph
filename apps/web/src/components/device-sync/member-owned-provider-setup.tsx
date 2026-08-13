@@ -39,7 +39,12 @@ export function MemberOwnedProviderSetup({
     && actionAvailable
     && effective.action !== "disconnect_first";
   const showCancel = !complete
-    && (effective.status === "provider_prerequisite" || effective.status === "canceling")
+    && (
+      effective.status === "authorized"
+      || effective.status === "browser_setup"
+      || effective.status === "capturing"
+      || effective.status === "canceling"
+    )
     && Boolean(onCancel);
   const showActions = showSetupAction || showCancel;
 
@@ -57,6 +62,11 @@ export function MemberOwnedProviderSetup({
             ? `${presentation.providerName} is connected through your private provider application.`
             : effective.message}
         </p>
+        {(effective.status === "pending" || effective.status === "canceled") ? (
+          <p className="mt-2 text-xs leading-relaxed text-pretty text-muted-foreground">
+            {presentation.developerAccessDisclosure}
+          </p>
+        ) : null}
         {effective.applicationRevision ? (
           <p className="mt-1 text-xs text-muted-foreground">
             Private application revision {effective.applicationRevision}
@@ -100,7 +110,7 @@ function buildPendingView(
   presentation: MemberOwnedProviderSetupPresentation,
 ): MemberOwnedProviderSetupDisplay {
   return {
-    action: "start",
+    action: "authorize",
     applicationRevision: null,
     connected: false,
     message: presentation.messages.pending,
@@ -135,20 +145,14 @@ function resolveStatusLabel(
   switch (status) {
     case "pending":
       return "Ready to set up";
-    case "working":
-      return "Murph is working";
-    case "inspection_required":
-      return "Safe recovery";
-    case "waiting_for_user":
-      return "Your action needed";
-    case "provider_prerequisite":
-      return "Provider prerequisite";
+    case "authorized":
+      return "Authorized";
+    case "browser_setup":
+      return "Murph is setting up";
+    case "capturing":
+      return "Sealing credentials";
     case "canceling":
       return "Canceling safely";
-    case "repair_required":
-      return "Repair available";
-    case "retryable_failure":
-      return "Progress saved";
     case "oauth_ready":
       return "Ready for consent";
     case "oauth_in_progress":
@@ -157,8 +161,6 @@ function resolveStatusLabel(
       return "Connected";
     case "disconnect_first":
       return "Disconnect first";
-    case "provider_conflict":
-      return "Protected provider app";
     case "deletion_pending":
       return "Removing private app";
     case "canceled":

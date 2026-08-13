@@ -382,7 +382,7 @@ function readConnectAuthorizationUrl(response: HostedDeviceSyncConnectResponse):
     throw new Error("Connection could not be started.");
   }
 
-  const url = new URL(response.authorizationUrl);
+  const url = new URL(response.authorizationUrl, window.location.origin);
   if (url.protocol !== "https:") {
     throw new Error("Connection could not be started.");
   }
@@ -454,20 +454,6 @@ function normalizeConnectKey(value: string | null | undefined): string | null {
     .replace(/^_+|_+$/gu, "");
 
   return normalized || null;
-}
-
-export function readSafeMemberOwnedProviderHandoffUrl(
-  value: string,
-  origin: string,
-): string | null {
-  try {
-    const url = new URL(value, origin);
-    return url.origin === origin && url.pathname.startsWith("/computer/handoff/")
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function normalizeConnectSourceId(value: string | null | undefined): string | null {

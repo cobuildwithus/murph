@@ -145,6 +145,36 @@ first.
 5. `murph.computer_finish_run` closes the run when the task is complete, failed,
    or canceled.
 
+## Private provider application setup
+
+For a provider that needs a member-owned developer application, `/connect`
+Continue is the authorization boundary. Call `murph.provider_setup` with
+`action: "begin"`, then pass its exact opaque `runId` to `computer_open` and
+`computer_act` with typed steps. Navigate from the live page and choose controls at runtime; do
+not maintain a provider-specific selector script or state machine.
+
+A setup-owned `computer_act` accepts typed control steps only. It may navigate,
+fill non-secret application metadata, click reversible controls, and wait for a
+known page state, but it may not read or return DOM values, browser storage,
+network responses, screenshots, or arbitrary page text. Its result is a trusted,
+credential-redacted observation. Do not use `computer_os_control` or
+`computer_finish_run` on a setup-owned run.
+
+Never submit the developer-app form with `computer_act`. Once the exact form is
+ready, call `provider_setup` with `action: "capture"` and runtime selectors for
+the owned application root, final submit, ownership marker, client ID, and client secret fields. That
+trusted operation submits, reads the values inside the browser boundary, seals
+them directly, navigates away, and returns no credential value. Never ask for,
+read, copy, quote, log, screenshot, or preserve client IDs, client secrets, OAuth
+tokens, or other credentials.
+
+For sign-in, MFA, CAPTCHA, or a provider prerequisite, pause the same run with a
+secure handoff. The member completes only the interruption and returns to
+`/connect`; call `provider_setup begin` again to resume the exact persisted run.
+For deletion, disconnect the provider first, call `prepare_delete`, navigate to
+the application, then use `delete` or `confirm_missing`; the trusted operation
+verifies the exact ownership marker before local credentials are removed.
+
 ## Act primitive
 
 `computer_act` is the browser execution primitive. Pass Playwright

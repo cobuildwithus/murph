@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createHostedBrowserConnectionId } from "../src/lib/device-sync/public-connection";
-import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "../src/lib/device-sync/provider-setup/presentation";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "../src/lib/device-sync/provider-setup/registry";
 import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 vi.mock("server-only", () => ({}));
@@ -498,7 +498,7 @@ describe("device sync settings routes", () => {
       },
     });
     mocks.cancelMemberOwnedProviderSetup.mockResolvedValue({
-      action: "start",
+      action: "authorize",
       applicationRevision: null,
       connected: false,
       message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages.canceled,
@@ -1884,7 +1884,7 @@ describe("device sync settings routes", () => {
       presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
       provider: "strava",
       setup: {
-        action: "start",
+        action: "authorize",
         status: "canceled",
       },
     });

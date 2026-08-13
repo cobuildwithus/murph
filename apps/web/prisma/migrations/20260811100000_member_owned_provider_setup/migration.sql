@@ -13,8 +13,6 @@ CREATE TABLE "device_provider_setup" (
   "browser_run_id" TEXT,
   "provider_application_id" TEXT,
   "provider_application_revision" INTEGER,
-  "last_error_code" TEXT,
-  "provider_submission_at" TIMESTAMP(3),
   "completed_at" TIMESTAMP(3),
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL,

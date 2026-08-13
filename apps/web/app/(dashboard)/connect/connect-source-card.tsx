@@ -142,7 +142,7 @@ export function SourceCard({
                     {source.memberOwnedSetupPresentation.messages.pending}
                   </p>
                   <p className="mt-2 text-xs leading-relaxed text-pretty text-muted-foreground">
-                    Continue lets Murph open a secure browser and begin this private provider setup. No provider work starts before you continue. {source.memberOwnedSetupPresentation.readOnlyAccessLabel} still requires your approval on {source.memberOwnedSetupPresentation.providerName}.
+                    {source.memberOwnedSetupPresentation.developerAccessDisclosure} Continue authorizes Murph to begin this exact setup in a secure browser; no provider work starts before you continue. {source.memberOwnedSetupPresentation.readOnlyAccessLabel} still requires your approval on {source.memberOwnedSetupPresentation.providerName}.
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">

@@ -76,6 +76,11 @@ import {
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
+  HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH,
+  hostedRuntimeProviderSetupToolRequestSchema,
+  type HostedRuntimeProviderSetupToolRequest,
+} from '@murphai/hosted-execution/provider-setup'
+import {
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
@@ -270,6 +275,7 @@ import {
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_PROVIDER_SETUP_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -767,6 +773,7 @@ const assistantConfigurationArgumentsSchema = z
 const computerRunIdSchema = z.string().trim().min(1)
 
 const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
+  'runId',
   'startUrl',
 ] as const
 
@@ -778,9 +785,12 @@ const computerNavigationUrlSchema = z
 
 const computerOpenArgumentsSchema = z
   .object({
+    runId: computerRunIdSchema.nullable().default(null),
     startUrl: computerNavigationUrlSchema.nullable().default(null),
   })
   .strict()
+
+const providerSetupArgumentsSchema = hostedRuntimeProviderSetupToolRequestSchema
 
 const computerActArgumentsSchema = z.unknown().transform((value, ctx) => {
   const withRunId = z
@@ -1109,6 +1119,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'ask-grok'
       args: AskGrokToolArgs
+    }
+  | {
+      kind: 'provider-setup'
+      args: HostedRuntimeProviderSetupToolRequest
     }
   | {
       kind: 'computer-open'
@@ -1662,6 +1676,17 @@ export function readMurphDynamicToolRequest(
         messageRef: parsed.messageRef,
       }
     }
+    case MURPH_PROVIDER_SETUP_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: providerSetupArgumentsSchema,
+        schemaName: 'murph.provider_setup.input',
+        toolName: 'murph.provider_setup',
+      })
+      return parsed.ok
+        ? { kind: 'provider-setup', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
     case MURPH_COMPUTER_OPEN_TOOL.name: {
       const parsed = parseComputerArguments({
         argumentsValue: request.arguments,
@@ -1679,7 +1704,7 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
-        schemaRootKeys: ['runId', 'code', 'timeoutMs'],
+        schemaRootKeys: ['runId', 'code', 'steps', 'timeoutMs'],
         toolName: 'murph.computer_act',
       })
       return parsed.ok
@@ -1732,6 +1757,7 @@ export function isComputerDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   switch (request.kind) {
+    case 'provider-setup':
     case 'computer-open':
     case 'computer-act':
     case 'computer-os-control':
@@ -1748,6 +1774,7 @@ function isExecutableComputerDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   switch (request.kind) {
+    case 'provider-setup':
     case 'computer-open':
     case 'computer-act':
     case 'computer-os-control':
@@ -2882,6 +2909,13 @@ export async function executeMurphDynamicToolRequest(input: {
           userActionScope?.conversationScope === 'direct'
           && userActionScope.acceptedInputIds.length > 0,
         request: input.request,
+      })
+    }
+    case 'provider-setup': {
+      return await executeHostedProviderSetupTool({
+        abortSignal: input.abortSignal ?? null,
+        fetchImpl: input.fetchImpl,
+        request: input.request.args,
       })
     }
     case 'computer-open': {
@@ -5464,6 +5498,26 @@ async function executeProgressUpdateTool(input: {
   }
 }
 
+async function executeHostedProviderSetupTool(input: {
+  abortSignal: AbortSignal | null
+  fetchImpl: typeof fetch
+  request: HostedRuntimeProviderSetupToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const apiResult = await callHostedComputerApi({
+    abortSignal: input.abortSignal,
+    body: input.request,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH,
+    unknownOutcomeOnTransportError: input.request.action !== 'begin',
+  })
+  return apiResult.ok
+    ? toolTextResult(
+        true,
+        safeToolPayloadText(sanitizeHostedProviderSetupPayload(apiResult.payload)),
+      )
+    : toolTextResult(false, apiResult.errorText)
+}
+
 async function executeHostedComputerPauseForUserTool(input: {
   abortSignal: AbortSignal | null
   body: HostedComputerPauseForUserRequest
@@ -5509,15 +5563,18 @@ function buildHostedComputerOpenBody(input: {
   args: ComputerOpenToolArgs
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
-  const { startUrl } = input.args
-  const resumeAfterMailboxItemId = currentHostedMailboxItemId(input.hostedToolContext)
+  const { runId, startUrl } = input.args
+  const resumeAfterMailboxItemId = runId
+    ? null
+    : currentHostedMailboxItemId(input.hostedToolContext)
   return {
     goal: 'Hosted computer task.',
     resumeAfterMailboxItemId,
     resumeDeliveryContext: resumeAfterMailboxItemId
       ? currentHostedDeliveryContext(input.hostedToolContext)
       : null,
-    startUrl,
+    runId,
+    startUrl: runId ? null : startUrl,
   }
 }
 
@@ -5774,6 +5831,65 @@ function readSanitizedComputerPausePayload(payload: unknown): Record<string, unk
   }
 }
 
+function sanitizeHostedProviderSetupPayload(
+  payload: unknown,
+): Record<string, unknown> {
+  const record = asRecord(payload)
+  if (!record) {
+    return {}
+  }
+
+  const setupSource = asRecord(record.setup) ?? record
+  const setup = {
+    ...readStringField(setupSource, 'action'),
+    ...readNumberField(setupSource, 'applicationRevision'),
+    ...readBooleanField(setupSource, 'connected'),
+    ...readStringField(setupSource, 'message'),
+    ...readStringField(setupSource, 'provider'),
+    ...readStringField(setupSource, 'setupId'),
+    ...readStringField(setupSource, 'status'),
+    ...readStringField(setupSource, 'updatedAt'),
+  }
+  const runSource = asRecord(record.run)
+  const run = runSource
+    ? {
+        ...readStringOrNullField(runSource, 'awaitingReason'),
+        ...readBooleanField(runSource, 'reused'),
+        ...readStringField(runSource, 'runId'),
+        ...readStringField(runSource, 'status'),
+      }
+    : null
+  const contractSource = asRecord(record.contract)
+  const applicationSource = asRecord(contractSource?.application)
+  const contract = contractSource
+    ? {
+        ...(applicationSource
+          ? {
+              application: {
+                ...readStringField(applicationSource, 'callbackUrl'),
+                ...readStringOrNullField(applicationSource, 'category'),
+                ...readStringField(applicationSource, 'marker'),
+                ...readStringField(applicationSource, 'name'),
+                ...readStringArrayField(applicationSource, 'readOnlyScopes'),
+                ...readStringField(applicationSource, 'website'),
+              },
+            }
+          : {}),
+        ...readStringField(contractSource, 'developerPortalUrl'),
+        ...readStringArrayField(contractSource, 'guidance'),
+        ...readStringField(contractSource, 'provider'),
+        ...readStringField(contractSource, 'providerName'),
+        ...readStringField(contractSource, 'safeLandingUrl'),
+      }
+    : null
+
+  return {
+    ...(contract ? { contract } : {}),
+    ...(run ? { run } : {}),
+    ...(Object.keys(setup).length > 0 ? { setup } : {}),
+  }
+}
+
 function sanitizeHostedComputerPayload(
   sanitizer: HostedComputerToolPayloadSanitizer,
   payload: unknown,
@@ -5814,6 +5930,28 @@ function sanitizeHostedComputerPayload(
         ...readStringField(record, 'status'),
       }
   }
+}
+
+function readNumberField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, number> {
+  const value = record[field]
+  return typeof value === 'number' && Number.isFinite(value)
+    ? { [field]: value }
+    : {}
+}
+
+function readStringArrayField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, string[]> {
+  const value = record[field]
+  if (!Array.isArray(value)) {
+    return {}
+  }
+  const strings = value.filter((item): item is string => typeof item === 'string')
+  return strings.length === value.length ? { [field]: strings } : {}
 }
 
 function readStringField(

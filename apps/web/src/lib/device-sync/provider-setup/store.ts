@@ -29,12 +29,10 @@ export const DEVICE_PROVIDER_SETUP_SELECT = {
   connectTarget: true,
   createdAt: true,
   id: true,
-  lastErrorCode: true,
   memberId: true,
   provider: true,
   providerApplicationId: true,
   providerApplicationRevision: true,
-  providerSubmissionAt: true,
   sourceProviderSlug: true,
   status: true,
   updatedAt: true,
@@ -76,12 +74,10 @@ export interface DeviceProviderSetupTransitionInput {
   browserRunId?: string | null;
   completedAt?: Date | null;
   expectedVersion: number;
-  lastErrorCode?: string | null;
   memberId: string;
   provider: MemberOwnedDeviceProviderApplicationProvider;
   providerApplicationId?: string | null;
   providerApplicationRevision?: number | null;
-  providerSubmissionAt?: Date | null;
   setupId: string;
   status: MemberOwnedProviderSetupStatus;
 }
@@ -181,18 +177,12 @@ export class PrismaDeviceProviderSetupStore {
         ...(input.completedAt === undefined
           ? {}
           : { completedAt: input.completedAt }),
-        ...(input.lastErrorCode === undefined
-          ? {}
-          : { lastErrorCode: input.lastErrorCode }),
         ...(input.providerApplicationId === undefined
           ? {}
           : { providerApplicationId: input.providerApplicationId }),
         ...(input.providerApplicationRevision === undefined
           ? {}
           : { providerApplicationRevision: input.providerApplicationRevision }),
-        ...(input.providerSubmissionAt === undefined
-          ? {}
-          : { providerSubmissionAt: input.providerSubmissionAt }),
         status: input.status,
         version: { increment: 1 },
       },
@@ -269,7 +259,6 @@ export class PrismaDeviceProviderSetupStore {
     await this.prisma.deviceProviderSetup.updateMany({
       data: {
         completedAt: new Date(),
-        lastErrorCode: null,
         status: "connected",
         version: { increment: 1 },
       },
@@ -314,7 +303,6 @@ export class PrismaDeviceProviderSetupStore {
     return this.transition({
       completedAt: null,
       expectedVersion: setup.version,
-      lastErrorCode: null,
       memberId: setup.memberId,
       provider: setup.provider,
       setupId: setup.id,

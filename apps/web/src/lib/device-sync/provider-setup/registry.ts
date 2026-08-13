@@ -1,49 +1,63 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import {
   listMemberOwnedDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
 } from "@murphai/device-syncd/connect-config";
+import { listDeviceSyncProviderCatalog } from "@murphai/device-syncd";
 
+import { readHostedDeviceSyncPublicBaseUrl } from "../../hosted-web/public-url";
 import {
-  MEMBER_OWNED_DEVICE_PROVIDER_APPLICATION_PROVIDERS,
   isMemberOwnedDeviceProviderApplicationProvider,
   type MemberOwnedDeviceProviderApplicationProvider,
 } from "../provider-applications";
-import type {
-  MemberOwnedProviderSetupAdapter,
-  MemberOwnedProviderSetupComputer,
-  MemberOwnedProviderSetupCoordinates,
-} from "./adapter";
-import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "./presentation";
-import { StravaMemberOwnedProviderSetupAdapter } from "./strava-adapter";
 import type { MemberOwnedProviderSetupPresentation } from "./types";
+
+export interface MemberOwnedProviderSetupCoordinates<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
+> {
+  connectSourceId: string;
+  connectTarget: string;
+  provider: TProvider;
+  sourceProviderSlug: string | null;
+}
+
+export interface MemberOwnedProviderSetupBrowserMetadata {
+  applicationCategory: string | null;
+  applicationWebsite: string;
+  developerPortalUrl: string;
+  guidance: readonly string[];
+  safeLandingUrl: string;
+}
 
 export interface MemberOwnedProviderSetupRegistration<
   TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
 > {
+  browser: MemberOwnedProviderSetupBrowserMetadata;
   coordinates: MemberOwnedProviderSetupCoordinates<TProvider>;
-  createAdapter(input?: {
-    computer?: MemberOwnedProviderSetupComputer;
-  }): MemberOwnedProviderSetupAdapter<TProvider>;
   presentation: MemberOwnedProviderSetupPresentation<TProvider>;
 }
 
-export interface MemberOwnedProviderSetupRegistry<
-  TProvider extends string,
+export interface MemberOwnedProviderSetupBrowserContract<
+  TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
 > {
-  list(): readonly MemberOwnedProviderSetupRegistration<TProvider>[];
-  read(provider: string): MemberOwnedProviderSetupRegistration<TProvider> | null;
-  readByConnectSourceId(
-    connectSourceId: string,
-  ): MemberOwnedProviderSetupRegistration<TProvider> | null;
-  readByConnectTarget(
-    connectTarget: string,
-  ): MemberOwnedProviderSetupRegistration<TProvider> | null;
+  application: {
+    callbackUrl: string;
+    category: string | null;
+    marker: string;
+    name: string;
+    readOnlyScopes: readonly string[];
+    website: string;
+  };
+  developerPortalUrl: string;
+  guidance: readonly string[];
+  provider: TProvider;
+  providerName: string;
+  safeLandingUrl: string;
 }
-
-export { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "./presentation";
 
 export const STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES = {
   connectSourceId: "strava",
@@ -52,134 +66,91 @@ export const STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES = {
   sourceProviderSlug: null,
 } as const satisfies MemberOwnedProviderSetupCoordinates;
 
-const MEMBER_OWNED_PROVIDER_SETUP_REGISTRY = defineMemberOwnedProviderSetupRegistry(
-  MEMBER_OWNED_DEVICE_PROVIDER_APPLICATION_PROVIDERS,
-  {
-    strava: {
-      coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
-      createAdapter: (input) => new StravaMemberOwnedProviderSetupAdapter(input),
-      presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
-    },
-  } as const satisfies Record<
-    MemberOwnedDeviceProviderApplicationProvider,
-    MemberOwnedProviderSetupRegistration<MemberOwnedDeviceProviderApplicationProvider>
-  >,
-);
+export const STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION = {
+  actionLabels: {
+    authorize: "Continue",
+    continue_oauth: "Continue with Strava",
+    disconnect_first: "Disconnect Strava first",
+  },
+  cancelSetupLabel: "Cancel setup",
+  developerAccessDisclosure:
+    "Strava may require developer access or another provider prerequisite before setup can finish.",
+  messages: {
+    authorized: "Setup is authorized. Return to your Murph conversation and ask Murph to continue this exact Strava setup.",
+    browser_setup: "Murph is continuing this Strava setup in its secure browser. Progress survives sign-in, MFA, CAPTCHA, and provider prerequisites.",
+    canceled: "Strava setup was canceled. You can authorize a new attempt.",
+    canceling: "Murph is safely canceling this Strava setup. Late browser work cannot save credentials.",
+    capturing: "Murph is securely capturing and sealing the private application credentials. They are never shown to the assistant.",
+    connected: "Strava is connected through your private provider application.",
+    deletion_pending: "Murph is removing only the private Strava application it can prove it owns.",
+    deleted: "The private Strava application and local credential binding were deleted.",
+    disconnect_first: "Disconnect the current Strava connection before changing or removing its private application.",
+    oauth_in_progress: "Strava is waiting for read-only consent. Continue to finish connecting.",
+    oauth_ready: "Your private Strava application is ready. Continue to grant read-only activity access.",
+    pending: "Murph can create and manage a private Strava application for this connection.",
+  },
+  provider: "strava",
+  providerName: "Strava",
+  readOnlyAccessLabel: "Read-only activity access",
+} as const satisfies MemberOwnedProviderSetupPresentation;
 
-assertRegistryMatchesMemberOwnedConnectCatalog(MEMBER_OWNED_PROVIDER_SETUP_REGISTRY);
+const STRAVA_REGISTRATION = Object.freeze({
+  browser: Object.freeze({
+    applicationCategory: "Other",
+    applicationWebsite: "https://withmurph.ai",
+    developerPortalUrl: "https://www.strava.com/settings/api",
+    guidance: Object.freeze([
+      "Use the provider developer page to create one private application with the exact supplied name, website, category, callback URL, and read-only scopes.",
+      "Navigate and identify controls from the live page. Never rely on checked-in provider selectors or a provider-specific browser program.",
+      "Fill the final form with computer tools, but do not submit it with computer_act. Call provider_setup capture so final submission and credential sealing happen inside the trusted browser boundary.",
+      "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption, not to create the application or copy credentials.",
+    ]),
+    safeLandingUrl: "https://www.strava.com/settings/api",
+  }),
+  coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
+  presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+} as const satisfies MemberOwnedProviderSetupRegistration<"strava">);
+
+const REGISTRATIONS = Object.freeze([STRAVA_REGISTRATION]);
+assertRegistrationsMatchConnectCatalog();
 
 export function listMemberOwnedProviderSetupRegistrations(): readonly MemberOwnedProviderSetupRegistration[] {
-  return MEMBER_OWNED_PROVIDER_SETUP_REGISTRY.list();
+  return REGISTRATIONS;
 }
 
 export function readMemberOwnedProviderSetupRegistration(
   provider: string,
 ): MemberOwnedProviderSetupRegistration | null {
-  return isMemberOwnedDeviceProviderApplicationProvider(provider)
-    ? MEMBER_OWNED_PROVIDER_SETUP_REGISTRY.read(provider)
-    : null;
+  if (!isMemberOwnedDeviceProviderApplicationProvider(provider)) {
+    return null;
+  }
+  return REGISTRATIONS.find(
+    (registration) => registration.coordinates.provider === provider,
+  ) ?? null;
 }
 
 export function readMemberOwnedProviderSetupRegistrationByConnectSourceId(
   connectSourceId: string,
 ): MemberOwnedProviderSetupRegistration | null {
-  return MEMBER_OWNED_PROVIDER_SETUP_REGISTRY.readByConnectSourceId(connectSourceId);
+  const normalized = normalizeDeviceConnectSourceId(connectSourceId);
+  if (!normalized) {
+    return null;
+  }
+  return REGISTRATIONS.find(
+    (registration) => registration.coordinates.connectSourceId === normalized,
+  ) ?? null;
 }
 
 export function readMemberOwnedProviderSetupRegistrationByConnectTarget(
   connectTarget: string,
 ): MemberOwnedProviderSetupRegistration | null {
-  return MEMBER_OWNED_PROVIDER_SETUP_REGISTRY.readByConnectTarget(connectTarget);
-}
-
-export function defineMemberOwnedProviderSetupRegistry<TProvider extends string>(
-  providers: readonly TProvider[],
-  registrations: Readonly<
-    Record<TProvider, MemberOwnedProviderSetupRegistration<TProvider>>
-  >,
-): MemberOwnedProviderSetupRegistry<TProvider> {
-  const entries = Object.freeze(
-    providers.map((provider) => {
-      const registration = registrations[provider];
-      if (
-        registration.coordinates.provider !== provider
-        || registration.presentation.provider !== provider
-      ) {
-        throw new TypeError(
-          `Member-owned provider setup registration ${provider} has mismatched provider metadata.`,
-        );
-      }
-      return registration;
-    }),
-  );
-  const byProvider = new Map<string, MemberOwnedProviderSetupRegistration<TProvider>>(
-    providers.map((provider) => [provider, registrations[provider]]),
-  );
-  const bySource = buildUniqueRegistrationIndex(entries, "connectSourceId");
-  const byTarget = buildUniqueRegistrationIndex(entries, "connectTarget");
-
-  return Object.freeze({
-    list: () => entries,
-    read: (provider: string) => byProvider.get(provider) ?? null,
-    readByConnectSourceId: (connectSourceId: string) => {
-      const normalized = normalizeDeviceConnectSourceId(connectSourceId);
-      return normalized ? bySource.get(normalized) ?? null : null;
-    },
-    readByConnectTarget: (connectTarget: string) => {
-      const normalized = normalizeDeviceSyncConnectTargetKey(connectTarget);
-      return normalized ? byTarget.get(normalized) ?? null : null;
-    },
-  });
-}
-
-function buildUniqueRegistrationIndex<TProvider extends string>(
-  registrations: readonly MemberOwnedProviderSetupRegistration<TProvider>[],
-  coordinate: "connectSourceId" | "connectTarget",
-): ReadonlyMap<string, MemberOwnedProviderSetupRegistration<TProvider>> {
-  const index = new Map<string, MemberOwnedProviderSetupRegistration<TProvider>>();
-  for (const registration of registrations) {
-    const value = coordinate === "connectSourceId"
-      ? normalizeDeviceConnectSourceId(registration.coordinates[coordinate])
-      : normalizeDeviceSyncConnectTargetKey(registration.coordinates[coordinate]);
-    if (!value) {
-      throw new TypeError(
-        `Member-owned provider setup ${coordinate} is invalid.`,
-      );
-    }
-    if (index.has(value)) {
-      throw new TypeError(
-        `Member-owned provider setup ${coordinate} ${value} is duplicated.`,
-      );
-    }
-    index.set(value, registration);
+  const normalized = normalizeDeviceSyncConnectTargetKey(connectTarget);
+  if (!normalized) {
+    return null;
   }
-  return index;
-}
-
-function assertRegistryMatchesMemberOwnedConnectCatalog(
-  registry: MemberOwnedProviderSetupRegistry<MemberOwnedDeviceProviderApplicationProvider>,
-): void {
-  const registrations = registry.list();
-  const targets = listMemberOwnedDeviceSyncConnectTargets();
-  if (registrations.length !== targets.length) {
-    throw new TypeError(
-      "Member-owned provider setup registry does not match the device connect catalog.",
-    );
-  }
-  for (const registration of registrations) {
-    const coordinates = registration.coordinates;
-    if (!targets.some(
-      (target) =>
-        target.connectSourceId === coordinates.connectSourceId
-        && target.connectTarget === coordinates.connectTarget
-        && target.provider === coordinates.provider
-        && coordinates.sourceProviderSlug === null,
-    )) {
-      throw new TypeError(
-        `Member-owned provider setup registry entry ${coordinates.provider} does not match the device connect catalog.`,
-      );
-    }
-  }
+  return REGISTRATIONS.find(
+    (registration) => registration.coordinates.connectTarget === normalized,
+  ) ?? null;
 }
 
 export function requireMemberOwnedProviderSetupRegistration(
@@ -190,4 +161,82 @@ export function requireMemberOwnedProviderSetupRegistration(
     throw new TypeError("Member-owned provider setup is not supported for this provider.");
   }
   return registration;
+}
+
+export function buildMemberOwnedProviderSetupBrowserContract(input: {
+  env?: Readonly<Record<string, string | undefined>>;
+  memberId: string;
+  provider: MemberOwnedDeviceProviderApplicationProvider;
+  registration?: MemberOwnedProviderSetupRegistration;
+}): MemberOwnedProviderSetupBrowserContract {
+  const registration = input.registration
+    ?? requireMemberOwnedProviderSetupRegistration(input.provider);
+  if (registration.coordinates.provider !== input.provider) {
+    throw new TypeError("Member-owned provider setup metadata does not match its provider.");
+  }
+  const publicBaseUrl = readHostedDeviceSyncPublicBaseUrl(input.env ?? process.env);
+  if (!publicBaseUrl) {
+    throw new TypeError("Hosted device-sync public base URL is required for provider setup.");
+  }
+  const descriptor = listDeviceSyncProviderCatalog().find(
+    (candidate) => candidate.provider === input.provider,
+  );
+  if (!descriptor?.callbackPath || descriptor.defaultScopes.length === 0) {
+    throw new TypeError("Provider setup OAuth metadata is incomplete.");
+  }
+  const marker = buildMemberOwnedProviderApplicationMarker({
+    memberId: input.memberId,
+    provider: input.provider,
+  });
+  return {
+    application: {
+      callbackUrl: new URL(
+        descriptor.callbackPath.replace(/^\/+/, ""),
+        `${publicBaseUrl.replace(/\/+$/u, "")}/`,
+      ).toString(),
+      category: registration.browser.applicationCategory,
+      marker,
+      name: marker,
+      readOnlyScopes: descriptor.defaultScopes,
+      website: registration.browser.applicationWebsite,
+    },
+    developerPortalUrl: registration.browser.developerPortalUrl,
+    guidance: registration.browser.guidance,
+    provider: input.provider,
+    providerName: registration.presentation.providerName,
+    safeLandingUrl: registration.browser.safeLandingUrl,
+  };
+}
+
+export function buildMemberOwnedProviderApplicationMarker(input: {
+  memberId: string;
+  provider: MemberOwnedDeviceProviderApplicationProvider;
+}): string {
+  const suffix = createHash("sha256")
+    .update(`murph.member-owned-provider:${input.provider}:${input.memberId}`, "utf8")
+    .digest("hex")
+    .slice(0, 12);
+  return `Murph Private Sync ${suffix}`;
+}
+
+function assertRegistrationsMatchConnectCatalog(): void {
+  const targets = listMemberOwnedDeviceSyncConnectTargets();
+  if (targets.length !== REGISTRATIONS.length) {
+    throw new TypeError(
+      "Member-owned provider setup metadata does not match the device connect catalog.",
+    );
+  }
+  for (const registration of REGISTRATIONS) {
+    const coordinates = registration.coordinates;
+    if (!targets.some(
+      (target) => target.connectSourceId === coordinates.connectSourceId
+        && target.connectTarget === coordinates.connectTarget
+        && target.provider === coordinates.provider
+        && (target.sourceProviderSlug ?? null) === coordinates.sourceProviderSlug,
+    )) {
+      throw new TypeError(
+        `Member-owned provider setup metadata for ${coordinates.provider} does not match the device connect catalog.`,
+      );
+    }
+  }
 }

@@ -2290,7 +2290,6 @@ function createStore(input: {
     }
     return {
       ...latestRun,
-      deletionPending: false,
     };
   });
   const requireMemberOwnedProviderSetupRunAcquisition = vi.fn(async (

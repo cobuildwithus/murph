@@ -17,6 +17,7 @@ export const POST = withJsonError(async (request: Request) => {
       memberId,
       resumeAfterMailboxItemId: body.resumeAfterMailboxItemId,
       resumeDeliveryContext: body.resumeDeliveryContext,
+      runId: body.runId,
       startUrl: body.startUrl,
     }),
   }));

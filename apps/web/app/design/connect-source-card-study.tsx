@@ -13,7 +13,7 @@ import {
 import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
-import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/presentation";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/registry";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
 
 type ConnectSourceCardStudyCase = {
@@ -40,7 +40,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     source: MOBVOI_HEALTH_CONNECT_SOURCE,
   },
   buildStravaConnectIntentStudyCase(),
-  buildStravaSetupStudyCase("provider_prerequisite"),
+  buildStravaSetupStudyCase("authorized"),
   buildStravaSetupStudyCase("disconnect_first"),
   {
     authenticated: true,
@@ -287,7 +287,7 @@ export function ConnectSourceCardStudy({
 }
 
 function buildStravaSetupStudyCase(
-  status: "disconnect_first" | "provider_prerequisite",
+  status: "authorized" | "disconnect_first",
 ): ConnectSourceCardStudyCase {
   const disconnectFirst = status === "disconnect_first";
   return {
@@ -310,7 +310,7 @@ function buildStravaSetupStudyCase(
         width: 128,
       },
       memberOwnedSetup: {
-        action: disconnectFirst ? "disconnect_first" : "continue_provider",
+        action: disconnectFirst ? "disconnect_first" : "none",
         applicationRevision: null,
         connected: false,
         message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages[status],
@@ -328,7 +328,7 @@ function buildStravaSetupStudyCase(
 }
 
 function buildStravaConnectIntentStudyCase(): ConnectSourceCardStudyCase {
-  const studyCase = buildStravaSetupStudyCase("provider_prerequisite");
+  const studyCase = buildStravaSetupStudyCase("authorized");
   return {
     ...studyCase,
     memberOwnedConnectIntentDisclosure: true,

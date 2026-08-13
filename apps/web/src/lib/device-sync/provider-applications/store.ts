@@ -122,6 +122,12 @@ export async function readDeviceProviderApplicationView(input: {
   return row ? projectView(row) : null;
 }
 
+export interface DeviceProviderApplicationSetupCaptureFence {
+  expectedSetupVersion: number;
+  runId: string;
+  setupId: string;
+}
+
 export async function saveDeviceProviderApplication(input: {
   clientId: string;
   clientSecret: string;
@@ -129,13 +135,14 @@ export async function saveDeviceProviderApplication(input: {
   memberId: string;
   prisma?: PrismaClient;
   provider: string;
+  setupCapture?: DeviceProviderApplicationSetupCaptureFence;
 }): Promise<DeviceProviderApplicationView> {
   const provider = requireMemberOwnedDeviceProviderApplicationProvider(
     input.provider,
   );
   const prisma = input.prisma ?? getPrisma();
-  // Reject missing and synthetic-room members before any KMS work. The
-  // transaction repeats this check under the member lock before committing.
+  // Reject missing and synthetic-room members, stale setup captures, and
+  // revision conflicts before KMS work. The transaction repeats every check.
   await requirePersonalMember({ memberId: input.memberId, prisma });
   const initial = await prisma.deviceProviderApplication.findUnique({
     select: DEVICE_PROVIDER_APPLICATION_SELECT,
@@ -150,6 +157,16 @@ export async function saveDeviceProviderApplication(input: {
     currentRevision: initial?.revision ?? null,
     expectedRevision: input.expectedRevision,
   });
+  if (input.setupCapture) {
+    await requireSetupCaptureFence({
+      expectedApplication: initial,
+      expectedRevision: input.expectedRevision,
+      fence: input.setupCapture,
+      memberId: input.memberId,
+      prisma,
+      provider,
+    });
+  }
 
   const desiredSecret = buildDeviceProviderApplicationSecret({
     clientId: input.clientId,
@@ -207,7 +224,18 @@ export async function saveDeviceProviderApplication(input: {
       currentRevision: current?.revision ?? null,
       expectedRevision: input.expectedRevision,
     });
+    if (input.setupCapture) {
+      await requireSetupCaptureFence({
+        expectedApplication: current,
+        expectedRevision: input.expectedRevision,
+        fence: input.setupCapture,
+        memberId: input.memberId,
+        prisma: tx,
+        provider,
+      });
+    }
 
+    let saved: DeviceProviderApplicationRow;
     if (!current) {
       const legacyConnection = await tx.deviceConnection.findFirst({
         select: { id: true },
@@ -224,7 +252,7 @@ export async function saveDeviceProviderApplication(input: {
         );
       }
 
-      return tx.deviceProviderApplication.create({
+      saved = await tx.deviceProviderApplication.create({
         data: {
           configEncrypted: requireEncryptedProviderApplication(encrypted),
           id: applicationId,
@@ -234,23 +262,142 @@ export async function saveDeviceProviderApplication(input: {
         },
         select: DEVICE_PROVIDER_APPLICATION_SELECT,
       });
+    } else if (credentialsUnchanged) {
+      saved = current;
+    } else {
+      const activeConnection = await tx.deviceConnection.findFirst({
+        select: { id: true },
+        where: {
+          providerApplicationId: current.id,
+          status: { not: "disconnected" },
+        },
+      });
+      if (activeConnection) {
+        throw new DeviceProviderApplicationError(
+          "DEVICE_PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+          "Disconnect the existing provider connection before replacing its private application credentials.",
+        );
+      }
+
+      await tx.deviceConnection.updateMany({
+        data: {
+          providerApplicationId: null,
+          providerApplicationRevision: null,
+        },
+        where: {
+          providerApplicationId: current.id,
+          status: "disconnected",
+        },
+      });
+      await tx.deviceOauthSession.deleteMany({
+        where: { providerApplicationId: current.id },
+      });
+
+      saved = await tx.deviceProviderApplication.update({
+        data: {
+          configEncrypted: requireEncryptedProviderApplication(encrypted),
+          revision: current.revision + 1,
+        },
+        select: DEVICE_PROVIDER_APPLICATION_SELECT,
+        where: { id: current.id },
+      });
     }
 
-    if (credentialsUnchanged) {
-      return current;
+    if (input.setupCapture) {
+      const bound = await tx.deviceProviderSetup.updateMany({
+        data: {
+          providerApplicationId: saved.id,
+          providerApplicationRevision: saved.revision,
+          status: "oauth_ready",
+          version: { increment: 1 },
+        },
+        where: {
+          active: true,
+          browserRunId: input.setupCapture.runId,
+          id: input.setupCapture.setupId,
+          memberId: input.memberId,
+          provider,
+          providerApplicationId: current?.id ?? null,
+          providerApplicationRevision: current?.revision ?? null,
+          status: "capturing",
+          version: input.setupCapture.expectedSetupVersion,
+        },
+      });
+      if (bound.count !== 1) {
+        throw new DeviceProviderApplicationError(
+          "DEVICE_PROVIDER_APPLICATION_CONFLICT",
+          "Private provider setup was canceled or changed before credentials could be saved.",
+        );
+      }
     }
 
+    return saved;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  return projectView(row);
+}
+
+export async function deleteDeviceProviderApplicationForSetup(input: {
+  applicationId: string;
+  expectedRevision: number;
+  expectedSetupVersion: number;
+  memberId: string;
+  prisma?: PrismaClient;
+  provider: string;
+  runId: string;
+  setupId: string;
+}): Promise<void> {
+  const provider = requireMemberOwnedDeviceProviderApplicationProvider(
+    input.provider,
+  );
+  const revision = requireDeviceProviderApplicationRevision(input.expectedRevision);
+  const prisma = input.prisma ?? getPrisma();
+
+  await prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    await requirePersonalMember({ memberId: input.memberId, prisma: tx });
+    const setup = await tx.deviceProviderSetup.findFirst({
+      select: { id: true },
+      where: {
+        active: true,
+        browserRunId: input.runId,
+        id: input.setupId,
+        memberId: input.memberId,
+        provider,
+        providerApplicationId: input.applicationId,
+        providerApplicationRevision: revision,
+        status: "deletion_pending",
+        version: input.expectedSetupVersion,
+      },
+    });
+    if (!setup) {
+      throw new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_CONFLICT",
+        "Private provider deletion authority changed.",
+      );
+    }
+    const application = await tx.deviceProviderApplication.findUnique({
+      select: DEVICE_PROVIDER_APPLICATION_SELECT,
+      where: { id: input.applicationId },
+    });
+    requireApplicationAuthority({
+      applicationId: input.applicationId,
+      expectedRevision: revision,
+      memberId: input.memberId,
+      provider,
+      row: application,
+    });
     const activeConnection = await tx.deviceConnection.findFirst({
       select: { id: true },
       where: {
-        providerApplicationId: current.id,
+        providerApplicationId: input.applicationId,
         status: { not: "disconnected" },
       },
     });
     if (activeConnection) {
       throw new DeviceProviderApplicationError(
         "DEVICE_PROVIDER_APPLICATION_CONNECTION_CONFLICT",
-        "Disconnect the existing provider connection before replacing its private application credentials.",
+        "Disconnect the existing provider connection before deleting its private application.",
       );
     }
 
@@ -259,26 +406,70 @@ export async function saveDeviceProviderApplication(input: {
         providerApplicationId: null,
         providerApplicationRevision: null,
       },
-      where: {
-        providerApplicationId: current.id,
-        status: "disconnected",
-      },
+      where: { providerApplicationId: input.applicationId },
     });
     await tx.deviceOauthSession.deleteMany({
-      where: { providerApplicationId: current.id },
+      where: { providerApplicationId: input.applicationId },
     });
-
-    return tx.deviceProviderApplication.update({
+    const updated = await tx.deviceProviderSetup.updateMany({
       data: {
-        configEncrypted: requireEncryptedProviderApplication(encrypted),
-        revision: current.revision + 1,
+        completedAt: new Date(),
+        providerApplicationId: null,
+        providerApplicationRevision: null,
+        status: "deleted",
+        version: { increment: 1 },
       },
-      select: DEVICE_PROVIDER_APPLICATION_SELECT,
-      where: { id: current.id },
+      where: {
+        browserRunId: input.runId,
+        id: input.setupId,
+        memberId: input.memberId,
+        provider,
+        providerApplicationId: input.applicationId,
+        providerApplicationRevision: revision,
+        status: "deletion_pending",
+        version: input.expectedSetupVersion,
+      },
+    });
+    if (updated.count !== 1) {
+      throw new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_CONFLICT",
+        "Private provider deletion authority changed.",
+      );
+    }
+    await tx.deviceProviderApplication.delete({
+      where: { id: input.applicationId },
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
 
-  return projectView(row);
+async function requireSetupCaptureFence(input: {
+  expectedApplication: DeviceProviderApplicationRow | null;
+  expectedRevision: number | null;
+  fence: DeviceProviderApplicationSetupCaptureFence;
+  memberId: string;
+  prisma: DeviceProviderApplicationReadClient;
+  provider: MemberOwnedDeviceProviderApplicationProvider;
+}): Promise<void> {
+  const setup = await input.prisma.deviceProviderSetup.findFirst({
+    select: { id: true },
+    where: {
+      active: true,
+      browserRunId: input.fence.runId,
+      id: input.fence.setupId,
+      memberId: input.memberId,
+      provider: input.provider,
+      providerApplicationId: input.expectedApplication?.id ?? null,
+      providerApplicationRevision: input.expectedRevision,
+      status: "capturing",
+      version: input.fence.expectedSetupVersion,
+    },
+  });
+  if (!setup) {
+    throw new DeviceProviderApplicationError(
+      "DEVICE_PROVIDER_APPLICATION_CONFLICT",
+      "Private provider setup was canceled or changed before credentials could be saved.",
+    );
+  }
 }
 
 export async function resolveDeviceProviderApplication(input: {

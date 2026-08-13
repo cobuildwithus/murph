@@ -1,201 +1,171 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-import type { MemberOwnedProviderSetupAdapter } from "@/src/lib/device-sync/provider-setup/adapter";
+import { parseHostedRuntimeProviderSetupToolRequest } from "@murphai/hosted-execution/provider-setup";
+
 import {
-  defineMemberOwnedProviderSetupRegistry,
-  type MemberOwnedProviderSetupRegistration,
+  STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+  buildMemberOwnedProviderApplicationMarker,
+  buildMemberOwnedProviderSetupBrowserContract,
+  listMemberOwnedProviderSetupRegistrations,
 } from "@/src/lib/device-sync/provider-setup/registry";
 import {
+  buildBlindOwnedApplicationDeleteCode,
+  buildBlindProviderCredentialCaptureCode,
+} from "@/src/lib/device-sync/provider-setup/service";
+import {
   toMemberOwnedProviderSetupView,
-  type MemberOwnedProviderSetupPresentation,
   type MemberOwnedProviderSetupRecord,
-  type MemberOwnedProviderSetupStatus,
 } from "@/src/lib/device-sync/provider-setup/types";
 
-const PROVIDERS = ["alpha-fixture", "beta-fixture"] as const;
-type FixtureProvider = (typeof PROVIDERS)[number];
+const MEMBER_ID = "member_synthetic";
 
-const MESSAGES = {
-  canceled: "canceled",
-  canceling: "canceling",
-  connected: "connected",
-  deleted: "deleted",
-  deletion_pending: "deletion pending",
-  disconnect_first: "disconnect first",
-  inspection_required: "inspection required",
-  oauth_in_progress: "oauth in progress",
-  oauth_ready: "oauth ready",
-  pending: "pending",
-  provider_conflict: "provider conflict",
-  provider_prerequisite: "provider prerequisite",
-  repair_required: "repair required",
-  retryable_failure: "retryable failure",
-  waiting_for_user: "waiting for user",
-  working: "working",
-} satisfies Readonly<Record<MemberOwnedProviderSetupStatus, string>>;
+const SETUP: MemberOwnedProviderSetupRecord = {
+  active: true,
+  browserRunId: null,
+  completedAt: null,
+  connectSourceId: "strava",
+  connectTarget: "strava",
+  createdAt: new Date("2026-08-11T12:00:00.000Z"),
+  id: "dps_synthetic",
+  memberId: MEMBER_ID,
+  provider: "strava",
+  providerApplicationId: null,
+  providerApplicationRevision: null,
+  sourceProviderSlug: null,
+  status: "pending",
+  updatedAt: new Date("2026-08-11T12:00:00.000Z"),
+  version: 1,
+};
 
-describe("member-owned provider setup primitive", () => {
-  it("indexes and constructs a synthetic second provider without changing shared logic", async () => {
-    const registry = defineMemberOwnedProviderSetupRegistry(PROVIDERS, {
-      "alpha-fixture": buildRegistration("alpha-fixture"),
-      "beta-fixture": buildRegistration("beta-fixture"),
+describe("member-owned provider setup contract", () => {
+  it("keeps Strava declarative and derives the browser contract from shared OAuth metadata", () => {
+    const registrations = listMemberOwnedProviderSetupRegistrations();
+    const contract = buildMemberOwnedProviderSetupBrowserContract({
+      env: { HOSTED_WEB_BASE_URL: "https://web.example.test" },
+      memberId: MEMBER_ID,
+      provider: "strava",
     });
 
-    expect(registry.list()).toHaveLength(2);
-    expect(registry.read("beta-fixture")?.coordinates).toEqual({
-      connectSourceId: "beta-fixture",
-      connectTarget: "beta-fixture",
-      provider: "beta-fixture",
-      sourceProviderSlug: null,
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0]).toMatchObject({
+      browser: {
+        applicationCategory: "Other",
+        applicationWebsite: "https://withmurph.ai",
+        developerPortalUrl: "https://www.strava.com/settings/api",
+      },
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+      },
     });
-    expect(registry.readByConnectSourceId("beta-fixture")?.coordinates.provider)
-      .toBe("beta-fixture");
-    expect(registry.readByConnectTarget("beta-fixture")?.coordinates.provider)
-      .toBe("beta-fixture");
-
-    const adapter = registry.read("beta-fixture")?.createAdapter();
-    if (!adapter) {
-      throw new TypeError("Synthetic provider registration was not indexed.");
-    }
-    expect(adapter.provider).toBe("beta-fixture");
-    await expect(adapter.captureAndSealOwnedApplication({
-      expectedRevision: null,
-      memberId: "member_fixture",
-      runId: "hcr_fixture",
-      setupId: "dps_fixture",
-    })).resolves.toMatchObject({
-      provider: "beta-fixture",
-      revision: 1,
+    expect(contract).toMatchObject({
+      application: {
+        callbackUrl: "https://web.example.test/api/device-sync/oauth/strava/callback",
+        category: "Other",
+        readOnlyScopes: ["activity:read"],
+        website: "https://withmurph.ai",
+      },
+      developerPortalUrl: "https://www.strava.com/settings/api",
+      provider: "strava",
     });
+    expect(contract.guidance.join(" ")).toMatch(/live page/iu);
+    expect(contract.guidance.join(" ")).toMatch(/trusted browser boundary/iu);
+    expect(contract.guidance.join(" ")).not.toMatch(/input\[|button\.|data-testid|xpath/iu);
   });
 
-  it("rejects duplicate source and target ownership across providers", () => {
-    expect(() => defineMemberOwnedProviderSetupRegistry(PROVIDERS, {
-      "alpha-fixture": buildRegistration("alpha-fixture"),
-      "beta-fixture": buildRegistration("beta-fixture", {
-        connectSourceId: "alpha-fixture",
-      }),
-    })).toThrow(/connectSourceId .* duplicated/u);
+  it("uses a stable opaque ownership marker without exposing the member id", () => {
+    const first = buildMemberOwnedProviderApplicationMarker({
+      memberId: MEMBER_ID,
+      provider: "strava",
+    });
+    const second = buildMemberOwnedProviderApplicationMarker({
+      memberId: MEMBER_ID,
+      provider: "strava",
+    });
 
-    expect(() => defineMemberOwnedProviderSetupRegistry(PROVIDERS, {
-      "alpha-fixture": buildRegistration("alpha-fixture"),
-      "beta-fixture": buildRegistration("beta-fixture", {
-        connectTarget: "alpha-fixture",
-      }),
-    })).toThrow(/connectTarget .* duplicated/u);
+    expect(first).toBe(second);
+    expect(first).toMatch(/^Murph Private Sync [a-f0-9]{12}$/u);
+    expect(first).not.toContain(MEMBER_ID);
   });
 
-  it("projects the same lifecycle and recovery action for a synthetic provider", () => {
-    const presentation = buildPresentation("beta-fixture");
-    const setup = buildSetup("beta-fixture", "provider_conflict");
-
-    expect(toMemberOwnedProviderSetupView(setup, presentation)).toMatchObject({
-      action: "retry",
-      connected: false,
-      message: "provider conflict",
-      provider: "beta-fixture",
-      status: "provider_conflict",
+  it("accepts only the runtime selector handoff and rejects credential-shaped tool input", () => {
+    const parsed = parseHostedRuntimeProviderSetupToolRequest({
+      action: "capture",
+      applicationRootSelector: "form[data-owned-application]",
+      clientIdSelector: "[data-client-id]",
+      clientSecretSelector: "[data-client-secret]",
+      ownershipMarkerSelector: "input[name=application_name]",
+      provider: "strava",
+      revealSecretSelector: null,
+      runId: "hcr_synthetic",
+      setupId: "dps_synthetic",
+      submitSelector: "button[type=submit]",
     });
+
+    expect(parsed.action).toBe("capture");
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      ...parsed,
+      clientSecret: randomUUID(),
+    })).toThrow();
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      ...parsed,
+      selectorProgram: "await page.locator('provider-specific').click()",
+    })).toThrow();
+  });
+
+  it("keeps final capture and deletion generic, exact, and blind", () => {
+    const capture = buildBlindProviderCredentialCaptureCode({
+      applicationRootSelector: "form[data-owned-application]",
+      clientIdSelector: "#runtime-client-id",
+      clientSecretSelector: "#runtime-client-secret",
+      marker: "Murph Private Sync fixture",
+      ownershipMarkerSelector: "#runtime-marker",
+      revealSecretSelector: "#runtime-reveal",
+      safeLandingUrl: "https://provider.example.test/apps",
+      submitSelector: "#runtime-submit",
+    });
+    const deletion = buildBlindOwnedApplicationDeleteCode({
+      applicationRootSelector: "section[data-owned-application]",
+      completionSelector: "#runtime-complete",
+      confirmSelector: "#runtime-confirm",
+      deleteSelector: "#runtime-delete",
+      marker: "Murph Private Sync fixture",
+      ownershipMarkerSelector: "#runtime-marker",
+      safeLandingUrl: "https://provider.example.test/apps",
+    });
+
+    expect(capture).toContain("return { clientId, clientSecret }");
+    expect(capture).toContain("provider application ownership marker mismatch");
+    expect(capture).toContain("https://provider.example.test/apps");
+    expect(capture).not.toMatch(/strava/iu);
+    expect(deletion).toContain("provider application ownership marker mismatch");
+    expect(deletion).toContain('return { kind: "deleted" }');
+    expect(deletion).not.toMatch(/strava/iu);
+  });
+
+  it("projects only member-facing actions from the reduced durable lifecycle", () => {
+    expect(toMemberOwnedProviderSetupView(
+      SETUP,
+      STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    ).action).toBe("authorize");
+    expect(toMemberOwnedProviderSetupView(
+      { ...SETUP, status: "authorized" },
+      STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    ).action).toBe("none");
+    expect(toMemberOwnedProviderSetupView(
+      {
+        ...SETUP,
+        providerApplicationId: "dpa_synthetic",
+        providerApplicationRevision: 1,
+        status: "oauth_ready",
+      },
+      STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    ).action).toBe("continue_oauth");
+    expect(toMemberOwnedProviderSetupView(
+      { ...SETUP, status: "disconnect_first" },
+      STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    ).action).toBe("disconnect_first");
   });
 });
-
-function buildRegistration<TProvider extends FixtureProvider>(
-  provider: TProvider,
-  coordinates: {
-    connectSourceId?: string;
-    connectTarget?: string;
-  } = {},
-): MemberOwnedProviderSetupRegistration<TProvider> {
-  return {
-    coordinates: {
-      connectSourceId: coordinates.connectSourceId ?? provider,
-      connectTarget: coordinates.connectTarget ?? provider,
-      provider,
-      sourceProviderSlug: null,
-    },
-    createAdapter: () => buildAdapter(provider, {
-      connectSourceId: coordinates.connectSourceId ?? provider,
-      connectTarget: coordinates.connectTarget ?? provider,
-    }),
-    presentation: buildPresentation(provider),
-  };
-}
-
-function buildAdapter<TProvider extends FixtureProvider>(
-  provider: TProvider,
-  coordinates: { connectSourceId: string; connectTarget: string },
-): MemberOwnedProviderSetupAdapter<TProvider> {
-  return {
-    ...coordinates,
-    provider,
-    sourceProviderSlug: null,
-    createOwnedApplication: async () => ({ kind: "submitted" }),
-    captureAndSealOwnedApplication: async () => ({
-      applicationId: `dpa_${provider}`,
-      createdAt: "2026-08-12T00:00:00.000Z",
-      provider,
-      revision: 1,
-      updatedAt: "2026-08-12T00:00:00.000Z",
-    }),
-    cancelBrowserRun: async () => "canceled",
-    deleteOwnedApplication: async () => ({ kind: "missing" }),
-    ensureBrowserRun: async () => ({
-      awaitingReason: null,
-      reused: false,
-      runId: `hcr_${provider}`,
-      status: "running",
-    }),
-    finishBrowserRun: async () => "canceled",
-    inspectDashboard: async () => ({ kind: "owned_application" }),
-    pauseForUser: async () => ({
-      handoffUrl: "/computer/handoff/synthetic",
-      runId: `hcr_${provider}`,
-    }),
-  };
-}
-
-function buildPresentation<TProvider extends FixtureProvider>(
-  provider: TProvider,
-): MemberOwnedProviderSetupPresentation<TProvider> {
-  return {
-    actionLabels: {
-      continue_oauth: "Continue to OAuth",
-      continue_provider: "Continue at provider",
-      continue_sign_in: "Continue sign-in",
-      disconnect_first: "Disconnect first",
-      retry: "Retry",
-      start: "Start",
-    },
-    cancelSetupLabel: "Cancel setup",
-    messages: MESSAGES,
-    provider,
-    providerName: provider,
-    readOnlyAccessLabel: "Read-only",
-  };
-}
-
-function buildSetup<TProvider extends FixtureProvider>(
-  provider: TProvider,
-  status: MemberOwnedProviderSetupStatus,
-): MemberOwnedProviderSetupRecord<TProvider> {
-  const now = new Date("2026-08-12T00:00:00.000Z");
-  return {
-    active: true,
-    browserRunId: null,
-    completedAt: null,
-    connectSourceId: provider,
-    connectTarget: provider,
-    createdAt: now,
-    id: "dps_fixture",
-    lastErrorCode: null,
-    memberId: "member_fixture",
-    provider,
-    providerApplicationId: null,
-    providerApplicationRevision: null,
-    providerSubmissionAt: null,
-    sourceProviderSlug: null,
-    status,
-    updatedAt: now,
-    version: 1,
-  };
-}

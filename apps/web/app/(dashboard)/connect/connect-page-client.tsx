@@ -36,7 +36,6 @@ import {
   markCallbackConnectedSource,
   markLocallyDisconnectedSources,
   readDeviceConnectIntentFromCurrentLocation,
-  readSafeMemberOwnedProviderHandoffUrl,
   requestConnectionAuthorizationUrl,
   resolveCallbackSourceId,
   resolveConnectIntentRedirectSource,
@@ -71,7 +70,6 @@ interface MemberOwnedProviderSetupReadResponse {
 }
 
 interface MemberOwnedProviderSetupMutationResponse {
-  handoffUrl?: string;
   presentation: MemberOwnedProviderSetupPresentation;
   setup: MemberOwnedProviderSetupView;
 }
@@ -353,17 +351,6 @@ export function ConnectSourcesGrid({
       setMemberOwnedSetupBySourceId((values) =>
         new Map(values).set(source.id, advanced.setup),
       );
-      if (advanced.handoffUrl) {
-        const handoffUrl = readSafeMemberOwnedProviderHandoffUrl(
-          advanced.handoffUrl,
-          window.location.origin,
-        );
-        if (!handoffUrl) {
-          throw new Error("Murph could not open the secure provider sign-in handoff.");
-        }
-        window.location.assign(handoffUrl);
-        return;
-      }
       if (advanced.setup.action === "continue_oauth") {
         await startOAuth();
       }

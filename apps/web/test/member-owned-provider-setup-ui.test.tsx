@@ -2,154 +2,80 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  readSafeMemberOwnedProviderHandoffUrl,
-} from "../app/(dashboard)/connect/connect-page-helpers";
-import {
-  MemberOwnedProviderSetupComponentStudy,
-  MemberOwnedProviderSetupFlowStudy,
-} from "@/app/design/member-owned-provider-setup-study";
+import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
+import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { MemberOwnedProviderSetup } from "@/src/components/device-sync/member-owned-provider-setup";
-import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/presentation";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/registry";
 import type { MemberOwnedProviderSetupView } from "@/src/lib/device-sync/provider-setup/types";
 
 const UPDATED_AT = "2026-08-11T12:00:00.000Z";
 
-type TestSetupView = Omit<MemberOwnedProviderSetupView, "setupId">;
-
-function renderSetup(
-  setup: TestSetupView | null,
-  connected = false,
-): string {
-  const resolvedSetup: MemberOwnedProviderSetupView | null = setup
-    ? { setupId: "dps_synthetic", ...setup }
-    : null;
+function renderSetup(setup: MemberOwnedProviderSetupView | null): string {
   return renderToStaticMarkup(createElement(MemberOwnedProviderSetup, {
-    connected,
+    connected: setup?.connected ?? false,
     onAction: vi.fn(),
     onCancel: vi.fn(),
-    pending: resolvedSetup?.status === "working",
+    pending: false,
     presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
-    setup: resolvedSetup,
+    setup,
   }));
 }
 
 describe("member-owned provider setup UI", () => {
-  it("accepts only same-origin hosted-computer handoffs", () => {
-    expect(readSafeMemberOwnedProviderHandoffUrl(
-      "/computer/handoff/synthetic-handoff",
-      "https://web.example.test",
-    )).toBe("https://web.example.test/computer/handoff/synthetic-handoff");
-    expect(readSafeMemberOwnedProviderHandoffUrl(
-      "https://attacker.example/computer/handoff/synthetic-handoff",
-      "https://web.example.test",
-    )).toBeNull();
-    expect(readSafeMemberOwnedProviderHandoffUrl(
-      "https://web.example.test/settings",
-      "https://web.example.test",
-    )).toBeNull();
-  });
+  it("discloses provider prerequisites before setup begins", () => {
+    const markup = renderSetup(setupView("pending", "authorize"));
 
-  it.each([
-    ["pending", "start", "Set up Strava"],
-    ["working", "none", "Murph is working"],
-    ["waiting_for_user", "continue_sign_in", "Continue sign-in"],
-    ["provider_prerequisite", "continue_provider", "Continue in Strava"],
-    ["canceling", "none", "Canceling safely"],
-    ["inspection_required", "retry", "Safe recovery"],
-    ["oauth_ready", "continue_oauth", "Continue with Strava"],
-    ["oauth_in_progress", "continue_oauth", "Consent in progress"],
-    ["repair_required", "retry", "Repair available"],
-    ["retryable_failure", "retry", "Progress saved"],
-    ["disconnect_first", "disconnect_first", "Disconnect first"],
-    ["provider_conflict", "retry", "Protected provider app"],
-  ] as const)("renders truthful %s state", (status, action, expected) => {
-    const markup = renderSetup({
-      action,
-      applicationRevision: status === "pending" || status === "working" ? null : 4,
-      connected: false,
-      message: `Synthetic ${status} status without credentials.`,
-      provider: "strava",
-      status,
-      updatedAt: UPDATED_AT,
-    });
-
-    expect(markup).toContain(expected);
+    expect(markup).toContain("Ready to set up");
+    expect(markup).toContain("Strava may require developer access");
+    expect(markup).toMatch(/<button[^>]*>Continue<\/button>/u);
     expect(markup).not.toMatch(/<input\b/iu);
     expect(markup).not.toMatch(/client[ -]?(?:id|secret)/iu);
-    expect(markup).not.toContain("synthetic-client-secret-not-a-credential");
   });
 
-  it("renders connected state without credential fields or setup actions", () => {
-    const markup = renderSetup({
-      action: "none",
-      applicationRevision: 4,
-      connected: true,
-      message: "Synthetic connected status.",
-      provider: "strava",
-      status: "connected",
-      updatedAt: UPDATED_AT,
-    }, true);
-
-    expect(markup).toContain("Strava is connected through your private provider application.");
-    expect(markup).toContain("Private application revision 4");
-    expect(markup).not.toContain("<button");
-    expect(markup).not.toMatch(/<input\b/iu);
-  });
-
-  it("does not claim a legacy connection uses the member-owned application", () => {
-    const markup = renderSetup(null, true);
-
-    expect(markup).toContain("Disconnect the current Strava connection");
-    expect(markup).not.toContain(
-      "Strava is connected through your private provider application.",
-    );
-  });
-
-  it("renders prerequisite continuation and cancellation as real buttons", () => {
-    const markup = renderSetup({
-      action: "continue_provider",
-      applicationRevision: null,
-      connected: false,
-      message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages.provider_prerequisite,
-      provider: "strava",
-      status: "provider_prerequisite",
-      updatedAt: UPDATED_AT,
+  it("offers safe Continue and Cancel actions in the exact connect-intent disclosure", () => {
+    const markup = renderSourceCard({
+      memberOwnedConnectIntentDisclosure: {
+        onCancel: vi.fn(),
+        onContinue: vi.fn(),
+      },
+      source: stravaSource(setupView("pending", "authorize")),
     });
 
-    expect(markup).toMatch(
-      /<button[^>]+type="button"[^>]*aria-label="Cancel setup for Strava"[^>]*>Cancel setup<\/button>/u,
-    );
-    expect(markup).toMatch(
-      /<button[^>]+type="button"[^>]*aria-label="Continue in Strava for Strava"[^>]*>Continue in Strava<\/button>/u,
-    );
+    expect(markup).toContain("Review before setup");
+    expect(markup).toContain("no provider work starts before you continue");
+    expect(markup).toMatch(/<button[^>]*>Cancel<\/button>/u);
+    expect(markup).toMatch(/<button[^>]*>Continue<\/button>/u);
   });
 
-  it("leaves disconnect-first action ownership to the enclosing SourceCard", () => {
-    const markup = renderSetup({
-      action: "disconnect_first",
-      applicationRevision: 4,
-      connected: false,
-      message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages.disconnect_first,
-      provider: "strava",
-      status: "disconnect_first",
-      updatedAt: UPDATED_AT,
-    });
-
-    expect(markup).toContain("Disconnect the current Strava connection");
-    expect(markup).not.toContain("<button");
+  it("keeps durable in-progress setup cancelable without exposing browser internals", () => {
+    for (const status of ["authorized", "browser_setup", "capturing", "canceling"] as const) {
+      const markup = renderSetup(setupView(status, "none"));
+      expect(markup).toContain("Cancel setup");
+      expect(markup).not.toMatch(/handoff|runId|selector|playwright/iu);
+      expect(markup).not.toMatch(/<input\b/iu);
+    }
   });
 
-  it("renders as a flat content group without nested card chrome", () => {
-    const markup = renderSetup({
-      action: "start",
-      applicationRevision: null,
-      connected: false,
-      message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages.pending,
-      provider: "strava",
-      status: "pending",
-      updatedAt: UPDATED_AT,
+  it("leaves disconnect-first ownership to the enclosing source card", () => {
+    const setup = setupView("disconnect_first", "disconnect_first", 3);
+    const componentMarkup = renderSetup(setup);
+    const cardMarkup = renderSourceCard({
+      source: {
+        ...stravaSource(setup),
+        connected: true,
+        disconnectConnectionId: "connection_synthetic",
+      },
     });
+
+    expect(componentMarkup).not.toContain("<button");
+    const disconnectActions = cardMarkup.match(
+      /<button[^>]*aria-label="Disconnect Strava first"[^>]*>[\s\S]*?Disconnect Strava first[\s\S]*?<\/button>/gu,
+    ) ?? [];
+    expect(disconnectActions).toHaveLength(1);
+  });
+
+  it("stays flattened inside the existing source card", () => {
+    const markup = renderSetup(setupView("authorized", "none"));
     const wrapper = markup.match(
       /<div data-member-owned-provider-setup="true" class="([^"]+)"/u,
     );
@@ -157,23 +83,59 @@ describe("member-owned provider setup UI", () => {
     expect(wrapper?.[1]).toBe("flex w-full flex-col gap-3");
     expect(wrapper?.[1]).not.toMatch(/(?:^|\s)(?:border|rounded|bg-|p-)/u);
   });
-
-  it("uses the production component for inert component and section studies", () => {
-    const componentMarkup = renderToStaticMarkup(
-      createElement(MemberOwnedProviderSetupComponentStudy),
-    );
-    const sectionMarkup = renderToStaticMarkup(
-      createElement(MemberOwnedProviderSetupFlowStudy),
-    );
-
-    expect(componentMarkup).toContain("Murph is working");
-    expect(sectionMarkup).toContain("member-owned-provider-setup-flow");
-    expect(sectionMarkup).toContain("Provider sign-in or challenge");
-    expect(sectionMarkup).toContain("Provider prerequisite");
-    expect(sectionMarkup).toContain("Cancel setup");
-    expect(sectionMarkup).toContain("Ambiguous create recovery");
-    expect(sectionMarkup).toContain("Disconnect first");
-    expect(sectionMarkup).not.toMatch(/<input\b/iu);
-    expect(sectionMarkup).not.toMatch(/client[ -]?(?:id|secret)/iu);
-  });
 });
+
+function renderSourceCard(input: {
+  memberOwnedConnectIntentDisclosure?: {
+    onCancel: () => void;
+    onContinue: () => void;
+  };
+  source: ConnectSource;
+}): string {
+  return renderToStaticMarkup(createElement(SourceCard, {
+    authenticated: true,
+    errorMessage: null,
+    memberOwnedConnectIntentDisclosure: input.memberOwnedConnectIntentDisclosure,
+    onCancelSetup: async () => undefined,
+    onDisconnectTargetChange: vi.fn(),
+    onStartConnection: async () => undefined,
+    pending: false,
+    pendingDisconnect: false,
+    source: input.source,
+  }));
+}
+
+function stravaSource(setup: MemberOwnedProviderSetupView): ConnectSource {
+  return {
+    connectTarget: "strava",
+    description: "Runs, rides, workouts, and activity history.",
+    id: "strava",
+    logo: {
+      className: "h-8 w-24",
+      height: 32,
+      src: "/brand-logos/connect/strava.svg",
+      width: 128,
+    },
+    memberOwnedSetup: setup,
+    memberOwnedSetupPresentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+    memberOwnedSetupProvider: "strava",
+    name: "Strava",
+  };
+}
+
+function setupView(
+  status: MemberOwnedProviderSetupView["status"],
+  action: MemberOwnedProviderSetupView["action"],
+  applicationRevision: number | null = null,
+): MemberOwnedProviderSetupView {
+  return {
+    action,
+    applicationRevision,
+    connected: status === "connected",
+    message: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION.messages[status],
+    provider: "strava",
+    setupId: "dps_synthetic",
+    status,
+    updatedAt: UPDATED_AT,
+  };
+}

@@ -127,6 +127,7 @@ export const hostedComputerDeliveryContextSchema = z
 export const hostedComputerOpenRunRequestSchema = z
   .object({
     goal: z.string().trim().min(1).max(2_000).optional(),
+    runId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     startUrl: hostedComputerStartUrlSchema.nullable().default(null),
@@ -141,16 +142,95 @@ const hostedComputerActTimeoutSchema = z
   .max(HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS)
   .default(15_000);
 
-export const hostedComputerActRequestSchema = z
-  .object({
-    code: z
-      .string()
-      .trim()
-      .min(1)
-      .max(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH),
-    timeoutMs: hostedComputerActTimeoutSchema,
-  })
-  .strict();
+const hostedComputerControlTextSchema = z.string().trim().min(1).max(2_000);
+const safeSelectorFragment = String.raw`(?:#[A-Za-z_][A-Za-z0-9_-]*|\.[A-Za-z_][A-Za-z0-9_-]*|\[(?:id|name|data-[A-Za-z0-9_-]+|aria-label|role|type)(?:=(?:"[^"\\\r\n]{1,160}"|'[^'\\\r\n]{1,160}'|[A-Za-z_][A-Za-z0-9_-]*))?\])`;
+const safeSelectorPattern = new RegExp(
+  String.raw`^(?:(?:\*|[A-Za-z][A-Za-z0-9-]*)(?:${safeSelectorFragment})*|(?:${safeSelectorFragment})+)$`,
+  "u",
+);
+
+export const hostedComputerSafeSelectorSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .regex(safeSelectorPattern);
+
+export const hostedComputerControlTargetSchema = z.discriminatedUnion("kind", [
+  z.object({
+    exact: z.boolean().default(true),
+    kind: z.literal("label"),
+    value: hostedComputerControlTextSchema,
+  }).strict(),
+  z.object({
+    exact: z.boolean().default(true),
+    kind: z.literal("role"),
+    name: hostedComputerControlTextSchema.nullable().default(null),
+    role: z.string().trim().min(1).max(80),
+  }).strict(),
+  z.object({
+    kind: z.literal("selector"),
+    value: hostedComputerSafeSelectorSchema,
+  }).strict(),
+  z.object({
+    exact: z.boolean().default(true),
+    kind: z.literal("text"),
+    value: hostedComputerControlTextSchema,
+  }).strict(),
+]);
+
+const hostedComputerControlActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("goto"),
+    url: hostedComputerStartUrlSchema,
+  }).strict(),
+  z.object({
+    action: z.literal("click"),
+    target: hostedComputerControlTargetSchema,
+  }).strict(),
+  z.object({
+    action: z.literal("fill"),
+    target: hostedComputerControlTargetSchema,
+    value: z.string().max(2_000),
+  }).strict(),
+  z.object({
+    action: z.literal("select"),
+    option: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("label"), value: hostedComputerControlTextSchema }).strict(),
+      z.object({ kind: z.literal("value"), value: hostedComputerControlTextSchema }).strict(),
+    ]),
+    target: hostedComputerControlTargetSchema,
+  }).strict(),
+  z.object({
+    action: z.literal("set_checked"),
+    checked: z.boolean(),
+    target: hostedComputerControlTargetSchema,
+  }).strict(),
+  z.object({
+    action: z.literal("wait"),
+    state: z.enum(["visible", "hidden"]).default("visible"),
+    target: hostedComputerControlTargetSchema,
+  }).strict(),
+]);
+
+const hostedComputerScriptActRequestSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(1)
+    .max(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH),
+  timeoutMs: hostedComputerActTimeoutSchema,
+}).strict();
+
+export const hostedComputerControlActRequestSchema = z.object({
+  steps: z.array(hostedComputerControlActionSchema).min(1).max(12),
+  timeoutMs: hostedComputerActTimeoutSchema,
+}).strict();
+
+export const hostedComputerActRequestSchema = z.union([
+  hostedComputerScriptActRequestSchema,
+  hostedComputerControlActRequestSchema,
+]);
 
 const hostedComputerOsControlCoordinateSchema = z
   .number()
@@ -267,6 +347,10 @@ export type HostedComputerOpenRunRequest =
   z.infer<typeof hostedComputerOpenRunRequestSchema>;
 export type HostedComputerActRequest =
   z.infer<typeof hostedComputerActRequestSchema>;
+export type HostedComputerControlActRequest =
+  z.infer<typeof hostedComputerControlActRequestSchema>;
+export type HostedComputerControlTarget =
+  z.infer<typeof hostedComputerControlTargetSchema>;
 export type HostedComputerOsControlRequest =
   z.infer<typeof hostedComputerOsControlRequestSchema>;
 export type HostedComputerDeliveryContext =

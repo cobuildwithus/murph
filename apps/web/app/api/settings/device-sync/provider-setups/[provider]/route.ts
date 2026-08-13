@@ -41,13 +41,13 @@ export const POST = withJsonError(async (
     memberId: auth.member.id,
     prisma: getPrisma(),
   });
-  const result = await createMemberOwnedProviderSetupService(provider)
-    .advance(auth.member.id);
+  const setup = await createMemberOwnedProviderSetupService(provider)
+    .authorize(auth.member.id);
 
   return jsonOk({
     presentation: registration.presentation,
     provider,
-    ...result,
+    setup,
   });
 });
 

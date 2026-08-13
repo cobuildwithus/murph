@@ -172,60 +172,69 @@ afterEach(() => {
 });
 
 function createStravaSetupProjection(input: {
-  action?: "continue_oauth" | "continue_provider" | "disconnect_first" | "none" | "retry" | "start";
+  action?: "authorize" | "continue_oauth" | "disconnect_first" | "none";
   connected?: boolean;
-  status?: "connected" | "disconnect_first" | "oauth_ready" | "pending" | "provider_prerequisite" | "repair_required";
+  status?:
+    | "authorized"
+    | "browser_setup"
+    | "canceled"
+    | "canceling"
+    | "capturing"
+    | "connected"
+    | "deleted"
+    | "deletion_pending"
+    | "disconnect_first"
+    | "oauth_in_progress"
+    | "oauth_ready"
+    | "pending";
 } = {}) {
   const status = input.status ?? "pending";
+  const messages = {
+    authorized: "Setup is authorized. Return to your Murph conversation and ask Murph to continue this exact Strava setup.",
+    browser_setup: "Murph is continuing this Strava setup in its secure browser. Progress survives sign-in, MFA, CAPTCHA, and provider prerequisites.",
+    canceled: "Strava setup was canceled. You can authorize a new attempt.",
+    canceling: "Murph is safely canceling this Strava setup. Late browser work cannot save credentials.",
+    capturing: "Murph is securely capturing and sealing the private application credentials. They are never shown to the assistant.",
+    connected: "Strava is connected through your private provider application.",
+    deleted: "The private Strava application and local credential binding were deleted.",
+    deletion_pending: "Murph is removing only the private Strava application it can prove it owns.",
+    disconnect_first: "Disconnect the current Strava connection before changing or removing its private application.",
+    oauth_in_progress: "Strava is waiting for read-only consent. Continue to finish connecting.",
+    oauth_ready: "Your private Strava application is ready. Continue to grant read-only activity access.",
+    pending: "Murph can create and manage a private Strava application for this connection.",
+  } as const;
+  const action = input.action ?? (
+    status === "pending" || status === "canceled"
+      ? "authorize"
+      : status === "oauth_ready" || status === "oauth_in_progress"
+        ? "continue_oauth"
+        : status === "disconnect_first"
+          ? "disconnect_first"
+          : "none"
+  );
   return {
     strava: {
       presentation: {
         actionLabels: {
+          authorize: "Continue",
           continue_oauth: "Continue with Strava",
-          continue_provider: "Continue in Strava",
-          continue_sign_in: "Continue sign-in",
           disconnect_first: "Disconnect Strava first",
-          retry: "Retry safely",
-          start: "Set up Strava",
         },
         cancelSetupLabel: "Cancel setup",
-        messages: {
-          canceled: "Strava setup was canceled. You can start again.",
-          canceling: "Murph is safely canceling this Strava setup. You can retry cancellation if it was interrupted.",
-          connected: "Strava is connected and sync is starting.",
-          deletion_pending: "Murph is removing its private Strava application.",
-          deleted: "This Strava setup was deleted.",
-          disconnect_first: "Disconnect the current Strava connection first.",
-          inspection_required: "Murph needs to inspect Strava before continuing.",
-          oauth_in_progress: "Strava is waiting for read-only consent.",
-          oauth_ready: "Your private Strava application is ready.",
-          pending: "Murph can set up your private Strava connection. Strava may first require a developer subscription or another provider prerequisite.",
-          provider_conflict: "Murph will not change an unrelated application.",
-          provider_prerequisite: "Strava requires its current developer subscription or provider prerequisite before Murph can create the private application. Continue in Strava, then return here to resume, or cancel setup.",
-          repair_required: "Murph can repair its private Strava application.",
-          retryable_failure: "Your progress is saved and safe to retry.",
-          waiting_for_user: "Continue in Strava for sign-in or verification.",
-          working: "Murph is setting up Strava for you.",
-        },
+        developerAccessDisclosure:
+          "Strava may require developer access or another provider prerequisite before setup can finish.",
+        messages,
         provider: "strava" as const,
         providerName: "Strava",
         readOnlyAccessLabel: "Read-only activity access",
       },
       setup: {
-        action: input.action ?? (status === "connected" ? "none" : "start"),
-        applicationRevision: status === "pending" ? null : 2,
+        action,
+        applicationRevision: ["oauth_ready", "oauth_in_progress", "connected", "disconnect_first"].includes(status)
+          ? 2
+          : null,
         connected: input.connected ?? status === "connected",
-        message: status === "connected"
-          ? "Strava is connected and sync is starting."
-          : status === "repair_required"
-          ? "Murph can repair its private Strava application."
-          : status === "disconnect_first"
-          ? "Disconnect the current Strava connection first."
-          : status === "oauth_ready"
-          ? "Your private Strava application is ready."
-          : status === "provider_prerequisite"
-          ? "Strava requires its current developer subscription or provider prerequisite before Murph can create the private application. Continue in Strava, then return here to resume, or cancel setup."
-          : "Murph can set up your private Strava connection. Strava may first require a developer subscription or another provider prerequisite.",
+        message: messages[status],
         provider: "strava" as const,
         setupId: "dps_synthetic",
         status,
@@ -533,9 +542,9 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, />Strava</u);
   assert.match(
     markup,
-    /Strava may first require a developer subscription or another provider prerequisite/u,
+    /Strava may require developer access or another provider prerequisite before setup can finish/u,
   );
-  assert.match(markup, /aria-label="Set up Strava for Strava"/u);
+  assert.match(markup, /aria-label="Continue for Strava"/u);
   assert.doesNotMatch(markup, /client secret|client ID/iu);
   assert.doesNotMatch(markup, /Whoop V2/u);
   assert.ok(
@@ -1237,9 +1246,9 @@ test("ConnectPage uses the member-owned Strava path even when legacy global rout
   assert.match(markup, />Strava</u);
   assert.match(
     markup,
-    /Strava may first require a developer subscription or another provider prerequisite/u,
+    /Strava may require developer access or another provider prerequisite before setup can finish/u,
   );
-  assert.match(markup, /aria-label="Set up Strava for Strava"/u);
+  assert.match(markup, /aria-label="Continue for Strava"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Strava"/u);
   assert.doesNotMatch(markup, /NON_CREDENTIAL_LEGACY_GLOBAL_CLIENT_ID|client secret/iu);
 });
@@ -1276,11 +1285,11 @@ test("ConnectPage renders an authoritative connected Strava projection with disc
   assert.doesNotMatch(markup, /aria-label="Reconnect Strava"/u);
 });
 
-test("ConnectPage routes Strava access repair through the shared member-owned setup", async () => {
+test("ConnectPage routes Strava reauthorization through the sealed application binding", async () => {
   mocks.readMemberOwnedProviderSetupProjections.mockResolvedValueOnce(
     createStravaSetupProjection({
-      action: "retry",
-      status: "repair_required",
+      action: "continue_oauth",
+      status: "oauth_ready",
     }),
   );
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
@@ -1291,10 +1300,7 @@ test("ConnectPage routes Strava access repair through the shared member-owned se
         connectionId: "dsc_strava_123",
         connectSourceId: "strava",
         connectTarget: "strava",
-        primaryAction: {
-          kind: "reconnect",
-          label: "Reconnect",
-        },
+        primaryAction: { kind: "reconnect", label: "Reconnect" },
         provider: "strava",
         state: "reauthorization_required",
         upstreamSources: [],
@@ -1307,8 +1313,8 @@ test("ConnectPage routes Strava access repair through the shared member-owned se
   );
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.match(markup, /Murph can repair its private Strava application/u);
-  assert.match(markup, /aria-label="Retry safely for Strava"/u);
+  assert.match(markup, /Your private Strava application is ready/u);
+  assert.match(markup, /aria-label="Continue with Strava for Strava"/u);
   assert.match(markup, /aria-label="Disconnect Strava"/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Strava"/u);
 });
@@ -2867,13 +2873,13 @@ test("SourceCard owns the sole enabled disconnect-first action and keeps setup c
   );
 });
 
-test("SourceCard offers explicit Strava prerequisite continuation and cancellation", async () => {
+test("SourceCard exposes durable browser resume state with safe cancellation", async () => {
   const { SourceCard } = await import(
     "../app/(dashboard)/connect/connect-source-card"
   );
   const projection = createStravaSetupProjection({
-    action: "continue_provider",
-    status: "provider_prerequisite",
+    action: "none",
+    status: "authorized",
   }).strava;
   const markup = renderToStaticMarkup(
     createElement(SourceCard, {
@@ -2903,8 +2909,8 @@ test("SourceCard offers explicit Strava prerequisite continuation and cancellati
   );
 
   assert.match(markup, />Cancel setup<\/button>/u);
-  assert.match(markup, />Continue in Strava<\/button>/u);
-  assert.match(markup, /developer subscription or provider prerequisite/u);
+  assert.match(markup, /Return to your Murph conversation/u);
+  assert.doesNotMatch(markup, />Continue in Strava<\/button>/u);
 });
 
 test("SourceCard stacks Apple Health app content vertically at the base breakpoint", async () => {
@@ -2982,7 +2988,7 @@ test("connect source card design study renders the production action states", as
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
   assert.match(markup, /Review before setup/u);
-  assert.match(markup, /No provider work starts before you continue\./u);
+  assert.match(markup, /no provider work starts before you continue\./u);
   assert.match(markup, /Peloton could not open\. Please try again\./u);
 });
 
@@ -3634,11 +3640,11 @@ test("ConnectSourcesGrid discloses a member-owned connect intent without startin
   });
   assert.match(
     rendered.container.textContent ?? "",
-    /No provider work starts before you continue\./u,
+    /no provider work starts before you continue\./u,
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /Strava may first require a developer subscription or another provider prerequisite\./u,
+    /Strava may require developer access or another provider prerequisite before setup can finish\./u,
   );
   assert.equal(fetch.mock.calls.length, 0);
   assert.equal(rendered.assign.mock.calls.length, 0);
@@ -3746,15 +3752,14 @@ test("ConnectSourcesGrid submits a member-owned connect intent exactly once afte
   await act(async () => {
     resolveAuthorizationResponse?.(
       Response.json({
-        authorizationUrl:
-          "https://join.example.test/computer/handoff/synthetic-handoff",
+        authorizationUrl: "/connect#connectSource=strava",
       }),
     );
   });
   await vi.waitFor(() => {
     assert.equal(
       rendered.assign.mock.calls[0]?.[0],
-      "https://join.example.test/computer/handoff/synthetic-handoff",
+      "/connect#connectSource=strava",
     );
   });
   assert.equal(fetch.mock.calls.length, 1);
@@ -6015,22 +6020,22 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
   assert.equal(requiresVitalConnectionPreflight(disconnectedWhoop), true);
 });
 
-test("ConnectSourcesGrid continues a reached Strava prerequisite through the refreshed setup handoff", async () => {
-  const prerequisite = createStravaSetupProjection({
-    action: "continue_provider",
-    status: "provider_prerequisite",
+test("ConnectSourcesGrid authorizes provider setup without redirecting into browser internals", async () => {
+  const pending = createStravaSetupProjection().strava;
+  const authorized = createStravaSetupProjection({
+    action: "none",
+    status: "authorized",
   }).strava;
   const fetch = vi.fn(async (
-    _input: RequestInfo | URL,
+    _input: string | URL | Request,
     _init?: RequestInit,
   ) => {
     void _input;
     void _init;
     return Response.json({
-    handoffUrl: "https://web.example.test/computer/handoff/refreshed",
-    presentation: prerequisite.presentation,
-    provider: "strava",
-    setup: prerequisite.setup,
+      presentation: authorized.presentation,
+      provider: "strava",
+      setup: authorized.setup,
     });
   });
   vi.stubGlobal("fetch", fetch);
@@ -6051,8 +6056,8 @@ test("ConnectSourcesGrid continues a reached Strava prerequisite through the ref
           src: "/brand-logos/connect/strava.svg",
           width: 96,
         },
-        memberOwnedSetup: prerequisite.setup,
-        memberOwnedSetupPresentation: prerequisite.presentation,
+        memberOwnedSetup: pending.setup,
+        memberOwnedSetupPresentation: pending.presentation,
         memberOwnedSetupProvider: "strava" as const,
         name: "Strava",
       }],
@@ -6068,7 +6073,7 @@ test("ConnectSourcesGrid continues a reached Strava prerequisite through the ref
     },
   );
   const continueButton = rendered.container.querySelector(
-    'button[aria-label="Continue in Strava for Strava"]',
+    'button[aria-label="Continue for Strava"]',
   );
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
 
@@ -6078,27 +6083,25 @@ test("ConnectSourcesGrid continues a reached Strava prerequisite through the ref
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.equal(
-      rendered.assign.mock.calls[0]?.[0],
-      "https://web.example.test/computer/handoff/refreshed",
-    );
+    assert.match(rendered.container.textContent ?? "", /Setup is authorized/u);
   });
   assert.equal(
     fetch.mock.calls[0]?.[0],
     "/api/settings/device-sync/provider-setups/strava",
   );
   assert.equal((fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.method, "POST");
+  assert.equal(rendered.assign.mock.calls.length, 0);
 
   await rendered.cleanup();
 });
 
 test("ConnectSourcesGrid cancels a proved-unsent Strava prerequisite through the authenticated setup route", async () => {
   const prerequisite = createStravaSetupProjection({
-    action: "continue_provider",
-    status: "provider_prerequisite",
+    action: "none",
+    status: "authorized",
   }).strava;
   const canceled = createStravaSetupProjection({
-    action: "start",
+    action: "authorize",
     status: "pending",
   }).strava.setup;
   const canceledSetup = {
@@ -6156,7 +6159,7 @@ test("ConnectSourcesGrid cancels a proved-unsent Strava prerequisite through the
     assert.equal(fetch.mock.calls.length, 1);
     assert.match(
       rendered.container.textContent ?? "",
-      /Strava setup was canceled\. You can start again\./u,
+      /Strava setup was canceled\. You can authorize a new attempt\./u,
     );
   });
   assert.equal(
@@ -6171,7 +6174,7 @@ test("ConnectSourcesGrid cancels a proved-unsent Strava prerequisite through the
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.ok(
     rendered.container.querySelector(
-      'button[aria-label="Set up Strava for Strava"]',
+      'button[aria-label="Continue for Strava"]',
     ),
   );
 

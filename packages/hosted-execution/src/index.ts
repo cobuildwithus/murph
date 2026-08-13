@@ -50,6 +50,7 @@ export * from "./contracts.ts";
 export * from "./browser-vault.ts";
 export * from "./connected-apps.ts";
 export * from "./computer-use.ts";
+export * from "./provider-setup.ts";
 export * from "./phone-calls.ts";
 export * from "./physical-notes.ts";
 export * from "./email-ingress.ts";

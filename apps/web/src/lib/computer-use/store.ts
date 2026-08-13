@@ -63,9 +63,7 @@ export interface ComputerRunRecord {
   updatedAt: Date;
 }
 
-export interface MemberOwnedProviderSetupRunRecord extends ComputerRunRecord {
-  deletionPending: boolean;
-}
+export type MemberOwnedProviderSetupRunRecord = ComputerRunRecord;
 
 export interface ComputerRunCheckpointContext {
   conversationId: string | null;
@@ -618,15 +616,12 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         retryable: false,
       });
     }
-    const access = await requireMemberOwnedProviderSetupRunAccess(this.prisma, {
+    await requireMemberOwnedProviderSetupRunAccess(this.prisma, {
       memberId: input.memberId,
       ownerKey: input.ownerKey,
       runId: input.runId,
     });
-    return {
-      ...mapRun(run),
-      deletionPending: access.deletionPending,
-    };
+    return mapRun(run);
   }
 
   async requireMemberOwnedProviderSetupRunAcquisition(input: {
@@ -1800,13 +1795,20 @@ async function requireMemberOwnedProviderSetupRunAccess(
     ownerKey: string;
     runId?: string;
   },
-): Promise<{ deletionPending: boolean }> {
+): Promise<void> {
   const member = await prisma.hostedMember.findUnique({
     select: { id: true, suspendedAt: true },
     where: { id: input.memberId },
   });
   if (!member) {
     throw computerUseNotFoundError("Hosted member was not found.");
+  }
+  if (member.suspendedAt !== null) {
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+      message: "Computer use is not available for this hosted member.",
+      retryable: false,
+    });
   }
 
   const setup = await prisma.deviceProviderSetup.findFirst({
@@ -1864,18 +1866,6 @@ async function requireMemberOwnedProviderSetupRunAccess(
     });
   }
 
-  const deletionPending = setup.status === "deletion_pending";
-  if (member.suspendedAt === null) {
-    return { deletionPending };
-  }
-  if (!deletionPending) {
-    throw computerUseConflictError({
-      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
-      message: "Computer use is not available for this hosted member.",
-      retryable: false,
-    });
-  }
-  return { deletionPending };
 }
 
 async function requireMemberOwnedProviderSetupAcquisitionRecovery(

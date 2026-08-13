@@ -7,7 +7,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { MemberOwnedProviderSetup } from "@/src/components/device-sync/member-owned-provider-setup";
-import type { MemberOwnedProviderSetupAdapter } from "@/src/lib/device-sync/provider-setup/adapter";
 import {
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
 } from "@/src/lib/device-sync/provider-setup/registry";
@@ -22,7 +21,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
-  advanceMemberOwnedProviderSetup: vi.fn(),
+  authorizeMemberOwnedProviderSetup: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   claimHostedDeviceConnectIntentForStart: vi.fn(),
@@ -110,20 +109,18 @@ describe("hosted device connect intent route", () => {
       authorizationUrl: "https://provider.example.test/oauth/start",
       callbackProofCookie: "murph-device-sync-whoop=proof; Path=/; HttpOnly",
     });
-    mocks.advanceMemberOwnedProviderSetup.mockResolvedValue({
-      setup: {
-        action: "continue_sign_in",
-        applicationRevision: null,
-        connected: false,
-        message: "Continue the secure provider sign-in.",
-        provider: "strava",
-        status: "waiting_for_user",
-        updatedAt: "2026-08-11T12:00:00.000Z",
-      },
-      handoffUrl: "https://join.example.test/computer/handoff/synthetic-handoff",
+    mocks.authorizeMemberOwnedProviderSetup.mockResolvedValue({
+      action: "none",
+      applicationRevision: null,
+      connected: false,
+      message: "Murph can continue this private provider setup from Connect.",
+      provider: "strava",
+      setupId: "dps_synthetic",
+      status: "authorized",
+      updatedAt: "2026-08-11T12:00:00.000Z",
     });
     mocks.createMemberOwnedProviderSetupService.mockReturnValue({
-      advance: mocks.advanceMemberOwnedProviderSetup,
+      authorize: mocks.authorizeMemberOwnedProviderSetup,
       startOAuth: mocks.startMemberOwnedProviderSetupOAuth,
     });
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
@@ -173,7 +170,7 @@ describe("hosted device connect intent route", () => {
     expect(mocks.readHostedDeviceConnectIntent).toHaveBeenCalledWith("dc_opaque");
     expect(mocks.claimHostedDeviceConnectIntentForStart).not.toHaveBeenCalled();
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
-    expect(mocks.advanceMemberOwnedProviderSetup).not.toHaveBeenCalled();
+    expect(mocks.authorizeMemberOwnedProviderSetup).not.toHaveBeenCalled();
     expect(mocks.startMemberOwnedProviderSetupOAuth).not.toHaveBeenCalled();
     expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
   });
@@ -260,7 +257,7 @@ describe("hosted device connect intent route", () => {
     expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
   });
 
-  it("starts an exact member-owned Strava setup handoff", async () => {
+  it("authorizes an exact member-owned Strava setup and returns safely to Connect", async () => {
     mocks.claimHostedDeviceConnectIntentForStart.mockResolvedValueOnce({
       status: "claimed",
       intent: createIntentRecord({
@@ -280,10 +277,8 @@ describe("hosted device connect intent route", () => {
     );
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(
-      "https://join.example.test/computer/handoff/synthetic-handoff",
-    );
-    expect(mocks.advanceMemberOwnedProviderSetup).toHaveBeenCalledWith(
+    expect(response.headers.get("location")).toBe("/connect#connectSource=strava");
+    expect(mocks.authorizeMemberOwnedProviderSetup).toHaveBeenCalledWith(
       "member_123",
       "dps_synthetic",
     );
@@ -291,6 +286,7 @@ describe("hosted device connect intent route", () => {
       claim: "dc_opaque",
       memberId: "member_123",
     });
+    expect(mocks.startMemberOwnedProviderSetupOAuth).not.toHaveBeenCalled();
     expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
   });
 
@@ -344,9 +340,6 @@ describe("hosted device connect intent route", () => {
       providerApplicationRevision: 3,
       status: "oauth_in_progress",
     });
-    expect(fixture.adapter.ensureBrowserRun).not.toHaveBeenCalled();
-    expect(fixture.adapter.createOwnedApplication).not.toHaveBeenCalled();
-    expect(fixture.adapter.captureAndSealOwnedApplication).not.toHaveBeenCalled();
     expect(mocks.releaseHostedDeviceConnectIntentStart).not.toHaveBeenCalled();
   });
 
@@ -377,47 +370,6 @@ describe("hosted device connect intent route", () => {
     expect(markup).not.toContain(">Connected<");
   });
 
-  it("rejects a provider setup handoff outside Murph's first-party computer surface", async () => {
-    mocks.claimHostedDeviceConnectIntentForStart.mockResolvedValueOnce({
-      status: "claimed",
-      intent: createIntentRecord({
-        connectSourceId: "strava",
-        connectTarget: "strava",
-        provider: "strava",
-        providerSetupId: "dps_synthetic",
-        startedAt: new Date("2026-05-08T12:01:00.000Z"),
-      }),
-    });
-    mocks.advanceMemberOwnedProviderSetup.mockResolvedValueOnce({
-      setup: {
-        action: "continue_sign_in",
-        applicationRevision: null,
-        connected: false,
-        message: "Continue the secure provider sign-in.",
-        provider: "strava",
-        status: "waiting_for_user",
-        updatedAt: "2026-08-11T12:00:00.000Z",
-      },
-      handoffUrl: "https://attacker.example/computer/handoff/synthetic-handoff",
-    });
-
-    const response = await deviceConnectIntentRoute.POST(
-      new Request("https://join.example.test/device/connect/dc_opaque", {
-        method: "POST",
-      }),
-      createRouteContext({ claim: "dc_opaque" }),
-    );
-
-    expect(response.status).toBe(502);
-    expect(response.headers.get("location")).toBeNull();
-    expect(await response.text()).toContain(
-      "Murph could not open the secure provider sign-in handoff.",
-    );
-    expect(mocks.releaseHostedDeviceConnectIntentStart).toHaveBeenCalledWith({
-      claim: "dc_opaque",
-      memberId: "member_123",
-    });
-  });
 
   it("returns JSON for app-page intent starts", async () => {
     const response = await deviceConnectIntentRoute.POST(
@@ -599,12 +551,10 @@ function createReauthorizationRequiredSetupFixture() {
     connectTarget: "strava",
     createdAt: REAUTHORIZATION_NOW,
     id: "dps_synthetic",
-    lastErrorCode: null,
     memberId: "member_123",
     provider: "strava",
     providerApplicationId: REAUTHORIZATION_APPLICATION.applicationId,
     providerApplicationRevision: REAUTHORIZATION_APPLICATION.revision,
-    providerSubmissionAt: null,
     sourceProviderSlug: null,
     status: "connected",
     updatedAt: REAUTHORIZATION_NOW,
@@ -622,6 +572,7 @@ function createReauthorizationRequiredSetupFixture() {
   };
   const store: ProviderSetupStore = {
     ensureActive: async () => setup,
+    listMemberSetups: async () => [setup],
     markConnectedForExactApplication: async () => setup,
     markDisconnected: async () => setup,
     readActive: async () => setup,
@@ -648,18 +599,12 @@ function createReauthorizationRequiredSetupFixture() {
         ...(input.completedAt === undefined
           ? {}
           : { completedAt: input.completedAt }),
-        ...(input.lastErrorCode === undefined
-          ? {}
-          : { lastErrorCode: input.lastErrorCode }),
         ...(input.providerApplicationId === undefined
           ? {}
           : { providerApplicationId: input.providerApplicationId }),
         ...(input.providerApplicationRevision === undefined
           ? {}
           : { providerApplicationRevision: input.providerApplicationRevision }),
-        ...(input.providerSubmissionAt === undefined
-          ? {}
-          : { providerSubmissionAt: input.providerSubmissionAt }),
         status: input.status,
         updatedAt: new Date(setup.updatedAt.getTime() + 1_000),
         version: setup.version + 1,
@@ -667,52 +612,11 @@ function createReauthorizationRequiredSetupFixture() {
       return setup;
     },
   };
-  const adapter: MemberOwnedProviderSetupAdapter = {
-    cancelBrowserRun: vi.fn<MemberOwnedProviderSetupAdapter["cancelBrowserRun"]>(
-      async () => "canceled",
-    ),
-    captureAndSealOwnedApplication: vi.fn<
-      MemberOwnedProviderSetupAdapter["captureAndSealOwnedApplication"]
-    >(async () => ({
-      applicationId: REAUTHORIZATION_APPLICATION.applicationId,
-      createdAt: REAUTHORIZATION_NOW.toISOString(),
-      provider: "strava",
-      revision: REAUTHORIZATION_APPLICATION.revision,
-      updatedAt: REAUTHORIZATION_NOW.toISOString(),
-    })),
-    connectSourceId: "strava",
-    connectTarget: "strava",
-    createOwnedApplication: vi.fn<
-      MemberOwnedProviderSetupAdapter["createOwnedApplication"]
-    >(async () => ({ kind: "submitted" })),
-    deleteOwnedApplication: vi.fn<
-      MemberOwnedProviderSetupAdapter["deleteOwnedApplication"]
-    >(async () => ({ kind: "deleted" })),
-    ensureBrowserRun: vi.fn(async () => ({
-      awaitingReason: null,
-      reused: false,
-      runId: "hcr_unexpected",
-      status: "running",
-    })),
-    finishBrowserRun: vi.fn<MemberOwnedProviderSetupAdapter["finishBrowserRun"]>(
-      async () => "completed",
-    ),
-    inspectDashboard: vi.fn<
-      MemberOwnedProviderSetupAdapter["inspectDashboard"]
-    >(async () => ({ kind: "owned_application" })),
-    pauseForUser: vi.fn(async () => ({
-      handoffUrl: null,
-      runId: "hcr_unexpected",
-    })),
-    provider: "strava",
-    sourceProviderSlug: null,
-  };
   const startConnection = vi.fn(async () => ({
     authorizationUrl: "https://www.strava.com/oauth/authorize?reauthorize=1",
     state: "synthetic_reauthorization_state_1234567890",
   }));
   const service = new MemberOwnedProviderSetupService("strava", {
-    adapter,
     createIngress: () => ({
       startConnectionWithProviderApplication: startConnection,
     }),
@@ -722,7 +626,6 @@ function createReauthorizationRequiredSetupFixture() {
     store,
   });
   return {
-    adapter,
     readSetup: () => setup,
     service,
     startConnection,

@@ -5,18 +5,14 @@ import type {
 
 export const MEMBER_OWNED_PROVIDER_SETUP_STATUSES = [
   "pending",
-  "working",
-  "inspection_required",
-  "waiting_for_user",
-  "provider_prerequisite",
+  "authorized",
+  "browser_setup",
+  "capturing",
   "canceling",
-  "repair_required",
-  "retryable_failure",
   "oauth_ready",
   "oauth_in_progress",
   "connected",
   "disconnect_first",
-  "provider_conflict",
   "deletion_pending",
   "canceled",
   "deleted",
@@ -24,18 +20,6 @@ export const MEMBER_OWNED_PROVIDER_SETUP_STATUSES = [
 
 export type MemberOwnedProviderSetupStatus =
   (typeof MEMBER_OWNED_PROVIDER_SETUP_STATUSES)[number];
-
-export const MEMBER_OWNED_PROVIDER_SETUP_ERROR_CODES = [
-  "PROVIDER_SETUP_AMBIGUOUS_SUBMISSION",
-  "PROVIDER_SETUP_DASHBOARD_UNAVAILABLE",
-  "PROVIDER_SETUP_INSPECTION_REQUIRED",
-  "PROVIDER_SETUP_PROVIDER_CONFLICT",
-  "PROVIDER_SETUP_PROVIDER_PREREQUISITE",
-  "PROVIDER_SETUP_REPAIR_REQUIRED",
-] as const;
-
-export type MemberOwnedProviderSetupErrorCode =
-  (typeof MEMBER_OWNED_PROVIDER_SETUP_ERROR_CODES)[number];
 
 export interface MemberOwnedProviderSetupRecord<
   TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
@@ -47,12 +31,10 @@ export interface MemberOwnedProviderSetupRecord<
   connectTarget: string;
   createdAt: Date;
   id: string;
-  lastErrorCode: string | null;
   memberId: string;
   provider: TProvider;
   providerApplicationId: string | null;
   providerApplicationRevision: number | null;
-  providerSubmissionAt: Date | null;
   sourceProviderSlug: string | null;
   status: MemberOwnedProviderSetupStatus;
   updatedAt: Date;
@@ -60,10 +42,7 @@ export interface MemberOwnedProviderSetupRecord<
 }
 
 export type MemberOwnedProviderSetupAction =
-  | "start"
-  | "continue_sign_in"
-  | "continue_provider"
-  | "retry"
+  | "authorize"
   | "continue_oauth"
   | "disconnect_first"
   | "none";
@@ -78,6 +57,7 @@ export interface MemberOwnedProviderSetupPresentation<
 > {
   actionLabels: Readonly<Record<MemberOwnedProviderSetupInteractiveAction, string>>;
   cancelSetupLabel: string;
+  developerAccessDisclosure: string;
   messages: Readonly<Record<MemberOwnedProviderSetupStatus, string>>;
   provider: TProvider;
   providerName: string;
@@ -111,11 +91,6 @@ export type MemberOwnedProviderSetupProjectionMap = Partial<
   >
 >;
 
-export interface MemberOwnedProviderSetupAdvanceResult {
-  handoffUrl?: string;
-  setup: MemberOwnedProviderSetupView;
-}
-
 export interface MemberOwnedProviderSetupOAuthResult {
   authorizationUrl: string;
   callbackProofCookie: string;
@@ -133,31 +108,6 @@ export type MemberOwnedProviderSetupConnectionDisposition<
       status: "active" | "reauthorization_required";
     }
   | { connectionId: string; kind: "conflict" };
-
-export type MemberOwnedProviderDashboardInspection =
-  | { kind: "authentication_required"; reason: "challenge" | "signed_out" }
-  | { kind: "prerequisite_required" }
-  | { kind: "ambiguous" }
-  | { kind: "missing" }
-  | { kind: "owned_application" }
-  | { kind: "unrelated_application" };
-
-export type MemberOwnedProviderApplicationCreateResult =
-  | { kind: "submitted" }
-  | { kind: "ambiguous" }
-  | { kind: "known_unsent"; reason: "prerequisite" | "unavailable" };
-
-export interface MemberOwnedProviderApplicationCaptureResult {
-  applicationId: string;
-  revision: number;
-}
-
-export type MemberOwnedProviderApplicationDeleteResult =
-  | { kind: "deleted" }
-  | { kind: "missing" }
-  | { kind: "unrelated_application" }
-  | { kind: "ambiguous" }
-  | { kind: "authentication_required"; reason: "challenge" | "signed_out" };
 
 export function isMemberOwnedProviderSetupStatus(
   value: string,
@@ -233,22 +183,15 @@ function resolveSetupAction(
   switch (status) {
     case "pending":
     case "canceled":
-      return "start";
-    case "waiting_for_user":
-      return "continue_sign_in";
-    case "provider_prerequisite":
-      return "continue_provider";
-    case "inspection_required":
-    case "repair_required":
-    case "retryable_failure":
-    case "provider_conflict":
-      return "retry";
+      return "authorize";
     case "oauth_ready":
     case "oauth_in_progress":
       return "continue_oauth";
     case "disconnect_first":
       return "disconnect_first";
-    case "working":
+    case "authorized":
+    case "browser_setup":
+    case "capturing":
     case "canceling":
     case "connected":
     case "deletion_pending":

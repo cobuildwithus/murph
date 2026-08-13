@@ -1,4 +1,4 @@
-import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncReconnectTargets,
@@ -137,19 +137,8 @@ export async function POST(
           prisma: getPrisma(),
         });
         const setupService = createMemberOwnedProviderSetupService(target.provider);
-        const advanced = await setupService.advance(session.member.id, setupId);
-        if (advanced.handoffUrl) {
-          const handoffUrl = requireHostedProviderSetupHandoffUrl(
-            request,
-            advanced.handoffUrl,
-          );
-          await releaseHostedDeviceConnectIntentStart({
-            claim,
-            memberId: session.member.id,
-          });
-          return deviceConnectIntentStartResponse(request, handoffUrl);
-        }
-        if (advanced.setup.action !== "continue_oauth") {
+        const setup = await setupService.authorize(session.member.id, setupId);
+        if (setup.action !== "continue_oauth") {
           await releaseHostedDeviceConnectIntentStart({
             claim,
             memberId: session.member.id,
@@ -288,35 +277,6 @@ function buildHostedProviderSetupPageUrl(
   const url = new URL("/connect", request.url);
   url.hash = new URLSearchParams({ connectSource: connectSourceId }).toString();
   return `${url.pathname}${url.hash}`;
-}
-
-function requireHostedProviderSetupHandoffUrl(
-  request: Request,
-  value: string,
-): string {
-  let url: URL;
-  try {
-    url = new URL(value, request.url);
-  } catch {
-    throw deviceSyncError({
-      code: "DEVICE_PROVIDER_SETUP_HANDOFF_INVALID",
-      httpStatus: 502,
-      message: "Murph could not open the secure provider sign-in handoff.",
-      retryable: true,
-    });
-  }
-
-  const requestOrigin = new URL(request.url).origin;
-  if (url.origin !== requestOrigin || !url.pathname.startsWith("/computer/handoff/")) {
-    throw deviceSyncError({
-      code: "DEVICE_PROVIDER_SETUP_HANDOFF_INVALID",
-      httpStatus: 502,
-      message: "Murph could not open the secure provider sign-in handoff.",
-      retryable: true,
-    });
-  }
-
-  return url.toString();
 }
 
 function handleHostedDeviceConnectIntentError(error: unknown, request?: Request): Response {

@@ -152,8 +152,6 @@ model DeviceProviderSetup {
   browserRunId                String?   @map("browser_run_id")
   providerApplicationId       String?   @map("provider_application_id")
   providerApplicationRevision Int?      @map("provider_application_revision")
-  lastErrorCode               String?   @map("last_error_code")
-  providerSubmissionAt        DateTime? @map("provider_submission_at")
   completedAt                 DateTime? @map("completed_at")
   createdAt                   DateTime  @default(now()) @map("created_at")
   updatedAt                   DateTime  @updatedAt @map("updated_at")

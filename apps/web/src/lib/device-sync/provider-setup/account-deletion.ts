@@ -2,17 +2,13 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
-import { ComputerUseService } from "../../computer-use/service";
-import { PrismaComputerUseStore } from "../../computer-use/store";
 import { hostedOnboardingError } from "../../hosted-onboarding/errors";
 import {
   readDeviceProviderApplicationView,
   type DeviceProviderApplicationView,
 } from "../provider-applications";
-import type { MemberOwnedProviderSetupAdapter } from "./adapter";
 import {
-  requireMemberOwnedProviderSetupRegistration,
-  type MemberOwnedProviderSetupRegistration,
+  listMemberOwnedProviderSetupRegistrations,
 } from "./registry";
 import { PrismaDeviceProviderSetupStore } from "./store";
 import type { MemberOwnedProviderSetupRecord } from "./types";
@@ -24,195 +20,132 @@ interface ProviderSetupDeletionStore {
   ): Promise<MemberOwnedProviderSetupRecord>;
 }
 
-type ProviderSetupDeletionAdapter = Pick<
-  MemberOwnedProviderSetupAdapter,
-  "cancelBrowserRun" | "deleteOwnedApplication" | "ensureBrowserRun" | "pauseForUser"
->;
-
-type ProviderSetupDeletionAdapterFactory = (
-  registration: MemberOwnedProviderSetupRegistration,
-) => ProviderSetupDeletionAdapter;
-
 type ReadProviderApplicationView = (input: {
   memberId: string;
   provider: MemberOwnedProviderSetupRecord["provider"];
 }) => Promise<DeviceProviderApplicationView | null>;
 
-export async function deleteMemberOwnedProviderSetupExternalStateForAccountDeletion(input: {
-  adapterFactory?: ProviderSetupDeletionAdapterFactory;
+/**
+ * Provider dashboards need an authenticated member-driven browser. Account
+ * deletion therefore starts only after every Murph-owned provider application
+ * has been removed through the ordinary /connect assistant flow. This check is
+ * intentionally before the account suspension fence; no model or browser
+ * session is started after suspension.
+ */
+export async function assertMemberOwnedProviderSetupsReadyForAccountDeletion(input: {
   memberId: string;
-  prisma: PrismaClient;
+  prisma?: PrismaClient;
+  readApplicationView?: ReadProviderApplicationView;
+  store?: Pick<ProviderSetupDeletionStore, "listMemberSetups">;
+}): Promise<void> {
+  const store = input.store
+    ?? new PrismaDeviceProviderSetupStore(requireDeletionPrisma(input.prisma));
+  const readApplication = input.readApplicationView
+    ?? ((query) => readDeviceProviderApplicationView({
+      ...query,
+      prisma: requireDeletionPrisma(input.prisma),
+    }));
+  const setups = (await store.listMemberSetups(input.memberId))
+    .filter((setup) => setup.active && setup.status !== "deleted");
+
+  const providerNames = new Map(
+    listMemberOwnedProviderSetupRegistrations().map((registration) => [
+      registration.coordinates.provider,
+      registration.presentation.providerName,
+    ]),
+  );
+  const providers = new Set([
+    ...providerNames.keys(),
+    ...setups.map((setup) => setup.provider),
+  ]);
+
+  for (const provider of providers) {
+    const setup = setups.find((candidate) => candidate.provider === provider) ?? null;
+    const application = await readApplication({
+      memberId: input.memberId,
+      provider,
+    });
+    if (
+      application
+      || setup?.providerApplicationId
+      || setup?.providerApplicationRevision
+      || setup?.browserRunId
+      || setup?.status === "browser_setup"
+      || setup?.status === "capturing"
+      || setup?.status === "canceling"
+      || setup?.status === "deletion_pending"
+    ) {
+      throw providerSetupCleanupRequired(
+        providerNames.get(provider) ?? "provider",
+      );
+    }
+  }
+}
+
+/**
+ * Post-suspension cleanup is deliberately local. The preflight above proves
+ * that no external application or resumable browser remains; this function
+ * only closes the durable setup record before the normal account row deletion.
+ */
+export async function deleteMemberOwnedProviderSetupExternalStateForAccountDeletion(input: {
+  memberId: string;
+  prisma?: PrismaClient;
   readApplicationView?: ReadProviderApplicationView;
   store?: ProviderSetupDeletionStore;
 }): Promise<void> {
-  const store = input.store ?? new PrismaDeviceProviderSetupStore(input.prisma);
+  const store = input.store
+    ?? new PrismaDeviceProviderSetupStore(requireDeletionPrisma(input.prisma));
+  const readApplication = input.readApplicationView
+    ?? ((query) => readDeviceProviderApplicationView({
+      ...query,
+      prisma: requireDeletionPrisma(input.prisma),
+    }));
   const setups = (await store.listMemberSetups(input.memberId))
     .filter((setup) => setup.active && setup.status !== "deleted");
 
   for (const setup of setups) {
-    const needsAbsenceProof = setup.providerApplicationId === null
-      && setup.providerApplicationRevision === null
-      && setup.providerSubmissionAt === null
-      && (setup.status === "pending" || setup.status === "canceled");
-    const application = needsAbsenceProof
-      ? await (input.readApplicationView
-          ?? ((query) => readDeviceProviderApplicationView({
-            ...query,
-            prisma: input.prisma,
-          }))
-        )({
-          memberId: setup.memberId,
-          provider: setup.provider,
-        })
-      : null;
-    // Only pre-work or durably canceled setup states can prove that no
-    // provider application exists without inspecting the provider dashboard.
+    const application = await readApplication({
+      memberId: setup.memberId,
+      provider: setup.provider,
+    });
     if (
-      application === null
-      && needsAbsenceProof
+      application
+      || setup.providerApplicationId
+      || setup.providerApplicationRevision
+      || setup.browserRunId
     ) {
-      await transitionDeletionState(store, setup, {
-        completedAt: new Date(),
-        lastErrorCode: null,
-        status: "deleted",
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_PROVIDER_SETUP_PREFLIGHT_INVALIDATED",
+        httpStatus: 503,
+        message: "Private provider cleanup changed after account deletion began. Retry account deletion.",
+        retryable: true,
       });
-      continue;
     }
 
-    const registration = requireMemberOwnedProviderSetupRegistration(
-      setup.provider,
-    );
-    const adapter = input.adapterFactory
-      ? input.adapterFactory(registration)
-      : registration.createAdapter({
-          computer: new ComputerUseService({
-            store: new PrismaComputerUseStore(input.prisma),
-          }),
-        });
-    await deleteProviderSetup({ adapter, setup, store });
+    await store.transition({
+      active: false,
+      completedAt: new Date(),
+      expectedVersion: setup.version,
+      memberId: setup.memberId,
+      provider: setup.provider,
+      setupId: setup.id,
+      status: "deleted",
+    });
   }
 }
 
-async function deleteProviderSetup(input: {
-  adapter: ProviderSetupDeletionAdapter;
-  setup: MemberOwnedProviderSetupRecord;
-  store: ProviderSetupDeletionStore;
-}): Promise<void> {
-  let deleting = input.setup.status === "deletion_pending"
-    ? input.setup
-    : await transitionDeletionState(input.store, input.setup, {
-        lastErrorCode: null,
-        status: "deletion_pending",
-      });
-  const run = await input.adapter.ensureBrowserRun({
-    expectedRunId: deleting.browserRunId,
-    memberId: deleting.memberId,
-    setupId: deleting.id,
-  });
-  if (deleting.browserRunId !== run.runId) {
-    deleting = await transitionDeletionState(input.store, deleting, {
-      browserRunId: run.runId,
-      lastErrorCode: null,
-      status: "deletion_pending",
-    });
-  }
-  if (run.status === "awaiting_user") {
-    const handoff = await input.adapter.pauseForUser({
-      memberId: deleting.memberId,
-      reason: run.awaitingReason === "login_needed" ? "signed_out" : "challenge",
-      runId: run.runId,
-      setupId: deleting.id,
-    });
-    throw accountDeletionProviderHandoffRequired(handoff.handoffUrl);
-  }
-  if (run.status !== "running") {
-    throw accountDeletionProviderBrowserCleanupIncomplete();
-  }
-
-  const result = await input.adapter.deleteOwnedApplication({
-    memberId: deleting.memberId,
-    runId: run.runId,
-    setupId: deleting.id,
-  });
-  if (result.kind === "authentication_required") {
-    const handoff = await input.adapter.pauseForUser({
-      memberId: deleting.memberId,
-      reason: result.reason,
-      runId: run.runId,
-      setupId: deleting.id,
-    });
-    throw accountDeletionProviderHandoffRequired(handoff.handoffUrl);
-  }
-  if (result.kind === "ambiguous") {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_PROVIDER_APPLICATION_AMBIGUOUS",
-      httpStatus: 503,
-      message: "Murph could not safely identify its private provider application. Retry account deletion after the provider page is stable.",
-      retryable: true,
-    });
-  }
-
-  const runStatus = await input.adapter.cancelBrowserRun({
-    memberId: deleting.memberId,
-    runId: run.runId,
-    setupId: deleting.id,
-  });
-  if (runStatus !== "canceled") {
-    throw accountDeletionProviderBrowserCleanupIncomplete();
-  }
-
-  // The exact deterministic marker is the only external deletion authority.
-  // A missing app or an unrelated app is left untouched while local cleanup
-  // continues from the fenced, retryable deletion state.
-  await transitionDeletionState(input.store, deleting, {
-    browserRunId: null,
-    completedAt: new Date(),
-    lastErrorCode: null,
-    status: "deleted",
-  });
-}
-
-function accountDeletionProviderBrowserCleanupIncomplete() {
+function providerSetupCleanupRequired(providerName: string) {
   return hostedOnboardingError({
-    code: "ACCOUNT_DELETION_PROVIDER_BROWSER_CLEANUP_INCOMPLETE",
-    httpStatus: 503,
-    message: "Murph could not finish the private provider cleanup browser safely. Retry account deletion.",
-    retryable: true,
-  });
-}
-
-function accountDeletionProviderHandoffRequired(
-  handoffUrl: string | null,
-) {
-  if (!handoffUrl) {
-    return accountDeletionProviderBrowserCleanupIncomplete();
-  }
-  return hostedOnboardingError({
-    code: "ACCOUNT_DELETION_PROVIDER_HANDOFF_REQUIRED",
-    details: {
-      ...(handoffUrl ? { handoffUrl } : {}),
-    },
+    code: "ACCOUNT_DELETION_PROVIDER_SETUP_REQUIRES_CLEANUP",
     httpStatus: 409,
-    message: "Continue the secure provider sign-in, then retry account deletion.",
-    retryable: true,
+    message: `Disconnect ${providerName} and ask Murph to remove its private application from /connect before deleting your account.`,
+    retryable: false,
   });
 }
 
-async function transitionDeletionState(
-  store: ProviderSetupDeletionStore,
-  setup: MemberOwnedProviderSetupRecord,
-  update: {
-    browserRunId?: string | null;
-    completedAt?: Date | null;
-    lastErrorCode?: string | null;
-    status: "deleted" | "deletion_pending";
-  },
-): Promise<MemberOwnedProviderSetupRecord> {
-  return store.transition({
-    ...update,
-    expectedVersion: setup.version,
-    memberId: setup.memberId,
-    provider: setup.provider,
-    setupId: setup.id,
-  });
+function requireDeletionPrisma(prisma: PrismaClient | undefined): PrismaClient {
+  if (!prisma) {
+    throw new TypeError("Provider setup account deletion requires Prisma unless all owners are injected.");
+  }
+  return prisma;
 }

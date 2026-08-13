@@ -907,25 +907,44 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   `DeviceProviderSetup` is the durable Web owner for the member-visible setup
   journey. One active row per personal member and finite member-owned provider
-  records the exact connect coordinates, setup-owned browser run, provider
-  submission ambiguity, application id/revision, and terminal outcome. A small
-  exhaustive checked-in registry maps each supported provider to presentation
-  metadata and one explicit adapter; adding a provider does not change the
-  store, state machine, routes, `/connect` projection, deletion owner, or shared
-  component. The adapter owns only finite provider-dashboard semantics. The
-  existing hosted computer owner owns the persistent browser profile and human
-  handoff, and admits navigation only on a run bound to that exact setup (or a
-  newly acquired setup-owned run persisted before navigation). Re-entering
-  `/connect` while that run is awaiting the member rotates or reuses only its
-  latest same-origin handoff capability and never repeats provider submission.
-  Completing that exact setup-owned handoff resumes the run directly. Ordinary
-  setup returns the authenticated member to `/connect`; a suspension-fenced
-  `deletion_pending` setup returns only to the authenticated data-privacy retry
-  surface. It never creates a conversation reply or contact deeplink, and
-  generic browser handoffs retain their existing return behavior. Once an exact
-  application binding is durably usable, setup finishes that exact browser run
-  with `completed` and compare-and-set clears its run binding before OAuth can
-  continue; an interrupted finish or clear remains explicit and retryable.
+  records the exact connect coordinates, setup-owned browser run, application
+  id/revision, and terminal outcome. A small exhaustive checked-in registry maps
+  each supported provider to presentation and browser-contract metadata only;
+  there is no provider-specific browser adapter, selector table, or Playwright
+  program. Adding a provider with the supported lifecycle does not change the
+  store, state machine, routes, `/connect` projection, deletion owner, shared
+  component, or browser action implementation.
+
+  `/connect` Continue is the explicit member authorization boundary. The
+  assistant then calls the generic `provider_setup` tool to begin or resume the
+  exact durable setup and drives the provider's live UI from registry guidance
+  plus a credential-redacted control map. A setup-owned `computer_act` accepts
+  typed navigation and control steps only: arbitrary Playwright, OS control,
+  value reads, credential-shaped fields, non-read network requests, final
+  submission, destructive actions, and value-probing selectors fail closed.
+  Model-visible observations omit page titles and expose only the origin plus
+  bounded sanitized control metadata. The existing hosted computer owner still
+  owns the persistent browser profile and human handoff, and every model action
+  revalidates that the run is bound to the exact active setup. Sign-in, MFA,
+  CAPTCHA, and provider prerequisites pause that same run for secure member
+  takeover; `provider_setup begin` resumes the persisted run after the member
+  returns to `/connect`.
+
+  Final submission and credential capture remain trusted Web operations. The
+  model supplies only restricted selectors identified from the live page; Web
+  scopes them to the exact application root, verifies the deterministic
+  ownership marker, reads the client id and secret inside the browser boundary,
+  seals them directly into `DeviceProviderApplication`, navigates away, scrubs
+  transient values, and returns no credential-bearing result. Owned deletion
+  uses the same marker-scoped boundary. A persisted `canceling` transition and
+  exact setup-version/run fence prevent late browser capture from saving
+  credentials after cancellation begins. Once an exact application binding is
+  durable, setup finishes that exact browser run and compare-and-set clears its
+  run binding before OAuth can continue; an interrupted finish or clear remains
+  explicit and retryable. Account deletion requires the external provider
+  application and resumable run to be removed before suspension, then closes
+  only the local durable setup row after the suspension fence.
+
   `DeviceProviderApplication` owns encrypted credentials, while device-sync owns
   OAuth, authoritative connection activation, initial backfill, polling, revoke,
   and disconnect. Setup reads reconcile their visible projection from current
@@ -935,8 +954,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   receives a client id and secret immediately, completes OAuth, and can remove
   that application in the browser. Adding another provider with that lifecycle
   extends the finite connect catalog, encrypted-application definition,
-  presentation, and dashboard adapter; it does not add another state machine,
-  route family, handoff owner, projection owner, or deletion orchestrator.
+  presentation, and declarative browser metadata; it does not add another state
+  machine, route family, handoff owner, projection owner, browser adapter, or
+  deletion orchestrator.
   Providers with a different credential or application lifecycle require a new
   product and ownership decision rather than being forced through this seam.
   The reconnect projection is the exact-coordinate-deduplicated union of
@@ -945,15 +965,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   connect claim may select and focus its existing source card, but cannot claim
   durable work, acquire a browser, or start OAuth until the member has seen the
   prerequisite disclosure and explicitly chooses Continue.
-  Strava is the first registry entry: it
-  recognizes only the deterministic Murph marker, models the provider's
+  Strava is the first registry entry: its declarative guidance uses the
+  deterministic Murph marker, models the provider's
   subscription prerequisite as a disclosed recoverable pause with explicit
   Continue and Cancel actions, uses the checked-in callback and `activity:read`
   scope, never falls back to global credentials, and does not enable
   member-application webhooks. Cancellation is allowed only while exact durable
-  state proves there is no submission, application binding, or connection, and
-  it terminates only the exact setup-owned browser run. Ambiguous form submission
-  resumes by dashboard inspection rather than replaying creation.
+  state proves there is no application binding or connection, and it terminates
+  only the exact setup-owned browser run.
 
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display

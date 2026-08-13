@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
@@ -1060,11 +1061,12 @@ describe("ComputerUseService", () => {
 
   it("captures provider credentials only inside the seal callback and scrubs browser results", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
+    const capturedCredentials = {
+      clientId: randomUUID(),
+      clientSecret: randomUUID(),
+    };
     const credentialResult = {
-      result: {
-        clientId: "synthetic-client-id-not-a-credential",
-        clientSecret: "synthetic-client-secret-not-a-credential",
-      },
+      result: { ...capturedCredentials },
       title: "Provider application",
       url: "https://provider.example.test/settings/application",
     };
@@ -1084,12 +1086,9 @@ describe("ComputerUseService", () => {
     const warningLog = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const result = await service.captureAndSealProviderCredentials({
-      code: "return { clientId: 'synthetic-captured-id-not-a-credential', clientSecret: 'synthetic-captured-secret-not-a-credential' };",
+      code: "return await captureProviderCredentialsInsideTrustedBoundary();",
       consume: async (credentials) => {
-        expect(credentials).toEqual({
-          clientId: "synthetic-client-id-not-a-credential",
-          clientSecret: "synthetic-client-secret-not-a-credential",
-        });
+        expect(credentials).toEqual(capturedCredentials);
         return { applicationId: "dpa_synthetic", revision: 7 };
       },
       memberId: "member_123",
@@ -1102,13 +1101,14 @@ describe("ComputerUseService", () => {
       url: "https://provider.example.test/settings/application",
       value: { applicationId: "dpa_synthetic", revision: 7 },
     });
-    expect(JSON.stringify(result)).not.toContain("synthetic-client");
+    expect(JSON.stringify(result)).not.toContain(capturedCredentials.clientId);
+    expect(JSON.stringify(result)).not.toContain(capturedCredentials.clientSecret);
     expect(credentialResult.result).toEqual({ clientId: "", clientSecret: "" });
-    expect(JSON.stringify(store.run)).not.toContain("synthetic-client");
-    expect(JSON.stringify(errorLog.mock.calls)).not.toContain("synthetic-client");
-    expect(JSON.stringify(warningLog.mock.calls)).not.toContain("synthetic-client");
+    expect(JSON.stringify(store.run)).not.toContain(capturedCredentials.clientSecret);
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(capturedCredentials.clientSecret);
+    expect(JSON.stringify(warningLog.mock.calls)).not.toContain(capturedCredentials.clientSecret);
     expect(kernel.executePlaywrightInputs[0]?.code).not.toContain(
-      "synthetic-client-secret-not-a-credential",
+      capturedCredentials.clientSecret,
     );
 
     errorLog.mockRestore();
@@ -1117,11 +1117,12 @@ describe("ComputerUseService", () => {
 
   it("scrubs malformed provider credential execution results before rejecting them", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
+    const malformedCredentials = {
+      clientId: randomUUID(),
+      clientSecret: randomUUID(),
+    };
     const malformedResult = {
-      nested: {
-        clientId: "synthetic-malformed-id-not-a-credential",
-        clientSecret: "synthetic-malformed-secret-not-a-credential",
-      },
+      nested: { ...malformedCredentials },
     };
     const kernel = createFakeKernel({ executeResult: malformedResult });
     const service = new ComputerUseService({
@@ -1134,7 +1135,7 @@ describe("ComputerUseService", () => {
     const consume = vi.fn(async () => ({ applicationId: "dpa_unreachable" }));
 
     await expect(service.captureAndSealProviderCredentials({
-      code: "return { clientId: 'synthetic-captured-id-not-a-credential', clientSecret: 'synthetic-captured-secret-not-a-credential' };",
+      code: "return await captureProviderCredentialsInsideTrustedBoundary();",
       consume,
       memberId: "member_123",
       runId: "hcr_run123",
@@ -1144,7 +1145,8 @@ describe("ComputerUseService", () => {
     });
     expect(consume).not.toHaveBeenCalled();
     expect(malformedResult.nested).toEqual({ clientId: "", clientSecret: "" });
-    expect(JSON.stringify(malformedResult)).not.toContain("synthetic-malformed");
+    expect(JSON.stringify(malformedResult)).not.toContain(malformedCredentials.clientId);
+    expect(JSON.stringify(malformedResult)).not.toContain(malformedCredentials.clientSecret);
   });
 
   it("passes arbitrary start URLs to Kernel navigation", async () => {
@@ -4381,33 +4383,6 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("returns a suspended exact deletion-owned handoff to data privacy", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const handoff = createHandoffRecord({ status: "completed" });
-    const store = new FakeComputerUseStore({
-      computerUseAvailable: false,
-      handoff,
-      memberOwnedProviderSetupDeletionPending: true,
-      run: createRunRecord({
-        ownerKey: "dps_deletion_exact",
-        ownerPurpose: "member_owned_provider_setup",
-        status: "running",
-      }),
-    });
-    const service = new ComputerUseService({
-      kernel: createFakeKernel(),
-      now: () => now,
-      store,
-    });
-
-    await expect(service.readHandoffPageState({
-      memberId: "member_123",
-      token: "handoff-token",
-    })).resolves.toEqual({
-      kind: "redirect",
-      url: "/settings/data-privacy?accountDeletion=retry",
-    });
-  });
 
   it("blocks suspended members from opening a handoff page", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
@@ -7036,9 +7011,54 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       timeoutMs: 1_000,
     })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      code: "HOSTED_COMPUTER_PROVIDER_SETUP_ACTION_FORBIDDEN",
     });
     expect(kernel.executePlaywrightCalls).toBe(0);
+  });
+
+  it("runs setup-owned browser controls through a redacted read-only observation", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: null,
+        url: "https://provider.example.test/",
+        visibleText: 'button "Create application"',
+      },
+    });
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.act({
+      memberId: "member_123",
+      runId: "hcr_run123",
+      steps: [{
+        action: "click",
+        target: {
+          exact: true,
+          kind: "role",
+          name: "Create application",
+          role: "button",
+        },
+      }],
+      timeoutMs: 1_000,
+    })).resolves.toEqual({
+      result: { visibleText: 'button "Create application"' },
+      title: null,
+      url: "https://provider.example.test/",
+    });
+
+    const code = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(code).toContain('page.route("**/*"');
+    expect(code).toContain('new URL("/", window.location.origin).toString()');
+    expect(code).toContain("title: null");
+    expect(code).not.toContain("document.body.innerText");
+    expect(code).not.toContain("page.title()");
+    expect(code).not.toContain("window.location.href");
   });
 
   it("finishes only the exact setup-owned run during prerequisite cancellation", async () => {
@@ -7200,107 +7220,14 @@ describe("ComputerUseService", () => {
 });
 
 describe("PrismaComputerUseStore", () => {
-  it("permits only the exact suspended deletion-owned run", async () => {
+  it("rejects every setup-owned run after member suspension", async () => {
     const run = createRunRecord({
-      id: "hcr_deletion_exact",
+      id: "hcr_setup_exact",
       memberId: "member_suspended",
-      ownerKey: "dps_deletion_exact",
+      ownerKey: "dps_setup_exact",
       ownerPurpose: "member_owned_provider_setup",
     });
-    const staleRun = createRunRecord({
-      id: "hcr_deletion_stale",
-      memberId: "member_suspended",
-      ownerKey: "dps_deletion_exact",
-      ownerPurpose: "member_owned_provider_setup",
-    });
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: "member_suspended" }]);
     const store = new PrismaComputerUseStore({
-      $queryRaw: queryRaw,
-      deviceProviderSetup: {
-        findFirst: vi.fn(async ({ where }: {
-          where: { active: boolean; id: string; memberId: string };
-        }) => where.active
-          && where.id === "dps_deletion_exact"
-          && where.memberId === "member_suspended"
-          ? {
-              browserRunId: "hcr_deletion_exact",
-              status: "deletion_pending",
-            }
-          : null),
-      },
-      hostedComputerRun: {
-        findFirst: vi.fn(async ({ where }: {
-          where: {
-            id: string;
-            memberId: string;
-            ownerKey: string;
-            ownerPurpose: string;
-          };
-        }) => {
-          const candidate = where.id === run.id
-            ? run
-            : where.id === staleRun.id
-              ? staleRun
-              : null;
-          return candidate
-            && candidate.memberId === where.memberId
-            && candidate.ownerKey === where.ownerKey
-            && candidate.ownerPurpose === where.ownerPurpose
-            ? candidate
-            : null;
-        }),
-      },
-      hostedMember: {
-        findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
-          where.id === "member_suspended"
-            ? { id: "member_suspended", suspendedAt: new Date("2026-06-17T11:00:00.000Z") }
-            : null),
-      },
-    } as never);
-
-    await expect(store.requireMemberOwnedProviderSetupRun({
-      memberId: "member_suspended",
-      ownerKey: "dps_deletion_exact",
-      ownerPurpose: "member_owned_provider_setup",
-      runId: "hcr_deletion_exact",
-    })).resolves.toMatchObject({
-      deletionPending: true,
-      id: "hcr_deletion_exact",
-      memberId: "member_suspended",
-      ownerKey: "dps_deletion_exact",
-    });
-
-    await expect(store.requireMemberComputerUseAvailable({
-      memberId: "member_suspended",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
-    });
-    await expect(store.requireMemberOwnedProviderSetupRun({
-      memberId: "member_foreign",
-      ownerKey: "dps_deletion_exact",
-      ownerPurpose: "member_owned_provider_setup",
-      runId: "hcr_deletion_exact",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
-    });
-    await expect(store.requireMemberOwnedProviderSetupRun({
-      memberId: "member_suspended",
-      ownerKey: "dps_deletion_exact",
-      ownerPurpose: "member_owned_provider_setup",
-      runId: "hcr_deletion_stale",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
-    });
-
-    const nonDeletionStore = new PrismaComputerUseStore({
-      deviceProviderSetup: {
-        findFirst: vi.fn(async () => ({
-          browserRunId: "hcr_deletion_exact",
-          status: "oauth_ready",
-        })),
-      },
       hostedComputerRun: {
         findFirst: vi.fn(async () => run),
       },
@@ -7311,11 +7238,12 @@ describe("PrismaComputerUseStore", () => {
         })),
       },
     } as never);
-    await expect(nonDeletionStore.requireMemberOwnedProviderSetupRun({
+
+    await expect(store.requireMemberOwnedProviderSetupRun({
       memberId: "member_suspended",
-      ownerKey: "dps_deletion_exact",
+      ownerKey: "dps_setup_exact",
       ownerPurpose: "member_owned_provider_setup",
-      runId: "hcr_deletion_exact",
+      runId: "hcr_setup_exact",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
@@ -9237,7 +9165,6 @@ class FakeComputerUseStore implements ComputerUseStore {
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
   managedLoginFallbackReplyBoundarySeq: bigint | null = null;
-  memberOwnedProviderSetupDeletionPending = false;
   memberRuns: ComputerRunRecord[] | null = null;
   pauseRunBeforeSecondRequireOwnedRun = false;
   pauseRunAfterFailedAttachRunBrowser = false;
@@ -9264,7 +9191,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     failNextUpdateRunBrowserState?: boolean;
     handoff?: ComputerHandoffRecord | null;
     managedLoginFallbackReplyBoundarySeq?: bigint | null;
-    memberOwnedProviderSetupDeletionPending?: boolean;
     memberRuns?: ComputerRunRecord[];
     pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
@@ -9294,8 +9220,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.handoffs = this.handoff ? [this.handoff] : [];
     this.managedLoginFallbackReplyBoundarySeq =
       input.managedLoginFallbackReplyBoundarySeq ?? null;
-    this.memberOwnedProviderSetupDeletionPending =
-      input.memberOwnedProviderSetupDeletionPending ?? false;
     this.memberRuns = input.memberRuns ?? null;
     this.pauseRunAfterFailedAttachRunBrowser =
       input.pauseRunAfterFailedAttachRunBrowser ?? false;
@@ -9336,7 +9260,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (input.memberId !== this.run.memberId) {
       throw new Error("Member not found.");
     }
-    if (!this.computerUseAvailable && !this.memberOwnedProviderSetupDeletionPending) {
+    if (!this.computerUseAvailable) {
       throw Object.assign(new Error("Computer use is not available for this hosted member."), {
         code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
       });
@@ -9404,15 +9328,12 @@ class FakeComputerUseStore implements ComputerUseStore {
         code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
       });
     }
-    if (!this.computerUseAvailable && !this.memberOwnedProviderSetupDeletionPending) {
+    if (!this.computerUseAvailable) {
       throw Object.assign(new Error("Computer use is not available for this hosted member."), {
         code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
       });
     }
-    return {
-      ...this.run,
-      deletionPending: this.memberOwnedProviderSetupDeletionPending,
-    };
+    return this.run;
   }
 
   async requireComputerHandoffAccess(

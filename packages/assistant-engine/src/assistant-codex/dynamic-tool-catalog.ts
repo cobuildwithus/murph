@@ -43,10 +43,12 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
 } from '@murphai/hosted-execution/vault-share'
 import {
-  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
-  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  hostedComputerActRequestSchema,
   hostedComputerOsControlRequestSchema,
 } from '@murphai/hosted-execution/computer-use'
+import {
+  hostedRuntimeProviderSetupToolRequestSchema,
+} from '@murphai/hosted-execution/provider-setup'
 import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantResponseCardJsonSchema,
@@ -1248,15 +1250,31 @@ export const MURPH_REACT_TO_MESSAGE_TOOL = {
   },
 } as const
 
+export const MURPH_PROVIDER_SETUP_TOOL = {
+  namespace: 'murph',
+  name: 'provider_setup',
+  description:
+    'Drive an authorized private provider-app setup through the trusted browser boundary. Begin or resume the exact setup, then use computer_open/computer_act on its runId. Final submit/capture and owned deletion must use this tool so client credentials never enter model context. Selectors are identified from the live page at call time; never embed provider UI programs or credentials.',
+  inputSchema: z.toJSONSchema(hostedRuntimeProviderSetupToolRequestSchema, {
+    io: 'input',
+  }) as Record<string, unknown>,
+} as const
+
 export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
+    "Open/reuse an authorized browser; pass provider_setup's exact runId for private setup, otherwise omit it. Returns runId and safe page state. Before multi-step browsing, call send_progress_update if available; prior-turn progress does not count.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
+      runId: {
+        anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }],
+        default: null,
+        description:
+          'Exact opaque runId returned by provider_setup begin/prepare_delete. Omit for ordinary browser tasks.',
+      },
       startUrl: {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
@@ -1273,27 +1291,23 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
 
 type JsonSchemaObject = Record<string, unknown>
 
-const MURPH_COMPUTER_ACT_INPUT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    runId: { type: 'string', minLength: 1 },
-    code: {
-      type: 'string',
-      minLength: 1,
-      maxLength: HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
-      description:
-        'One complete Playwright macro-step using the in-scope page, context, and browser objects. Return only compact JSON-serializable state needed for the next decision.',
-    },
-    timeoutMs: {
-      type: 'integer',
-      minimum: 1000,
-      maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-      default: 15000,
-    },
-  },
-  required: ['runId', 'code'],
-} as const
+const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
+
+function buildComputerActInputSchema(): JsonSchemaObject {
+  const generated = z.toJSONSchema(hostedComputerActRequestSchema, {
+    io: 'input',
+  }) as JsonSchemaObject
+  const variants = Array.isArray(generated.oneOf)
+    ? generated.oneOf
+    : Array.isArray(generated.anyOf)
+    ? generated.anyOf
+    : []
+
+  return {
+    oneOf: variants.map(addRunIdToActionSchema),
+    type: 'object',
+  }
+}
 
 const MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA = buildComputerOsControlInputSchema()
 
@@ -1328,7 +1342,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
+    'One bounded step in the run. Provider_setup accepts typed steps only and blocks code, OS control, value reads, network writes, submit, and destructive actions; use provider_setup for capture/deletion. Ordinary runs accept Playwright. Before call two, send progress if available. After failure, call computer_open.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -1336,7 +1350,7 @@ export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
   namespace: 'murph',
   name: 'computer_os_control',
   description:
-    'Fallback: perform one bounded mouse or keyboard action in the current authorized run only when Playwright cannot operate the verified control. Never enter sensitive data. After a possible effect or failure, the outcome may be unknown; call computer_open before any retry or next action.',
+    'Fallback for ordinary runs: one bounded mouse or keyboard action when Playwright cannot operate a verified control. Forbidden for provider_setup and sensitive data. After a possible effect or failure, call computer_open before retrying.',
   inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 
@@ -1384,7 +1398,7 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
   namespace: 'murph',
   name: 'computer_finish_run',
   description:
-    'Finish the current authorized computer run with the stated outcome and close its browser. On success, do not reuse the runId.',
+    'Finish an ordinary run with the stated outcome and close its browser. Provider_setup owns its run lifecycle. On success, do not reuse the runId.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1429,6 +1443,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
+  MURPH_PROVIDER_SETUP_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_OS_CONTROL_TOOL,

@@ -74,6 +74,10 @@
       "types": "./dist/computer-use.d.ts",
       "default": "./dist/computer-use.js"
     },
+    "./provider-setup": {
+      "types": "./dist/provider-setup.d.ts",
+      "default": "./dist/provider-setup.js"
+    },
     "./phone-calls": {
       "types": "./dist/phone-calls.d.ts",
       "default": "./dist/phone-calls.js"

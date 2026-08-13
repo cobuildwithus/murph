@@ -1,7 +1,7 @@
 "use client";
 
 import { MemberOwnedProviderSetup } from "@/src/components/device-sync/member-owned-provider-setup";
-import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/presentation";
+import { STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION } from "@/src/lib/device-sync/provider-setup/registry";
 import type {
   MemberOwnedProviderSetupStatus,
   MemberOwnedProviderSetupView,
@@ -13,70 +13,18 @@ const STUDY_STATES: readonly {
   label: string;
   setup: MemberOwnedProviderSetupView;
 }[] = [
-  {
-    label: "Start",
-    setup: buildStudySetup("pending", "start"),
-  },
-  {
-    label: "Working",
-    setup: buildStudySetup("working", "none"),
-  },
-  {
-    label: "Provider sign-in or challenge",
-    setup: buildStudySetup("waiting_for_user", "continue_sign_in"),
-  },
-  {
-    label: "Provider prerequisite",
-    setup: buildStudySetup("provider_prerequisite", "continue_provider"),
-  },
-  {
-    label: "Canceling safely",
-    setup: buildStudySetup("canceling", "none"),
-  },
-  {
-    label: "Ambiguous create recovery",
-    setup: buildStudySetup("inspection_required", "retry"),
-  },
-  {
-    label: "Continue OAuth",
-    setup: buildStudySetup("oauth_ready", "continue_oauth", 3),
-  },
-  {
-    label: "OAuth consent in progress",
-    setup: buildStudySetup("oauth_in_progress", "continue_oauth", 3),
-  },
-  {
-    label: "Connected",
-    setup: buildStudySetup("connected", "none", 3, true),
-  },
-  {
-    label: "Repair credentials/application",
-    setup: buildStudySetup("repair_required", "retry", 3),
-  },
-  {
-    label: "Transient retry",
-    setup: buildStudySetup("retryable_failure", "retry", 3),
-  },
-  {
-    label: "Disconnect first",
-    setup: buildStudySetup("disconnect_first", "disconnect_first", 3),
-  },
-  {
-    label: "Unrelated application protected",
-    setup: buildStudySetup("provider_conflict", "retry"),
-  },
-  {
-    label: "Canceled, ready to restart",
-    setup: buildStudySetup("canceled", "start"),
-  },
-  {
-    label: "Account deletion cleanup",
-    setup: buildStudySetup("deletion_pending", "none", 3),
-  },
-  {
-    label: "Private application deleted",
-    setup: buildStudySetup("deleted", "none", 3),
-  },
+  { label: "Ready", setup: buildStudySetup("pending", "authorize") },
+  { label: "Authorized", setup: buildStudySetup("authorized", "none") },
+  { label: "Browser setup", setup: buildStudySetup("browser_setup", "none") },
+  { label: "Sealing credentials", setup: buildStudySetup("capturing", "none") },
+  { label: "Canceling safely", setup: buildStudySetup("canceling", "none") },
+  { label: "Continue OAuth", setup: buildStudySetup("oauth_ready", "continue_oauth", 3) },
+  { label: "OAuth consent", setup: buildStudySetup("oauth_in_progress", "continue_oauth", 3) },
+  { label: "Connected", setup: buildStudySetup("connected", "none", 3, true) },
+  { label: "Disconnect first", setup: buildStudySetup("disconnect_first", "disconnect_first", 3) },
+  { label: "Canceled", setup: buildStudySetup("canceled", "authorize") },
+  { label: "Removing private app", setup: buildStudySetup("deletion_pending", "none", 3) },
+  { label: "Private app deleted", setup: buildStudySetup("deleted", "none") },
 ];
 
 export function MemberOwnedProviderSetupComponentStudy() {
@@ -119,7 +67,7 @@ function StudyCard({
         actionAvailable
         connected={setup.connected}
         controlsInert
-        pending={setup.status === "working"}
+        pending={false}
         presentation={STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION}
         setup={setup}
         onAction={() => undefined}

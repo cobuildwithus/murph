@@ -20,6 +20,7 @@ import {
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import {
+  assertMemberOwnedProviderSetupsReadyForAccountDeletion,
   deleteMemberOwnedProviderSetupExternalStateForAccountDeletion,
 } from "../device-sync/provider-setup";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
@@ -827,6 +828,11 @@ async function deleteHostedAccountDataInternal(input: {
     });
   }
 
+  await assertMemberOwnedProviderSetupsReadyForAccountDeletion({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
   const deletionStartedAt = new Date();
   const deletionMemberIds = await markHostedMembersSuspendedForAccountDeletion({
     now: deletionStartedAt,
@@ -900,11 +906,9 @@ async function deleteHostedAccountDataInternal(input: {
     ...connectedAppRevocations,
   ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
-  // Revoke exact application-bound connections while the application credentials
-  // are still valid, then remove only Murph's marked provider application. The
-  // setup-owned browser authority is available solely to this already-fenced
-  // account-deletion path. Local setup/application rows remain for safe retry if
-  // this external cleanup does not complete.
+  // Provider-dashboard cleanup was proven complete before suspension. Close the
+  // remaining local setup rows now; no browser or model authority is available
+  // after the account-deletion fence.
   await deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
     memberId: input.memberId,
     prisma: input.prisma,

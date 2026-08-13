@@ -47,6 +47,9 @@ import {
   readHostedComputerRunOperationRoute,
 } from "../src/computer-use.ts";
 import {
+  parseHostedRuntimeProviderSetupToolRequest,
+} from "../src/provider-setup.ts";
+import {
   assessBrowserVaultReplicaFreshness,
   getBrowserVaultReplicaFreshness,
   shouldScheduleBrowserVaultRefresh,
@@ -608,6 +611,7 @@ describe("hosted execution coverage gaps", () => {
       "./phone-calls",
       "./physical-notes",
       "./plan-usage",
+      "./provider-setup",
       "./return-contact",
       "./routes",
       "./runtime-control",
@@ -849,12 +853,14 @@ describe("hosted execution coverage gaps", () => {
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
+      runId: null,
       startUrl: null,
     });
     expect(parseHostedComputerOpenRunRequest({
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
+      runId: null,
       startUrl: null,
     });
     expect(parseHostedComputerFinishRunRequest({
@@ -877,11 +883,51 @@ describe("hosted execution coverage gaps", () => {
       code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
+    expect(parseHostedComputerActRequest({
+      steps: [{
+        action: "click",
+        target: {
+          kind: "selector",
+          value: 'button[data-testid="create-app"]',
+        },
+      }],
+    })).toEqual({
+      steps: [{
+        action: "click",
+        target: {
+          kind: "selector",
+          value: 'button[data-testid="create-app"]',
+        },
+      }],
+      timeoutMs: 15000,
+    });
+    expect(() => parseHostedComputerActRequest({
+      steps: [{
+        action: "click",
+        target: {
+          kind: "selector",
+          value: 'body:has(input[value^="secret-prefix"]) button',
+        },
+      }],
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      action: "capture",
+      applicationRootSelector: "form#provider-app",
+      clientIdSelector: 'input[value^="secret-prefix"]',
+      clientSecretSelector: 'input[name="client_secret"]',
+      ownershipMarkerSelector: 'input[name="app_name"]',
+      provider: "strava",
+      revealSecretSelector: null,
+      runId: "hcr_setup",
+      setupId: "dps_setup",
+      submitSelector: 'button[type="submit"]',
+    })).toThrow();
     expect(parseHostedComputerOpenRunRequest({
       startUrl: "about:blank",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
+      runId: null,
       startUrl: "about:blank",
     });
     expect(parseHostedComputerOpenRunRequest({
@@ -889,6 +935,7 @@ describe("hosted execution coverage gaps", () => {
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
+      runId: null,
       startUrl: "http://127.0.0.1:3000",
     });
     expect(() => parseHostedComputerActRequest({
