@@ -3,6 +3,7 @@ import { test } from "vitest";
 
 import {
   isDeviceConnectSourceAvailableForConnection,
+  listJunctionDeviceConnectRouteEntries,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
@@ -10,6 +11,21 @@ import {
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
 } from "../src/config.ts";
 import { readConfiguredDeviceSyncConnectTargetConfigs } from "../src/connect-config.ts";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "../src/hosted-runtime.ts";
+
+test("configured Junction source authority fits one runtime connection snapshot", () => {
+  const sourceProviderSlugs = new Set(
+    listJunctionDeviceConnectRouteEntries().map(
+      ({ route }) => route.sourceProviderSlug,
+    ),
+  );
+
+  assert.equal(sourceProviderSlugs.size, 33);
+  assert.ok(
+    sourceProviderSlugs.size
+      <= HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+  );
+});
 
 test("connect targets prefer direct providers except Junction-backed WHOOP", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
@@ -94,7 +110,7 @@ test("reconnect targets retain duplicate direct and Junction routes for exact re
   );
 });
 
-test("Strava remains configured for status and self-hosted routing while its offer gate is disabled", () => {
+test("disabled offers remain configured for status and ingestion while fresh starts stay gated", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -107,6 +123,11 @@ test("Strava remains configured for status and self-hosted routing while its off
 
   assert.ok(configs.strava);
   assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
+  assert.equal(isDeviceConnectSourceAvailableForConnection("dexcom"), false);
+  assert.equal(
+    isDeviceConnectSourceAvailableForConnection("dexcom-g6-and-older"),
+    true,
+  );
   assert.deepEqual(listConfiguredDeviceSyncConnectTargets(configs), [{
     connectSourceId: "strava",
     connectTarget: "strava",

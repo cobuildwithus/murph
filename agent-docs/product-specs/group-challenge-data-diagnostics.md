@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-08-05
+Last verified: 2026-08-11
 
 Status: Implemented
 
@@ -65,20 +65,24 @@ eligible only after that read returns exact missing-grant evidence.
 
 Web answers one model-triggered read with every current member and every
 requested scope. Each cell distinguishes `not_granted`, `granted` plus
-`missing`, and `available`; a current grant additionally carries its canonical
-`grantedAt`, while a non-grant carries null. The timestamp is bounded
-authorization metadata, not proof of why the member granted access. A real zero
-remains available data. Profile labels come only from the separately granted
-profile snapshot. Authority, decryption, parsing, or bound failures return one
+`pending`, `granted` plus `missing`, and `available`. `pending` means the exact
+grant is active and readable but its first encrypted snapshot has not
+materialized; `missing` means a completed snapshot is empty or current access
+withholds it. A current grant additionally carries its canonical `grantedAt`,
+while a non-grant carries null. The timestamp is bounded authorization metadata,
+not proof of why the member granted access. A real zero remains available data.
+Profile labels come only from the separately granted profile snapshot.
+Authority, decryption, parsing, or bound failures return one
 typed `unavailable` result without shared records rather than falling back to
 cached data.
 
 That full Web result remains the authority boundary. The assistant-engine model
 adapter keys each retained projection by exact scope and maps the grant/data
-pair to `not_granted`, `missing`, or `available`. Non-workout record arrays stay
-intact; `workouts.v0` additionally compacts its repeated day, activity-kind,
-time-semantics, and completion-watermark fields. If whole member rows still
-exceed the model bound, the adapter returns `status="partial"` and names each
+pair to `not_granted`, `pending`, `missing`, or `available`. Non-workout record
+arrays stay intact; `workouts.v0` additionally compacts its repeated day,
+activity-kind, time-semantics, and completion-watermark fields. If whole member
+rows still exceed the model bound, the adapter returns `status="partial"` and
+names each
 still-current capacity-omitted membership in `omittedParticipantIds`. Omission
 does not imply departure, a score, a diagnostic state, or a permission state.
 The assistant keeps those participants unverified and unranked and labels any
@@ -236,6 +240,7 @@ evidence.
 | --- | --- | --- |
 | Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. Reported Deep/REM sleep is scoreable immediately; the member-local future-date guard still excludes future rows, but the current local date alone does not make a reported stage value provisional. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
 | Current challenge-metric data exists but is not yet eligible under that completion marker | Keep the participant pending and unranked. This is not missing data or a zero. | Do not diagnose, offer permission, or advance completion from the reader's clock. |
+| Exact scope granted with a `pending` first projection snapshot | Say the permission is active and the recent shared data is still preparing. Keep the participant pending and unranked. | Invite a retry shortly. Do not diagnose a source, offer permission again, or infer private sync state. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Metric scope granted, but no `device-sync-status.v0` grant | The current shared read lacks a usable metric; its cause is unverified. Connection status was not shared, but that does not explain the absence. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Live diagnostic result with `needs-reconnect` or `disconnected` | The current shared read lacks a usable metric and its cause is unverified. Separately name the literal source label and coarse status. | The literal status supports asking the participant to reconnect that source privately; do not claim reconnecting will restore the metric. |

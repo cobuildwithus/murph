@@ -74,7 +74,8 @@ import type {
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
-  HostedVaultShareProjectionScope,
+  HostedVaultShareActiveProjectionKindsResponse,
+  HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
@@ -113,6 +114,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotCursor,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -441,6 +443,7 @@ export interface HostedRuntimeDeviceSyncPort {
   }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
+    cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
     includeCredentialMaterial?: boolean | null;
     limit?: number | null;
     provider?: string | null;
@@ -686,11 +689,21 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
-  listActiveProjectionScopes(): Promise<HostedVaultShareProjectionScope[]>;
+  listActiveProjectionScopes(input?: {
+    projectionMode?: HostedVaultShareProjectionMode;
+    signal?: AbortSignal | null;
+  }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
-  ): Promise<HostedVaultShareDeliverResponse>;
+  ): Promise<HostedRuntimeVaultShareDeliverResult>;
 }
+
+export type HostedRuntimeVaultShareDeliverResult =
+  | HostedVaultShareDeliverResponse
+  | {
+    /** Web reached a terminal response, but this scope still needs retry. */
+    status: "scope-failed";
+  };
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;

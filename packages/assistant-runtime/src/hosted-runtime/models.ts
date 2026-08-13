@@ -174,6 +174,10 @@ export type HostedSystemMailboxPostCheckpointRecord =
       kind: "codex-auth.updated";
       nextWakeAt?: null;
       phase: "connected" | "disconnected";
+    }
+  | {
+      kind: "vault-share.projection";
+      nextWakeAt?: null;
     };
 
 export interface HostedConversationWakeMetrics {
