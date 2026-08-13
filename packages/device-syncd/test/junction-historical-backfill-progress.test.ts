@@ -131,7 +131,7 @@ describe("Junction extended timeseries history coverage", () => {
     if (typeof encoded !== "string") {
       throw new TypeError("Expected encoded Junction extended-history coverage.");
     }
-    expect(encoded).toHaveLength(217);
+    expect(encoded).toHaveLength(195);
     expect(encoded.length).toBeLessThanOrEqual(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       coverage,
@@ -145,18 +145,8 @@ describe("Junction extended timeseries history coverage", () => {
       "caffeine",
       1,
     )).toBe(false);
-    expect(canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
       { junctionBloodPressureHistoryBackfillCoverage: `m2|${"0".repeat(192)}` },
-      "omron",
-      "caffeine",
-      1,
-    )).toBe(true);
-    expect(canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      {
-        junctionBloodPressureHistoryBackfillCoverage: `m2|${"0".repeat(192)}`,
-        junctionNoteHistoryBackfillCoverage: "opaque",
-      },
-      "omron",
       "caffeine",
       1,
     )).toBe(false);
@@ -177,10 +167,10 @@ describe("Junction extended timeseries history coverage", () => {
     )).toBe(true);
   });
 
-  it("migrates deployed m1 bits without certifying the old note semantic", () => {
+  it("updates deployed m1 bits without changing the format", () => {
     const bytes = new Uint8Array(96);
     const garminSourceSlot = 16;
-    for (const resourceSlot of [1, 6]) {
+    for (const resourceSlot of [6]) {
       const bitIndex = garminSourceSlot * 12 + resourceSlot;
       bytes[Math.floor(bitIndex / 8)] = (bytes[Math.floor(bitIndex / 8)] ?? 0)
         | (1 << (bitIndex % 8));
@@ -195,26 +185,14 @@ describe("Junction extended timeseries history coverage", () => {
       "caffeine",
       1,
     )).toBe(true);
-    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      metadata,
-      "garmin",
-      "note",
-      2,
-    )).toBe(false);
     const migrated = addCoverage(metadata, "garmin", "water");
-    expect(migrated.junctionBloodPressureHistoryBackfillCoverage).toMatch(/^m2\|/u);
+    expect(migrated.junctionBloodPressureHistoryBackfillCoverage).toMatch(/^m1\|/u);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       migrated,
       "garmin",
       "caffeine",
       1,
     )).toBe(true);
-    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      migrated,
-      "garmin",
-      "note",
-      2,
-    )).toBe(false);
   });
 
   it("unions unpublished local resource bits without losing hosted coverage", () => {
@@ -269,7 +247,7 @@ describe("Junction extended timeseries history coverage", () => {
     expect(Object.keys(metadata)).toEqual([
       "junctionBloodPressureHistoryBackfillCoverage",
     ]);
-    expect(metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(217);
+    expect(metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(195);
     for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
       for (const resource of resources) {
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -316,7 +294,7 @@ describe("Junction extended timeseries history coverage", () => {
       localMetadata,
     });
     expect(result.preservedLocalProgress).toBe(true);
-    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(217);
+    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(195);
     for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
       for (const resource of resources) {
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -411,6 +389,26 @@ describe("Junction extended timeseries history coverage", () => {
       "caffeine",
       1,
     )).toBe(true);
+  });
+
+  it("does not reserve coverage coordinates for inactive resources", () => {
+    for (const resource of [
+      "insulin_injection",
+      "carbohydrates",
+      "workout_duration",
+      "weight",
+      "fat",
+      "body_mass_index",
+      "lean_body_mass",
+      "waist_circumference",
+    ]) {
+      expect(canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        {},
+        "garmin",
+        resource,
+        1,
+      )).toBe(false);
+    }
   });
 });
 

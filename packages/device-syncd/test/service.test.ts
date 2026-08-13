@@ -1985,7 +1985,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     "junctionNoteHistoryBackfillCoverage",
   ].filter((key) => Object.hasOwn(merged.metadata, key));
   assert.equal(mergedCoverageSlots.length, 1);
-  assert.match(String(merged.metadata[mergedCoverageSlots[0] ?? ""]), /^m2\|/u);
+  assert.match(String(merged.metadata[mergedCoverageSlots[0] ?? ""]), /^m1\|/u);
   assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
     merged.metadata,
     "omron",
@@ -2131,7 +2131,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     "junctionNoteHistoryBackfillCoverage",
   ].filter((key) => Object.hasOwn(persisted.metadata, key));
   assert.equal(persistedCoverageSlots.length, 1);
-  assert.match(String(persisted.metadata[persistedCoverageSlots[0] ?? ""]), /^m2\|/u);
+  assert.match(String(persisted.metadata[persistedCoverageSlots[0] ?? ""]), /^m1\|/u);
   close();
 
   const reopenedStore = new SqliteDeviceSyncStore(databasePath);
@@ -2345,11 +2345,11 @@ test("Junction sparse history certifies exhausted empties without certifying mal
     const encodedCoverage = [
       persisted.metadata.junctionBloodPressureHistoryBackfillCoverage,
       persisted.metadata.junctionNoteHistoryBackfillCoverage,
-    ].find((value) => typeof value === "string" && value.startsWith("m2|"));
+    ].find((value) => typeof value === "string" && value.startsWith("m1|"));
     assert.equal(typeof encodedCoverage, "string");
     const encodedBytes = String(encodedCoverage).split("|", 2)[1];
     assert.ok(encodedBytes);
-    const setBitCount = [...Buffer.from(encodedBytes, "base64url")]
+    const setBitCount = [...Buffer.from(encodedBytes, "hex")]
       .reduce((sum, byte) => sum + byte.toString(2).replaceAll("0", "").length, 0);
     assert.equal(setBitCount, 1, "only the proven empty source/resource pair owns a bit");
 
