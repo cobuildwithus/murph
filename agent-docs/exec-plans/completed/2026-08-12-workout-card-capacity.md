@@ -1,6 +1,6 @@
 # Workout Card Capacity And Native Overflow
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -233,3 +233,30 @@ Updated: 2026-08-12
   retaining complete visible workout text and tracking only in the transcript.
   Existing reverse-order tests continue to prove media rejects a later card or
   semantic overflow.
+
+## ReviewGPT round 6 and completion
+
+- ReviewGPT audited the full exact-head snapshot at
+  `b71c73acdd9e38c1e3a1ee7b0e313bd1a512ec15` and returned `PASS`. It verified
+  every accepted correction, both mechanism-level retrospectives, the complete
+  Linq/Telegram/email route matrix, pre-effect arbitration, strict-reader
+  rollout floors, and deferred changelog publication. No qualifying product,
+  architecture, correctness, or complexity finding remains.
+- ReviewGPT could not inspect the linked iOS repository's native screenshot from
+  the Murph-only guarded snapshot. The iOS PR separately contains that exact-head
+  raster evidence and passed its own ReviewGPT audit. Physical Apple Messages
+  chrome and tap-to-expand behavior remain an explicit release proof gap.
+- Final local proof includes the 422/422 combined app-server/tool/channel/
+  notification suite, the earlier 408/408 strict-reader suite, 150/150
+  cross-channel route matrix, all five changed-package typechecks, diff hygiene,
+  and privacy scanning. Broad GitHub Actions passed on the reviewed Murph head;
+  the plan-archive follow-up is documentation-only and requires exact-head CI but
+  not a new substantive ReviewGPT round.
+- The iOS exact head `8984dc972db24086fe2ad8bd429352158fe36e5b`
+  passed hosted verification and ReviewGPT. XcodeGen, SwiftFormat, direct
+  simulator compilation, and the synthetic 11x3 render passed. Repository Xcode
+  build/test and a physical Messages journey remain merge/release blockers
+  because the shared Xcode installation stalled before target compilation on
+  unrelated long-running worker/package-loading state that this task did not
+  own.
+Completed: 2026-08-12
