@@ -1,4 +1,4 @@
-import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/contracts";
+import { JUNCTION_ALLOWED_TIMESERIES_RESOURCES } from "@murphai/contracts";
 
 import {
   JUNCTION_API_BASE_URL_ENV_KEYS,
@@ -32,39 +32,11 @@ import type {
   JunctionRegion,
 } from "./provider-types.ts";
 
-// One code-owned production activation boundary. These additions remain
-// non-serializable and cannot be widened by a member or environment value.
-// Raw provider arrays are never retained: each resource's contracts policy
-// selects a bounded sparse, daily, hourly, or dense-feature reducer.
-export const JUNCTION_PRODUCTION_TIMESERIES_RESOURCES = Object.freeze([
-  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  "body_mass_index",
-  "calories_basal",
-  "carbohydrates",
-  "daylight_exposure",
-  "electrocardiogram_voltage",
-  "fall",
-  "fat",
-  "floors_climbed",
-  "forced_expiratory_volume_1",
-  "forced_vital_capacity",
-  "handwashing",
-  "heart_rate_alert",
-  "inhaler_usage",
-  "insulin_injection",
-  "lean_body_mass",
-  "peak_expiratory_flow_rate",
-  "sleep_apnea_alert",
-  "stand_duration",
-  "stand_hour",
-  "uv_exposure",
-  "waist_circumference",
-  "wheelchair_push",
-  "workout_distance",
-  "workout_duration",
-  "workout_stream",
-  "workout_swimming_stroke",
-] as const);
+// Production sets the exhaustive code-owned list explicitly. Omitted runtime
+// configuration resolves to the same registry, while explicit subsets remain
+// exact and cannot be widened by member or environment data.
+export const JUNCTION_PRODUCTION_TIMESERIES_RESOURCES =
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES;
 
 export function readConfiguredJunctionDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,

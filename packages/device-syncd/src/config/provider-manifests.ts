@@ -182,6 +182,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesPhase: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
@@ -190,8 +191,10 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      timeseriesCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesPhase: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
@@ -573,7 +576,7 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   );
   const timeseriesResources = normalizeOptionalJunctionResourceList(
     config.timeseriesResources,
-    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
     JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
     "timeseries",
   );

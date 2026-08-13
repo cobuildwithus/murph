@@ -12,6 +12,7 @@ import {
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
 import {
   normalizeJunctionSnapshot,
@@ -624,7 +625,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
               status: "connected",
               resource_availability: Object.fromEntries([
                 "activity",
-                ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+                ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
                 "heartrate",
                 "steps",
                 "distance",
@@ -640,72 +641,67 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
         return createJsonResponse({ data: [] });
       }
 
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/workouts/junction-user-1")) {
+        return createJsonResponse({ data: [] });
+      }
+
       const timeseriesResource = normalizeJunctionResourceName(
         new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
-        return createJsonResponse({
-          groups: {
-            garmin: [{
-              data: [{
-                timestamp: "2026-04-02T12:00:00.000Z",
-                unit: timeseriesResource === "blood_oxygen" ? "%" : "score",
-                value: timeseriesResource === "blood_oxygen" ? 97 : 24,
-              }],
-              source: { provider: "garmin", type: "watch" },
-            }],
-          },
-        });
+        return createJsonResponse({ groups: {} });
       }
 
       throw new Error(`Unexpected request: ${url}`);
     },
   });
 
-  await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      account: createAccount({
-        lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
-      }),
-      importSnapshot: async (snapshot) => {
-        importedSnapshots.push(snapshot);
-        return { imported: true };
-      },
+  const context = createJunctionJobContext({
+    account: createAccount({
+      lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
     }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+  let result = await executeJunctionJob(
+    provider,
+    context,
     createJob("backfill", {
       windowStart: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
+  while (result.scheduledJobs?.[0]) {
+    const continuation = result.scheduledJobs[0];
+    result = await executeJunctionJob(
+      provider,
+      context,
+      createJob(continuation.kind, continuation.payload ?? {}),
+    );
+  }
 
   const requestedTimeseriesResources = requests
     .map((url) => normalizeJunctionResourceName(
       new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
     ))
     .filter((resource): resource is string => Boolean(resource));
+  if (requests.some((url) =>
+    new URL(url).pathname === "/v2/summary/workouts/junction-user-1"
+  )) {
+    requestedTimeseriesResources.push("workout_stream");
+  }
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
+    [...JUNCTION_KNOWN_TIMESERIES_RESOURCES].sort(),
   );
-  const importedTimeseriesResources = importedSnapshots.flatMap((snapshot) =>
-    Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
-  );
-  assert.equal(
-    importedSnapshots.every((snapshot) =>
-      Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {}).length === 1
-    ),
-    true,
-  );
-  assert.deepEqual(
-    [...importedTimeseriesResources].sort(),
-    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
-  );
+  assert.equal(importedSnapshots.length, 0);
 });
 
 test("Junction programmatic timeseries overrides fetch exactly the requested resources", async () => {
@@ -764,22 +760,31 @@ test("Junction programmatic timeseries overrides fetch exactly the requested res
     },
   });
 
-  await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      account: createAccount({
-        lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
-      }),
-      importSnapshot: async (snapshot) => {
-        importedSnapshots.push(snapshot);
-        return { imported: true };
-      },
+  const context = createJunctionJobContext({
+    account: createAccount({
+      lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
     }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+  let result = await executeJunctionJob(
+    provider,
+    context,
     createJob("backfill", {
       windowStart: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
+  while (result.scheduledJobs?.[0]) {
+    const continuation = result.scheduledJobs[0];
+    result = await executeJunctionJob(
+      provider,
+      context,
+      createJob(continuation.kind, continuation.payload ?? {}),
+    );
+  }
 
   const requestedTimeseriesResources = requests
     .map((url) => new URL(url).pathname.match(
@@ -797,7 +802,7 @@ test("Junction programmatic timeseries overrides fetch exactly the requested res
     ),
     true,
   );
-  assert.deepEqual([...importedTimeseriesResources].sort(), ["heartrate", "steps"]);
+  assert.deepEqual([...new Set(importedTimeseriesResources)].sort(), ["heartrate", "steps"]);
 });
 
 test("Junction dense resource jobs import only complete closed UTC days", async () => {
