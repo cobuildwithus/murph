@@ -152,8 +152,8 @@ export class DeviceWebhookQueueHealthMonitor {
     }
     const nowMs = observation.observedAtMs;
     if (
-      state.lastAlertAttemptedAtMs !== null
-      && nowMs - state.lastAlertAttemptedAtMs
+      state.lastAlertSucceededAtMs !== null
+      && nowMs - state.lastAlertSucceededAtMs
         < DEVICE_WEBHOOK_QUEUE_ALERT_INTERVAL_MS
     ) {
       return;
@@ -188,27 +188,14 @@ export class DeviceWebhookQueueHealthMonitor {
       };
     }
 
-    const attemptedAtMs = normalizeTimestamp(this.nowImplementation());
-    if (
-      state.lastAlertAttemptedAtMs !== null
-      && attemptedAtMs - state.lastAlertAttemptedAtMs
-        < DEVICE_WEBHOOK_QUEUE_ALERT_INTERVAL_MS
-    ) {
-      return {
-        conditions: observation.conditions,
-        outcome: "alert_deferred",
-        observationStatus: observation.status,
-      };
-    }
-
-    this.store.recordAlertAttempt(attemptedAtMs);
     try {
       await this.alertSender.send({
         idempotencyKey: pendingIdempotencyKey,
         message: pendingMessage,
       });
+      const succeededAtMs = normalizeTimestamp(this.nowImplementation());
       this.transactionSync(() => {
-        this.store.recordAlertSuccess();
+        this.store.recordAlertSuccess(succeededAtMs);
         const latestObservation = this.store.readLatestObservation();
         if (latestObservation && isHealthyObservation(latestObservation)) {
           this.store.closeIncident();

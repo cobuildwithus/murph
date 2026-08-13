@@ -43,7 +43,7 @@ export interface DeviceWebhookQueueHealthState {
   consecutiveMetricsFailures: number;
   incidentOpen: boolean;
   incidentSequence: number;
-  lastAlertAttemptedAtMs: number | null;
+  lastAlertSucceededAtMs: number | null;
   pendingAlertIdempotencyKey: string | null;
   pendingAlertMessage: string | null;
 }
@@ -54,6 +54,8 @@ interface DeviceWebhookQueueMonitorMetaRow
   consecutive_metrics_failures: number;
   incident_open: number;
   incident_sequence: number;
+  // The deployed physical name is retained for rollback compatibility. Current
+  // writers set this value only after the complete operator page succeeds.
   last_alert_attempted_at_ms: number | null;
   pending_alert_idempotency_key: string | null;
   pending_alert_message: string | null;
@@ -105,7 +107,7 @@ export class DeviceWebhookQueueHealthStore {
       consecutiveMetricsFailures: row.consecutive_metrics_failures,
       incidentOpen: row.incident_open === 1,
       incidentSequence: row.incident_sequence,
-      lastAlertAttemptedAtMs: row.last_alert_attempted_at_ms,
+      lastAlertSucceededAtMs: row.last_alert_attempted_at_ms,
       pendingAlertIdempotencyKey: row.pending_alert_idempotency_key,
       pendingAlertMessage: row.pending_alert_message,
     };
@@ -189,7 +191,8 @@ export class DeviceWebhookQueueHealthStore {
        SET
          incident_open = 1,
          incident_sequence = incident_sequence + 1,
-         alert_sequence = 0
+         alert_sequence = 0,
+         last_alert_attempted_at_ms = NULL
        WHERE singleton = 1`,
     );
     return this.readState();
@@ -200,7 +203,8 @@ export class DeviceWebhookQueueHealthStore {
       `UPDATE device_webhook_queue_monitor_meta
        SET
          incident_open = 0,
-         alert_sequence = 0
+         alert_sequence = 0,
+         last_alert_attempted_at_ms = NULL
        WHERE singleton = 1
          AND pending_alert_idempotency_key IS NULL`,
     );
@@ -224,22 +228,15 @@ export class DeviceWebhookQueueHealthStore {
     return this.readState();
   }
 
-  recordAlertAttempt(attemptedAtMs: number): void {
-    this.sql.exec(
-      `UPDATE device_webhook_queue_monitor_meta
-       SET last_alert_attempted_at_ms = ?
-       WHERE singleton = 1`,
-      attemptedAtMs,
-    );
-  }
-
-  recordAlertSuccess(): void {
+  recordAlertSuccess(succeededAtMs: number): void {
     this.sql.exec(
       `UPDATE device_webhook_queue_monitor_meta
        SET
+         last_alert_attempted_at_ms = ?,
          pending_alert_idempotency_key = NULL,
          pending_alert_message = NULL
        WHERE singleton = 1`,
+      succeededAtMs,
     );
   }
 

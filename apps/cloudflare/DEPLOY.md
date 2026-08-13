@@ -1160,8 +1160,11 @@ events because Web froze verified prepared meaning before provider acknowledgeme
 The Queue-health Durable Object reads only native main-Queue and DLQ metrics.
 It pages both configured operator chats immediately when the DLQ is nonempty,
 when the oldest main-Queue message reaches 15 minutes, or after two consecutive
-metric failures. Keep `HOSTED_DATABASE_ALERT_ENABLED=1` and the existing Linq
-alert secrets configured for production so both independent monitors run.
+metric failures. A failed first page retains its exact body and Linq
+idempotency key for the next five-minute check, while hourly pacing applies
+only to successful repeat pages in the same continuously open incident. Keep
+`HOSTED_DATABASE_ALERT_ENABLED=1` and the existing Linq alert secrets configured
+for production so both independent monitors run.
 
 For encrypted DLQ recovery, first fix the admission failure and retain every
 Cloudflare automation private key still referenced by either Queue. Pause the

@@ -812,11 +812,14 @@ Last verified: 2026-08-13
   any DLQ backlog or a main message at least 15 minutes old, and after two
   consecutive metric-collection failures. A two-minute persisted run lease
   coalesces overlapping cron deliveries. Incident sequence, exact pending body
-  and idempotency key, latest typed observation, and the last provider-attempt
-  time survive restart. Alert attempts and continuing-incident recurrences are
-  paced to one hour. Only acknowledged delivery to both configured operator
-  chats clears pending state; an incident closes only after the pending page is
-  cleared and both Queue observations are healthy. The monitor persists no
+  and idempotency key, latest typed observation, and the last successful page
+  time survive restart. A failed page retries with the same bytes and key on
+  the next five-minute scheduled check, and every newly opened incident admits
+  its first page independently of an earlier incident. Only successfully
+  delivered repeat pages in one continuously open incident are paced to one
+  hour. Only acknowledged delivery to both configured operator chats clears
+  pending state; an incident closes only after the pending page is cleared and
+  both Queue observations are healthy. The monitor persists no
   webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account

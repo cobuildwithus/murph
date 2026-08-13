@@ -62,6 +62,7 @@ describe("device webhook Queue health monitor", () => {
       alertSequence: 1,
       incidentOpen: true,
       incidentSequence: 1,
+      lastAlertSucceededAtMs: FIVE_MINUTES_MS,
       pendingAlertIdempotencyKey: null,
     });
 
@@ -148,20 +149,13 @@ describe("device webhook Queue health monitor", () => {
     expect(pending.pendingAlertMessage).toContain(
       "Dead-letter backlog: 2 message(s).",
     );
+    expect(pending.lastAlertSucceededAtMs).toBeNull();
 
     harness.setNow(FIVE_MINUTES_MS * 2);
     harness.setDeadLetterMetrics(metrics({ backlogCount: 0 }));
     await expect(harness.run()).resolves.toMatchObject({
-      outcome: "alert_deferred",
+      outcome: "alert_sent",
     });
-    expect(harness.monitor.readState()).toMatchObject({
-      incidentOpen: true,
-      pendingAlertIdempotencyKey: pending.pendingAlertIdempotencyKey,
-      pendingAlertMessage: pending.pendingAlertMessage,
-    });
-
-    harness.setNow(FIVE_MINUTES_MS + ONE_HOUR_MS);
-    await expect(harness.run()).resolves.toMatchObject({ outcome: "alert_sent" });
     expect(harness.sent[1]).toEqual({
       idempotencyKey: pending.pendingAlertIdempotencyKey,
       message: pending.pendingAlertMessage,
@@ -173,7 +167,7 @@ describe("device webhook Queue health monitor", () => {
     });
   });
 
-  it("persists the pending page and pacing fence across monitor restart", async () => {
+  it("retries the exact pending page on the next check after monitor restart", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const harness = createHarness({
       deadLetterMetrics: [metrics({ backlogCount: 1 })],
@@ -187,13 +181,36 @@ describe("device webhook Queue health monitor", () => {
     harness.setDeadLetterMetrics(metrics({ backlogCount: 5 }));
 
     await expect(harness.run()).resolves.toMatchObject({
-      outcome: "alert_deferred",
+      outcome: "alert_sent",
     });
-    expect(harness.monitor.readState()).toMatchObject({
-      pendingAlertIdempotencyKey: beforeRestart.pendingAlertIdempotencyKey,
-      pendingAlertMessage: beforeRestart.pendingAlertMessage,
+    expect(harness.sent[1]).toEqual({
+      idempotencyKey: beforeRestart.pendingAlertIdempotencyKey,
+      message: beforeRestart.pendingAlertMessage,
     });
-    expect(harness.sent).toHaveLength(1);
+  });
+
+  it("pages a newly opened incident independently of the prior incident", async () => {
+    const harness = createHarness({
+      deadLetterMetrics: [metrics({ backlogCount: 1 })],
+    });
+
+    await expect(harness.run()).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    harness.setNow(FIVE_MINUTES_MS * 2);
+    harness.setDeadLetterMetrics(metrics());
+    await expect(harness.run()).resolves.toMatchObject({ outcome: "healthy" });
+
+    harness.setNow(FIVE_MINUTES_MS * 3);
+    harness.setDeadLetterMetrics(metrics({ backlogCount: 2 }));
+    await expect(harness.run()).resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(harness.sent).toEqual([
+      expect.objectContaining({
+        idempotencyKey: "device-webhook-queue-health:1:1",
+      }),
+      expect.objectContaining({
+        idempotencyKey: "device-webhook-queue-health:2:1",
+      }),
+    ]);
   });
 
   it("coalesces overlapping cron delivery with the durable run lease", async () => {
