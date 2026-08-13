@@ -1,13 +1,20 @@
 import {
   isValidIanaTimeZone,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import {
+  resolveAdherenceObservationActivityKind,
   resolveActivityEvidenceLocalDate,
   resolveInterventionSessionLocalDate,
 } from "./experiment-adherence.ts";
+import {
+  selectMetricSeries,
+  type MetricPoint,
+} from "./metrics/index.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import { buildWearableSummaryBundle } from "./wearables.ts";
 import type {
@@ -24,6 +31,10 @@ const MAX_FACTORS = 6;
 const MIN_MATCHED_DAYS = 5;
 const MIN_WINDOW_DAYS = 21;
 const COMPARISON_SEARCH_DAYS = 35;
+// Product-owned and intentionally fail-closed. A new provider tag requires
+// explicit product evidence before it can acquire action semantics here.
+const PERSONAL_PATTERN_OURA_ACTION_TAG = "sauna";
+const JUNCTION_NOTE_RESOURCE_TYPE_PATTERN = /^junction-[a-z0-9]+(?:-[a-z0-9]+)*-note$/u;
 const OUTCOME_LIKE_FACTOR_TOKENS = new Set([
   "heart-rate-variability",
   "hrv",
@@ -106,6 +117,11 @@ interface MatchedPair {
   exposedValue: number;
 }
 
+interface PatternWindow {
+  fromDate: string;
+  outcomeToDate: string;
+}
+
 export function buildPersonalPatternReport(
   vault: VaultReadModel,
   options: { asOf?: Date | string; windowDays?: number } = {},
@@ -122,6 +138,45 @@ export function buildPersonalPatternReportFromWearableBundle(
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
   options: { asOf?: Date | string; windowDays?: number } = {},
 ): PersonalPatternReport {
+  return buildPersonalPatternReportFromOutcomeSeries(
+    vault,
+    collectOutcomeSeries(
+      wearableBundle,
+      resolveWindow(options),
+      readVaultTimeZone(vault),
+    ),
+    options,
+  );
+}
+
+export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+  vault: VaultReadModel,
+  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
+  metricPoints: readonly MetricPoint[],
+  options: { asOf?: Date | string; windowDays?: number } = {},
+): PersonalPatternReport {
+  const window = resolveWindow(options);
+  const wearableOutcomes = collectOutcomeSeries(
+    wearableBundle,
+    window,
+    readVaultTimeZone(vault),
+  );
+  const wearableOutcomeIds = new Set(wearableOutcomes.map((outcome) => outcome.id));
+  const fallbackOutcomes = collectMetricPointRecoveryOutcomeSeries(metricPoints, window)
+    .filter((outcome) => !wearableOutcomeIds.has(outcome.id));
+
+  return buildPersonalPatternReportFromOutcomeSeries(
+    vault,
+    [...wearableOutcomes, ...fallbackOutcomes],
+    options,
+  );
+}
+
+function buildPersonalPatternReportFromOutcomeSeries(
+  vault: VaultReadModel,
+  outcomes: readonly OutcomeSeries[],
+  options: { asOf?: Date | string; windowDays?: number },
+): PersonalPatternReport {
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
@@ -130,12 +185,6 @@ export function buildPersonalPatternReportFromWearableBundle(
     .filter((factor) => factor.observedDays >= MIN_MATCHED_DAYS);
   const factorDatesById = new Map(
     [...factorAccumulators.values()].map((factor) => [factor.token, factor.dates] as const),
-  );
-  const outcomes = collectOutcomeSeries(
-    wearableBundle,
-    fromDate,
-    addDays(asOfDate, 1),
-    readVaultTimeZone(vault),
   );
   const candidateCells = candidateFactors.flatMap((factor) =>
     outcomes.map((outcome) => buildPatternCell(
@@ -246,15 +295,20 @@ function readFactorCandidate(
   event: CanonicalEntity,
 ): { kind: "activity" | "intervention"; token: string } | null {
   if (event.kind === "activity_session") {
-    const token = canonicalFactorToken(normalizeActivityKindToken(
-      readString(event.attributes.activityType) ?? readString(event.attributes.activityKind),
-    ));
+    const token = canonicalFactorToken(resolveAdherenceObservationActivityKind({
+      attributes: event.attributes,
+    }));
     return token && !OUTCOME_LIKE_FACTOR_TOKENS.has(token)
       ? { kind: "activity", token }
       : null;
   }
 
   if (event.kind === "intervention_session") {
+    // PR #1673 emitted every Junction note tag as a completed intervention.
+    // Those legacy rows have incorrect canonical meaning and must not remain
+    // action factors while any explicit storage repair is evaluated separately.
+    if (isLegacyJunctionNoteTagIntervention(event)) return null;
+
     const status = readString(event.attributes.sessionStatus);
     if (status === "missed" || status === "skipped") return null;
     const token = canonicalFactorToken(
@@ -265,15 +319,46 @@ function readFactorCandidate(
       : null;
   }
 
-  return null;
+  if (
+    !isEligibleJunctionOuraWearableTagNote(event)
+    || !event.tags.includes(PERSONAL_PATTERN_OURA_ACTION_TAG)
+  ) {
+    return null;
+  }
+
+  return { kind: "intervention", token: PERSONAL_PATTERN_OURA_ACTION_TAG };
+}
+
+function isEligibleJunctionOuraWearableTagNote(event: CanonicalEntity): boolean {
+  if (event.kind !== "note") return false;
+  if (readString(event.attributes.noteType) !== JUNCTION_WEARABLE_TAG_NOTE_TYPE) return false;
+
+  const externalRef = readRecord(event.attributes.externalRef);
+  const dataOrigin = readRecord(event.attributes.dataOrigin);
+  return readString(event.attributes.source) === "device"
+    && readString(externalRef?.system) === "junction"
+    && readString(externalRef?.resourceType) === "junction-oura-note"
+    && readString(externalRef?.facet) === JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET
+    && readString(dataOrigin?.sourceProviderSlug) === "oura";
+}
+
+function isLegacyJunctionNoteTagIntervention(event: CanonicalEntity): boolean {
+  const externalRef = readRecord(event.attributes.externalRef);
+  const resourceType = readString(externalRef?.resourceType);
+  const facet = readString(externalRef?.facet);
+  return readString(event.attributes.source) === "device"
+    && readString(externalRef?.system) === "junction"
+    && resourceType !== null
+    && JUNCTION_NOTE_RESOURCE_TYPE_PATTERN.test(resourceType)
+    && facet?.startsWith("tag-") === true;
 }
 
 function collectOutcomeSeries(
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
-  fromDate: string,
-  toDate: string,
+  window: PatternWindow,
   fallbackTimeZone: string | null,
 ): OutcomeSeries[] {
+  const { fromDate, outcomeToDate: toDate } = window;
   const sleep = wearableBundle.sleepNights
     .filter(isWearableSleepPatternEligibleNight)
     .filter((day) => {
@@ -291,6 +376,49 @@ function collectOutcomeSeries(
     outcome("hrv", "HRV", "ms", 2, 0.05, recovery, (day) => day.hrv),
     outcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, recovery, (day) => day.restingHeartRate),
   ].filter((series) => series.values.size >= MIN_MATCHED_DAYS * 2);
+}
+
+function collectMetricPointRecoveryOutcomeSeries(
+  metricPoints: readonly MetricPoint[],
+  window: PatternWindow,
+): OutcomeSeries[] {
+  return [
+    metricPointOutcome("readiness-score", "Readiness score", "score", 3, 0.03, "readiness-score", metricPoints, window),
+    metricPointOutcome("hrv", "HRV", "ms", 2, 0.05, "hrv-rmssd", metricPoints, window),
+    metricPointOutcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, "resting-heart-rate", metricPoints, window),
+  ].filter((series) => series.values.size >= MIN_MATCHED_DAYS * 2);
+}
+
+function metricPointOutcome(
+  id: string,
+  label: string,
+  unit: string,
+  meaningfulAbsoluteDelta: number,
+  meaningfulRelativeDelta: number,
+  metricKey: string,
+  metricPoints: readonly MetricPoint[],
+  window: PatternWindow,
+): OutcomeSeries {
+  const rows = selectMetricSeries({
+    from: window.fromDate,
+    metricKey,
+    points: metricPoints,
+    to: window.outcomeToDate,
+  }).rows;
+  return {
+    id,
+    label,
+    meaningfulAbsoluteDelta,
+    meaningfulRelativeDelta,
+    unit,
+    values: new Map(
+      rows.flatMap((row) =>
+        row.confidence !== "none" && row.value !== null
+          ? [[row.date, row.value] as const]
+          : []
+      ),
+    ),
+  };
 }
 
 function outcome<T extends { date: string }>(
@@ -432,6 +560,17 @@ function hasRepeatedDirection(pairs: readonly MatchedPair[], fullDelta: number):
   return Math.sign(firstDelta) === Math.sign(fullDelta) && Math.sign(secondDelta) === Math.sign(fullDelta);
 }
 
+function resolveWindow(
+  options: { asOf?: Date | string; windowDays?: number },
+): PatternWindow {
+  const asOfDate = resolveAsOfDate(options.asOf);
+  const windowDays = normalizeWindowDays(options.windowDays);
+  return {
+    fromDate: addDays(asOfDate, -(windowDays - 1)),
+    outcomeToDate: addDays(asOfDate, 1),
+  };
+}
+
 function resolveAsOfDate(value: Date | string | undefined): string {
   const date = value instanceof Date ? value : new Date(value ?? Date.now());
   if (Number.isNaN(date.valueOf())) throw new TypeError("Personal Patterns asOf must be a valid date.");
@@ -466,6 +605,12 @@ function mean(values: readonly number[]): number {
 
 function round(value: number): number {
   return Number(value.toFixed(2));
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function readString(value: unknown): string | null {

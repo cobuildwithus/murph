@@ -57,6 +57,7 @@ export interface HostedDeviceSyncDirtyResource {
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
+  timingSourceProviderSlug?: string | null;
   windowEnd: string | null;
   windowStart: string | null;
 }

@@ -12,6 +12,7 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-ser
 
 import {
   executeMurphDynamicToolRequest,
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   resolveMurphDynamicTools,
   type MurphGroupSharedReadTurnState,
@@ -59,6 +60,36 @@ const CARD: AssistantResponseCard = {
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
+}
+
+const ROUTINE_CARD: AssistantResponseCard = {
+  exercises: [{
+    dose: '8 repetitions',
+    estimatedSeconds: 45,
+    images: [{
+      alt: 'Person with a forearm resting on a door frame.',
+      source: 'exercise_catalog:ST170:1',
+      step: 'Setup',
+      url: 'https://cdn.example.test/doorway-stretch.png',
+    }],
+    instructions: ['Take a small step forward.', 'Keep the ribs quiet.'],
+    name: 'Doorway stretch',
+  }],
+  footer: null,
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain increases.',
+  subtitle: null,
+  title: 'Short reset',
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
 }
 
 const CHALLENGE_CARD: AssistantResponseCard = {
@@ -246,14 +277,17 @@ async function createChallengeVault(input: {
   return root
 }
 
-function readCardToolRequest(argumentsValue: unknown) {
+function readCardToolRequest(
+  argumentsValue: unknown,
+  tool = 'attach_response_card',
+) {
   return readTestMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: {
       arguments: argumentsValue,
       namespace: 'murph',
-      tool: 'attach_response_card',
+      tool,
     },
   })
 }
@@ -416,7 +450,11 @@ describe('murph.attach_response_card', () => {
     }).find((tool) => tool.name === 'attach_response_card')
     expect(groupTool).toBeDefined()
 
-    for (const tool of [MURPH_ATTACH_RESPONSE_CARD_TOOL, groupTool!]) {
+    for (const tool of [
+      MURPH_ATTACH_RESPONSE_CARD_TOOL,
+      MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+      groupTool!,
+    ]) {
       const serializedBytes = Buffer.byteLength(
         JSON.stringify(normalizeCodexSchemaForSize(tool.inputSchema)),
         'utf8',
@@ -479,8 +517,17 @@ describe('murph.attach_response_card', () => {
   })
 
   it('describes the private on-demand canonical-read contract', () => {
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'repeat, resend, or improve the presentation of a movement routine already present in the committed conversation',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'not styled plain text',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'saved instructions for the exact scheduled automation occurrence explicitly request it',
+      'saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'a structured plan or schedule that the table alone can fully represent within its bounds',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Occurrence authority alone is not card intent',
@@ -737,6 +784,19 @@ describe('murph.attach_response_card', () => {
     expect(readCardToolRequest({ card: REALISTIC_LATE_WORKOUT_CARD })).toEqual({
       card: REALISTIC_LATE_WORKOUT_CARD,
       kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest(
+      { card: ROUTINE_CARD },
+      'attach_exercise_routine_card',
+    )).toEqual({
+      card: ROUTINE_CARD,
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest(
+      { card: CARD },
+      'attach_exercise_routine_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     const ordinaryTable = {
       kind: 'compact_table',

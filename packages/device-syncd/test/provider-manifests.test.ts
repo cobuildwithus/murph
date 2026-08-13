@@ -488,6 +488,7 @@ describe("deviceSyncProviderManifests", () => {
         kind: "resource",
         payload: {
           eventType: "daily.data.activity.created",
+          historicalBackfillVersion: 2,
           historicalProviderRecordsSeen: true,
           historicalUnresolvedProviderRecordIdentitiesJson:
             "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
@@ -504,6 +505,7 @@ describe("deviceSyncProviderManifests", () => {
       }),
     ).toEqual({
       eventType: "daily.data.activity.created",
+      historicalBackfillVersion: 2,
       historicalProviderRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson:
         "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",

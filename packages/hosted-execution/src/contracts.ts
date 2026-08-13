@@ -133,6 +133,20 @@ export type HostedExecutionTelegramExternalThreadRouteAuthority =
   };
 
 /**
+ * Ephemeral, send-time Linq route authority resolved by the hosted Web control
+ * plane. Raw provider coordinates must never be copied into durable runtime
+ * state, prompts, logs, or outbox payloads.
+ */
+export interface HostedExecutionResolvedLinqDeliveryRoute {
+  conversationThreadId: string | null;
+  directRecipientPhoneNumber: string | null;
+  fromPhoneNumber: string | null;
+  target: string;
+  targetKind: "participant" | "thread";
+  threadIsDirect: boolean;
+}
+
+/**
  * Provider-authenticated sender evidence for one exact accepted group message.
  * The assistant runtime derives this after reloading the opaque assistant
  * input id; the model never supplies a canonical member id.

@@ -20,6 +20,7 @@ export {
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,
   sendTelegramMessage,
+  sendTelegramRichMessage,
   sendTelegramVoiceMemoMessage,
   startAssistantChannelActivitySession,
   startLinqTypingIndicator,

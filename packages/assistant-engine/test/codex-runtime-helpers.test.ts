@@ -2943,6 +2943,17 @@ describe('Codex assistant registry helpers', () => {
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
     })
+    expect(
+      resolveCodexAssistantTargetCapabilities({
+        modelProvider: 'hosted-custom-inference',
+        provider: 'codex-cli',
+      }),
+    ).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image'],
+      supportsNativeResume: true,
+      supportsReasoningEffort: false,
+      supportsRichUserMessageContent: true,
+    })
 
     expect(resolveCodexStaticModels({ provider: 'codex-cli' })).toEqual(
       DEFAULT_CODEX_MODELS,

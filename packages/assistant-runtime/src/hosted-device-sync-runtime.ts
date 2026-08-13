@@ -21,6 +21,8 @@ import type {
 } from "@murphai/device-syncd/types";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
   mergeHostedDeviceSyncConnectionMetadata,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
@@ -59,6 +61,11 @@ import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
 } from "./hosted-device-sync-limits.ts";
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./hosted-runtime/device-sync-snapshot-pagination.ts";
+
+export { fetchCompleteHostedDeviceSyncRuntimeSnapshot };
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -90,6 +97,7 @@ export interface HostedDeviceSyncImportTiming {
   eventToProviderSendBucket: HostedDeviceSyncEventToProviderSendBucket | null;
   firstWebhookReceivedAt: string | null;
   providerSendToWebhookMs: number | null;
+  sourceProvider: string | null;
 }
 
 export interface HostedDeviceSyncCompletedImportTiming extends HostedDeviceSyncImportTiming {
@@ -141,12 +149,11 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   const snapshot = input.snapshot === undefined
-    ? (input.signal
-      ? await client.fetchSnapshot({
-          includeCredentialMaterial: true,
-          signal: input.signal,
-        })
-      : await client.fetchSnapshot({ includeCredentialMaterial: true }))
+    ? await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: client,
+        includeCredentialMaterial: true,
+        signal: input.signal ?? null,
+      })
     : input.snapshot;
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(
     snapshot ? { ...snapshot, connections: [] } : null,
@@ -850,7 +857,10 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
       priority: job.input.priority ?? 0,
       provider: input.provider,
     });
-    const timing = buildHostedDeviceSyncImportTiming(job.resource);
+    const timing = buildHostedDeviceSyncImportTiming({
+      provider: input.provider,
+      resource: job.resource,
+    });
     return job.dirtyPayloadId || "timing" in timing
       ? [{
           connectionId: input.connectionId,
@@ -864,11 +874,14 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
 }
 
 function buildHostedDeviceSyncImportTiming(
-  resource: HostedExecutionDeviceSyncDirtyResource,
+  input: {
+    provider: string;
+    resource: HostedExecutionDeviceSyncDirtyResource;
+  },
 ): { timing: HostedDeviceSyncImportTiming } | Record<string, never> {
-  const eventToProviderSendBucket = resource.eventToProviderSendBucket ?? null;
-  const firstWebhookReceivedAt = resource.firstWebhookReceivedAt ?? null;
-  const providerSendToWebhookMs = resource.providerSendToWebhookMs ?? null;
+  const eventToProviderSendBucket = input.resource.eventToProviderSendBucket ?? null;
+  const firstWebhookReceivedAt = input.resource.firstWebhookReceivedAt ?? null;
+  const providerSendToWebhookMs = input.resource.providerSendToWebhookMs ?? null;
   if (!eventToProviderSendBucket && !firstWebhookReceivedAt && providerSendToWebhookMs === null) {
     return {};
   }
@@ -878,6 +891,9 @@ function buildHostedDeviceSyncImportTiming(
       eventToProviderSendBucket,
       firstWebhookReceivedAt,
       providerSendToWebhookMs,
+      sourceProvider: input.resource.timingSourceProviderSlug === undefined
+        ? input.resource.sourceProviderSlug ?? input.provider
+        : input.resource.timingSourceProviderSlug,
     },
   };
 }
@@ -986,6 +1002,9 @@ function mergeHostedDeviceSyncImportTiming(
       left.providerSendToWebhookMs,
       right.providerSendToWebhookMs,
     ),
+    sourceProvider: left.sourceProvider === right.sourceProvider
+      ? left.sourceProvider
+      : null,
   };
 }
 

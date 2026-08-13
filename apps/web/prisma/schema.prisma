@@ -1081,6 +1081,7 @@ model HostedMailboxItem {
   @@index([userId, expiresAt])
   @@index([expiresAt, id])
   @@index([createdAt, id])
+  @@index([consumedAt, id], map: "hosted_mailbox_item_consumed_at_id_idx")
   @@map("hosted_mailbox_item")
 }
 
@@ -1125,6 +1126,7 @@ model HostedIngressLatencyTrace {
 
   @@unique([userId, mailboxItemId])
   @@index([source, acceptedAt])
+  @@index([source, assistantInputStagedAt], map: "hosted_ingress_latency_trace_source_staged_at_idx")
   @@index([source, providerStartAt])
   @@index([userId, acceptedAt])
   @@index([acceptedAt, id])
@@ -1562,9 +1564,11 @@ model HostedGroupSponsorshipMoment {
   configurationDigest        String   @map("configuration_digest")
   creativeRequestEncrypted   String?  @map("creative_request_encrypted")
   publicAliasEncrypted       String?  @map("public_alias_encrypted")
+  fundingPageAliasConsent    String?  @map("funding_page_alias_consent")
   sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
   runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
   activatedAt                DateTime? @map("activated_at")
+  fundingPageAliasPublishedAt DateTime? @map("funding_page_alias_published_at")
   expiresAt                  DateTime? @map("expires_at")
   createdAt                  DateTime  @default(now()) @map("created_at")
   updatedAt                  DateTime  @updatedAt @map("updated_at")
@@ -2069,6 +2073,7 @@ model HostedLinqDelivery {
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
+  @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
   @@map("hosted_linq_delivery")
 }
 

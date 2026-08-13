@@ -68,6 +68,27 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps OpenAI's available first-photo detail separate from bounded image paths", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "sharper-single-photo-review",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1616, 1674],
+      summary: expect.stringContaining("Luna, Terra, and Sol"),
+      details: expect.stringContaining("follow-up photos"),
+    });
+    expect(item?.summary).toContain("one available initial photo");
+    expect(item?.summary).toContain("more detail");
+    expect(item?.details).toContain("Multiple available initial photos");
+    expect(item?.details).toContain("Venice");
+    expect(item?.details).toContain("custom inference");
+    expect(`${item?.title} ${item?.summary} ${item?.details}`).not.toContain(
+      "original detail",
+    );
+  });
+
   it("keeps the health-data Settings note bound to layout only", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "health-data-settings-row",
@@ -99,6 +120,21 @@ describe("changelog registry", () => {
       title: "Cleaner plan and model settings",
     });
     expect(item?.details).toBeUndefined();
+    expect(item?.tryIt).toBeUndefined();
+  });
+
+  it("keeps scheduled native delivery current and private", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "scheduled-cards-use-current-private-route",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1624],
+      summary: expect.stringContaining("current private Messages conversation"),
+    });
+    expect(item?.details).toContain("If the route changes before delivery");
+    expect(item?.details).toContain("exposing private text through recovery");
     expect(item?.tryIt).toBeUndefined();
   });
 
@@ -677,6 +713,7 @@ describe("changelog registry", () => {
         })),
     ).toEqual([
       {
+
         id: "2026-08-09",
         itemIds: [
           "group-sleep-challenges-use-fresh-data",
@@ -1037,6 +1074,22 @@ describe("changelog registry", () => {
     });
     expect(item?.details).toContain("existing history");
     expect(item?.details).toContain("association rather than cause");
+  });
+
+  it("bounds wearable recovery to model-free sync work", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "wearable-sync-recovers-model-free",
+    );
+
+    expect(item).toMatchObject({
+      kind: "improvement",
+      priority: 5,
+      sourcePullRequests: [1597, 1721],
+    });
+    expect(item?.summary).toContain("scheduled assistant automations are paused");
+    expect(item?.details).toContain("Fresh messages still take priority");
+    expect(item?.details).toContain("does not start an AI response");
+    expect(item?.tryIt).toBeUndefined();
   });
 
   it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {

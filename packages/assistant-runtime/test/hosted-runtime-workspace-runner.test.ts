@@ -69,6 +69,9 @@ import {
   type HostedRuntimeEffectsPort,
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "../src/hosted-runtime.ts";
+import type {
+  HostedRuntimeLinqRecentInboundEngagementRequest,
+} from "../src/hosted-runtime/platform.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
@@ -9155,12 +9158,26 @@ function createPlatform(input: {
       },
     },
     effectsPort: {
-      async assertLinqRecentInboundEngagement(request: {
-        authorityCheckOnly: boolean;
-      }) {
-        return request.authorityCheckOnly === true
-          ? {}
-          : { providerDispatchClaimed: true };
+      async assertLinqRecentInboundEngagement(
+        request: HostedRuntimeLinqRecentInboundEngagementRequest,
+      ) {
+        const target = request.target ?? "linq-thread";
+        return {
+          ...(request.authorityCheckOnly === true
+            ? {}
+            : { providerDispatchClaimed: true }),
+          resolvedRoute: {
+            conversationThreadId: null,
+            directRecipientPhoneNumber:
+              request.directRecipientPhoneNumber ?? null,
+            fromPhoneNumber: request.fromPhoneNumber ?? null,
+            target,
+            targetKind: request.targetKind === "participant"
+              ? "participant"
+              : "thread",
+            threadIsDirect: true,
+          },
+        } as const;
       },
       async readRawEmailMessage() {
         return null;

@@ -97,6 +97,15 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('GPT-5 execution bias:')
     expect(prompt).toContain('Lead the final reply with the result')
     expect(prompt).toContain(
+      'Complete cards replace text.',
+    )
+    expect(prompt).toContain(
+      'Response media comes with concise text for order, dose, timing, cues, safety, and fallback',
+    )
+    expect(prompt).toContain(
+      'Use `murph.generate_image` only if no card fits',
+    )
+    expect(prompt).toContain(
       'trim introductions, repetition, reassurance, and optional background first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
@@ -3206,6 +3215,25 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
     )
+    for (const scheduleExample of [
+      '`{"kind":"every","everyMs":3600000}`',
+      '`{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`',
+      '`{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`',
+    ]) {
+      expect(prompt).toContain(scheduleExample)
+    }
+    expect(prompt).toContain(
+      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
+    )
+    expect(prompt).toContain(
+      'Never invent schedule, update, or timezone fields outside the schema.',
+    )
+    expect(prompt).toContain(
+      'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
+    )
+    expect(prompt).toContain(
+      'never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field',
+    )
     expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
     )
@@ -3234,8 +3262,10 @@ describe('assistant conversation scope', () => {
       'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'When a time-based result has `timingVerified: false`, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
+      'When a time-based result has `timingVerified: false`, say that the save or patch succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-patch recovery action; do not retry the write.',
     )
+    expect(prompt).not.toContain('save or update succeeded')
+    expect(prompt).not.toContain('inspect-or-update recovery action')
     expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
     )

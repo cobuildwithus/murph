@@ -1,6 +1,8 @@
 "use client";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -114,6 +116,13 @@ export function GroupJoinStudy({
 }: {
   comprehensivePermissions: readonly GroupJoinPermissionDisplay[];
 }) {
+  const selectorPermissions = comprehensivePermissions.filter(({ projectionScope }) => (
+    projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND
+      ? projectionScope.selector.activityKind === "walking"
+      : projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND
+        && projectionScope.selector.activityKind === "bike"
+  ));
+
   return (
     <div
       className="grid gap-6 rounded-3xl border border-border bg-background px-4 py-12 sm:px-8 lg:grid-cols-2"
@@ -194,7 +203,7 @@ export function GroupJoinStudy({
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="A new member sees every available sharing choice selected, can clear optional sharing in one action, and can still re-enable exact choices before joining. Nothing is shared until they join."
+        caption="A new member sees every available sharing choice selected, including the exact seven-day window for recent activity distance and session counts. They can clear optional sharing in one action and re-enable exact choices before joining. Nothing is shared until they join."
         title="New invitee · comprehensive default"
       >
         <GroupJoinPageMock
@@ -208,6 +217,27 @@ export function GroupJoinStudy({
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
             permissions={comprehensivePermissions}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="Selector-based activity choices name the same seven-day history window as every other recent-data permission, so approval is informed before sharing starts."
+        title="Recent activity · exact consent window"
+      >
+        <GroupJoinPageMock
+          alreadyActiveMember={false}
+          designState="group-join-selector-permissions"
+        >
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[]}
+            alreadyActiveMember={false}
+            expectedMembershipId={null}
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={selectorPermissions}
             postJoinContactOption={null}
             postJoinDestination="/home"
           />

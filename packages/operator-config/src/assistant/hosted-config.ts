@@ -1,8 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
-import {
-  assistantModelTargetSchema,
-  type AssistantChatProvider,
-} from '../assistant-cli-contracts.js'
+import { assistantModelTargetSchema } from '../assistant-cli-contracts.js'
 import {
   assistantBackendTargetToProviderConfigInput,
   createAssistantModelTarget,
@@ -26,10 +23,7 @@ export const hostedAssistantProfileSchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     managedBy: z.enum(hostedAssistantProfileManagedByValues).default('member'),
-    target: assistantModelTargetSchema.refine(
-      (target) => target.adapter === 'codex-cli',
-      'Hosted assistant profiles must use the Codex App Server adapter.',
-    ),
+    target: assistantModelTargetSchema,
   })
   .strict()
 
@@ -86,7 +80,7 @@ export function createHostedAssistantProfile(input: {
     createAssistantModelTarget(input.providerConfig),
   )
 
-  if (!target || target.adapter !== 'codex-cli') {
+  if (!target) {
     throw new TypeError(
       'Hosted assistant profiles require an explicit Codex App Server target.',
     )
@@ -98,7 +92,6 @@ export function createHostedAssistantProfile(input: {
       normalizeHostedAssistantString(input.label) ??
       resolveHostedAssistantProfileLabel({
         modelProvider: target.modelProvider,
-        provider: target.adapter,
       }),
     managedBy: input.managedBy ?? 'member',
     target,
@@ -226,16 +219,13 @@ export function hostedAssistantProfilesEqual(
 
 export function resolveHostedAssistantProfileLabel(input: {
   modelProvider?: string | null
-  provider?: AssistantChatProvider | null
 }): string {
   const modelProvider = resolveAssistantCodexModelProviderConfig(input.modelProvider)
   if (modelProvider) {
     return modelProvider.name
   }
 
-  return input.provider === 'codex-cli'
-    ? 'Codex App Server'
-    : 'Hosted assistant profile'
+  return 'Codex App Server'
 }
 
 function resolveHostedAssistantActiveProfileId(

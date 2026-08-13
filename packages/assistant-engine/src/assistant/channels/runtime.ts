@@ -9,6 +9,7 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  assertLinqMessageTextPartWithinLimit,
   checkLinqIMessageCapability,
   createLinqChat,
   isDefinitiveLinqIMessageAppCardRejection,
@@ -64,6 +65,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantResponseCard,
+  TelegramRichMessage,
 } from '@murphai/operator-config/assistant-response-cards'
 import { normalizeOptionalText } from './helpers.js'
 
@@ -81,7 +83,11 @@ const LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000
 const LINQ_TYPING_POST_MESSAGE_REFRESH_MS = 1_000
 
 type TelegramParsedTarget = TelegramThreadTarget
-type TelegramSendOperation = 'sendMessage' | 'sendPhoto' | 'sendVoice'
+type TelegramSendOperation =
+  | 'sendMessage'
+  | 'sendPhoto'
+  | 'sendRichMessage'
+  | 'sendVoice'
 type TelegramImageResponseMedia = Extract<
   AssistantResponseMedia,
   { kind: 'image' | 'vault_image' }
@@ -178,6 +184,136 @@ export async function sendTelegramMessage(
   target: string
 }> {
   return sendTelegramMessageDetailed(input, dependencies)
+}
+
+export async function sendTelegramRichMessage(
+  input: {
+    fallbackMessage: string
+    idempotencyKey?: string | null
+    replyToMessageId?: string | null
+    richMessage: TelegramRichMessage
+    target: string
+  },
+  dependencies: TelegramRuntimeDependencies = {},
+): Promise<{
+  cleanupMessages?: TelegramCleanupMessage[]
+  cleanupTargetAliases?: string[]
+  providerMessageId: string | null
+  providerMessageIds?: string[]
+  target: string
+}> {
+  assertSingleTelegramRichFallbackMessage(input.fallbackMessage)
+  const env = dependencies.env ?? process.env
+  const token = resolveTelegramBotToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+    )
+  }
+
+  const fetchImplementation =
+    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (typeof fetchImplementation !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_UNAVAILABLE',
+      'Outbound Telegram delivery requires fetch support in the current Node.js runtime.',
+    )
+  }
+
+  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
+    /\/$/u,
+    '',
+  )
+  let target = parseTelegramTargetOrThrow(input.target)
+  let targetLabel = serializeTelegramThreadTarget(target)
+  const cleanupTargetAliases = new Set<string>()
+
+  assertTelegramAuthorityBoundTarget({
+    authorityBoundTarget: dependencies.authorityBoundTarget,
+    target: targetLabel,
+  })
+
+  while (true) {
+    const outcome = resolveTelegramSendAttemptOutcome({
+      operation: 'sendRichMessage',
+      result: await sendTelegramRichMessageOnce({
+        baseUrl,
+        fetchImplementation,
+        replyToMessageId: normalizeTelegramReplyToMessageId(input.replyToMessageId),
+        richMessage: input.richMessage,
+        signal: dependencies.signal,
+        target,
+        targetLabel,
+        token,
+      }),
+      target,
+      targetLabel,
+    })
+
+    if (outcome.kind === 'delivered') {
+      const cleanupMessages = outcome.providerMessageId === null
+        ? []
+        : [{ messageId: outcome.providerMessageId, target: targetLabel }]
+      return {
+        ...(cleanupMessages.length > 0 ? { cleanupMessages } : {}),
+        ...(cleanupTargetAliases.size > 0
+          ? { cleanupTargetAliases: [...cleanupTargetAliases] }
+          : {}),
+        providerMessageId: outcome.providerMessageId,
+        target: targetLabel,
+      }
+    }
+
+    if (outcome.kind === 'migrated') {
+      assertTelegramAuthorityBoundTarget({
+        authorityBoundTarget: dependencies.authorityBoundTarget,
+        target: outcome.targetLabel,
+      })
+      cleanupTargetAliases.add(targetLabel)
+      target = outcome.target
+      targetLabel = outcome.targetLabel
+      continue
+    }
+
+    if (
+      outcome.kind === 'failed' &&
+      isDefinitiveTelegramRichMessageRejection(outcome.failure)
+    ) {
+      let fallback
+      try {
+        fallback = await sendTelegramMessageDetailed(
+          {
+            idempotencyKey: input.idempotencyKey ?? null,
+            message: input.fallbackMessage,
+            replyToMessageId: input.replyToMessageId ?? null,
+            target: targetLabel,
+          },
+          { ...dependencies, maxDeliveryAttempts: 1 },
+        )
+      } catch (error) {
+        if (providerRequestWasSkipped(error)) {
+          throw error
+        }
+        throw markTelegramDeliveryAmbiguous(error, targetLabel)
+      }
+      const fallbackAliases = new Set([
+        ...cleanupTargetAliases,
+        ...(fallback.cleanupTargetAliases ?? []),
+      ])
+      return {
+        ...fallback,
+        ...(fallbackAliases.size > 0
+          ? { cleanupTargetAliases: [...fallbackAliases] }
+          : {}),
+      }
+    }
+
+    if (providerRequestWasSkipped(outcome.failure)) {
+      throw outcome.failure
+    }
+    throw markTelegramDeliveryAmbiguous(outcome.failure, targetLabel)
+  }
 }
 
 export async function sendTelegramImageMessage(
@@ -580,6 +716,7 @@ export async function sendLinqMessage(
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
   const shouldAttemptDirectNativeCard =
     card !== null &&
+    card.kind !== 'exercise_routine' &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
@@ -670,6 +807,20 @@ export async function sendLinqMessage(
     }
   }
 
+  const message = responseMedia.some((item) => item.kind === 'vault_file')
+    ? ''
+    : appendImageAlternativeText(input.message, responseMedia)
+  assertLinqMessageTextPartWithinLimit({
+    message,
+    operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
+    requestAttachmentMediaPartCount: responseMedia.filter((item) =>
+      item.kind === 'vault_image' || item.kind === 'vault_file'
+    ).length,
+    requestMediaPartCount: responseMedia.length,
+    requestPublicUrlMediaPartCount:
+      responseMedia.filter((item) => item.kind === 'image').length,
+  })
+
   if (card !== null) {
     const textFallbackIdempotencyKey =
       appCardFallbackIdempotencyKey ?? idempotencyKey
@@ -695,9 +846,6 @@ export async function sendLinqMessage(
     responseMedia,
     dependencies,
   )
-  const message = responseMedia.some((item) => item.kind === 'vault_file')
-    ? ''
-    : appendImageAlternativeText(input.message, input.media ?? [])
 
   if (participantFromPhoneNumber) {
     const created = await createLinqChat(
@@ -1869,6 +2017,19 @@ function isTelegramSuccessResponse(
   )
 }
 
+function isTelegramFailureResponse(
+  value: unknown,
+): value is {
+  ok: false
+} {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'ok' in value &&
+      (value as { ok?: unknown }).ok === false,
+  )
+}
+
 function extractTelegramErrorContext(value: unknown): {
   description: string | null
   errorCode: number | null
@@ -2182,6 +2343,105 @@ function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
   )
 }
 
+async function sendTelegramRichMessageOnce(input: {
+  baseUrl: string
+  fetchImplementation: TelegramFetchImplementation
+  replyToMessageId: string | null
+  richMessage: TelegramRichMessage
+  signal?: AbortSignal
+  target: TelegramParsedTarget
+  targetLabel: string
+  token: string
+}): Promise<TelegramSendAttemptResult> {
+  try {
+    const result = await sendTelegramBotApiRequest({
+      baseUrl: input.baseUrl,
+      fetchImplementation: input.fetchImplementation,
+      operation: 'sendRichMessage',
+      payload: {
+        ...buildTelegramTargetPayload(input.target),
+        reply_parameters: input.replyToMessageId
+          ? { message_id: Number.parseInt(input.replyToMessageId, 10) }
+          : undefined,
+        rich_message: input.richMessage,
+      },
+      signal: input.signal,
+      token: input.token,
+    })
+
+    return {
+      kind: 'response',
+      ...result,
+    }
+  } catch (error) {
+    if (providerRequestWasSkipped(error)) {
+      throw error
+    }
+    return {
+      kind: 'request-error',
+      failure: Object.assign(
+        new VaultCliError(
+          'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+          'Outbound Telegram rich-message delivery could not be confirmed after calling the Bot API.',
+          {
+            error: describeUnknownError(error),
+            target: input.targetLabel,
+          },
+        ),
+        {
+          deliveryMayHaveSucceeded: true as const,
+          providerMessageId: null,
+          providerMessageIds: [] as [],
+          target: input.targetLabel,
+        },
+      ),
+    }
+  }
+}
+
+function markTelegramDeliveryAmbiguous(
+  error: unknown,
+  target: string,
+): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  retryable: false
+} {
+  const marked = error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS'
+    ? error
+    : new VaultCliError(
+      'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      'Outbound Telegram delivery could not be confirmed.',
+      { error: describeUnknownError(error), target },
+    )
+  return Object.assign(marked, {
+    deliveryMayHaveSucceeded: true as const,
+    retryable: false as const,
+  })
+}
+
+function assertSingleTelegramRichFallbackMessage(message: string): void {
+  const renderedMessage = renderMarkdownMessageText(message)
+  const chunks = splitDecoratedMessageText(
+    renderedMessage,
+    TELEGRAM_MAX_TEXT_LENGTH,
+  )
+  if (chunks.length === 1) {
+    return
+  }
+  throw Object.assign(
+    new VaultCliError(
+      'ASSISTANT_TELEGRAM_RICH_FALLBACK_TOO_LONG',
+      'Telegram rich-message fallback must fit one text message.',
+      {
+        maxLength: TELEGRAM_MAX_TEXT_LENGTH,
+        renderedLength: renderedMessage.text.length,
+      },
+    ),
+    { deliveryMayHaveSucceeded: false as const },
+  )
+}
+
 async function sendTelegramTextChunkOnce(input: {
   baseUrl: string
   entities: TelegramMessageEntity[]
@@ -2442,6 +2702,24 @@ function resolveTelegramSendAttemptOutcome(input: {
     }
   }
 
+  if (!isTelegramFailureResponse(input.result.payload)) {
+    return {
+      kind: 'failed',
+      failure: markTelegramDeliveryAmbiguous(
+        new VaultCliError(
+          'ASSISTANT_TELEGRAM_INVALID_RESPONSE',
+          `Telegram Bot API ${input.operation} returned a response without a valid success or rejection envelope.`,
+          {
+            operation: input.operation,
+            status: input.result.response.status,
+            target: input.targetLabel,
+          },
+        ),
+        input.targetLabel,
+      ),
+    }
+  }
+
   const errorContext = extractTelegramErrorContext(input.result.payload)
   if (
     errorContext.migrateToChatId &&
@@ -2484,6 +2762,7 @@ function resolveTelegramSendAttemptOutcome(input: {
       failureMessage,
       failureContext,
     )
+  Object.assign(failure, { deliveryMayHaveSucceeded: false as const })
 
   if (retryable) {
     return {
@@ -2497,6 +2776,17 @@ function resolveTelegramSendAttemptOutcome(input: {
     kind: 'failed',
     failure,
   }
+}
+
+function isDefinitiveTelegramRichMessageRejection(error: unknown): boolean {
+  if (!(error instanceof VaultCliError)) {
+    return false
+  }
+  const status = error.context?.status
+  return typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    ![408, 409, 425, 429].includes(status)
 }
 
 function normalizeTelegramReplyToMessageId(value: string | null | undefined): string | null {

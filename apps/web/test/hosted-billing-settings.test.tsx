@@ -1110,7 +1110,7 @@ describe("HostedBillingSettings", () => {
         /Your Family plan needs billing attention/u,
       );
       assert.doesNotMatch(rendered.container.textContent ?? "", /Current plan/u);
-      assert.doesNotMatch(rendered.container.textContent ?? "", /Choose Family/u);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Start your own Family plan/u);
 
       const manageButton = findButtonByText(
         rendered.window.document,
@@ -1195,9 +1195,392 @@ describe("HostedBillingSettings", () => {
       currentBillingPlanCode: "launch_monthly",
     }));
 
-    assert.match(markup, /Choose Family/);
+    assert.match(markup, /Start your own Family plan/);
     assert.match(markup, /Choose Pulse, Edge, or Max for each person/);
     assert.match(markup, /From \$7\/person/);
+  });
+
+  test("offers self-service recovery for an unfinished unpaid Family setup", async () => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new Error("Family billing changed before recovery."),
+    );
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecovery: {
+          checkoutAttemptId: null,
+          groupId: "hbag_rendered_draft",
+          state: "abandonable",
+        },
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Your unfinished Family setup is not paid/u,
+      );
+      const abandonButton = findButtonByText(
+        rendered.window.document,
+        "Abandon Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        abandonButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /expires any open checkout and removes only the unpaid Family setup/u,
+      );
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /join someone else's Family using their invite/u,
+      );
+
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Abandon unpaid setup",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "DELETE",
+        payload: {
+          checkoutAttemptId: null,
+          groupId: "hbag_rendered_draft",
+        },
+        url: "/api/settings/billing/family/draft/claim",
+      });
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /Family billing changed before recovery/u,
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test.each([
+    [
+      "checkout_starting",
+      "Your Family checkout is still starting",
+      "Continue your Family setup",
+    ],
+    [
+      "recovery_required",
+      "Murph could not verify an earlier Family checkout",
+      "Contact support",
+    ],
+    [
+      "not_abandonable",
+      "membership or billing state to preserve",
+      "Continue your Family setup",
+    ],
+  ] as const)(
+    "does not advertise abandonment for %s Family state",
+    async (familyDraftRecoveryState, expectedText, expectedAction) => {
+      const { HostedBillingSettings } = await import(
+        "@/src/components/settings/hosted-billing-settings"
+      );
+      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecovery: familyDraftRecoveryState === "checkout_starting"
+          ? {
+              checkoutAttemptId: "hbfca_starting",
+              groupId: "hbag_starting",
+              state: familyDraftRecoveryState,
+            }
+          : { state: familyDraftRecoveryState },
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      }));
+
+      assert.match(markup, new RegExp(expectedText, "u"));
+      assert.match(markup, new RegExp(expectedAction, "u"));
+      assert.doesNotMatch(markup, /Abandon Family setup/u);
+    },
+  );
+
+  test("returns to the exact Family invite after abandonment", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ abandoned: true });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const returnPath = "/family/accept/invite_return_target";
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecovery: {
+          checkoutAttemptId: "hbfca_rendered_bound",
+          groupId: "hbag_rendered_bound",
+          state: "abandonable",
+        },
+        familyInviteReturnPath: returnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const abandonButton = findButtonByText(
+        rendered.window.document,
+        "Abandon Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        abandonButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Abandon unpaid setup",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.routerReplace.mock.calls, [[returnPath]]);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("keeps Stripe Checkout neutral when starting an owned plan from invite recovery", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const familyInviteReturnPath = "/family/accept/invite_return_target";
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecovery: {
+          checkoutAttemptId: "hbfca_starting",
+          groupId: "hbag_starting",
+          state: "checkout_starting",
+        },
+        familyInviteReturnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const continueButton = findButtonByText(
+        rendered.window.document,
+        "Continue your Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        continueButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Start a plan I pay for",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        url: "/api/settings/billing/family/checkout",
+      });
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("resolves a starting checkout from the use-invite action", async () => {
+    const familyInviteReturnPath = "/family/accept/invite_return_target";
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: familyInviteReturnPath,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecovery: {
+          checkoutAttemptId: "hbfca_starting",
+          groupId: "hbag_starting",
+          state: "checkout_starting",
+        },
+        familyInviteReturnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const continueButton = findButtonByText(
+        rendered.window.document,
+        "Continue your Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        continueButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const useInviteButton = findButtonByText(
+        rendered.window.document,
+        "I'll use an invite",
+        rendered.window,
+      );
+      await act(async () => {
+        useInviteButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        payload: {
+          abandonForInvite: true,
+          familyInviteReturnPath,
+        },
+        url: "/api/settings/billing/family/checkout",
+      });
+      assert.deepEqual(rendered.assign.mock.calls, [[familyInviteReturnPath]]);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("returns directly to the preserved invite after cleanup and refresh", async () => {
+    const familyInviteReturnPath = "/family/accept/invite_return_target";
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecovery: null,
+        familyInviteReturnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const startButton = findButtonByText(
+        rendered.window.document,
+        "Start your own Family plan",
+        rendered.window,
+      );
+      await act(async () => {
+        startButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const useInviteButton = findButtonByText(
+        rendered.window.document,
+        "I'll use an invite",
+        rendered.window,
+      );
+      await act(async () => {
+        useInviteButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(rendered.assign.mock.calls, [[familyInviteReturnPath]]);
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("does not bypass a preserved Family draft when using an invite", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecovery: { state: "not_abandonable" },
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const continueButton = findButtonByText(
+        rendered.window.document,
+        "Continue your Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        continueButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const useInviteButton = findButtonByText(
+        rendered.window.document,
+        "I'll use an invite",
+        rendered.window,
+      );
+      await act(async () => {
+        useInviteButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.equal(rendered.assign.mock.calls.length, 0);
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("routes a current Max member through the canonical Family owner", async () => {
@@ -1222,13 +1605,34 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    const chooseFamilyButton = findButtonByText(
+    const startFamilyButton = findButtonByText(
       rendered.window.document,
-      "Choose Family",
+      "Start your own Family plan",
       rendered.window,
     );
     await act(async () => {
-      chooseFamilyButton.dispatchEvent(
+      startFamilyButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /You will own this Family plan and pay for every included member/u,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /To join someone else's Family, use the invite they sent you/u,
+    );
+
+    const confirmButton = findButtonByText(
+      rendered.window.document,
+      "Start a plan I pay for",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(
         new rendered.window.Event("click", { bubbles: true }),
       );
     });

@@ -29,6 +29,8 @@ import type {
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -1727,6 +1729,37 @@ function renderHostedGroupJoinOfferScopeSentence(
       "by-source sleep includes every available source's value and name, plus when Murph recorded that source value",
     );
   }
+  const recentSleepLabels = [
+    ...(projectionScopes.some((scope) => scope.projectionKind === "sleep-times.v0")
+      ? ["sleep timing"]
+      : []),
+    ...(projectionScopes.some(
+      (scope) => scope.projectionKind === "sleep-duration-days.v0",
+    )
+      ? ["sleep duration"]
+      : []),
+  ];
+  if (recentSleepLabels.length > 0) {
+    disclosures.push(
+      `${formatHumanList(recentSleepLabels)} ${recentSleepLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
+    );
+  }
+  const recentActivityLabels = projectionScopes.flatMap((scope) => {
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} distance and session count`];
+    }
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} session count`];
+    }
+    return [];
+  });
+  if (recentActivityLabels.length > 0) {
+    disclosures.push(
+      `${formatHumanList(recentActivityLabels)} ${recentActivityLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
+    );
+  }
   return disclosures.length > 0
     ? `${sentence} (${disclosures.join("; ")})`
     : sentence;
@@ -1785,7 +1818,7 @@ async function authorizeHostedRuntimeDirectLinqChat(input: {
       prisma: getPrisma(),
       target: input.chatId,
     });
-    if (assertion.threadIsDirect !== true) {
+    if (assertion.resolvedRoute.threadIsDirect !== true) {
       return { unavailableReason: "linq_thread_unauthorized" };
     }
   } catch {

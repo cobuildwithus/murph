@@ -154,13 +154,21 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    reduce provider event time to a coarse event-to-send delay bucket, compute
    the verified signed-envelope send-to-receipt duration, and preserve the
    earliest Murph receipt long enough to derive receipt-to-import duration
-   after import. This reduction applies to the timing carrier and runtime log;
+   after import. A timing-only source field carries attribution without
+   participating in dirty-resource identity, counters, provider job payloads,
+   or executor routing; execution `sourceProviderSlug` retains its existing
+   meaning. This reduction applies to the timing carrier and runtime log;
    pre-existing ingestion fields still use provider occurrence for dirty-window
    and clean-transition wake ownership. Coalesced hints
    keep the slowest upstream bucket, longest signed delivery, and earliest
-   receipt without pairing timestamps from different events. The runtime log contains only the
-   coarse upstream bucket, provider/job kind, provider-send-to-receipt,
-   receipt-to-import, queue, and execution durations. It deliberately omits raw
+   receipt without pairing timestamps from different events. Source attribution
+   coalesces only when every timing hint agrees; conflicting sources are omitted.
+   The runtime log contains only the coarse upstream bucket, connector provider,
+   normalized source provider when known, job kind, provider-send-to-receipt,
+   receipt-to-import, queue, and execution durations. `provider` names the
+   executor/transport owner, while `sourceProvider` distinguishes Garmin,
+   Fitbit, and other Junction-backed sources and falls back to the connector for
+   direct integrations or unknown Junction sources. It deliberately omits raw
    stage timestamps, event/resource semantics, counts, and exactly reversible
    event-origin intervals. Missing or negatively ordered clocks omit only the
    affected measurement. The runtime timing association is pass-local, so a
@@ -179,6 +187,47 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    Link-only provider filter. Availability is capability evidence, not proof
    that sparse resources such as workouts or body measurements should contain a
    row, so those resources do not become absence obligations.
+
+   Junction timeseries history follows the exhaustive static policy beside the
+   provider executor. Dense daily aggregates (`blood_oxygen`, `stress_level`,
+   `hrv`, `respiratory_rate`, and `glucose`) retain the bounded 14-day initial
+   window. Sparse daily aggregates (`afib_burden`, `vo2_max`,
+   `heart_rate_recovery_one_minute`, body and basal temperature resources,
+   `sleep_breathing_disturbance`, `caffeine`, `water`, and
+   `mindfulness_minutes`) use the summary-history window, 180 days by default.
+   Every date-mode timeseries request owns one complete provider calendar date,
+   so offset timestamps on opposite sides of UTC midnight reach the importer
+   together during both migration and normal reconcile. A provider-bearing date
+   with any row rejected by the canonical aggregate parser retries only that
+   date on the existing bounded ladder before it becomes terminal.
+   Historical-pull status is re-read at the first date and before
+   coverage. Source matching canonicalizes supported connect-route aliases on
+   both the persisted and introspection sides before applying the status table:
+   A matching pulled entry owns contradictory envelopes: `success` permits
+   terminal empty history, nonterminal state waits, and explicit failure remains
+   uncovered. Explicit `not_pulled` is no obligation only without a pulled entry.
+   Unavailable, malformed, or unmatched introspection can close only after a
+   canonical historical observation. Before coverage closes, the
+   migration recomputes the live reconcile-window boundary and appends the
+   uncovered segment; delayed continuations repeat that same derivation, so
+   stable dedupe cannot freeze a middle gap.
+   Blood pressure and notes retain their existing extended policies. An
+   explicit timeseries-window override governs both classes.
+
+   Extended work is admitted only for a persisted connected source that
+   advertises the exact resource. Each `(source provider, resource)` migration
+   keeps the existing one-day fetch continuation and per-account serialization.
+   Rollout-added resources end at the current UTC day so existing connections
+   receive one migration; blood pressure remains anchored to source first-seen
+   time. Source-scoped completion is stored in connection metadata. All extended
+   timeseries resources share one fixed-width, versioned source-by-resource
+   matrix in an existing blood-pressure or note coverage slot. Its append-only
+   route slots cover every configured Junction source within the 256-character
+   scalar bound, and deployed blood-pressure and note values remain legacy read
+   inputs. An unrepresentable route fails before history egress instead of
+   advancing coverage. Blood pressure retains exact per-reading repair and notes
+   retain complete-fetch semantics. No second queue, retry store, or persisted
+   lifecycle owns this history.
 
    The importer is the sole owner of raw summary semantics. Historical coverage
    consumes the bounded `(source provider, resource)` normalization evidence

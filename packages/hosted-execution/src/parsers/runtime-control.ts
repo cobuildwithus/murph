@@ -2419,7 +2419,11 @@ function parseHostedRuntimeGroupSharedProjection(
     throw new TypeError(`${label}.grantStatus is invalid.`);
   }
   const dataStatus = requireString(projection.dataStatus, `${label}.dataStatus`);
-  if (dataStatus !== "available" && dataStatus !== "missing") {
+  if (
+    dataStatus !== "available"
+    && dataStatus !== "missing"
+    && dataStatus !== "pending"
+  ) {
     throw new TypeError(`${label}.dataStatus is invalid.`);
   }
   const grantedAt = projection.grantedAt === undefined
@@ -2460,8 +2464,10 @@ function parseHostedRuntimeGroupSharedProjection(
       `${label} available projections must contain at least one record.`,
     );
   }
-  if (dataStatus === "missing" && rawRecords.length !== 0) {
-    throw new TypeError(`${label} missing projections must not contain records.`);
+  if (dataStatus !== "available" && rawRecords.length !== 0) {
+    throw new TypeError(
+      `${label} pending or missing projections must not contain records.`,
+    );
   }
 
   const seenRecordKeys = new Set<string>();

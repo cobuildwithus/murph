@@ -114,6 +114,8 @@ const SIGNED_PRIVATE_IMAGE_URL =
   `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
 const SIGNED_PRIVATE_JPEG_URL =
   SIGNED_PRIVATE_IMAGE_URL.replace("group-avatar.png", "group-avatar.jpg");
+const GROUP_TOOL_INPUT_PROPERTIES =
+  MURPH_GROUP_TOOL.inputSchema.allOf[0].properties;
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -121,7 +123,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_SHARED_READ_TOOL);
     expect(MURPH_DYNAMIC_TOOLS)
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
+    expect(GROUP_TOOL_INPUT_PROPERTIES.action.enum).toEqual([
       "ask",
       "ask_current_sender",
       "message_current_sender",
@@ -149,34 +151,52 @@ describe("murph.group dynamic tool", () => {
       "share_contact_card",
       "revoke_own_email_share",
     ]);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.question.maxLength)
+    expect(MURPH_GROUP_TOOL.inputSchema).not.toHaveProperty("required");
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].required).toEqual(["action"]);
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[0]).toMatchObject({
+      properties: {
+        action: {
+          enum: [
+            "ask_current_sender",
+            "message_current_sender",
+            "revoke_own_email_share",
+          ],
+        },
+        message_ref: {},
+      },
+      required: ["action", "message_ref"],
+    });
+    expect(
+      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1].properties.action.enum,
+    ).not.toContain("message_current_sender");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.policyCode.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.policyCode.description)
       .toContain('state="armed"');
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.groupLabel.maxLength)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.permissionText.maxLength)
       .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
     expect(
-      MURPH_GROUP_TOOL.inputSchema.properties.setup.properties
+      GROUP_TOOL_INPUT_PROPERTIES.setup.properties
         .roomContextMarkdown.maxLength,
     ).toBe(HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS);
     expect(
-      MURPH_GROUP_TOOL.inputSchema.properties.setup.properties
+      GROUP_TOOL_INPUT_PROPERTIES.setup.properties
         .roomContextMarkdown.description,
     ).toContain("2 KiB UTF-8 envelope");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties)
+    expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("requestedVaultShareProjectionScopes");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties)
+    expect(GROUP_TOOL_INPUT_PROPERTIES)
       .toHaveProperty("standaloneLink");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.maxItems)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
     const [
       fixedScopeSchema,
       minutesScopeSchema,
       distanceScopeSchema,
       sessionCountScopeSchema,
-    ] = MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.items.oneOf;
+    ] = GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.items.oneOf;
     expect(fixedScopeSchema.properties.projectionKind.enum)
       .toEqual(expect.arrayContaining([
         "sleep-times.v0",
@@ -203,28 +223,28 @@ describe("murph.group dynamic tool", () => {
       .not.toContain("sleep");
     expect(sessionCountScopeSchema.properties.selector.properties.activityKind.enum)
       .not.toContain("sleep");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
       .toContain("the name the group chose");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
       .toContain("immediately preceding read_chat_name result");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty("messageTemplate");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty("messageTemplate");
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("every selectable permission by default");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("exact narrower set requested");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("trusted host owns the exact consent copy");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("actual scope snapshot");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.membershipId.description)
       .toContain("immediately preceding list_memberships result");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.avatarSource.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.avatarSource.description)
       .toBe(
         'Required for action="set_chat_avatar". Generate a new square avatar or reuse an exact existing private image ref.',
       );
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.imageRef.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.imageRef.description)
       .toBe(
         'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
       );
@@ -492,9 +512,9 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("uses one message_ref model contract for exact-message group actions", () => {
-    expect(MURPH_GROUP_TOOL.inputSchema.properties)
+    expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("messageRef");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.message_ref)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.message_ref)
       .toMatchObject({ pattern: "^ain_[0-9a-f]{32}$" });
 
     for (const action of [
@@ -1415,7 +1435,7 @@ describe("murph.group dynamic tool", () => {
           participantId: "participant_b",
           projections: [
             {
-              dataStatus: "missing" as const,
+              dataStatus: "pending" as const,
               grantedAt: "2026-07-31T12:32:00.000Z",
               grantStatus: "granted" as const,
               projectionScope: { projectionKind: "steps-days.v0" as const },
@@ -1555,7 +1575,7 @@ describe("murph.group dynamic tool", () => {
             projections: {
               "steps-days.v0": {
                 grantedAt: "2026-07-31T12:32:00.000Z",
-                status: "missing",
+                status: "pending",
               },
               "device-sync-status.v0": {
                 grantedAt: "2026-07-31T12:33:00.000Z",
@@ -3167,7 +3187,7 @@ describe("murph.group dynamic tool", () => {
       .toContain("update_display_name/set_chat_avatar ok means provider acceptance");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+    expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
       .toContain('Required for action="update_display_name"');
   });
 

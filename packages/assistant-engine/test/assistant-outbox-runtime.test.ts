@@ -18,6 +18,7 @@ import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
   createExperiment,
   initializeVault,
+  loadVault,
   patchAutomation,
   scaffoldAutomationPayload,
   showAutomation,
@@ -44,6 +45,7 @@ import {
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import {
+  buildOnboardingGoalCheckinSeed,
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
@@ -2561,6 +2563,116 @@ describe('assistant outbox runtime', () => {
     })).toBe(false)
   })
 
+  it('retains unresolved private continuity until application, then restores ordinary pruning', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-private-continuity-retention-',
+    )
+    const outstanding = await createIntent(vaultRoot, {
+      createdAt: '2026-04-19T00:00:00.000Z',
+      message: 'unbound private continuity',
+      privateCompletionContinuitySessionId: null,
+      sessionId: 'session-private-continuity-unbound',
+      turnId: 'turn-private-continuity-unbound',
+    })
+    const outstandingSent = await saveAssistantOutboxIntent(vaultRoot, {
+      ...outstanding,
+      delivery: createDelivery({
+        sentAt: '2026-04-19T00:01:00.000Z',
+      }),
+      sentAt: '2026-04-19T00:01:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-19T00:01:00.000Z',
+    })
+    const prepared = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:00:00.000Z',
+      message: 'prepared private continuity',
+      privateCompletionContinuitySessionId: 'session-private-continuity-prepared',
+      sessionId: 'session-private-continuity-prepared',
+      turnId: 'turn-private-continuity-prepared',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...prepared,
+      delivery: createDelivery({ sentAt: '2026-03-01T00:01:00.000Z' }),
+      privateCompletionContinuity: {
+        baseTurnCount: 0,
+        preparedAt: '2026-03-01T00:01:01.000Z',
+        sessionId: prepared.sessionId,
+        status: 'prepared',
+        transcriptCreatedAt: '2026-03-01T00:01:00.000Z',
+      },
+      sentAt: '2026-03-01T00:01:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:01:01.000Z',
+    })
+    const ordinaryOld = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:02:00.000Z',
+      message: 'ordinary old terminal',
+      sessionId: 'session-ordinary-old-terminal',
+      turnId: 'turn-ordinary-old-terminal',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...ordinaryOld,
+      sentAt: '2026-03-01T00:03:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:03:00.000Z',
+    })
+    for (let index = 0; index < 101; index += 1) {
+      const createdAt = new Date(Date.UTC(2026, 3, 19, 1, index, 0)).toISOString()
+      const recent = await createIntent(vaultRoot, {
+        createdAt,
+        message: `recent terminal ${index}`,
+        sessionId: `session-recent-terminal-${index}`,
+        turnId: `turn-recent-terminal-${index}`,
+      })
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...recent,
+        status: 'failed',
+        updatedAt: createdAt,
+      })
+    }
+
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2026-04-20T12:00:00.000Z'),
+      paths,
+      vault: vaultRoot,
+    })).resolves.toBe(2)
+    let retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained.some((intent) => intent.intentId === outstanding.intentId)).toBe(
+      true,
+    )
+    expect(retained.some((intent) => intent.intentId === prepared.intentId)).toBe(
+      true,
+    )
+    expect(retained.some((intent) => intent.intentId === ordinaryOld.intentId)).toBe(
+      false,
+    )
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...outstandingSent,
+      privateCompletionContinuity: {
+        appliedAt: '2026-04-20T12:01:00.000Z',
+        baseTurnCount: 0,
+        preparedAt: '2026-04-20T12:00:59.000Z',
+        sessionId: outstandingSent.sessionId,
+        status: 'applied',
+        transcriptCreatedAt: outstandingSent.delivery!.sentAt,
+      },
+      updatedAt: '2026-04-20T12:01:00.000Z',
+    })
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2026-04-20T12:02:00.000Z'),
+      paths,
+      vault: vaultRoot,
+    })).resolves.toBe(1)
+    retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained.some((intent) => intent.intentId === outstanding.intentId)).toBe(
+      false,
+    )
+    expect(retained.some((intent) => intent.intentId === prepared.intentId)).toBe(
+      true,
+    )
+  })
+
   it('retains legacy group newsletter terminal occurrence evidence during outbox pruning', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-newsletter-retention-',
@@ -3037,6 +3149,7 @@ describe('assistant outbox runtime', () => {
     }))
 
     const sent = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-1'],
       channel: 'linq',
       dependencies: {
         setLinqMessageReaction,
@@ -3052,6 +3165,9 @@ describe('assistant outbox runtime', () => {
     expect(sent.kind).toBe('sent')
     expect(sent.intent.status).toBe('sent')
     expect(sent.intent.deliveryTransportIdempotent).toBe(false)
+    expect(sent.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-1',
+    ])
     expect(sent.intent.operation).toEqual({
       kind: 'message-reaction',
       reaction: 'heart',
@@ -3089,6 +3205,171 @@ describe('assistant outbox runtime', () => {
       kind: 'message-reaction',
       reaction: 'laugh',
     })
+  })
+
+  it('retains an accepted Linq reaction receipt while exact-consume confirmation retries', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-confirmation-',
+    )
+    const setLinqMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'thread' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+    const persistDeliveredIntent = vi.fn(async (input: {
+      intent: AssistantOutboxIntent
+    }) => {
+      expect(input.intent.answeredMailboxItemIds).toEqual([
+        'mailbox-linq-reaction-confirmation',
+      ])
+      expect(input.intent.delivery).toMatchObject({
+        channel: 'linq',
+        kind: 'message-reaction',
+        targetMessageId: 'linq-message-confirmation',
+      })
+      throw new Error('Web confirmation unavailable')
+    })
+
+    const first = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-confirmation'],
+      channel: 'linq',
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      dispatchHooks: {
+        persistDeliveredIntent,
+      },
+      explicitTarget: 'linq-chat-confirmation',
+      reaction: 'thumbs_up',
+      sessionId: 'session-linq-reaction-confirmation',
+      targetMessageId: 'linq-message-confirmation',
+      turnId: 'turn-linq-reaction-confirmation',
+      vault: vaultRoot,
+    })
+
+    expect(first.kind).toBe('queued')
+    expect(first.intent).toMatchObject({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-confirmation'],
+      delivery: {
+        channel: 'linq',
+        kind: 'message-reaction',
+        targetMessageId: 'linq-message-confirmation',
+      },
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: false,
+      status: 'retryable',
+    })
+    expect(first.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+    expect(persistDeliveredIntent).toHaveBeenCalledTimes(1)
+
+    const stillAwaitingConfirmation = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      force: true,
+      intentId: first.intent.intentId,
+      now: new Date('2026-04-08T01:24:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(stillAwaitingConfirmation.intent).toMatchObject({
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+
+    const resolveDeliveredIntent = vi.fn(async (input: {
+      intent: AssistantOutboxIntent
+    }) => input.intent.delivery)
+    const confirmed = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      dispatchHooks: {
+        resolveDeliveredIntent,
+      },
+      force: true,
+      intentId: first.intent.intentId,
+      now: new Date('2026-04-08T01:25:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(confirmed.intent.status).toBe('sent')
+    expect(confirmed.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-confirmation',
+    ])
+    expect(resolveDeliveredIntent).toHaveBeenCalledTimes(1)
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers a stale accepted Linq reaction receipt without replaying the provider', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-crash-recovery-',
+    )
+    const queued = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-crash'],
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-chat-crash',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction-crash',
+      targetMessageId: 'linq-message-crash',
+      turnId: 'turn-linq-reaction-crash',
+      vault: vaultRoot,
+    })
+    const deliveryIdempotencyKey =
+      `assistant-outbox:${queued.intent.intentId}`
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      delivery: {
+        channel: 'linq',
+        idempotencyKey: deliveryIdempotencyKey,
+        kind: 'message-reaction',
+        reaction: 'heart',
+        sentAt: '2026-04-08T01:00:01.000Z',
+        target: 'linq-chat-crash',
+        targetKind: 'thread',
+        targetMessageId: 'linq-message-crash',
+      },
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: null,
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T01:00:01.000Z',
+    })
+    const setLinqMessageReaction = vi.fn()
+    const resolveDeliveredIntent = vi.fn(async (input: {
+      intent: AssistantOutboxIntent
+    }) => input.intent.delivery)
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      dispatchHooks: {
+        resolveDeliveredIntent,
+      },
+      intentId: queued.intent.intentId,
+      now: new Date('2026-04-08T01:20:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(recovered.intent.status).toBe('sent')
+    expect(recovered.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-crash',
+    ])
+    expect(resolveDeliveredIntent).toHaveBeenCalledTimes(1)
+    expect(setLinqMessageReaction).not.toHaveBeenCalled()
   })
 
   it('keeps deduped Linq reaction updates non-idempotent', async () => {
@@ -3134,6 +3415,7 @@ describe('assistant outbox runtime', () => {
     })
 
     const sent = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-update'],
       channel: 'linq',
       dedupeToken: 'linq-reaction-slot',
       dependencies: {
@@ -3149,6 +3431,9 @@ describe('assistant outbox runtime', () => {
 
     expect(sent.kind).toBe('sent')
     expect(sent.intent.intentId).toBe(queued.intent.intentId)
+    expect(sent.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-update',
+    ])
     expect(sent.intent.deliveryTransportIdempotent).toBe(false)
     expect(sent.intent.operation).toEqual({
       kind: 'message-reaction',
@@ -3158,6 +3443,7 @@ describe('assistant outbox runtime', () => {
     await expect(
       readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
     ).resolves.toMatchObject({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-update'],
       deliveryTransportIdempotent: false,
       operation: {
         kind: 'message-reaction',
@@ -3854,27 +4140,41 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-onboarding-goal-checkin-',
     )
-    await completeAssistantOnboarding({
-      completedAt: '2026-06-01T17:30:00.000Z',
+    const completedAt = '2026-07-17T17:30:00.000Z'
+    const answeredOnboarding = await completeAssistantOnboarding({
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
+    const vault = await loadVault({ vaultRoot })
+    const seed = buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      onboardingState: answeredOnboarding,
+      stableKey: vault.metadata.vaultId,
+      timeZone: vault.metadata.timezone,
+    })
+    if (!seed || seed.schedule.kind !== 'at') {
+      throw new Error('Expected an onboarding goal check-in seed.')
+    }
+    const deliveryAt = new Date(
+      Date.parse(seed.schedule.at) + 60_000,
+    ).toISOString()
+    vi.setSystemTime(new Date(deliveryAt))
     const scaffold = scaffoldAutomationPayload()
     const automation = await upsertAutomation({
       ...scaffold,
-      activeUntil: '2026-07-27T17:30:00.000Z',
-      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-      continuityPolicy: 'preserve',
-      instructions: 'Offer one low-pressure health direction choice.',
-      now: new Date('2026-07-20T17:29:00.000Z'),
-      schedule: {
-        at: '2026-07-20T17:30:00.000Z',
-        kind: 'at',
-      },
-      slug: 'onboarding-goal-choice-point',
+      activeUntil: seed.activeUntil,
+      assistantTargetOverride: seed.assistantTargetOverride,
+      automationId: seed.automationId,
+      continuityPolicy: seed.continuityPolicy ?? 'preserve',
+      instructions: seed.instructions,
+      now: new Date(Date.parse(seed.schedule.at) - 60_000),
+      schedule: seed.schedule,
+      slug: seed.slug,
       status: 'active',
-      tags: ['assistant', 'scheduled', 'murph-managed'],
-      title: 'Onboarding goal choice point',
+      summary: seed.summary,
+      tags: [...(seed.tags ?? [])],
+      title: seed.title,
       vaultRoot,
     })
     const eligible = await deliverAssistantOutboxMessage({
@@ -3896,7 +4196,7 @@ describe('assistant outbox runtime', () => {
       delivery: createDelivery({
         idempotencyKey: eligible.intent.deliveryIdempotencyKey,
         providerMessageId: 'provider-onboarding-goal-checkin',
-        sentAt: '2026-07-20T17:31:00.000Z',
+        sentAt: deliveryAt,
         target: 'telegram-chat',
         targetKind: 'explicit',
       }),
@@ -3947,7 +4247,7 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
 
     await completeAssistantOnboarding({
-      completedAt: '2026-06-01T17:30:00.000Z',
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
@@ -3956,7 +4256,7 @@ describe('assistant outbox runtime', () => {
         idempotencyKey:
           temporarilyUnavailable.intent.deliveryIdempotencyKey,
         providerMessageId: 'provider-onboarding-goal-checkin-retry',
-        sentAt: '2026-07-20T17:32:00.000Z',
+        sentAt: deliveryAt,
         target: 'telegram-chat',
         targetKind: 'explicit',
       }),
@@ -3989,7 +4289,7 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     await reopenAssistantOnboarding({
-      reopenedAt: '2026-07-20T17:31:30.000Z',
+      reopenedAt: new Date(Date.parse(deliveryAt) + 30_000).toISOString(),
       vault: vaultRoot,
     })
     await expect(showAutomation({
@@ -6018,6 +6318,17 @@ describe('assistant outbox runtime', () => {
       code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+
+    const laterDrain = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:30:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(laterDrain.intent.status).toBe('abandoned')
+    expect(laterDrain.intent.nextAttemptAt).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
   it('replays only stale group-email planner roots while recipient sends stay fail-closed', async () => {
@@ -6475,6 +6786,7 @@ async function createIntent(
     nativeReplyRequested: true
     replyToMessageId: string | null
     media: AssistantOutboxIntent['media']
+    privateCompletionContinuitySessionId: string | null
     reviewedAssistantAskCompletionExpiresAt: string | null
     sessionId: string
     threadId: string | null
@@ -6502,6 +6814,12 @@ async function createIntent(
     identityId: overrides.identityId ?? 'participant-1',
     media: overrides.media ?? [],
     message: overrides.message ?? `${sessionId}:${turnId}:message`,
+    ...(overrides.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            overrides.privateCompletionContinuitySessionId,
+        }),
     reviewedAssistantAskCompletionExpiresAt:
       overrides.reviewedAssistantAskCompletionExpiresAt,
     ...(overrides.nativeReplyRequested === undefined

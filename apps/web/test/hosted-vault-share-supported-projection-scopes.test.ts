@@ -77,4 +77,38 @@ describe("hosted vault-share supported projection scopes", () => {
 
     expect([...supported]).toEqual(["protein-days.v0"]);
   });
+
+  it("requires the exact deferred-work capability version", async () => {
+    const supportedProjectionScopes = await import(
+      "../src/lib/hosted-vault-share/supported-projection-scopes"
+    );
+
+    expect(supportedProjectionScopes.supportsHostedVaultShareDeferredProjectionWork(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?deferredProjectionWork=v1",
+      ),
+    )).toBe(true);
+    expect(supportedProjectionScopes.supportsHostedVaultShareDeferredProjectionWork(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?deferredProjectionWork=v2",
+      ),
+    )).toBe(false);
+  });
+
+  it("reads only the exact first-materialization projection mode", async () => {
+    const supportedProjectionScopes = await import(
+      "../src/lib/hosted-vault-share/supported-projection-scopes"
+    );
+
+    expect(supportedProjectionScopes.readHostedVaultShareProjectionModeFromRequest(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?projectionMode=first-materialization",
+      ),
+    )).toBe("first-materialization");
+    expect(supportedProjectionScopes.readHostedVaultShareProjectionModeFromRequest(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?projectionMode=future-mode",
+      ),
+    )).toBeUndefined();
+  });
 });

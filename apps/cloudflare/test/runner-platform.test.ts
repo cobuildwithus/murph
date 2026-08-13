@@ -49,7 +49,11 @@ import {
 } from "@murphai/hosted-execution/routes";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
 } from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
@@ -68,10 +72,17 @@ function buildExpectedSupportedProjectionScopePath(path: string): string {
   return `${path}?${params.toString()}`;
 }
 
-function buildExpectedVaultShareActiveKindsPath(): string {
-  return buildExpectedSupportedProjectionScopePath(
+function buildExpectedVaultShareActiveKindsPath(
+  projectionMode?: typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+): string {
+  const path = buildExpectedSupportedProjectionScopePath(
     HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   );
+  const capabilityPath =
+    `${path}&${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM}=${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION}`;
+  return projectionMode
+    ? `${capabilityPath}&${HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM}=${projectionMode}`
+    : capabilityPath;
 }
 
 function buildExpectedGroupToolPath(): string {
@@ -4494,8 +4505,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (url.pathname.endsWith(HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH)) {
+        const projectionMode = url.searchParams.get(
+          HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
+        );
         return new Response(JSON.stringify({
           projectionKinds: ["activity-days.v0"],
+          ...(projectionMode === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+            ? { projectionMode }
+            : {}),
           projectionScopes: [{ projectionKind: "activity-days.v0" }],
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
@@ -4631,14 +4648,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         action: "read_current",
         result: { group: null, status: "none" },
       });
-    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual([
-      { projectionKind: "activity-days.v0" },
-    ]);
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: ["activity-days.v0"],
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    });
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    })).resolves.toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: ["activity-days.v0"],
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    });
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(14);
+    expect(fetchMock).toHaveBeenCalledTimes(15);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -4656,6 +4683,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
       `http://web-control.worker${buildExpectedGroupToolPath()}`,
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
+      `http://web-control.worker${buildExpectedVaultShareActiveKindsPath(HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE)}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
     for (const request of requests) {
@@ -5085,16 +5113,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               providerDispatchClaimed: true,
             }
           : {}),
-        ...(responseCount === 1
-          ? {}
+        resolvedRoute: responseCount === 1
+          ? {
+              conversationThreadId: null,
+              directRecipientPhoneNumber: null,
+              fromPhoneNumber: "+15550002",
+              target: "chat_123",
+              targetKind: "thread",
+              threadIsDirect: false,
+            }
           : {
-              targetOverride: {
-                conversationThreadId: "hid_current_chat",
-                target: "chat_current",
-                targetKind: "thread",
-              },
-            }),
-        threadIsDirect: responseCount === 1 ? false : true,
+              conversationThreadId: "hid_current_chat",
+              directRecipientPhoneNumber: "+15550001",
+              fromPhoneNumber: "+15550002",
+              target: "chat_current",
+              targetKind: "thread",
+              threadIsDirect: true,
+            },
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -5123,7 +5158,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     })).resolves.toEqual({
       deliveryPosture: "cautious",
       providerDispatchClaimed: true,
-      threadIsDirect: false,
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550002",
+        target: "chat_123",
+        targetKind: "thread",
+        threadIsDirect: false,
+      },
     });
     await expect(assertLinqRecentInboundEngagement({
       assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
@@ -5133,12 +5175,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       assistantAskFallbackRequired: true,
-      targetOverride: {
+      resolvedRoute: {
         conversationThreadId: "hid_current_chat",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
         target: "chat_current",
         targetKind: "thread",
+        threadIsDirect: true,
       },
-      threadIsDirect: true,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -5151,13 +5195,58 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("does not synthesize a canonical Linq route from a legacy Web response", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        targetOverride: {
+          conversationThreadId: "hid_legacy_chat",
+          target: "chat_legacy",
+          targetKind: "thread",
+        },
+        threadIsDirect: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq egress authority assertion effect.");
+    }
+
+    await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
+      target: "chat_legacy",
+      targetKind: "thread",
+    })).resolves.toEqual({});
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("strictly parses typed Linq health blocks from web-control", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         deliveryBlockCode: "chat_opted_out",
         deliveryPosture: "unknown-posture",
         ok: true,
-        threadIsDirect: true,
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550002",
+          target: "chat_blocked",
+          targetKind: "thread",
+          threadIsDirect: true,
+        },
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -5184,7 +5273,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       deliveryBlockCode: "chat_opted_out",
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_blocked",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
   });
 
@@ -5544,6 +5640,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("forwards hosted device-sync snapshot cursors without owning pagination policy", async () => {
+    const cursor = {
+      createdAt: "2026-08-11T12:00:00.000Z",
+      id: "conn_032",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.json()).resolves.toEqual({
+        cursor,
+        includeCredentialMaterial: true,
+        limit: 32,
+        userId: "member_123",
+      });
+      return new Response(JSON.stringify({
+        connections: [],
+        generatedAt: "2026-08-11T12:01:00.000Z",
+        nextCursor: null,
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.deviceSyncPort!.fetchSnapshot({
+      cursor,
+      includeCredentialMaterial: true,
+      limit: 32,
+    })).resolves.toMatchObject({ nextCursor: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("records hosted usage through the signed web callback seam", async () => {
     const usageRecord = createAssistantUsageRecord();
     const noticeDeliveryTarget = {
@@ -5801,6 +5940,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("forwards cancellation into hosted device-sync dirty acknowledgement", async () => {
+    const requestStarted = createDeferred<void>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requestStarted.resolve();
+      return await new Promise<Response>((_resolve, reject) => {
+        const abort = () => reject(
+          request.signal.reason instanceof Error
+            ? request.signal.reason
+            : new DOMException("Synthetic dirty acknowledgement aborted.", "AbortError"),
+        );
+        if (request.signal.aborted) {
+          abort();
+          return;
+        }
+        request.signal.addEventListener("abort", abort, { once: true });
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const abortController = new AbortController();
+    const acknowledgement = platform.deviceSyncPort!.ackDirtyStateProcessed({
+      connectionId: "dsc_abort",
+      processedRevision: "22",
+      signal: abortController.signal,
+    });
+
+    await requestStarted.promise;
+    const abortReason = new Error("synthetic exact wake");
+    abortController.abort(abortReason);
+
+    await expect(acknowledgement).rejects.toMatchObject({
+      hostedRuntimeFetchCallerSignalAborted: true,
+      hostedRuntimeFetchCauseKind: "abort",
+      hostedRuntimeFetchRequestSignalAborted: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("forces hosted device-sync connect-link creation through the signed POST callback route", async () => {

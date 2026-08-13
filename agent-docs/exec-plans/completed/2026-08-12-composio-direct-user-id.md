@@ -1,0 +1,146 @@
+# Repair Composio direct-write account identity
+
+Status: completed
+Created: 2026-08-12
+Updated: 2026-08-12
+
+## Goal
+
+- Restore confirmed connected-app writes by sending Composio both the selected
+  connected-account identity and the authenticated Murph member identity.
+- Preserve the existing approval, argument, privacy, and non-retryable
+  ambiguity boundaries for email and calendar writes.
+- Keep direct saved calendar automations functional while scheduled email sends
+  remain blocked before any Web control-plane request.
+
+## Success criteria
+
+- Gmail, Outlook mail, Google Calendar, and Outlook Calendar fixed writes use
+  the authenticated member as the direct-execution user identity.
+- The Composio client makes user identity mandatory for every direct execution,
+  preventing a selected-account call from compiling without that binding.
+- Focused request-shape tests cover the top-level user and connected-account
+  fields together.
+- Focused Web tests, Web typecheck, repository guards, exact-head CI, the
+  preliminary coverage review, and the final ReviewGPT gate pass.
+
+## Scope
+
+- In scope:
+  - The Web-owned Composio direct-execution request boundary.
+  - Fixed email and calendar write request-shape coverage.
+  - A public-safe changelog note for restored connected-app actions.
+- Out of scope:
+  - Retrying or replaying an ambiguous write.
+  - Changing assistant prompts, approval policy, account selection, provider
+    versions, or user-facing uncertainty wording.
+  - Browser-vault refresh diagnostics observed separately from the foreground
+    connected-app failure.
+
+## Constraints
+
+- Technical constraints:
+  - Keep the provider request aligned with the current Composio direct-execute
+    contract: top-level `user_id`, `connected_account_id`, pinned `version`, and
+    bounded `arguments`.
+  - Preserve the no-retry rule for failed or ambiguous provider writes.
+- Product/process constraints:
+  - Keep production evidence private and out of repository artifacts.
+  - Use the isolated task worktree and the PR/ReviewGPT lane required for an
+    external-provider write boundary.
+
+## Risks and mitigations
+
+1. Risk: Replaying the original request could duplicate a write whose outcome
+   is uncertain.
+   Mitigation: Change only future request identity; do not resend or add retry
+   behavior.
+2. Risk: Fixing only Gmail leaves the shared Outlook/calendar path broken.
+   Mitigation: Repair the shared fixed-write branch and assert both email and
+   calendar request shapes.
+3. Risk: A later caller omits user identity again because the client accepts it
+   as optional.
+   Mitigation: Require `userId` in the direct-execution client contract.
+
+## Tasks
+
+1. [x] Correlate the foreground turn through the control database, hosted
+   runtime logs, and production Web logs.
+2. [x] Confirm the structured provider failure and compare the emitted request
+   shape with the current Composio contract.
+3. [x] Require and send member user identity for direct fixed writes.
+4. [x] Strengthen exact-shape tests across email and calendar writes.
+5. [x] Add the public-safe changelog fragment, run focused verification, and
+   inspect the final diff for identifiers or secrets.
+6. [x] Push a PR candidate and complete specialist, final ReviewGPT, CI, and
+   merge-tree gates.
+
+## Decisions
+
+- The new structured provider diagnostics are working as designed; no
+  observability change is needed.
+- The minimal repair is request identity, not retry, reconciliation, or a new
+  provider adapter.
+- The shared identity repair intentionally covers direct saved calendar
+  automations. Current private input remains an email-specific authority
+  requirement rather than a requirement for every connected-app action.
+- Treat the change as ReviewGPT-sensitive because it repairs an external write
+  trust boundary.
+
+## Verification
+
+- Commands to run:
+  - Focused Vitest for the Composio client, connected-app service, and email
+    send boundaries.
+  - `pnpm --dir apps/web typecheck`.
+  - `pnpm logs:guard`, `pnpm docs:drift`, `git diff --check`, and scoped
+    identifier/credential scans.
+  - Exact-head GitHub Actions, preliminary coverage review, final ReviewGPT,
+    and `git merge-tree --write-tree HEAD origin/main`.
+- Expected outcomes:
+  - Every direct execute request contains `user_id`; account-selected requests
+    also contain the selected `connected_account_id`.
+  - All checks and review gates pass with no accepted findings remaining.
+
+## Verification log
+
+- Final focused Composio client, fixed-email-write, Google and Outlook calendar,
+  connected-app service, and changelog-fragment proof: passed, 60 tests.
+- `pnpm --dir apps/web typecheck`: passed after the final TypeScript change.
+- `pnpm logs:guard`: passed.
+- A production-shaped synthetic direct scenario passed through the real Web
+  service boundary and proved that the provider request binds both the
+  authenticated member and selected account.
+- Parameterized runtime boundary coverage proves that direct scheduled Google
+  and Outlook calendar creates reach the Web port exactly once without current
+  input, while scheduled Gmail and Outlook sends make no Web request; ambiguous
+  calendar results remain non-retryable.
+- ReviewGPT round 1 identified the overbroad changelog claim and missing
+  scheduled-calendar boundary proof. The finding was accepted; the copy and
+  paired runtime/Web coverage were corrected without changing production
+  authority or retry behavior.
+- The real changelog archive card and existing synthetic design study rendered
+  successfully at desktop and mobile widths. The card copy stayed legible and
+  within its container. The unchanged global chat launcher overlaps the lower
+  left edge of a mobile element crop and remains outside this repair.
+- The required Claude Code UI double-check was attempted, but the `claude`
+  executable is unavailable in this checkout. No substitute review is claimed.
+- The preliminary specialist review passed with product-experience and coverage
+  applicable, prompt and frontend implementation not applicable, no findings,
+  and no returned patch artifact.
+- ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` after verifying the accepted
+  round-1 finding was resolved. Its fresh full-patch audit found no remaining
+  correctness, authorization, privacy, retry, deployment, product-experience,
+  purpose-drift, or architectural-complexity issue.
+- Required GitHub checks passed on exact pushed head `7c8cabe912dc`, including
+  Web release build/typecheck, assistant/platform/CLI package coverage, both CLI
+  host lanes, app verification, billing proof, design proof, overflow, fixture,
+  artifact, aggregate release, and Vercel ignored-build verification.
+- The parent final diff and affected-call-path review found no remaining issue.
+- `git merge-tree --write-tree HEAD origin/main` passed against the latest
+  fetched base without conflicts.
+- `pnpm docs:drift`, `git diff --check`, and the scoped identifier scan: passed.
+- The first focused test launch happened before fresh-worktree Prisma generation
+  completed, so two suites failed during import with zero tests collected. The
+  exact rerun after the typecheck generated Prisma passed all 52 tests.
+Completed: 2026-08-12

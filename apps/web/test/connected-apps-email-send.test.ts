@@ -456,6 +456,7 @@ function createSuccessfulEmailFetch(input: {
       expect(JSON.parse(String(init?.body))).toEqual({
         arguments: input.expectedArguments,
         connected_account_id: "ca_email",
+        user_id: "hbm_member",
         version: input.version,
       });
       return jsonResponse({

@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   createIntegratedVaultServices: vi.fn(),
   detectWearableStorageMigrationCandidates: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot: vi.fn(),
   initInboxRuntime: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
@@ -84,6 +85,8 @@ vi.mock("@murphai/core", () => ({
 }));
 
 vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot:
+    mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   promoteHostedCompletedDirtyPayloadAcks:
     mocks.promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
@@ -238,6 +241,13 @@ beforeEach(async () => {
   mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
     service.close?.();
   });
+  mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot.mockImplementation(async (input: {
+    deviceSyncPort: ReturnType<typeof createMaintenanceDeviceSyncPortStub>;
+    signal: AbortSignal | null;
+  }) => input.deviceSyncPort.fetchSnapshot({
+    includeCredentialMaterial: true,
+    signal: input.signal,
+  }));
   mocks.initInboxRuntime.mockResolvedValue({
     configPath: ".runtime/operations/inbox/config.json",
     createdPaths: [],
@@ -1795,6 +1805,7 @@ describe("runHostedDeviceSyncPass", () => {
       jobKind: "resource",
       provider: "junction",
       providerSendToWebhookMs: 60_000,
+      sourceProvider: "garmin",
     }, {
       eventToProviderSendBucket: "5_to_30_minutes",
       firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
@@ -1804,6 +1815,17 @@ describe("runHostedDeviceSyncPass", () => {
       jobKind: "resource",
       provider: "strava",
       providerSendToWebhookMs: null,
+      sourceProvider: "strava",
+    }, {
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
+      jobCreatedAt: "2026-04-08T00:04:30.000Z",
+      jobKind: "reconcile",
+      provider: "junction",
+      providerSendToWebhookMs: 60_000,
+      sourceProvider: null,
     }]);
 
     await runHostedDeviceSyncPass(
@@ -1844,6 +1866,7 @@ describe("runHostedDeviceSyncPass", () => {
         provider: "junction",
         providerSendToWebhookMs: 60_000,
         runtimeQueueMs: 30_000,
+        sourceProvider: "garmin",
         webhookToImportMs: 120_000,
       },
     });
@@ -1854,28 +1877,42 @@ describe("runHostedDeviceSyncPass", () => {
     expect(skewedEntry.redactedJson).toMatchObject({
       eventToProviderSendBucket: "5_to_30_minutes",
       provider: "strava",
+      sourceProvider: "strava",
       webhookToImportMs: 180_000,
     });
     expect(skewedEntry.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
     expect(skewedEntry.redactedJson).not.toHaveProperty("runtimeQueueMs");
     expect(skewedEntry.redactedJson).not.toHaveProperty("importExecutionMs");
+    const mixedSourceEntry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.redactedJson?.jobKind === "reconcile");
+    assert.ok(mixedSourceEntry);
+    expect(mixedSourceEntry.redactedJson).not.toHaveProperty("sourceProvider");
     for (const privateField of [
+      "connectionId",
+      "deviceId",
       "eventCount",
       "eventToImportMs",
       "eventToProviderSendMs",
       "eventType",
+      "externalAccountId",
+      "healthValue",
       "importCompletedAt",
       "importExecutionStartedAt",
       "jobCreatedAt",
+      "memberId",
       "oldestEventOccurredAt",
       "oldestProviderSentAt",
       "oldestWebhookReceivedAt",
       "resource",
       "resourceCategory",
-      "sourceProvider",
+      "sourceProviderSlug",
+      "userId",
+      "webhookBody",
     ]) {
       expect(entry.redactedJson).not.toHaveProperty(privateField);
       expect(skewedEntry.redactedJson).not.toHaveProperty(privateField);
+      expect(mixedSourceEntry.redactedJson).not.toHaveProperty(privateField);
     }
   });
 
@@ -5341,6 +5378,70 @@ describe("runHostedDeviceSyncWakeLane", () => {
     expect(drainWorker).toHaveBeenCalledWith(1);
     expect(shouldYieldDeviceSync).toHaveBeenCalled();
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+  });
+
+  it("uses one lane-wide deadline for in-flight device-sync control requests", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    try {
+      const observedSignals: AbortSignal[] = [];
+      const fetchSnapshot = vi.fn(async (input?: { signal?: AbortSignal | null }) => {
+        const signal = input?.signal ?? null;
+        if (!signal) {
+          throw new Error("Expected the device-sync wake lane to provide a cancellation signal.");
+        }
+        observedSignals.push(signal);
+        return await new Promise<never>((_resolve, reject) => {
+          const rejectForAbort = () => reject(new Error(
+            "Hosted device-sync runtime snapshot request failed.",
+            { cause: signal.reason },
+          ));
+          if (signal.aborted) {
+            rejectForAbort();
+            return;
+          }
+          signal.addEventListener("abort", rejectForAbort, { once: true });
+        });
+      });
+
+      const resultPromise = runHostedDeviceSyncWakeLane({
+        deviceSyncPort: {
+          ackDirtyStateProcessed: vi.fn(),
+          applyUpdates: vi.fn(),
+          createConnectLink: vi.fn(),
+          fetchDirtyStates: vi.fn(),
+          fetchSnapshot,
+        },
+        wake: {
+          eventId: "evt_device_sync_lane_timeout",
+          kind: "device-sync.wake",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "webhook_hint",
+          userId: "member_123",
+        },
+        resolvedConfig: {
+          deviceSync: DEVICE_SYNC_CONFIG,
+        },
+        timeoutMs: 100,
+        vaultRoot: "/tmp/vault-root",
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(resultPromise).resolves.toEqual({
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: "2026-04-08T00:00:30.100Z",
+        nextWakeReason: "device-sync.reconcile",
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+      });
+      expect(fetchSnapshot).toHaveBeenCalledTimes(1);
+      const observedSignal = observedSignals[0];
+      expect(observedSignal?.aborted).toBe(true);
+      expect(observedSignal?.reason).toMatchObject({ name: "AbortError" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

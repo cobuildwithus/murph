@@ -9,6 +9,9 @@ import type {
   CodexAppServerSteerInput,
   CodexAppServerTurnInput,
 } from '../assistant-codex.js'
+import type {
+  CodexAppServerPreparedImageInput,
+} from './images.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
@@ -25,6 +28,7 @@ export type CodexAppServerInputItem =
     }
   | {
       type: 'localImage'
+      detail?: CodexAppServerPreparedImageInput['detail']
       path: string
     }
 
@@ -32,7 +36,7 @@ export type CodexAppServerSteerRequestInput = Omit<
   CodexAppServerSteerInput,
   'images'
 > & {
-  imagePaths?: readonly string[] | null
+  images?: readonly CodexAppServerPreparedImageInput[] | null
 }
 
 export function buildCodexThreadStartParams(
@@ -142,7 +146,7 @@ function buildCodexThreadResumeContextParams(
 }
 
 export function buildCodexTurnStartParams(input: {
-  imagePaths: readonly string[]
+  images: readonly CodexAppServerPreparedImageInput[]
   input: CodexAppServerTurnInput & {
     workingDirectory: string
   }
@@ -151,7 +155,7 @@ export function buildCodexTurnStartParams(input: {
   const params = stripUndefinedRpcParams({
     effort: normalizeNullableString(input.input.reasoningEffort),
     input: buildCodexAppServerInputItems({
-      imagePaths: input.imagePaths,
+      images: input.images,
       prompt: input.input.prompt,
     }),
     outputSchema: input.input.outputSchema
@@ -177,7 +181,7 @@ export function buildCodexTurnSteerParams(
       value: input.turnId,
     }),
     input: buildCodexAppServerInputItems({
-      imagePaths: input.imagePaths ?? [],
+      images: input.images ?? [],
       prompt: input.prompt,
     }),
     threadId: assertCodexRpcIdentifier({
@@ -204,7 +208,7 @@ export function buildCodexTurnInterruptParams(input: {
 }
 
 export function buildCodexAppServerInputItems(input: {
-  imagePaths: readonly string[]
+  images: readonly CodexAppServerPreparedImageInput[]
   prompt: string
 }): CodexAppServerInputItem[] {
   return [
@@ -212,9 +216,10 @@ export function buildCodexAppServerInputItems(input: {
       type: 'text',
       text: input.prompt,
     },
-    ...input.imagePaths.map((imagePath) => ({
+    ...input.images.map((image) => ({
       type: 'localImage' as const,
-      path: imagePath,
+      ...(image.detail ? { detail: image.detail } : {}),
+      path: image.path,
     })),
   ]
 }

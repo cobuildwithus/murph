@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Decision
 
@@ -318,21 +318,48 @@ the exact active share id and scope. An encrypted empty set means observed but
 missing; `null` means no snapshot has been supplied. Revoke and regrant clear
 the column in the same authority transaction, and regrant rotates the share id,
 so a stale producer cannot update a later grant generation.
+Explicit reaffirmation of a recent-date permission also rotates the share id
+and clears a materialized snapshot in that transaction. The new consent decision
+therefore becomes `pending` immediately and can never reuse records assembled
+under an older recent-date window; current-state, email, and device-status grants
+remain idempotent.
+
+The grantor's personal runtime offers this replacement projection only after its
+source state crosses the existing successful checkpoint boundary. A pending
+mailbox prefix may wait behind an in-flight projection only when the same
+bounded response proves every fetched lane reaches its lane-wide high-water and
+every visible item is a system-lane `device-sync.wake` with the production
+`device-sync:dirty:` dedupe prefix. Those rows are level-triggered dirty hints.
+A full page whose high-water lies beyond its visible suffix is incomplete and
+remains foreground work, so connection, disconnect, manual-reconcile, and
+scheduled-reconcile commands cannot hide behind dirty hints. Mixed or
+uninspectable prefixes and failed classification fetches likewise remain
+foreground. A successful classification prefetch is reused by the foreground
+import instead of fetched a second time. An invocation that exhausts its mailbox
+budget returns the existing durable continuation before making another
+projection offer. Once graceful shutdown is observed, the retiring runtime
+neither starts nor re-enters projection or mailbox import; it returns an
+immediate `mailbox` wake so the existing replacement-runtime reconciliation owns
+the durable row.
 
 `murph.group action="read_shared"` accepts one to three unique exact selectable
 projection scopes. The signed Web handler captures the current group roster and
 exact active grants, decrypts only the captured encrypted snapshots, and returns
 every current member with every requested scope. Each result is explicitly
-`not_granted`, `granted` plus `missing`, or `available`; a real zero remains
-available. Profile labels require their separate granted snapshot. Authority,
-decryption, parse, and bound failures return typed unavailability without shared
-records or identity-bearing infrastructure fields.
+`not_granted`, `granted` plus `pending`, `granted` plus `missing`, or
+`available`; a real zero remains available. `pending` is limited to an active
+readable grant whose first snapshot is still null. An encrypted empty snapshot
+is `missing`, as is a grant withheld by current access. Profile labels require
+their separate granted snapshot. Authority, decryption, parse, and bound
+failures return typed unavailability without shared records or identity-bearing
+infrastructure fields.
 
 The Web response is complete. For the model boundary, the assistant-engine
 adapter keys every retained projection by its exact scope and collapses the
-grant/data pair to `not_granted`, `missing`, or `available`. Non-workout record
-arrays remain intact; `workouts.v0` additionally hoists repeated day, kind,
-time-semantics, and completion-watermark fields. If whole member rows still
+grant/data pair to `not_granted`, `pending`, `missing`, or `available`.
+Non-workout record arrays remain intact; `workouts.v0` additionally hoists
+repeated day, kind, time-semantics, and completion-watermark fields. If whole
+member rows still
 exceed the model result limit, the adapter returns `status="partial"` with every
 omitted current membership named in `omittedParticipantIds`. It never truncates
 a member row, treats an omitted member as departed, or alters stored or
@@ -441,6 +468,127 @@ mutate a local share store. V2 archive restore excludes
 materialization excludes the corresponding vault-relative subtrees. No
 foreground cleanup pass or revoke wake is part of the boundary.
 
+When a join or permission acceptance admits a grant generation whose snapshot
+is null, including a recent-date generation refreshed by explicit
+reaffirmation, Web appends one generation-stable
+`runtime.maintenance-requested` mailbox row in the same transaction as the
+grant. An append failure rolls back the grant. After commit, Web signals that
+exact mailbox pointer alongside join-confirmation recovery, so either
+best-effort signal can stall without starving the other. The shared scheduled
+mailbox-handoff sweep also selects the unconsumed maintenance row, making a
+failed first Temporal signal or a process stop after commit recoverable without
+unrelated member activity. This adds no projection owner; the durable null
+snapshot remains visible as `pending` until the member runtime materializes it.
+
+The runtime does not mark that maintenance row handled when it first imports
+the control wake. It retains a `vault-share.projection` post-checkpoint record,
+runs the existing projection offer only after the source checkpoint, and removes
+the mailbox obligation only when every current granted runtime-projectable
+generation is materialized or revoked. This durable first pass uses the
+`first-materialization` projection mode. Web must acknowledge that exact mode;
+an old Web response that omits the acknowledgment fails before any private vault
+read. Discovery selects only null-snapshot rows at the source and chooses a deterministic
+page of complete exact-scope generations containing at most 25 active null
+snapshots total. One pass therefore performs at most 25 private scope reads, 25
+delivery requests, and 25 destination replacement transactions even at the
+admitted maximum of 25 destinations across every known scope. The bounded
+all-scope control read still admits at most 25 rows per finite known projection
+scope, then resolves destination access with one set-based member query and at
+most one bounded current-participant query.
+
+First-materialization delivery reselects only active null rows and conditionally
+replaces only an exact row whose snapshot remains null. Materialized rows cannot
+enter its generation digest or be rewritten by a racing or redundant maintenance
+pass. If a page made progress while more eligible page work remains, the existing
+recording item continues after one second; if no page is deliverable because
+remaining null work is inactive or unsupported, it uses the five-minute deferred
+retry. Either future retry time lets foreground and independent system controls
+proceed between pages. The ordinary abortable idle projection refresh omits this
+mode and retains its existing all-active-scope behavior.
+
+A temporary loss of grantor runtime access also returns the acknowledged
+first-materialization mode with only the opaque deferred-work bit and no scopes.
+Web does not read grants or destinations in that branch, and the runtime performs
+no private-vault read. A deferred-capability runner retains the same recording
+item on its five-minute retry; an older runner receives the existing generic
+retryable capability failure. After access returns, ordinary null-only discovery
+resumes. If the grants were revoked during the inaccessible interval, the next
+authoritative discovery returns no active work and the item terminates normally.
+Generic idle refresh during grantor inactivity remains an empty terminal response
+because it owns no accepted first-snapshot obligation.
+
+Web returns a single fixed-width
+`hasDeferredProjectionWork` bit when any approved null-snapshot generation is
+temporarily omitted by destination access or runner capability; it exposes no
+destination identity, count, or fan-out cardinality. The runtime may deliver
+currently active scopes in the same offer, but retry timing follows whether that
+bounded pass made progress. Missing ports, delivery races, and
+projection errors retain that item on the existing one-minute retry. Projection
+work has its own serialization key:
+its FIFO and watermark remain ordered, while a not-yet-due projection retry
+cannot block independent runtime controls such as account disconnect. The next
+mailbox wake is always recomputed from the retained state after failure, so due
+independent work runs without waiting for the projection delay. A crash, foreground
+preemption, or partial multi-scope failure therefore cannot turn a pending share
+into permanently consumed work.
+
+Before reading a projection, the runtime receives one fixed-width opaque digest
+of the active row generations for that exact scope. It returns the digest with
+the offer, and Web re-derives it from the active destination set before writing.
+A destination is active under the same participant-aware owner-or-current-
+participant rule used by the live group runtime, never the owner-only query
+approximation. Both active-scope discovery and delivery resolve that authority
+with one bounded member query plus at most one bounded current-participant
+query, with no per-destination reads. Exact-scope delivery admits at most the
+existing 25 grantor destinations; all-scope discovery composes that limit with
+the finite known projection registry and fails closed if the bound is exceeded.
+A mismatch or mid-delivery access change returns a generic retryable failure
+while any exact granted generation still has a null snapshot; after revocation
+or materialization, absence remains the terminal ordinary `no-active-share`
+result. A partial fan-out may replace currently active destinations, but one
+access-change result keeps the obligation so the omitted approved destination
+can complete after renewed access. Raw share IDs and destination cardinality
+never cross into the member runtime. A projectable active scope without a digest
+fails before any private vault read, and Web rejects a tokenless delivery as
+retryable before resolving or replacing a share. The active-scope request also
+declares exact deferred-work capability; while an older runner is draining, Web
+turns deferred discovery into the same generic retryable failure instead of
+letting that runner consume the row. The converged token- and deferred-capable
+runner bundle, including first-materialization mode acknowledgment, is therefore
+the hard rollback floor before Web promotion.
+
+The rollout is consumer-first and reader-before-backfill. First deploy the
+runtime/Worker parser, bounded first-materialization owner, retry consumer,
+generation-token client, and mode acknowledgment check, then prove immediate
+fleet convergence. Next deploy the complete Web release, including the
+pending-aware reader, opaque generation fence, null-only bounded page selector,
+consent copy, atomic admission, and reaffirmation writer. Capture one stable
+cutoff only after both releases are live, then run the bounded recent-date
+generation backfill under the production Web environment until its count-only
+result reports no selected grantors. The configurable command fetches at most
+101 candidate grantors and processes at most 100; each grantor transaction
+rotates at most 25 pre-cutoff group health generations, including orphaned
+pending rows whose original wake is absent, clears their snapshots, and appends
+one durable maintenance row. Exact signaling
+occurs after commit and its failure is recoverable from the row. Wait for that
+maintenance backlog to drain before declaring the rollout complete. Reusing the
+same cutoff makes the command idempotent and leaves current-state, email,
+device-status, non-group, and newly created grants untouched. Once the complete
+Web writer begins serving approvals, the pending-aware Web reader is the
+rollback floor; rolling Web back would recreate false missing states for newly
+admitted or refreshed generations even before the legacy backfill begins.
+
+Recent daily and sleep projection owners derive the member's current civil date
+from the validated vault timezone, admit only that date and the prior six civil
+dates, and emit at most seven records. Sparse data therefore cannot reach an
+eighth member-local date, including around UTC midnight or daylight-saving
+changes. A missing or invalid vault timezone fails these civil-date scopes
+closed. `workouts.v0` retains its separate global calendar-close semantics.
+Deploy the Cloudflare runtime bundle with that producer bound and the additive
+`pending` parser/model status before Web emits `pending`, exact seven-day consent
+copy, or fresh projection work. Deploy Web before any backfill clears a legacy
+snapshot.
+
 This protocol is a consumer-first hard cut:
 
 1. Deploy Cloudflare Worker and runner with `container_rollout=immediate`.
@@ -517,11 +665,15 @@ future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
-work arrives, the runner uses the same exact-child abort and identity-cleared
-replacement path. It must start a default-mode child rather than coalescing the
-wake because system-mailbox mode imports only system work and returns before
-assistant admission. A system-mailbox request behind an active default runtime
-remains deferred and cannot broaden that child's admission authority.
+work arrives, the runner wakes that exact child and leaves its fence intact.
+System-mailbox mode may import and run one bounded model-free device-sync item;
+it checkpoints any successfully applied unit, observes the wake, and returns
+before assistant admission. The foreground request then retries through the
+ordinary controller path and starts a default-mode child after the system child
+releases its fence. Operator maintenance receipts are not system-mode recovery
+work and remain pending for their existing owner. A system-mailbox request
+behind an active default runtime remains deferred and cannot broaden that
+child's admission authority.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -538,12 +690,14 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` or
-`system_mailbox` fence, the existing workspace-invocation abort seam is the
-sole preemption authority. UserRunner sends that exact abort directly instead
-of spending foreground command budget on a non-authoritative liveness
-preflight. A local exact-pointer abort enters the same inactive-fence
-replacement path. The container registers the
+For foreground/default work behind an `inbox_media_retention` fence, the
+existing workspace-invocation abort seam is the sole preemption authority.
+UserRunner sends that exact abort directly instead of spending foreground
+command budget on a non-authoritative liveness preflight. System-mailbox work
+uses the exact-child wake-and-checkpoint handoff above instead, because aborting
+a bounded unit after canonical web updates but before its checkpoint would
+discard committed progress. A local exact-pointer abort enters the same
+inactive-fence replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
 and an exact abort can cancel already-queued successors before runner dispatch.
@@ -647,6 +801,44 @@ unrelated pending delivery cannot hitchhike. Private completions retain their
 Web-owned exact-text, member, expiry, and direct-route assertion at every
 provider attempt; non-idempotent transport work remains checkpoint-gated. Fresh
 conversation input continues to preempt this pass.
+
+An authenticated current-sender private exact completion does not mutate the
+member's ordinary conversation when the notification is queued. After the
+live-authorized same-channel delivery reaches the durable outbox's canonical
+`sent` state, the hosted runtime uses its intent as the recovery journal. Partial or ambiguous
+provider receipts remain retryable or abandoned and never participate, even
+when they retain message metadata. If queue-time resolution found an
+existing ordinary direct session, the intent binds the exact ID returned by the
+hosted-default continuity lookup before the notification target is projected
+read-only. Supported model or reasoning changes do not erase that causal
+binding; only fallback resolution without an ordinary session stays unbound
+until the first attended direct turn. If that turn starts before delivery
+finishes, it atomically binds the current intent to its exact session without
+importing text, advancing the turn count, or clearing resume state; those
+effects remain gated on canonical `sent`. An omitted binding identifies a
+pre-rollout intent and fails closed; only an explicit current-writer null may
+wait for that first session. No route-sibling heuristic may choose the owner.
+A canonically sent field-present obligation is exempt from ordinary terminal outbox
+pruning until its journal reaches `applied`, after which ordinary retention
+resumes. The import appends the exact reviewed assistant text once,
+advances the session once, and clears both stale native provider-resume aliases.
+An interrupted import converges from that journal, and canonical direct
+attended resolution repairs it before provider-resume selection. An ordinary
+direct scheduled occurrence repairs only an obligation already bound to its
+exact session before provider-resume selection; it cannot claim explicit-null
+unbound work. The direct output-only Assistant Ask continuation applies the
+same bound-only rule before provider planning because it can be the next
+same-session history consumer. Hosted text turns use their nested
+direct-conversation route plus accepted assistant-input authority; multimodal
+payload shape is irrelevant. A direct exact notification that resolves the
+ordinary session also applies bound-only repair before it can append newer
+history; it cannot claim explicit-null work, and a genuinely detached session
+cannot import an obligation bound to another session.
+The runtime recognizes this
+exception only from the complete queue-only, exact-text, one-mailbox-item,
+direct Linq-or-Telegram private-completion proof plus its matching durable
+delivery. Rejected completions, an expiry marker alone, and all generic
+detached notification sessions remain isolated.
 
 A legacy usage-referral notification can be authority-less even after Web has
 repaired its producer, because the local system mailbox may already have
@@ -978,17 +1170,35 @@ unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
 forbidden because it can erase recent paired conversation history
 irreversibly.
 
-Accepted Linq reply delivery carries an earlier copy of the same exact-item
-consume authority:
-the runtime reports
-`answeredMailboxItemIds`, and the signed delivery callback stamps matching
+Accepted Linq reply and reaction delivery carry an earlier copy of the same
+exact-item consume authority: the runtime keeps `answeredMailboxItemIds` on the
+existing outbox intent, and the signed delivery callback stamps matching
 same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
+For a reaction-only terminal turn, the provider-accepted reaction receipt is
+persisted on that same intent before Web confirmation. A retryable or ambiguous
+confirmation retains the receipt and exact ids and retries only the signed Web
+callback; it must not replay the provider reaction or consume from an outcome
+that lacks a concrete accepted receipt. A restart reconciles the retained
+receipt through the same callback before the intent becomes sent. The ordinary
+exact-item checkpoint acknowledgement remains an idempotent fallback, and its
+terminal ids remain retained until a later mailbox fetch confirms the durable
+conversation floor.
 The mailbox fetch response returns both `consumedSeqByLane` and each item's
 `consumedAt`; replayed conversation items at or below the checkpoint replay
 floor, or with `consumedAt != null`, are re-staged as conversation context with
 a null reply target, never as fresh reply candidates. This keeps a workspace
 restore or restart from re-replying to an already-handled message without a
-side table or lane high-water advance past gaps. A container rollout SIGTERM
+side table or lane high-water advance past gaps. The runtime-progress monitor
+uses that same terminal distinction without redefining the contiguous floor:
+conversation candidates above the effective floor must still have
+`consumed_at IS NULL`, while system-lane candidates retain their existing
+live-row semantics. The selected head and `COUNT(*) OVER()` come from that one
+lane-aware predicate. A stamped conversation row is terminal, not usage-resume
+evidence; only staging, provider start, or accepted delivery can establish
+post-denial execution for a remaining candidate. The monitor probes at most one
+row beyond its raw 20,000-candidate cap before runtime-access and usage-denial
+exclusions and reports `scanTruncated` instead of scanning an exclusion-heavy
+population without bound. A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
 
@@ -1138,7 +1348,7 @@ another wake, with no finite application-owned recovery bound. Enrollment
 failure returns no continuation; a previously issued shell command may leave an
 idle container to expire, but it cannot process runtime work. Both direct
 requests are latency hints, not a second durable wake authority:
-accepted Linq reply delivery stamps `consumedAt` on the exact
+accepted Linq reply or reaction delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add
 workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
@@ -1574,8 +1784,10 @@ adds no image-specific sender, durable image job, mailbox kind, scheduler,
 reservation, allowance implementation, or usage lifecycle. Runner loss may
 drop unfinished provider work.
 
-Detached `assistant.notification.requested` work remains output-only and cannot
-mutate resident conversation history or native provider resume state. A completed phone
+Generic model-backed `assistant.notification.requested` work remains
+output-only and cannot mutate resident conversation history or native provider
+resume state. The authenticated deterministic current-sender private exact
+completion above is the sole conversation-bound exception. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox
 event: Murph composes the result in its own voice and proactively messages the
 member's resolved messaging route, and may skip a non-meaningful call
@@ -1617,13 +1829,15 @@ insufficient.
 
 ### Hosted Runtime Maintenance Wake
 
-`runtime.maintenance-requested` is the explicit operator wake for one-time
-hosted runtime maintenance such as a vault format rollout. Web appends the
-runtime-control mailbox row and signals the normal hosted runtime workflow; the
-assistant runtime treats the row as a no-op control receipt, then runs the same
-restore, local runtime maintenance, idle checkpoint, and workspace-version CAS
-path as any other hosted invocation. The maintenance wake must not carry
-provider payloads, decrypted mailbox content, or migration-specific data.
+`runtime.maintenance-requested` is the durable no-payload wake for one-time
+hosted runtime maintenance such as a vault format rollout and for a committed
+group projection grant that needs its first private-runtime pass. Web appends
+the runtime-control mailbox row and signals the normal hosted runtime workflow;
+the assistant runtime treats the row as a no-op control receipt, then runs the
+same restore, local runtime maintenance, idle checkpoint, and workspace-version
+CAS path as any other hosted invocation. The maintenance wake must not carry
+provider payloads, decrypted mailbox content, migration-specific data, or
+projected health values.
 
 The production operator surface is the hosted app-session gated
 `/ops/runtime-maintenance` page and its same-origin
@@ -1806,9 +2020,12 @@ caller sends its existing ensure-processing HTTP timeout as an internal header.
 An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
-`system_mailbox` path, which imports eligible model-free system work and exits
-before foreground assistant admission. It binds that effective processing mode
-into the same fence so controller priority, preemption, and the container job
+`system_mailbox` path, which imports system work, may run one bounded
+model-free deterministic device-sync item, and exits before foreground
+assistant admission. Operator maintenance receipts retain their existing owner
+and are not consumed by this recovery mode.
+It binds that effective processing mode into the same fence so controller
+priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime
 reaches one unexpectedly. Explicit media
 retention remains model-free, and custom inference keeps its selected route.

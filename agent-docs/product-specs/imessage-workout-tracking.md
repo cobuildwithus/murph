@@ -7,7 +7,7 @@ A private member can run a strength workout from the Murph conversation:
 - see today's ordered exercises and completed/remaining set counts;
 - open an exercise to see each set's target and recorded result;
 - compose an explicit command to log, correct, or finish the workout;
-- continue using ordinary text for free-form gym updates.
+- receive a refreshed immutable workout card after every verified free-form gym mutation.
 
 The experience borrows the useful workout-tracker loop—plan, log sets, correct, finish—without introducing a second workout product or data store.
 
@@ -48,10 +48,13 @@ remains the workout recovery owner, and the value-free fallback identifies the
 message as the member's workout before telling them how to request that complete
 text without exposing its values outside the card.
 
-The bitmap remains rectangular and badge-free because Messages owns the outer
-mask and app icon, but its header keeps the provider's upper-left icon footprint
-clear. Removing the image-owned logo must not move title text beneath the
-provider overlay.
+The bitmap remains rectangular because Messages owns the outer mask and
+caption. Because the provider request omits an App Store id, the app-absent
+layout supplies no app art of its own; the bitmap therefore embeds the checked-in
+canonical Murph mark in the same 36×27pt upper-left badge footprint as the
+native balloon. Every fallback title sits beside that compact footprint in one
+shared header; optional supporting text stays directly under the title, and no
+larger empty icon gutter is reserved.
 
 Shared workout footer copy must remain truthful on both projections: it may ask
 the member to reply with an exercise, set, and result, but must not promise a
@@ -68,6 +71,16 @@ no tracking or canonical event reference. The stateless Web renderer accepts no
 identity, credential, canonical reference, or write authority, reads no database
 or remote service, logs no card values, and returns private no-store/no-index
 headers. It adds no card API, persistence owner, cache, queue, or retry path.
+
+When the same shared-card fragment reaches the public homepage outside the
+Messages extension, Web recognizes only the exact non-empty `#murph-card=`
+prefix after hydration and opens the App Store handoff. It never decodes,
+displays, stores, logs, or transmits the fragment value. Dismissal leaves the
+shared URL unchanged, and every other homepage fragment stays quiet. The web
+fallback uses Murph's canonical App Store URL independently, while the Linq
+payload omits the optional App Store id so it cannot replace the wide static
+preview with square artwork. Neither path changes the installed-extension route
+or application authority.
 
 ## Plan versus actual
 

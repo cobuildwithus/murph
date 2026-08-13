@@ -1,15 +1,27 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import { junctionProviderAdapter } from "@murphai/importers/device-providers/junction";
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "../src/junction-historical-backfill-progress.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 } from "../src/public-account.ts";
-import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
+import { SqliteDeviceSyncStore } from "../src/store.ts";
+import {
+  createJsonResponse,
+  makeTempDirectory,
+  readUrl,
+  requireValue,
+} from "./helpers.ts";
 
 import type {
   DeviceSyncAccount,
@@ -24,6 +36,19 @@ const NOW = "2026-06-11T12:00:00.000Z";
 const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
+const NOTE_HISTORY_COVERAGE_KEY = "junctionNoteHistoryBackfillCoverage";
+const SPARSE_DAILY_HISTORY_RESOURCES = [
+  "afib_burden",
+  "basal_body_temperature",
+  "body_temperature",
+  "body_temperature_delta",
+  "caffeine",
+  "heart_rate_recovery_one_minute",
+  "mindfulness_minutes",
+  "sleep_breathing_disturbance",
+  "vo2_max",
+  "water",
+] as const;
 const SOURCE_DISCONNECT_FENCE_CODES = [
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -41,6 +66,26 @@ interface MutableProviderState {
   present?: boolean;
   resourceAvailability: Record<string, unknown>;
   status: string;
+}
+
+interface MutableHistoricalPullState {
+  notPulled?: boolean;
+  providerSlug?: string;
+  resource: string;
+  status?: string;
+}
+
+function isMockRecordInRequestWindow(
+  timestamp: string,
+  windowStart: string | null,
+  windowEnd: string | null,
+): boolean {
+  if (windowStart?.length === 10 && windowEnd?.length === 10) {
+    const providerDate = timestamp.slice(0, 10);
+    return providerDate >= windowStart && providerDate <= windowEnd;
+  }
+  return (windowStart === null || timestamp >= windowStart)
+    && (windowEnd === null || timestamp < windowEnd);
 }
 
 function createAccount(input: {
@@ -281,6 +326,9 @@ function createProvider(input: {
   bloodPressureFailureRequest?: number;
   bloodPressureGroups?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   bloodPressureRecords?: readonly Record<string, unknown>[];
+  includeNote?: boolean;
+  noteRecords?: readonly Record<string, unknown>[];
+  timeseriesRecords?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   bloodPressureRequestFailure?: {
     active: boolean;
     fromRequest: number;
@@ -290,10 +338,17 @@ function createProvider(input: {
     active: boolean;
     status: number;
   };
+  historicalPullRequestFailure?: {
+    active: boolean;
+    status: number;
+  };
   providerListRequests?: { count: number };
   providerState?: MutableProviderState;
+  historicalPullState?: MutableHistoricalPullState;
   requests: TimeseriesRequest[];
+  summaryBackfillDays?: number;
   timeseriesBackfillDays?: number;
+  timeseriesResources?: readonly string[];
 }) {
   let bloodPressureRequestCount = 0;
   const providerState = input.providerState ?? {
@@ -310,8 +365,12 @@ function createProvider(input: {
     environment: "sandbox",
     region: "us",
     summaryResources: ["activity"],
-    summaryBackfillDays: 30,
-    timeseriesResources: ["blood_pressure", "stress_level"],
+    summaryBackfillDays: input.summaryBackfillDays ?? 30,
+    timeseriesResources: input.timeseriesResources
+      ? [...input.timeseriesResources]
+      : input.includeNote
+        ? ["blood_pressure", "stress_level", "note"]
+        : ["blood_pressure", "stress_level"],
     ...(input.timeseriesBackfillDays === undefined
       ? {}
       : { timeseriesBackfillDays: input.timeseriesBackfillDays }),
@@ -355,7 +414,28 @@ function createProvider(input: {
         return createJsonResponse({ data: [] });
       }
       if (url.pathname === "/v2/introspect/historical_pull") {
-        return createJsonResponse({ data: [] });
+        if (input.historicalPullRequestFailure?.active === true) {
+          return createJsonResponse(
+            { error: "temporary_historical_pull_failure" },
+            input.historicalPullRequestFailure.status,
+          );
+        }
+        const state = input.historicalPullState;
+        return createJsonResponse(state
+          ? {
+              data: [{
+                provider: {
+                  [state.providerSlug ?? "omron"]: {
+                    not_pulled: state.notPulled ? [state.resource] : [],
+                    pulled: state.status
+                      ? { [state.resource]: { days_with_data: 0, status: state.status } }
+                      : {},
+                  },
+                },
+                user_id: "junction-user-1",
+              }],
+            }
+          : { data: [] });
       }
       const timeseriesPrefix = "/v2/timeseries/junction-user-1/";
       if (url.pathname.startsWith(timeseriesPrefix)) {
@@ -385,16 +465,42 @@ function createProvider(input: {
         const bloodPressureGroups = input.bloodPressureGroups ?? {
           omron: input.bloodPressureRecords ?? [],
         };
+        const noteWindowStart = url.searchParams.get("start_date");
+        const noteWindowEnd = url.searchParams.get("end_date");
+        const noteRecords = (input.noteRecords ?? []).filter((record) => {
+          const timestamp = typeof record.start === "string" ? record.start : null;
+          return timestamp !== null
+            && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
+        });
+        const timeseriesRecords = (input.timeseriesRecords?.[resource] ?? []).filter((record) => {
+          const timestamp = typeof record.start === "string"
+            ? record.start
+            : typeof record.timestamp === "string"
+              ? record.timestamp
+              : null;
+          return timestamp !== null
+            && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
+        });
+        const resourceGroups = resource === "note"
+          ? { oura: noteRecords }
+          : resource === "blood_pressure"
+            ? bloodPressureGroups
+            : { omron: timeseriesRecords };
         const records = resource === "blood_pressure"
           ? Object.values(bloodPressureGroups).flat()
-          : [];
+          : resource === "note"
+            ? noteRecords
+            : timeseriesRecords;
         return createJsonResponse(
           records.length > 0
             ? {
                 groups: Object.fromEntries(
-                  Object.entries(bloodPressureGroups).map(([source, sourceRecords]) => [
+                  Object.entries(resourceGroups).map(([source, sourceRecords]) => [
                     source,
-                    [{ data: [...sourceRecords] }],
+                    [{
+                      data: [...sourceRecords],
+                      source: { provider: source, type: "ring" },
+                    }],
                   ]),
                 ),
               }
@@ -408,10 +514,52 @@ function createProvider(input: {
 }
 
 function findBloodPressureJob(jobs: readonly DeviceSyncJobInput[]): DeviceSyncJobInput {
+  return findResourceJob(jobs, "blood_pressure");
+}
+
+function findResourceJob(
+  jobs: readonly DeviceSyncJobInput[],
+  resource: string,
+): DeviceSyncJobInput {
   return requireValue(jobs.find((job) =>
     job.kind === "resource"
-    && job.payload?.resource === "blood_pressure"
+    && job.payload?.resource === resource
   ));
+}
+
+function assertHistoryCoverage(
+  metadata: Record<string, unknown> | null | undefined,
+  providerSlug: string,
+  resource: string,
+  expected = true,
+  message?: string,
+  version = resource === "note" ? 2 : 1,
+): void {
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata ?? {},
+      providerSlug,
+      resource,
+      version,
+    ),
+    expected,
+    message,
+  );
+}
+
+function addHistoryCoverage(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+  resource: string,
+): Record<string, unknown> {
+  const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata,
+    providerSlug,
+    resource,
+    version: resource === "note" ? 2 : 1,
+  });
+  assert.ok(update);
+  return { ...metadata, [update.metadataKey]: update.value };
 }
 
 async function executeImmediateBloodPressureContinuations(input: {
@@ -422,26 +570,46 @@ async function executeImmediateBloodPressureContinuations(input: {
 }): Promise<{
   executionCount: number;
   result: ProviderJobResult;
+  results: ProviderJobResult[];
+}> {
+  return executeImmediateResourceContinuations({
+    ...input,
+    resource: "blood_pressure",
+  });
+}
+
+async function executeImmediateResourceContinuations(input: {
+  context: ProviderJobContext;
+  job: DeviceSyncJobRecord;
+  provider: ReturnType<typeof createProvider>;
+  resource: string;
+  startingIndex?: number;
+}): Promise<{
+  executionCount: number;
+  result: ProviderJobResult;
+  results: ProviderJobResult[];
 }> {
   const executor = requireValue(input.provider.jobExecutor);
   let currentJob = input.job;
   let executionCount = 0;
   let nextIndex = input.startingIndex ?? 10_000;
+  const results: ProviderJobResult[] = [];
 
   while (executionCount < 400) {
     const result = await executor.executeJob(input.context, currentJob);
+    results.push(result);
     executionCount += 1;
     const continuation = result.scheduledJobs?.find((job) =>
-      job.kind === "resource" && job.payload?.resource === "blood_pressure"
+      job.kind === "resource" && job.payload?.resource === input.resource
     );
     if (!continuation || continuation.availableAt) {
-      return { executionCount, result };
+      return { executionCount, result, results };
     }
     currentJob = toJobRecord(continuation, nextIndex);
     nextIndex += 1;
   }
 
-  throw new Error("Blood-pressure history did not reach a delayed or terminal result.");
+  throw new Error(`${input.resource} history did not reach a delayed or terminal result.`);
 }
 
 test("the persisted-source scheduler gives sparse blood pressure its own full-history resumable job", async () => {
@@ -611,7 +779,7 @@ test("empty blood-pressure history retries are bounded and mark source coverage 
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(result.metadataPatch, "omron", "blood_pressure");
 });
 
 test("SDK setup before a source is known does not fetch unusable full history", async () => {
@@ -655,7 +823,8 @@ test("a source-scoped terminal pass preserves completed sibling coverage", async
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron,withings");
+  assertHistoryCoverage(result.metadataPatch, "omron", "blood_pressure");
+  assertHistoryCoverage(result.metadataPatch, "withings", "blood_pressure");
 });
 
 test("a newly confirmed source backfills older blood pressure after sibling coverage", async () => {
@@ -697,7 +866,8 @@ test("a newly confirmed source backfills older blood pressure after sibling cove
     true,
   );
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron,withings");
+  assertHistoryCoverage(result.metadataPatch, "omron", "blood_pressure");
+  assertHistoryCoverage(result.metadataPatch, "withings", "blood_pressure");
 });
 
 test("an existing source receives one migration anchored to its first-seen window", () => {
@@ -733,6 +903,1219 @@ test("an existing source receives one migration anchored to its first-seen windo
       job.kind === "resource"
       && job.payload?.resource === "blood_pressure"
     ),
+    false,
+  );
+});
+
+test("v1 Oura note coverage receives one v2 semantic reimport while dense timeseries stay bounded", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    noteRecords: [{
+      id: "note-history-1",
+      end: "2026-01-05T20:05:00.000Z",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      start: "2026-01-05T20:00:00.000Z",
+      tags: ["sauna"],
+    }, {
+      end: "2026-02-05T20:05:00.000Z",
+      start: "2026-02-05T20:00:00.000Z",
+      tags: [],
+      value: "SENSITIVE_EMPTY_TAG_NOTE",
+    }],
+    requests,
+    summaryBackfillDays: 180,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sourceFirstSeenAt = "2026-01-01T12:00:00.000Z";
+  const sources = [createSourceSummary(
+    "oura",
+    sourceFirstSeenAt,
+    "connected",
+    { blood_pressure: false, note: true, stress_level: true },
+  )];
+  const scheduled = createScheduledJobs(
+    createStoredAccount({
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      sources,
+    }),
+    NOW,
+  );
+  const note = requireValue(scheduled.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+
+  assert.deepEqual(note.payload, {
+    historicalBackfill: true,
+    historicalBackfillVersion: 2,
+    historicalWindowStart: "2025-12-13T00:00:00.000Z",
+    resource: "note",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "oura",
+    windowEnd: BACKFILL_WINDOW_END,
+    windowStart: "2025-12-13T00:00:00.000Z",
+  });
+
+  const importedSnapshots: unknown[] = [];
+  const { executionCount, result } = await executeImmediateResourceContinuations({
+    context: createJobContext({
+      account: createAccount({
+        metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      }),
+      importedSnapshots,
+    }),
+    job: toJobRecord(note, 1),
+    provider,
+    resource: "note",
+  });
+  assert.equal(executionCount, 180);
+  assert.equal(importedSnapshots.length, 2);
+  assertHistoryCoverage(result.metadataPatch, "oura", "note");
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(
+    requests.filter((request) => request.resource === "note").length,
+    180,
+  );
+
+  const nextDayPending = createScheduledJobs(
+    createStoredAccount({
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      sources,
+    }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  const nextDayNote = requireValue(nextDayPending.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+  assert.equal(nextDayNote.dedupeKey, note.dedupeKey);
+
+  requests.length = 0;
+  const bounded = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
+  await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ metadata: result.metadataPatch }),
+    }),
+    toJobRecord(bounded, 2),
+  );
+  assert.equal(
+    requests.filter((request) => request.resource === "stress_level").length,
+    7,
+  );
+
+  const completed = createScheduledJobs(
+    createStoredAccount({ metadata: result.metadataPatch, sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  assert.equal(
+    completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
+    false,
+  );
+});
+
+test("sparse daily resources receive one rollout-anchored summary-history job", () => {
+  const resourceAvailabilitySummary = Object.fromEntries([
+    ...SPARSE_DAILY_HISTORY_RESOURCES.map((resource) => [resource, true] as const),
+    ["stress_level", true],
+  ]);
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: resourceAvailabilitySummary,
+      status: "connected",
+    },
+    requests: [],
+    summaryBackfillDays: 180,
+    timeseriesResources: ["stress_level", ...SPARSE_DAILY_HISTORY_RESOURCES],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    resourceAvailabilitySummary,
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const nextDay = createScheduledJobs(
+    createStoredAccount({ sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+
+  for (const resource of SPARSE_DAILY_HISTORY_RESOURCES) {
+    const job = findResourceJob(scheduled.jobs, resource);
+    const nextDayJob = findResourceJob(nextDay.jobs, resource);
+    assert.equal(job.payload?.historicalWindowStart, "2025-12-13T00:00:00.000Z");
+    assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);
+    assert.equal(nextDayJob.dedupeKey, job.dedupeKey);
+  }
+  assert.equal(
+    scheduled.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "stress_level"
+    ),
+    false,
+  );
+});
+
+test("terminal matrix coverage suppresses every extended-history pair", () => {
+  const extendedResources = [
+    "blood_pressure",
+    "note",
+    ...SPARSE_DAILY_HISTORY_RESOURCES,
+  ] as const;
+  const extendedResourceSet = new Set<string>(extendedResources);
+  const resourceAvailabilitySummary = Object.fromEntries(
+    extendedResources.map((resource) => [resource, true] as const),
+  );
+  const provider = createProvider({
+    includeNote: true,
+    providerState: {
+      resourceAvailability: resourceAvailabilitySummary,
+      status: "connected",
+    },
+    requests: [],
+    timeseriesResources: extendedResources,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    resourceAvailabilitySummary,
+  )];
+  const metadata = extendedResources.reduce(
+    (current, resource) => addHistoryCoverage(current, "omron", resource),
+    {} as Record<string, unknown>,
+  );
+  const scheduled = createScheduledJobs(
+    createStoredAccount({ metadata, sources }),
+    NOW,
+  );
+
+  assert.equal(
+    scheduled.jobs.some((job) =>
+      job.kind === "resource"
+      && extendedResourceSet.has(String(job.payload?.resource))
+    ),
+    false,
+  );
+});
+
+test("an unrepresentable source is omitted from extended-history scheduling", () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { caffeine: true },
+      slug: "configured_source_outside_connect_catalog",
+    }],
+    requests,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "configured_source_outside_connect_catalog",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+
+  assert.equal(
+    scheduled.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "caffeine"
+    ),
+    false,
+  );
+  assert.equal(requests.length, 0);
+});
+
+test("unwritable legacy slots fail before extended-history provider egress", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const job = findResourceJob(
+    createScheduledJobs(createStoredAccount({ sources }), NOW).jobs,
+    "caffeine",
+  );
+
+  await assert.rejects(
+    requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        account: createAccount({
+          metadata: {
+            junctionBloodPressureHistoryBackfillCoverage: "opaque-blood-pressure-state",
+            junctionNoteHistoryBackfillCoverage: "opaque-note-state",
+          },
+          sources,
+        }),
+      }),
+      toJobRecord(job, 1),
+    ),
+    (error) =>
+      isDeviceSyncError(error)
+      && error.code === "JUNCTION_EXTENDED_HISTORY_COVERAGE_UNREPRESENTABLE",
+  );
+  assert.equal(requests.length, 0);
+});
+
+test("coverage capacity gates scheduling and reopens when retention becomes possible", () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const metadata = Object.fromEntries(
+    Array.from({ length: 16 }, (_, index) => [`capacityFact${index}`, index]),
+  );
+  const saturated = createScheduledJobs(
+    createStoredAccount({ metadata, sources }),
+    NOW,
+  );
+  assert.equal(
+    saturated.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "caffeine"
+    ),
+    false,
+  );
+  assert.equal(saturated.jobs.some((job) => job.kind === "reconcile"), true);
+
+  const available = createScheduledJobs(
+    createStoredAccount({
+      metadata: Object.fromEntries(Object.entries(metadata).slice(0, 15)),
+      sources,
+    }),
+    NOW,
+  );
+  assert.equal(findResourceJob(available.jobs, "caffeine").kind, "resource");
+
+  const reusableCoverage = addHistoryCoverage(
+    Object.fromEntries(Object.entries(metadata).slice(0, 15)),
+    "withings",
+    "blood_pressure",
+  );
+  const inPlace = createScheduledJobs(
+    createStoredAccount({ metadata: reusableCoverage, sources }),
+    NOW,
+  );
+  assert.equal(findResourceJob(inPlace.jobs, "caffeine").kind, "resource");
+  assert.equal(requests.length, 0);
+});
+
+test("a stale job leaves newer extended-history coverage untouched without egress", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const job = findResourceJob(
+    createScheduledJobs(createStoredAccount({ sources }), NOW).jobs,
+    "caffeine",
+  );
+
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({
+        metadata: {
+          junctionBloodPressureHistoryBackfillCoverage: `m2|${"0".repeat(192)}`,
+        },
+        sources,
+      }),
+    }),
+    toJobRecord(job, 1),
+  );
+
+  assert.deepEqual(result, {});
+  assert.equal(requests.length, 0);
+});
+
+test("a sparse daily aggregate completes when several readings reduce to one event", async () => {
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests: [],
+    summaryBackfillDays: 2,
+    timeseriesRecords: {
+      caffeine: [{
+        end: "2026-06-10T08:05:00.000Z",
+        start: "2026-06-10T08:00:00.000Z",
+        unit: "g",
+        value: 0.08,
+      }, {
+        end: "2026-06-10T14:05:00.000Z",
+        start: "2026-06-10T14:00:00.000Z",
+        unit: "g",
+        value: 0.04,
+      }],
+    },
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const resourceAvailabilitySummary = { caffeine: true };
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    resourceAvailabilitySummary,
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const caffeine = findResourceJob(scheduled.jobs, "caffeine");
+  const { result } = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(caffeine, 1),
+    provider,
+    resource: "caffeine",
+  });
+
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assertHistoryCoverage(result.metadataPatch, "omron", "caffeine");
+});
+
+test("a sparse daily aggregate retries a date with a malformed sibling", async () => {
+  const importedSnapshots: unknown[] = [];
+  const timeseriesRecords: Record<string, unknown>[] = [{
+    end: "2026-06-09T08:05:00.000Z",
+    start: "2026-06-09T08:00:00.000Z",
+    unit: "g",
+  }, {
+    end: "2026-06-09T14:05:00.000Z",
+    start: "2026-06-09T14:00:00.000Z",
+    unit: "g",
+    value: 0.08,
+  }];
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests: [],
+    summaryBackfillDays: 2,
+    timeseriesRecords: { caffeine: timeseriesRecords },
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const caffeine = findResourceJob(scheduled.jobs, "caffeine");
+  const firstPass = await executeImmediateResourceContinuations({
+    context: createJobContext({ importedSnapshots }),
+    job: toJobRecord(caffeine, 1),
+    provider,
+    resource: "caffeine",
+  });
+  const delayedRetry = findResourceJob(firstPass.result.scheduledJobs ?? [], "caffeine");
+
+  assertHistoryCoverage(firstPass.result.metadataPatch, "omron", "caffeine", false);
+  assert.equal(delayedRetry.availableAt, "2026-06-11T12:15:00.000Z");
+  assert.equal(delayedRetry.payload?.windowStart, "2026-06-09T00:00:00.000Z");
+  assert.equal(delayedRetry.payload?.historicalPullReady, undefined);
+
+  timeseriesRecords[0] = {
+    ...timeseriesRecords[0],
+    value: 0.04,
+  };
+  const repaired = await executeImmediateResourceContinuations({
+    context: createJobContext({
+      importedSnapshots,
+      now: "2026-06-11T12:15:00.000Z",
+    }),
+    job: toJobRecord(delayedRetry, 3),
+    provider,
+    resource: "caffeine",
+  });
+
+  assert.equal(repaired.result.scheduledJobs?.length ?? 0, 0);
+  assertHistoryCoverage(repaired.result.metadataPatch, "omron", "caffeine");
+  const completed = createScheduledJobs(
+    createStoredAccount({ metadata: repaired.result.metadataPatch, sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  assert.equal(
+    completed.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "caffeine"
+    ),
+    false,
+  );
+  const normalized = await Promise.all(importedSnapshots.map(async (snapshot) => {
+    const parsed = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
+    return junctionProviderAdapter.normalizeSnapshot(parsed);
+  }));
+  assert.deepEqual(
+    normalized.flatMap((payload) =>
+      payload.events
+        ?.filter((event) => event.fields?.metric === "caffeine")
+        .map((event) => event.fields?.value) ?? []
+    ),
+    [80, 120],
+  );
+});
+
+test("date-mode history and reconcile keep provider days atomic across UTC midnight", async () => {
+  const cases = [
+    [
+      "negative offset",
+      [
+        { end: "2026-06-09T10:05:00-07:00", start: "2026-06-09T10:00:00-07:00", unit: "g", value: 0.08 },
+        { end: "2026-06-09T20:05:00-07:00", start: "2026-06-09T20:00:00-07:00", unit: "g", value: 0.04 },
+      ],
+    ],
+    [
+      "positive offset",
+      [
+        { end: "2026-06-09T00:35:00+07:00", start: "2026-06-09T00:30:00+07:00", unit: "g", value: 0.08 },
+        { end: "2026-06-09T20:05:00+07:00", start: "2026-06-09T20:00:00+07:00", unit: "g", value: 0.04 },
+      ],
+    ],
+  ] as const;
+
+  for (const [label, records] of cases) {
+    const provider = createProvider({
+      providerState: {
+        resourceAvailability: { caffeine: true },
+        status: "connected",
+      },
+      requests: [],
+      summaryBackfillDays: 2,
+      timeseriesRecords: { caffeine: records },
+      timeseriesResources: ["caffeine"],
+    });
+    const executor = requireValue(provider.jobExecutor);
+    const createScheduledJobs = requireValue(executor.createScheduledJobs);
+    const sources = [createSourceSummary(
+      "omron",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      { caffeine: true },
+    )];
+    const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+    const historicalSnapshots: unknown[] = [];
+    const historical = await executeImmediateResourceContinuations({
+      context: createJobContext({ importedSnapshots: historicalSnapshots }),
+      job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+      provider,
+      resource: "caffeine",
+    });
+    const reconcileSnapshots: unknown[] = [];
+    await executor.executeJob(
+      createJobContext({ importedSnapshots: reconcileSnapshots }),
+      toJobRecord({
+        dedupeKey: `reconcile-${label}`,
+        kind: "reconcile",
+        payload: {
+          windowEnd: "2026-06-10T00:00:00.000Z",
+          windowStart: "2026-06-09T00:00:00.000Z",
+        },
+        priority: 40,
+      }, 2),
+    );
+
+    const externalRefs = [];
+    for (const snapshots of [historicalSnapshots, reconcileSnapshots]) {
+      const normalized = await Promise.all(snapshots.map(async (snapshot) => {
+        const parsed = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
+        return junctionProviderAdapter.normalizeSnapshot(parsed);
+      }));
+      const caffeineEvents = normalized.flatMap((payload) =>
+        payload.events?.filter((event) => event.fields?.metric === "caffeine") ?? []
+      );
+      assert.equal(caffeineEvents.length, 1, label);
+      assert.equal(caffeineEvents[0]?.dayKey, "2026-06-09", label);
+      assert.equal(caffeineEvents[0]?.fields?.value, 120, label);
+      externalRefs.push(caffeineEvents[0]?.externalRef);
+    }
+    assert.deepEqual(externalRefs[0], externalRefs[1], label);
+    assert.equal(historical.result.scheduledJobs?.length ?? 0, 0, label);
+  }
+});
+
+test("sparse history waits for upstream pull success beyond the empty retry ladder", async () => {
+  const historicalPullState: MutableHistoricalPullState = {
+    resource: "caffeine",
+    status: "in_progress",
+  };
+  const requests: TimeseriesRequest[] = [];
+  const timeseriesRecords: Record<string, unknown>[] = [];
+  const provider = createProvider({
+    historicalPullState,
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesRecords: { caffeine: timeseriesRecords },
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const exhausted = toJobRecord({
+    ...findResourceJob(scheduled.jobs, "caffeine"),
+    payload: {
+      ...findResourceJob(scheduled.jobs, "caffeine").payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 1);
+  const pending = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    exhausted,
+  );
+  const retry = findResourceJob(pending.scheduledJobs ?? [], "caffeine");
+
+  assertHistoryCoverage(pending.metadataPatch, "omron", "caffeine", false);
+  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(requests.length, 0);
+
+  historicalPullState.status = "success";
+  timeseriesRecords.push({
+    end: "2026-06-09T08:05:00.000Z",
+    start: "2026-06-09T08:00:00.000Z",
+    unit: "g",
+    value: 0.08,
+  });
+  const completed = await executeImmediateResourceContinuations({
+    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    job: toJobRecord(retry, 2),
+    provider,
+    resource: "caffeine",
+  });
+
+  assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
+  assert.equal(requests.length, 2);
+});
+
+test("sparse history completion resolves supported source aliases", async () => {
+  const cases = [
+    {
+      expectedCoverage: false,
+      expectedScheduledJobs: 1,
+      expectedTimeseriesRequests: 0,
+      historicalPullState: {
+        notPulled: true,
+        resource: "caffeine",
+        status: "in_progress",
+      },
+      label: "in_progress",
+    },
+    {
+      expectedCoverage: true,
+      expectedScheduledJobs: 0,
+      expectedTimeseriesRequests: 0,
+      historicalPullState: { notPulled: true, resource: "caffeine" },
+      label: "not_pulled",
+    },
+    {
+      expectedCoverage: false,
+      expectedScheduledJobs: 0,
+      expectedTimeseriesRequests: 0,
+      historicalPullState: {
+        notPulled: true,
+        resource: "caffeine",
+        status: "failure",
+      },
+      label: "failure",
+    },
+    {
+      expectedCoverage: true,
+      expectedScheduledJobs: 0,
+      expectedTimeseriesRequests: 2,
+      historicalPullState: {
+        notPulled: true,
+        resource: "caffeine",
+        status: "success",
+      },
+      label: "success",
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({
+      additionalProviders: [{
+        resourceAvailability: { caffeine: true },
+        slug: "apple_health",
+      }],
+      historicalPullState: {
+        ...testCase.historicalPullState,
+        providerSlug: "apple-healthkit",
+      },
+      providerState: {
+        resourceAvailability: { activity: true },
+        status: "connected",
+      },
+      requests,
+      summaryBackfillDays: 2,
+      timeseriesRecords: {
+        caffeine: [{
+          end: "2026-06-09T08:05:00.000Z",
+          start: "2026-06-09T08:00:00.000Z",
+          unit: "g",
+          value: 0.08,
+        }],
+      },
+      timeseriesResources: ["caffeine"],
+    });
+    const createScheduledJobs = requireValue(
+      requireValue(provider.jobExecutor).createScheduledJobs,
+    );
+    const sources = [createSourceSummary(
+      "apple_health",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      { caffeine: true },
+    )];
+    const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+    const completed = await executeImmediateResourceContinuations({
+      context: createJobContext(),
+      job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+      provider,
+      resource: "caffeine",
+    });
+
+    assertHistoryCoverage(
+      completed.result.metadataPatch,
+      "apple_health",
+      "caffeine",
+      testCase.expectedCoverage,
+      testCase.label,
+    );
+    assert.equal(
+      completed.result.scheduledJobs?.length ?? 0,
+      testCase.expectedScheduledJobs,
+      testCase.label,
+    );
+    assert.equal(
+      requests.length,
+      testCase.expectedTimeseriesRequests,
+      testCase.label,
+    );
+  }
+});
+
+test("successful upstream pull with no sparse rows completes after one scan", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState: { resource: "caffeine", status: "success" },
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const completed = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+    provider,
+    resource: "caffeine",
+  });
+
+  assert.equal(completed.executionCount, 2);
+  assert.equal(requests.length, 2);
+  assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
+});
+
+test("unavailable upstream status cannot certify zero-row sparse history", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const historicalPullRequestFailure = { active: true, status: 503 };
+  const provider = createProvider({
+    historicalPullRequestFailure,
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const first = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+    provider,
+    resource: "caffeine",
+  });
+  const retry = findResourceJob(first.result.scheduledJobs ?? [], "caffeine");
+
+  assert.equal(first.executionCount, 2);
+  assert.equal(requests.length, 2);
+  assertHistoryCoverage(first.result.metadataPatch, "omron", "caffeine", false);
+  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(retry.payload?.historicalPullReady, undefined);
+
+  historicalPullRequestFailure.active = false;
+  const second = await executeImmediateResourceContinuations({
+    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    job: toJobRecord(retry, 2),
+    provider,
+    resource: "caffeine",
+  });
+
+  assert.equal(requests.length, 4);
+  assertHistoryCoverage(second.result.metadataPatch, "omron", "caffeine", false);
+  assert.equal(
+    findResourceJob(second.result.scheduledJobs ?? [], "caffeine").availableAt,
+    "2026-06-13T12:00:00.000Z",
+  );
+});
+
+test("explicit historical-pull failure stays uncovered without timeseries egress", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState: { resource: "caffeine", status: "failure" },
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+  );
+
+  assert.equal(requests.length, 0);
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assertHistoryCoverage(result.metadataPatch, "omron", "caffeine", false);
+  assert.equal(
+    createScheduledJobs(createStoredAccount({ sources }), "2026-06-11T13:00:00.000Z")
+      .jobs.some((job) => job.payload?.resource === "caffeine"),
+    true,
+  );
+});
+
+test("explicitly not-pulled sparse history closes without provider egress", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState: { notPulled: true, resource: "caffeine" },
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+  );
+
+  assert.equal(requests.length, 0);
+  assertHistoryCoverage(result.metadataPatch, "omron", "caffeine");
+});
+
+test("a persistently malformed sparse day exhausts only its bounded day retry", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState: { resource: "caffeine", status: "success" },
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 1,
+    timeseriesRecords: {
+      caffeine: [{
+        end: "2026-06-10T08:05:00.000Z",
+        start: "2026-06-10T08:00:00.000Z",
+        unit: "g",
+      }, {
+        end: "2026-06-10T14:05:00.000Z",
+        start: "2026-06-10T14:00:00.000Z",
+        unit: "g",
+        value: 0.08,
+      }],
+    },
+    timeseriesResources: ["caffeine"],
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const createScheduledJobs = requireValue(executor.createScheduledJobs);
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  let job = toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1);
+  let now = NOW;
+  let finalResult: ProviderJobResult | null = null;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const result = await executor.executeJob(createJobContext({ now }), job);
+    const retry = result.scheduledJobs?.find((candidate) =>
+      candidate.kind === "resource" && candidate.payload?.resource === "caffeine"
+    );
+    if (!retry) {
+      finalResult = result;
+      break;
+    }
+    now = requireValue(retry.availableAt);
+    job = toJobRecord(retry, attempt + 2);
+  }
+
+  assert.equal(requests.length, 5);
+  assertHistoryCoverage(
+    requireValue(finalResult).metadataPatch,
+    "omron",
+    "caffeine",
+  );
+});
+
+test("not_pulled skips frozen history but catches a queued migration up to current reconcile", async () => {
+  const tempDir = await makeTempDirectory("murph-junction-sparse-history-catch-up");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState: { notPulled: true, resource: "caffeine" },
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const delayedNow = "2026-07-11T12:00:00.000Z";
+
+  try {
+    const storedAccount = store.upsertAccount({
+      connectedAt: NOW,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-user-1",
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    const originalInput = findResourceJob(scheduled.jobs, "caffeine");
+    const original = store.enqueueJob({
+      ...originalInput,
+      accountId: storedAccount.id,
+      provider: "junction",
+    });
+    const current = createScheduledJobs(createStoredAccount({ sources }), delayedNow);
+    const duplicateInput = findResourceJob(current.jobs, "caffeine");
+    const duplicate = store.enqueueJob({
+      ...duplicateInput,
+      accountId: storedAccount.id,
+      provider: "junction",
+    });
+    const reconcileInput = requireValue(current.jobs.find((job) => job.kind === "reconcile"));
+    const reconcile = store.enqueueJob({
+      ...reconcileInput,
+      accountId: storedAccount.id,
+      provider: "junction",
+    });
+
+    assert.equal(duplicate.id, original.id);
+    assert.equal(duplicate.payload.windowEnd, "2026-06-11T00:00:00.000Z");
+    assert.equal(reconcile.payload.windowStart, "2026-07-04T00:00:00.000Z");
+
+    const claimedReconcile = requireValue(
+      store.claimDueJob("worker-reconcile", delayedNow, 60_000),
+    );
+    assert.equal(claimedReconcile.id, reconcile.id);
+    assert.equal(
+      store.completeJobIfOwned(claimedReconcile.id, "worker-reconcile", delayedNow),
+      true,
+    );
+    const claimedMigration = requireValue(
+      store.claimDueJob("worker-migration", delayedNow, 60_000),
+    );
+    assert.equal(claimedMigration.id, original.id);
+
+    const context = createJobContext({
+      account: createAccount({ now: delayedNow, sources }),
+      now: delayedNow,
+    });
+    const firstResult = await requireValue(provider.jobExecutor).executeJob(
+      context,
+      claimedMigration,
+    );
+
+    assertHistoryCoverage(firstResult.metadataPatch, "omron", "caffeine", false);
+    const catchUp = findResourceJob(
+      firstResult.scheduledJobs ?? [],
+      "caffeine",
+    );
+    assert.equal(requests.length, 0);
+    assert.equal(catchUp.payload?.windowStart, "2026-06-11T00:00:00.000Z");
+    assert.equal(catchUp.payload?.windowEnd, "2026-07-04T00:00:00.000Z");
+
+    const completed = await executeImmediateResourceContinuations({
+      context: createJobContext({
+        account: createAccount({ now: "2026-07-22T12:00:00.000Z", sources }),
+        now: "2026-07-22T12:00:00.000Z",
+      }),
+      job: toJobRecord(catchUp, 2),
+      provider,
+      resource: "caffeine",
+      startingIndex: 3,
+    });
+
+    assert.equal(completed.executionCount, 34);
+    assert.equal(requests.length, 34);
+    assert.equal(requests[0]?.start, "2026-06-11");
+    assert.equal(requests.at(-1)?.end, "2026-07-14");
+    assert.equal(
+      completed.results.slice(0, -1).some((result) =>
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          result.metadataPatch ?? {},
+          "omron",
+          "caffeine",
+          1,
+        )
+      ),
+      false,
+    );
+    assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("in-flight unversioned note history cannot certify v2 coverage after upgrade", async () => {
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    requests: [],
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const legacyJob = toJobRecord({
+    kind: "resource",
+    payload: {
+      historicalBackfill: true,
+      historicalWindowStart: "2026-06-09T00:00:00.000Z",
+      resource: "note",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "oura",
+      windowEnd: "2026-06-11T00:00:00.000Z",
+      windowStart: "2026-06-09T00:00:00.000Z",
+    },
+  }, 1);
+
+  const firstResult = await executor.executeJob(createJobContext(), legacyJob);
+  const legacyContinuation = requireValue(firstResult.scheduledJobs?.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+  assert.equal(Object.hasOwn(legacyContinuation.payload ?? {}, "historicalBackfillVersion"), false);
+
+  const completedLegacy = await executor.executeJob(
+    createJobContext(),
+    toJobRecord(legacyContinuation, 2),
+  );
+  assertHistoryCoverage(completedLegacy.metadataPatch, "oura", "note", false);
+
+  const sources = [createSourceSummary(
+    "oura",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { note: true },
+  )];
+  const scheduledV2 = requireValue(executor.createScheduledJobs)(
+    createStoredAccount({ metadata: completedLegacy.metadataPatch, sources }),
+    NOW,
+  ).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note");
+  assert.equal(scheduledV2?.payload?.historicalBackfillVersion, 2);
+
+  const lateLegacyCompletion = await executor.executeJob(
+    createJobContext({
+      account: createAccount({ metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" } }),
+    }),
+    toJobRecord({
+      ...legacyContinuation,
+      payload: {
+        ...legacyContinuation.payload,
+        windowStart: "2026-06-10T00:00:00.000Z",
+      },
+    }, 3),
+  );
+  assert.equal(
+    Object.hasOwn(lateLegacyCompletion.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY),
+    false,
+  );
+
+  const futureJob = toJobRecord({
+    ...legacyContinuation,
+    payload: {
+      ...legacyContinuation.payload,
+      historicalBackfillVersion: 3,
+      windowStart: "2026-06-10T00:00:00.000Z",
+    },
+  }, 4);
+  const futureResult = await executor.executeJob(createJobContext(), futureJob);
+  assert.equal(Object.hasOwn(futureResult.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY), false);
+});
+
+test("empty Oura note history reaches terminal source coverage", async () => {
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    requests: [],
+    summaryBackfillDays: 180,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "oura",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { note: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const note = requireValue(scheduled.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+
+  const { result } = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(note, 1),
+    provider,
+    resource: "note",
+  });
+
+  assertHistoryCoverage(result.metadataPatch, "oura", "note");
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  const completed = createScheduledJobs(
+    createStoredAccount({ metadata: result.metadataPatch, sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  assert.equal(
+    completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
     false,
   );
 });
@@ -790,7 +2173,7 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
     job: toJobRecord(schedulerJob, 1),
     provider,
   });
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(completed.metadataPatch, "omron", "blood_pressure");
   assert.equal(requests[0]?.start, "2026-02-18T00:00:00.000Z");
   assert.equal(requests.at(-1)?.end, "2026-03-20T00:00:00.000Z");
 
@@ -1007,7 +2390,7 @@ test("live blood-pressure capability gates provider egress and terminal coverage
     job: toJobRecord(recreated, 2),
     provider: recoveredProvider,
   });
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(completed.metadataPatch, "omron", "blood_pressure");
   assert.equal(
     recoveredRequests.some((request) => request.resource === "blood_pressure"),
     true,
@@ -1227,7 +2610,7 @@ test("a fetched blood-pressure record completes without an empty retry", async (
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(result.metadataPatch, "omron", "blood_pressure");
 });
 
 test("partial optional failure retries the uncompleted segment after importing canonical events", async () => {
@@ -1268,7 +2651,7 @@ test("partial optional failure retries the uncompleted segment after importing c
     provider,
   });
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(completed.metadataPatch, "omron", "blood_pressure");
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
     31,
@@ -1376,7 +2759,7 @@ test("retryable provider failure after raw rows preserves evidence through later
   });
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(recovered.metadataPatch, "omron", "blood_pressure");
 });
 
 test("retryable post-fetch failures preserve raw evidence and replay the anchored window", async () => {
@@ -1470,9 +2853,11 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
     });
 
     assert.equal(recovered.scheduledJobs?.length ?? 0, 0, boundary);
-    assert.equal(
-      recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
-      "v1|omron",
+    assertHistoryCoverage(
+      recovered.metadataPatch,
+      "omron",
+      "blood_pressure",
+      true,
       boundary,
     );
   }
@@ -1638,7 +3023,7 @@ test("source history partial failure stays recoverable after the empty retry lad
     provider,
   });
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(recovered.metadataPatch, "omron", "blood_pressure");
 });
 
 test("source-scoped partial failure stays recoverable after the empty retry ladder", async () => {
@@ -1685,7 +3070,7 @@ test("source-scoped partial failure stays recoverable after the empty retry ladd
     provider,
   });
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(recovered.metadataPatch, "omron", "blood_pressure");
 });
 
 test("raw provider rows without canonical imported events remain on the retry ladder", async () => {
@@ -1754,7 +3139,7 @@ test("exhausted malformed provider rows stay recoverable until canonical import 
   });
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(recovered.metadataPatch, "omron", "blood_pressure");
 });
 
 test("mixed canonical and malformed history stays unresolved until a complete repair", async () => {
@@ -1846,7 +3231,7 @@ test("mixed canonical and malformed history stays unresolved until a complete re
   });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(repaired.metadataPatch, "omron", "blood_pressure");
 });
 
 test("mixed source admission preserves rejected exact identity until authorized replay", async () => {
@@ -1922,10 +3307,7 @@ test("mixed source admission preserves rejected exact identity until authorized 
   });
 
   assert.equal(admittedReplay.scheduledJobs?.length ?? 0, 0);
-  assert.equal(
-    admittedReplay.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
-    "v1|omron",
-  );
+  assertHistoryCoverage(admittedReplay.metadataPatch, "omron", "blood_pressure");
 });
 
 test("an unrelated canonical reading cannot clear a malformed provider row", async () => {
@@ -1999,7 +3381,7 @@ test("an unrelated canonical reading cannot clear a malformed provider row", asy
     provider,
   });
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(repaired.metadataPatch, "omron", "blood_pressure");
 });
 
 test("every malformed provider identity must be repaired before coverage completes", async () => {
@@ -2060,7 +3442,7 @@ test("every malformed provider identity must be repaired before coverage complet
     provider,
   });
   assert.equal(fullyRepaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(fullyRepaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(fullyRepaired.metadataPatch, "omron", "blood_pressure");
 });
 
 test("more than 64 stable unresolved identities survive yield and clear exactly after repair", async () => {
@@ -2161,7 +3543,7 @@ test("more than 64 stable unresolved identities survive yield and clear exactly 
   });
 
   assert.equal(fullyRepaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(fullyRepaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(fullyRepaired.metadataPatch, "omron", "blood_pressure");
 });
 
 test("legacy and identity-less unresolved evidence cannot be cleared speculatively", async () => {
@@ -2255,7 +3637,7 @@ test("exact provider duplicates do not create false unresolved history", async (
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(result.metadataPatch, "omron", "blood_pressure");
 });
 
 test("a malformed post-yield segment requires one repaired anchored scan", async () => {
@@ -2328,7 +3710,7 @@ test("a malformed post-yield segment requires one repaired anchored scan", async
   });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(repaired.metadataPatch, "omron", "blood_pressure");
 });
 
 test.each(SOURCE_DISCONNECT_FENCE_CODES)(
@@ -2432,9 +3814,10 @@ test.each(["error", "unavailable"] as const)(
       provider,
     });
     assert.equal(completedTraversal.scheduledJobs?.length ?? 0, 0);
-    assert.equal(
-      completedTraversal.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
-      "v1|omron",
+    assertHistoryCoverage(
+      completedTraversal.metadataPatch,
+      "omron",
+      "blood_pressure",
     );
   },
 );
@@ -2508,7 +3891,7 @@ test.each(["error", "unavailable"] as const)(
       toJobRecord(continuation, status === "error" ? 94 : 95),
     );
     assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-    assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+    assertHistoryCoverage(repaired.metadataPatch, "omron", "blood_pressure");
   },
 );
 
@@ -2826,7 +4209,7 @@ test("yielded blood-pressure history keeps one identity and remembers earlier re
     provider,
   });
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(completed.metadataPatch, "omron", "blood_pressure");
 });
 
 test("malformed history cannot starve later valid days or clear without exact repair", async () => {
@@ -2945,7 +4328,7 @@ test("malformed history cannot starve later valid days or clear without exact re
   });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoverage(repaired.metadataPatch, "omron", "blood_pressure");
 });
 
 test("an empty yielded scan retries from the original anchored window", async () => {

@@ -1,0 +1,1 @@
+export { DELETE } from "../route";

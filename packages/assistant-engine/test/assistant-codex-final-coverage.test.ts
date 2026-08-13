@@ -28,6 +28,19 @@ const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'memories.use_memories': false,
   web_search: 'disabled',
 } as const
+const EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
+  include_apps_instructions: false,
+  include_collaboration_mode_instructions: false,
+  include_environment_context: false,
+  include_permissions_instructions: false,
+  project_doc_max_bytes: 0,
+  'features.request_permissions_tool': false,
+  'skills.include_instructions': false,
+} as const
+const EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+  ...EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+  ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
   'features.shell_tool=true',
   'features.apps=true',
@@ -52,30 +65,22 @@ const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
   resolveCodexAssistantCapabilities: vi.fn(),
   resolveCodexAssistantTargetCapabilities: vi.fn(),
-  resolveCodexAssistantLabel: vi.fn((profile) =>
-    (profile.target?.kind ?? profile.provider) === 'codex-cli'
-      ? 'Codex CLI'
-      : 'Unsupported provider',
-  ),
-  resolveCodexStaticModels: vi.fn((profile) =>
-    (profile.target?.kind ?? profile.provider) === 'codex-cli'
-      ? [
-          {
-            id: 'gpt-5.4',
-            label: 'GPT-5.4',
-            description: 'Frontier model',
-            source: 'static',
-            capabilities: {
-              images: true,
-              pdf: false,
-              reasoning: true,
-              streaming: true,
-              tools: true,
-            },
-          },
-        ]
-      : [],
-  ),
+  resolveCodexAssistantLabel: vi.fn(() => 'Codex CLI'),
+  resolveCodexStaticModels: vi.fn(() => [
+    {
+      id: 'gpt-5.4',
+      label: 'GPT-5.4',
+      description: 'Frontier model',
+      source: 'static',
+      capabilities: {
+        images: true,
+        pdf: false,
+        reasoning: true,
+        streaming: true,
+        tools: true,
+      },
+    },
+  ]),
 }))
 
 const providerTurnRunnerMocks = vi.hoisted(() => ({
@@ -443,41 +448,34 @@ describe('Codex model catalog', () => {
   })
 
   it('normalizes provider profiles and builds model catalogs with current and static models', () => {
-    providerMocks.resolveCodexAssistantLabel.mockImplementation((profile) =>
-      (profile.target?.kind ?? profile.provider) === 'codex-cli'
-        ? 'Codex CLI'
-        : 'Unsupported provider',
-    )
+    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.resolveCodexStaticModels.mockImplementation((profile) =>
-      (profile.target?.kind ?? profile.provider) === 'codex-cli'
-        ? [
-            {
-              id: 'gpt-5.4',
-              label: 'GPT-5.4',
-              description: 'Frontier model',
-              source: 'static',
-              capabilities: {
-                images: true,
-                pdf: false,
-                reasoning: true,
-                streaming: true,
-                tools: true,
-              },
-            },
-          ]
-        : [],
-    )
+    providerMocks.resolveCodexStaticModels.mockReturnValue([
+      {
+        id: 'gpt-5.4',
+        label: 'GPT-5.4',
+        description: 'Frontier model',
+        source: 'static',
+        capabilities: {
+          images: true,
+          pdf: false,
+          reasoning: true,
+          streaming: true,
+          tools: true,
+        },
+      },
+    ])
 
     const profile = resolveCodexAssistantProfile({
       provider: 'codex-cli',
     })
     expect(profile).toMatchObject({
       target: {
-        kind: 'codex-cli',
+        model: null,
+        modelProvider: null,
       },
       providerLabel: 'Codex CLI',
     })
@@ -1293,6 +1291,10 @@ describe('Codex model catalog', () => {
 
     expect(outcome.kind).toBe('succeeded')
     expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG)
+    expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
       dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
@@ -1404,6 +1406,29 @@ describe('Codex model catalog', () => {
     })
 
     expect(outcome.kind).toBe('succeeded')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG)
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).not.toHaveProperty('features.shell_tool')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexConfigOverrides,
+    ).toEqual(
+      expect.arrayContaining([
+        'features.apps=false',
+        'features.multi_agent=false',
+        'features.plugins=false',
+        'web_search="disabled"',
+      ]),
+    )
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexConfigOverrides,
+    ).not.toContain('features.shell_tool=false')
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -1540,6 +1565,12 @@ describe('Codex model catalog', () => {
     )
     expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.shell_tool=false',
+    )
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    )
+    expect(providerInput?.codexThreadConfig).not.toHaveProperty(
+      'features.shell_tool',
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],

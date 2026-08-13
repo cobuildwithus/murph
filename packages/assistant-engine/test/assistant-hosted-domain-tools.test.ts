@@ -722,6 +722,119 @@ describe('hosted domain dynamic tools', () => {
     })
   })
 
+  it('documents canonical automation calls without weakening strict validation', () => {
+    for (const scheduleExample of [
+      '`{"kind":"every","everyMs":3600000}`',
+      '`{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`',
+      '`{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`',
+    ]) {
+      expect(MURPH_AUTOMATION_TOOL.description).toContain(scheduleExample)
+    }
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Never invent schedule, update, or timezone fields outside the schema.',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field',
+    )
+
+    for (const schedule of [
+      { kind: 'every', everyMs: 3_600_000 },
+      {
+        kind: 'cron',
+        expression: '0 9 * * 1-5',
+        timeZone: 'America/Chicago',
+      },
+      {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+        timeZone: 'America/Chicago',
+      },
+    ]) {
+      expect(readToolRequest('automation', {
+        action: 'save',
+        instructions: 'Send a short reminder.',
+        schedule,
+        title: 'Scheduled reminder',
+      })).toMatchObject({
+        kind: 'automation',
+        request: { schedule },
+      })
+    }
+
+    for (const invalidArguments of [
+      {
+        action: 'save',
+        instructions: 'Send a short reminder.',
+        schedule: { kind: 'at', at: '2030-01-15T15:30:00Z' },
+        title: 'Scheduled reminder',
+      },
+      {
+        action: 'update',
+        lookup: 'scheduled-reminder',
+        status: 'paused',
+      },
+      {
+        action: 'patch',
+        status: 'paused',
+      },
+      {
+        action: 'patch',
+        lookup: 'scheduled-reminder',
+        update: { status: 'paused' },
+      },
+      {
+        action: 'save',
+        instructions: 'Send a short reminder.',
+        schedule: {
+          kind: 'cron',
+          expression: '0 9 * * 1-5',
+          timezone: 'America/Chicago',
+        },
+        title: 'Scheduled reminder',
+      },
+      {
+        action: 'save',
+        instructions: 'Send a short reminder.',
+        schedule: {
+          kind: 'at',
+          at: '2030-01-15T15:30:00Z',
+          timeZone: 'America/Chicago',
+        },
+        title: 'Scheduled reminder',
+      },
+      {
+        action: 'save',
+        instructions: 'Send a short reminder.',
+        schedule: {
+          kind: 'every',
+          everyMs: 3_600_000,
+          timeZone: 'America/Chicago',
+        },
+        title: 'Scheduled reminder',
+      },
+      {
+        action: 'save',
+        instructions: 'Send a short reminder.',
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '09:00',
+        },
+        timeZone: 'America/Chicago',
+        title: 'Scheduled reminder',
+      },
+    ]) {
+      expect(readToolRequest('automation', invalidArguments)).toMatchObject({
+        kind: 'invalid-automation-arguments',
+      })
+    }
+  })
+
   it('keeps privileged and generic execution fields out of both schemas', () => {
     const propertyKeys = new Set([
       ...collectJsonSchemaPropertyKeys(MURPH_AUTOMATION_TOOL.inputSchema),

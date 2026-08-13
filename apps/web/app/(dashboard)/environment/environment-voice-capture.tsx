@@ -49,6 +49,7 @@ export function EnvironmentVoiceCapture({
   triggerSize = "lg",
   disabled = false,
   onAccepted,
+  onUploadStarted,
   script = DEFAULT_ENVIRONMENT_VOICE_SCRIPT,
   triggerLabel = "Tell Murph by voice",
   triggerVariant = "default",
@@ -56,6 +57,7 @@ export function EnvironmentVoiceCapture({
   triggerSize?: "sm" | "default" | "lg";
   disabled?: boolean;
   onAccepted?: () => void;
+  onUploadStarted?: () => void;
   script?: EnvironmentVoiceScript;
   triggerLabel?: string;
   triggerVariant?: "default" | "outline";
@@ -350,6 +352,7 @@ export function EnvironmentVoiceCapture({
   };
 
   const uploadRecording = async (file: File) => {
+    onUploadStarted?.();
     setState("uploading");
     setNotice(null);
     const abortController = new AbortController();

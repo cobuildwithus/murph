@@ -86,7 +86,7 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
-  mergeAssistantProviderConfigsForProvider,
+  mergeAssistantProviderConfigs,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -2271,8 +2271,7 @@ export async function updateAssistantSessionOptionsLocal(input: {
     createIfMissing: false,
   })
 
-  const providerConfig = mergeAssistantProviderConfigsForProvider(
-    input.providerOptions.provider,
+  const providerConfig = mergeAssistantProviderConfigs(
     // Persisted targets carry the full durable provider config. Session
     // providerOptions are a derived runtime projection and omit target-only
     // fields such as the Codex executable path.
@@ -2281,12 +2280,6 @@ export async function updateAssistantSessionOptionsLocal(input: {
   )
   const nextTarget =
     createAssistantModelTarget(providerConfig) ?? session.session.target
-  if (nextTarget.adapter !== 'codex-cli') {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      'Assistant sessions only support Codex app-server targets.',
-    )
-  }
   const nextProviderOptions = serializeAssistantProviderSessionOptions(providerConfig)
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
