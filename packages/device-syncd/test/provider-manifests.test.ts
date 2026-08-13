@@ -509,6 +509,10 @@ describe("deviceSyncProviderManifests", () => {
         payload: {
           eventType: "daily.data.activity.created",
           historicalBackfillVersion: 2,
+          historicalCoverageTarget: "2026-04-23T00:00:00.000Z",
+          historicalMalformedDateExhausted: true,
+          historicalMalformedDateRetryAttempts: 3,
+          historicalNoProgressAttempts: 2,
           historicalNoProgressRescan: true,
           historicalProviderRecordsSeen: true,
           historicalUnresolvedProviderRecordIdentitiesJson:
@@ -527,6 +531,10 @@ describe("deviceSyncProviderManifests", () => {
     ).toEqual({
       eventType: "daily.data.activity.created",
       historicalBackfillVersion: 2,
+      historicalCoverageTarget: "2026-04-23T00:00:00.000Z",
+      historicalMalformedDateExhausted: true,
+      historicalMalformedDateRetryAttempts: 3,
+      historicalNoProgressAttempts: 2,
       historicalNoProgressRescan: true,
       historicalProviderRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson:
