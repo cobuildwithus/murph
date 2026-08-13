@@ -78,13 +78,32 @@ Updated: 2026-08-13
   `calories_basal` was absent from the daily-activity metric list. Its other
   proposed categories were already covered by the shipped prompt and skills.
 - Keep the correction in the always-on capability map plus the existing
-  `daily-activity` skill. Do not add a new skill or CLI surface.
+  `daily-activity` and `cardiometabolic-health` skills. Do not add a new skill
+  or CLI surface.
 - The first ReviewGPT response was substantive but its wrapper result was
   invalid because model confirmation was unavailable. The patch artifact was
   checksum-verified, fully inspected, and only its two evidence-backed findings
   were implemented manually.
 - This changes member-visible answer coverage, so publish one small changelog
   fragment rather than reopening the broader sync announcement.
+- The preliminary ReviewGPT specialist pass returned four findings. Accepted:
+  make insulin reads explicitly bounded and non-exhaustive, give basal and
+  insulin one route owner each, describe connected carbohydrate observations
+  as partial intake evidence, and add a real-provider model-choice evaluation.
+  Rejected: expanding this prompt task into new event-list filters and
+  pagination. The current CLI cannot prove an exhaustive total or absence, so
+  Murph now reports only matching records returned by one bounded short-range
+  read and says an empty result is not proof that no insulin was recorded.
+- ReviewGPT supplied no patch artifact. Its substantive findings were
+  implemented manually and the preliminary pass was not rerun, as required by
+  the completion workflow.
+- Parent product-experience re-review after remediation found no remaining
+  product finding. The irreducible purpose is one question, one owning skill,
+  one bounded canonical read, and one grounded answer that neither overstates
+  completeness nor changes prescription advice. The only material evidence
+  gap is execution of the opt-in real-provider evaluation because no provider
+  API key is available locally; the compiled evaluation stubs only canonical
+  CLI data and leaves skill choice, command choice, and wording to the model.
 
 ## Verification
 
@@ -94,12 +113,26 @@ Updated: 2026-08-13
 - Expected outcomes: Murph can discover and use the newly available normalized
   data without asking the member to restate device facts or implying access to
   raw ECG/workout samples.
-- Focused prompt, skill, and prompt-budget suite: 101 passed, 6 intentional
+- Focused prompt, skill, and prompt-budget suite: 102 passed, 6 intentional
   skips.
 - Production Codex App Server scenarios: basal-calorie and insulin queries plus
   raw-stream/intake boundaries passed through prompt, skill, exact CLI command,
-  returned evidence, and final answer.
+  returned evidence, and final answer. The corrected connected-health scenario
+  passed with 77 unrelated cases skipped; the dense-stream boundary passed in
+  the same production App Server harness.
 - Assistant Engine typecheck passed.
+- Changelog fragment validation passed all 7 cases.
+- Complete initial provider-input capture used the pinned real Codex App
+  Server, local scripted provider, `gpt-5.6-terra`, low reasoning, production
+  code mode, identical direct/group turns, and `gpt-tokenizer` 3.4.0
+  `o200k_harmony`. Selected fields were `include`, `input`, `instructions`,
+  `parallel_tool_calls`, `text`, `tool_choice`, and `tools`; transport/model,
+  reasoning, streaming, storage, cache, and client metadata were excluded
+  identically. An asserted replacement of the sole direct prompt block
+  reconstructed base behavior: direct changed from 24,814 tokens / 112,214
+  bytes to 24,837 / 112,314 (+23, +0.0927%, +100 bytes); group remained 21,305
+  tokens / 96,701 bytes (zero delta). Temporary capture code and payloads were
+  removed.
 - The generic skill validator could not run because its optional Python YAML
   dependency is absent; repository-native skill asset and frontmatter tests are
   the fallback proof.

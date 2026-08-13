@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Murph understands more connected health data",
-    "summary": "Murph can now answer questions from connected basal-calorie and recorded insulin data instead of treating those signals as unavailable.",
-    "details": "Basal calories remain an expenditure estimate, not food intake. Murph reads only stored insulin records and does not recommend prescription changes.",
+    "summary": "Murph can now use returned connected basal-calorie and recorded insulin data instead of treating those signals as unavailable.",
+    "details": "Basal calories remain an expenditure estimate, not food intake. Insulin answers describe matching records from a bounded read, never claim an exhaustive total or absence, and do not recommend prescription changes.",
     "relevanceTags": ["assistant", "wearables", "metabolic-health", "health-data"],
     "sourcePullRequests": [1698, 1777]
   }

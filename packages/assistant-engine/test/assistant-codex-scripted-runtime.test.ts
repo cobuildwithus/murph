@@ -472,7 +472,7 @@ describe('real codex app-server with scripted provider', () => {
       },
       {
         answer: 'Your connected device recorded a 4-unit insulin dose on July 12.',
-        command: 'event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        command: 'event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json',
         evidence: {
           count: 1,
           items: [{
@@ -633,7 +633,7 @@ text(result.output);
     scenario.stub.queue({
       requestIncludes: [
         'Raw ECG voltage/workout points are not stored',
-        'Burned calories and carbs are not intake',
+        'Burned calories are expenditure; carbs can be partial intake evidence',
       ],
       text: answer,
     })

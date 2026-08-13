@@ -95,7 +95,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'cardiometabolic-health',
     name: 'cardiometabolic-health',
     triggerHint:
-      'Use for glucose, A1c, CGM, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP measurement, lab retest timing, and lifestyle levers for cardiometabolic markers. Keep medication decisions framed as clinician conversations.',
+      'Use for glucose, A1c, CGM, connected insulin records, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP measurement, lab retest timing, and lifestyle levers for cardiometabolic markers. Keep medication decisions framed as clinician conversations.',
   },
   {
     slug: 'micronutrients-supplements',

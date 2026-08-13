@@ -24,6 +24,10 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- When the user specifically asks for basal calories, go directly to
+  `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json`.
+  Do not run `wearables day` first; basal calories are query-only and absent
+  from that summary.
 - For date-specific facts, first run
   `vault-cli wearables day <date> --format json`; for all workouts, types,
   count, duration, or normalized detail, next run
@@ -34,9 +38,8 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
   about, use the lossless global observation read
   `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`.
   Use the requested date or a short bounded trend window and the matching
-  public metric name: `calories_basal`, `daylight_exposure`, `fall`,
-  `floors_climbed`, `handwashing`, `stand_duration`, `stand_hour`,
-  `uv_exposure`,
+  public metric name: `daylight_exposure`, `fall`, `floors_climbed`,
+  `handwashing`, `stand_duration`, `stand_hour`, `uv_exposure`,
   `wheelchair_push`, `workout_distance`, `workout_duration`, or
   `workout_swimming_stroke`. These resource aliases belong to the global
   metric index, not the narrower `wearables metric` summary catalog. Use the

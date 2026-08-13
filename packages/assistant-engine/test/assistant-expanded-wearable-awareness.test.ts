@@ -34,24 +34,22 @@ describe('expanded wearable awareness', () => {
   it('routes normalized facts without promising source support or raw streams', () => {
     const prompt = buildPrompt()
 
-    expect(prompt).toContain('Connected health data can include body-composition')
-    expect(prompt).toContain('respiratory, metabolic, alert, accessibility, environmental')
-    expect(prompt).toContain('ECG-summary, and workout-summary observations')
-    expect(prompt).toContain('Read them with bounded `vault-cli measurement entry list`')
-    expect(prompt).toContain('Connected insulin is an `intervention_session`')
-    expect(prompt).toContain(
-      'vault-cli event list --kind intervention_session --from <date> --to <date> --limit 50 --format json',
-    )
-    expect(prompt).toContain('device-sourced `insulin-injection` events')
+    expect(prompt).toContain('Connected observations include body composition')
+    expect(prompt).toContain('respiratory, metabolic, alerts, accessibility, environment')
+    expect(prompt).toContain('ECG/workout summaries')
+    expect(prompt).toContain('Read with bounded `vault-cli measurement entry list`')
+    expect(prompt).toContain('Connected insulin records are `intervention_session` events')
+    expect(prompt).toContain('read `cardiometabolic-health`')
     expect(prompt).not.toContain('respiratory, metabolic, treatment, alert')
     expect(prompt).toContain('not `wearables metric`')
-    expect(prompt).toContain('missing is unavailable, not zero or proof of absence')
+    expect(prompt).toContain('missing is unavailable, not zero or proof')
     expect(prompt).toContain(
       'Raw ECG voltage/workout points are not stored',
     )
     expect(prompt).toContain(
-      'Burned calories and carbs are not intake; use meal records or say unavailable',
+      'Burned calories are expenditure; carbs can be partial intake evidence',
     )
+    expect(prompt).toContain('not proof of a complete meal or eaten-calorie total')
   })
 
   it('routes expanded activity signals through the lossless global metric surface', async () => {
@@ -61,7 +59,6 @@ describe('expanded wearable awareness', () => {
       'vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json',
     )
     for (const metric of [
-      'calories_basal',
       'daylight_exposure',
       'fall',
       'floors_climbed',
@@ -80,6 +77,25 @@ describe('expanded wearable awareness', () => {
     expect(skill).toMatch(/No returned entries\s+means missing coverage, not zero/u)
     expect(skill).toContain('returned source and event ID as provenance')
     expect(skill).toContain('query-only and unavailable through `vault-cli show`')
+    expect(skill).toContain(
+      'vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json',
+    )
+    expect(skill).toContain('Do not run `wearables day` first')
+  })
+
+  it('routes connected insulin through the owning skill without claiming completeness', async () => {
+    const skill = await readSkill('cardiometabolic-health')
+
+    expect(skill).toContain(
+      'vault-cli event list --kind intervention_session --from <date> --to <date> --limit 200 --format json',
+    )
+    expect(skill).toContain('`data.source` is `device`')
+    expect(skill).toContain('`data.interventionType` is `insulin-injection`')
+    expect(skill).toContain('`data.fields.dose-amount`')
+    expect(skill).toContain('Report the matching')
+    expect(skill).toContain('records returned, not an exhaustive total')
+    expect(skill).toContain('not proof that no insulin was recorded')
+    expect(skill).toContain('Never turn a record read into')
   })
 
   it('uses connected body metrics as source-aware trends rather than ground truth', async () => {
