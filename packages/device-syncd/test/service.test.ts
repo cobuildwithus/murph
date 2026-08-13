@@ -2152,10 +2152,12 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
   }
 });
 
-test("Junction sparse history certifies exhausted empties without certifying malformed days", async () => {
+test("Junction sparse history persists malformed disposition through restart without a fresh root", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-empty-history-terminal");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   let now = new Date("2026-08-11T12:00:00.000Z");
   const historicalRequests = new Map<string, number>();
+  const importedDays: string[] = [];
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -2165,8 +2167,8 @@ test("Junction sparse history certifies exhausted empties without certifying mal
     reconcileIntervalMs: 60 * 60_000,
     summaryBackfillDays: 1,
     summaryResources: [],
-    timeseriesBackfillDays: 1,
-    timeseriesResources: ["caffeine", "vo2_max"],
+    timeseriesBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
     fetchImpl: async (input) => {
       const url = new URL(readUrl(input));
       if (url.pathname === "/v2/user/providers/junction-user-empty-history-terminal") {
@@ -2175,7 +2177,7 @@ test("Junction sparse history certifies exhausted empties without certifying mal
           slug: "garmin",
           name: "Garmin",
           status: "connected",
-          resource_availability: { caffeine: true, vo2_max: true },
+          resource_availability: { caffeine: true },
         }] });
       }
       if (
@@ -2190,40 +2192,45 @@ test("Junction sparse history certifies exhausted empties without certifying mal
         )
       ) {
         const resource = url.pathname.split("/").at(-2);
-        assert.ok(resource === "caffeine" || resource === "vo2_max");
-        if (url.searchParams.get("provider") === "garmin") {
-          historicalRequests.set(resource, (historicalRequests.get(resource) ?? 0) + 1);
-        }
-        if (resource === "caffeine") {
-          return createJsonResponse({ groups: {} });
-        }
+        assert.equal(resource, "caffeine");
+        const day = url.searchParams.get("start_date");
+        assert.ok(day);
+        historicalRequests.set(day, (historicalRequests.get(day) ?? 0) + 1);
         return createJsonResponse({ groups: { garmin: [{
-          data: [{ start: url.searchParams.get("start_date"), value: "not-a-number" }],
+          data: [{
+            start: `${day}T08:00:00.000Z`,
+            value: day === "2026-08-10" ? 0.095 : "not-a-number",
+          }],
           source: { provider: "garmin", type: "watch" },
         }] } });
       }
       throw new Error(`Unexpected Junction empty-history request: ${url.pathname}`);
     },
   });
-  const { service, store, close } = createServiceFixture({
+  const createFixture = () => createServiceFixture({
     secret: "secret-for-tests",
     clock: { now: () => now },
     config: {
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
-      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      stateDatabasePath: databasePath,
     },
     importer: {
       async importDeviceProviderSnapshot(snapshot) {
         const prepared = await prepareDeviceProviderSnapshotImport(snapshot);
-        return { events: prepared.events ?? [] };
+        const events = prepared.events ?? [];
+        if (events.length > 0 && prepared.importedAt) {
+          importedDays.push(prepared.importedAt.slice(0, 10));
+        }
+        return { events };
       },
     },
     providers: [provider],
   });
+  let fixture = createFixture();
 
   try {
-    const account = store.upsertAccount({
+    const account = fixture.store.upsertAccount({
       connectedAt: "2026-04-03T12:00:00.000Z",
       credential: {
         credentialMetadata: {},
@@ -2244,18 +2251,18 @@ test("Junction sparse history certifies exhausted empties without certifying mal
       scopes: [],
       status: "active",
     });
-    store.upsertConnectionSource({
+    fixture.store.upsertConnectionSource({
       connectionId: account.id,
       lastSeenAt: now.toISOString(),
       lifecycleEpoch: 1,
-      resourceAvailabilitySummary: { caffeine: true, vo2_max: true },
+      resourceAvailabilitySummary: { caffeine: true },
       sourceInstanceKey: "garmin",
       sourceProviderSlug: "garmin",
       status: "connected",
     });
-    const activeHistoryJobs = () => readJobsForAccountForTesting(store, account.id)
+    const activeHistoryJobs = () => readJobsForAccountForTesting(fixture.store, account.id)
       .flatMap((row) => {
-        const job = store.getJobById(row.id);
+        const job = fixture.store.getJobById(row.id);
         return job
           && job.kind === "resource"
           && job.payload.historicalBackfill === true
@@ -2264,45 +2271,35 @@ test("Junction sparse history certifies exhausted empties without certifying mal
           : [];
       });
 
-    await service.runSchedulerOnce();
+    await fixture.service.runSchedulerOnce();
     const initiallyScheduled = activeHistoryJobs();
-    assert.equal(initiallyScheduled.length, 2);
-    const stableDedupeKeys = new Map(initiallyScheduled.map((job) => [
-      String(job.payload.resource),
-      job.dedupeKey,
-    ]));
-    assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+    assert.equal(initiallyScheduled.length, 1);
+    const stableDedupeKey = initiallyScheduled[0]?.dedupeKey;
+    assert.equal((await fixture.service.runWorkerOnce())?.kind, "reconcile");
 
-    const observedRetryAttempts = new Map<string, number>();
-    const observedRetryDelays = new Map<string, number[]>();
+    const observedRetryDelays: number[] = [];
+    let observedRetryAttempts = 0;
     let historyWorkerRuns = 0;
-    while (activeHistoryJobs().length > 0) {
-      const processed = await service.runWorkerOnce();
+    while (!activeHistoryJobs().some((job) =>
+      job.payload.historicalMalformedDateExhausted === true
+      && typeof job.payload.historicalCoverageTarget === "string"
+    )) {
+      const processed = await fixture.service.runWorkerOnce();
       if (processed) {
         assert.equal(processed.kind, "resource");
         historyWorkerRuns += 1;
         assert.ok(historyWorkerRuns <= 60);
-        const activeJobs = activeHistoryJobs();
-        for (const active of activeJobs) {
-          assert.equal(
-            active.dedupeKey,
-            stableDedupeKeys.get(String(active.payload.resource)),
-          );
-        }
-        const resource = String(processed.payload.resource);
-        const continuation = activeJobs.find((active) =>
-          active.payload.resource === resource
-        );
-        const retryAttempts = typeof continuation?.payload.emptyBackfillAttempts === "number"
-          ? continuation.payload.emptyBackfillAttempts
+        const continuation = activeHistoryJobs()[0];
+        assert.equal(continuation?.dedupeKey, stableDedupeKey);
+        const retryAttempts = typeof continuation?.payload.historicalMalformedDateRetryAttempts
+          === "number"
+          ? continuation.payload.historicalMalformedDateRetryAttempts
           : 0;
-        const previousRetryAttempts = observedRetryAttempts.get(resource) ?? 0;
-        if (continuation && retryAttempts > previousRetryAttempts) {
-          observedRetryDelays.set(resource, [
-            ...(observedRetryDelays.get(resource) ?? []),
+        if (continuation && retryAttempts > observedRetryAttempts) {
+          observedRetryDelays.push(
             Date.parse(continuation.availableAt) - now.getTime(),
-          ]);
-          observedRetryAttempts.set(resource, retryAttempts);
+          );
+          observedRetryAttempts = retryAttempts;
         }
         continue;
       }
@@ -2316,19 +2313,63 @@ test("Junction sparse history certifies exhausted empties without certifying mal
       now = new Date(nextAvailableAt);
     }
 
-    assert.equal(historyWorkerRuns, 10, "two one-day resources must complete five scans");
-    for (const resource of ["caffeine", "vo2_max"]) {
-      assert.deepEqual(observedRetryDelays.get(resource), [
-        15 * 60_000,
-        60 * 60_000,
-        6 * 60 * 60_000,
-        24 * 60 * 60_000,
-      ]);
-    }
-    assert.equal(historicalRequests.get("caffeine"), 5);
-    assert.equal(historicalRequests.get("vo2_max"), 5);
+    assert.deepEqual(observedRetryDelays, [
+      15 * 60_000,
+      60 * 60_000,
+      6 * 60 * 60_000,
+      24 * 60 * 60_000,
+    ]);
+    assert.equal(historicalRequests.get("2026-08-09"), 5);
+    assert.equal(
+      historicalRequests.get("2026-08-10"),
+      2,
+      "one current-sync fetch and one historical-lineage fetch share this date",
+    );
+    const persistedCatchup = activeHistoryJobs()[0];
+    const fixedCoverageTarget = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    )).toISOString();
+    assert.equal(persistedCatchup?.payload.historicalMalformedDateExhausted, true);
+    assert.equal(persistedCatchup?.payload.historicalCoverageTarget, fixedCoverageTarget);
+    assert.equal(persistedCatchup?.payload.historicalMalformedDateRetryAttempts, undefined);
+    assert.equal(persistedCatchup?.dedupeKey, stableDedupeKey);
 
-    const persisted = store.getAccountById(account.id);
+    fixture.close();
+    fixture = createFixture();
+    const restartedCatchup = activeHistoryJobs()[0];
+    assert.equal(restartedCatchup?.payload.historicalMalformedDateExhausted, true);
+    assert.equal(restartedCatchup?.payload.historicalCoverageTarget, fixedCoverageTarget);
+    assert.equal(restartedCatchup?.dedupeKey, stableDedupeKey);
+    let restartedRuns = 0;
+    while (activeHistoryJobs().length > 0) {
+      const processed = await fixture.service.runWorkerOnce();
+      if (!processed) {
+        const nextAvailableAt = activeHistoryJobs()
+          .map((job) => Date.parse(job.availableAt))
+          .sort((left, right) => left - right)[0];
+        assert.ok(Number.isFinite(nextAvailableAt));
+        assert.ok(nextAvailableAt >= now.getTime());
+        now = new Date(nextAvailableAt);
+        continue;
+      }
+      assert.equal(processed.kind, "resource");
+      restartedRuns += 1;
+      assert.ok(restartedRuns <= 4);
+      for (const continuation of activeHistoryJobs()) {
+        assert.equal(continuation.dedupeKey, stableDedupeKey);
+        assert.equal(continuation.payload.historicalMalformedDateExhausted, true);
+        assert.equal(continuation.payload.historicalCoverageTarget, fixedCoverageTarget);
+      }
+    }
+    assert.equal(activeHistoryJobs().length, 0);
+    assert.equal(historicalRequests.get("2026-08-11"), 1);
+    assert.equal(historicalRequests.get("2026-08-12"), 1);
+    assert.equal(importedDays.length, 2);
+    assert.equal(new Set(importedDays).size, 1);
+
+    const persisted = fixture.store.getAccountById(account.id);
     assert.ok(persisted);
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       persisted.metadata,
@@ -2336,12 +2377,6 @@ test("Junction sparse history certifies exhausted empties without certifying mal
       "caffeine",
       JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ), true);
-    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      persisted.metadata,
-      "garmin",
-      "vo2_max",
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
-    ), false);
     const encodedCoverage = [
       persisted.metadata.junctionBloodPressureHistoryBackfillCoverage,
       persisted.metadata.junctionNoteHistoryBackfillCoverage,
@@ -2351,21 +2386,19 @@ test("Junction sparse history certifies exhausted empties without certifying mal
     assert.ok(encodedBytes);
     const setBitCount = [...Buffer.from(encodedBytes, "hex")]
       .reduce((sum, byte) => sum + byte.toString(2).replaceAll("0", "").length, 0);
-    assert.equal(setBitCount, 1, "only the proven empty source/resource pair owns a bit");
+    assert.equal(setBitCount, 1, "the exhausted lineage owns one terminal bit");
 
-    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
-    await service.runSchedulerOnce();
-    assert.deepEqual(
-      activeHistoryJobs().map((job) => job.payload.resource),
-      ["vo2_max"],
-      "malformed provider days must remain eligible for one current repair root",
-    );
+    for (let pass = 0; pass < 3; pass += 1) {
+      fixture.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+      await fixture.service.runSchedulerOnce();
+      assert.equal(activeHistoryJobs().length, 0);
+    }
   } finally {
-    close();
+    fixture.close();
   }
 });
 
-test("Junction stale fifth sparse-history scan schedules one current replacement after restart", async () => {
+test("Junction stale fifth sparse-history scan carries one fixed target through restart", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-moving-history-repair");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   let now = new Date("2040-08-01T12:00:00.000Z");
@@ -2549,7 +2582,7 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
           pendingJobs: pendingJobs().map((job) => ({
             availableAt: job.availableAt,
             attempts: job.attempts,
-            emptyBackfillAttempts: job.payload.emptyBackfillAttempts,
+            historicalNoProgressAttempts: job.payload.historicalNoProgressAttempts,
             historicalNoProgressRescan: job.payload.historicalNoProgressRescan,
             kind: job.kind,
             resource: job.payload.resource,
@@ -2587,8 +2620,8 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
         continue;
       }
       assert.equal(activeHistoryJob.dedupeKey, stableDedupeKey);
-      const emptyAttempts = typeof activeHistoryJob.payload.emptyBackfillAttempts === "number"
-        ? activeHistoryJob.payload.emptyBackfillAttempts
+      const emptyAttempts = typeof activeHistoryJob.payload.historicalNoProgressAttempts === "number"
+        ? activeHistoryJob.payload.historicalNoProgressAttempts
         : 0;
       if (emptyAttempts > 0 && !observedRetryAttempts.has(emptyAttempts)) {
         observedRetryAttempts.add(emptyAttempts);
@@ -2607,7 +2640,7 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     const queuedTerminalScan = activeHistoryJobs()[0];
     assert.ok(queuedTerminalScan);
     assert.equal(queuedTerminalScan.dedupeKey, stableDedupeKey);
-    assert.equal(queuedTerminalScan.payload.emptyBackfillAttempts, 4);
+    assert.equal(queuedTerminalScan.payload.historicalNoProgressAttempts, 4);
     assert.equal(queuedTerminalScan.payload.historicalNoProgressRescan, true);
     const historicalRequestCountBeforeTerminalScan = historicalRequestCount;
     advanceToNextJob();
@@ -2617,7 +2650,7 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     assert.ok(persistedTerminalContinuation);
     assert.notEqual(persistedTerminalContinuation.id, queuedTerminalScan.id);
     assert.equal(persistedTerminalContinuation.dedupeKey, stableDedupeKey);
-    assert.equal(persistedTerminalContinuation.payload.emptyBackfillAttempts, 4);
+    assert.equal(persistedTerminalContinuation.payload.historicalNoProgressAttempts, 4);
     assert.equal(persistedTerminalContinuation.payload.historicalNoProgressRescan, true);
     assert.notEqual(
       persistedTerminalContinuation.payload.windowStart,
@@ -2645,11 +2678,13 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
     );
     assert.equal(reloadedTerminalContinuation.dedupeKey, stableDedupeKey);
     assert.equal(reloadedTerminalContinuation.payload.historicalNoProgressRescan, true);
+    assert.equal(reloadedTerminalContinuation.payload.historicalNoProgressAttempts, 4);
+    const fixedCoverageTarget = "2040-08-02T00:00:00.000Z";
     assert.notEqual(
       reloadedTerminalContinuation.payload.windowStart,
       reloadedTerminalContinuation.payload.historicalWindowStart,
     );
-    assert.equal(reloadedTerminalContinuation.payload.windowEnd, "2040-08-02T00:00:00.000Z");
+    assert.equal(reloadedTerminalContinuation.payload.windowEnd, fixedCoverageTarget);
 
     runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await runtime.service.runSchedulerOnce();
@@ -2678,70 +2713,10 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
       "garmin",
       "caffeine",
       JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
-    ), false, "the stale fifth scan must not publish terminal coverage");
+    ), true, "the restarted lineage completes its bounded schedule-time target");
     assert.equal(activeHistoryJobs().length, 0);
 
-    const historicalRowCountBeforeReplacement = readJobsForAccountForTesting(
-      runtime.store,
-      account.id,
-    ).filter((row) => {
-      const job = runtime.store.getJobById(row.id);
-      return job?.kind === "resource"
-        && job.payload.historicalBackfill === true
-        && job.payload.resource === "caffeine";
-    }).length;
-    runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
-    await runtime.service.runSchedulerOnce();
-    const currentReplacement = activeHistoryJobs();
-    assert.equal(currentReplacement.length, 1);
-    assert.equal(currentReplacement[0]?.dedupeKey, stableDedupeKey);
-    assert.equal(currentReplacement[0]?.payload.windowEnd, "2040-08-12T00:00:00.000Z");
-    assert.equal(currentReplacement[0]?.payload.historicalNoProgressRescan, undefined);
-    assert.equal(
-      readJobsForAccountForTesting(runtime.store, account.id).filter((row) => {
-        const job = runtime.store.getJobById(row.id);
-        return job?.kind === "resource"
-          && job.payload.historicalBackfill === true
-          && job.payload.resource === "caffeine";
-      }).length,
-      historicalRowCountBeforeReplacement + 1,
-      "the scheduler must offer exactly one current replacement root",
-    );
-
-    workerRuns = 0;
-    while (activeHistoryJobs().length > 0) {
-      const processed = await runtime.service.runWorkerOnce();
-      workerRuns += 1;
-      assert.ok(workerRuns < 50);
-      if (!processed) {
-        advanceToNextJob();
-      }
-    }
-    const currentReplacementWindows = historicalWindows.slice(
-      historicalRequestCountAfterStaleTerminal,
-    );
-    assert.equal(
-      historicalRequestCount,
-      historicalRequestCountAfterStaleTerminal + 31,
-      "one current replacement must scan 31 closed days",
-    );
-    assert.equal(currentReplacementWindows.length, 31);
-    assert.ok(currentReplacementWindows.some((window) =>
-      Date.parse(window.start) <= Date.parse(postAnchorFactAt)
-      && Date.parse(window.end) + 24 * 60 * 60_000 > Date.parse(postAnchorFactAt)
-    ));
-    assert.equal(importedPostAnchorFactCount, 1);
-    persisted = runtime.store.getAccountById(account.id);
-    assert.ok(persisted);
-    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      persisted.metadata,
-      "garmin",
-      "caffeine",
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
-    ), true);
-    assert.equal(activeHistoryJobs().length, 0);
-
-    const historicalRowsAfterCompletion = readJobsForAccountForTesting(
+    const historicalRowCountAfterCompletion = readJobsForAccountForTesting(
       runtime.store,
       account.id,
     ).filter((row) => {
@@ -2760,8 +2735,8 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
           && job.payload.historicalBackfill === true
           && job.payload.resource === "caffeine";
       }).length,
-      historicalRowsAfterCompletion,
-      "terminal coverage must prevent a fresh history chain",
+      historicalRowCountAfterCompletion,
+      "terminal coverage must prevent a replacement root",
     );
 
     dailyBlockerFails = false;
@@ -2783,7 +2758,7 @@ test("Junction stale fifth sparse-history scan schedules one current replacement
       Date.parse(window.start) <= Date.parse(postAnchorFactAt)
       && Date.parse(window.end) > Date.parse(postAnchorFactAt)
     ), false, "the recovered rolling daily window must no longer include the post-anchor fact");
-    assert.equal(importedPostAnchorFactCount, 1);
+    assert.equal(importedPostAnchorFactCount, 0);
     assert.equal(activeHistoryJobs().length, 0);
   } finally {
     if (!closed) {
@@ -3087,30 +3062,17 @@ test("a stale Junction history retry finishes without coverage and is replaced o
       );
     }
     assert.equal(activeHistoryJobs().length, 0);
-    assert.equal(hasCoverage(), false);
+    assert.equal(hasCoverage(), true);
 
     now = new Date("2026-08-05T13:00:00.000Z");
     vi.setSystemTime(now);
     store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await service.runSchedulerOnce();
     const replacements = activeHistoryJobs();
-    assert.equal(replacements.length, 1);
-    assert.equal(replacements[0]?.dedupeKey, stableDedupeKey);
-    assert.notEqual(replacements[0]?.id, originalHistoryJob.id);
-    assert.equal(replacements[0]?.payload.windowEnd, "2026-08-05T00:00:00.000Z");
+    assert.equal(replacements.length, 0);
     const replacementWindowStartIndex = successfulCaffeineWindows.length;
     assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
     const completedDailyBeforeReplacement = store.getAccountById(account.id)?.lastSyncCompletedAt;
-
-    for (let pass = 0; pass < 16 && activeHistoryJobs().length > 0; pass += 1) {
-      await service.runWorkerOnce();
-      if (activeHistoryJobs().length > 0) {
-        assert.equal(
-          store.getAccountById(account.id)?.lastSyncCompletedAt,
-          completedDailyBeforeReplacement,
-        );
-      }
-    }
     assert.equal(activeHistoryJobs().length, 0);
     assert.equal(hasCoverage(), true);
     assert.equal(

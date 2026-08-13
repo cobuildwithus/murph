@@ -14076,7 +14076,7 @@ test("Junction sparse-history scheduling caps global fanout and rotates across e
   const observedPairs = new Set<string>();
   const candidateCount =
     JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.length * sources.length;
-  const pageCount = Math.ceil(candidateCount / 8);
+  const pageCount = candidateCount;
   const baseAt = Date.parse("2026-08-11T00:00:00.000Z");
   const scheduledPageSizes: number[] = [];
 
@@ -14087,7 +14087,7 @@ test("Junction sparse-history scheduling caps global fanout and rotates across e
       job.kind === "resource" && job.payload?.historicalBackfill === true
     );
     scheduledPageSizes.push(historyJobs.length);
-    assert.ok(historyJobs.length <= 8);
+    assert.equal(historyJobs.length, 1);
     for (const job of historyJobs) {
       observedPairs.add(`${job.payload?.resource}:${job.payload?.sourceProviderSlug}`);
     }
@@ -14095,9 +14095,7 @@ test("Junction sparse-history scheduling caps global fanout and rotates across e
 
   assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
   assert.equal(candidateCount, 396);
-  assert.equal(candidateCount % 8, 4);
-  assert.equal(scheduledPageSizes.filter((size) => size === 8).length, pageCount - 1);
-  assert.equal(scheduledPageSizes.filter((size) => size === 4).length, 1);
+  assert.equal(scheduledPageSizes.every((size) => size === 1), true);
   assert.equal(observedPairs.size, candidateCount);
 });
 
@@ -14125,14 +14123,14 @@ test("Junction sparse-history policy keeps schedule-time retry identity stable a
     lastSeenAt: "2026-08-11T12:00:00.000Z",
     lastDataAt: null,
   };
-  const firstJobs = provider.jobExecutor?.createScheduledJobs?.(
-    createStoredAccount({ sources: [source] }),
-    "2026-08-11T12:00:00.000Z",
-  ).jobs ?? [];
-  const secondJobs = provider.jobExecutor?.createScheduledJobs?.(
-    createStoredAccount({ sources: [source] }),
-    "2026-08-12T12:00:00.000Z",
-  ).jobs ?? [];
+  const scheduledJobsAt = (at: string) => [0, 1].flatMap((offset) =>
+    provider.jobExecutor?.createScheduledJobs?.(
+      createStoredAccount({ sources: [source] }),
+      new Date(Date.parse(at) + offset * 60 * 60_000).toISOString(),
+    ).jobs ?? []
+  );
+  const firstJobs = scheduledJobsAt("2026-08-11T12:00:00.000Z");
+  const secondJobs = scheduledJobsAt("2026-08-12T12:00:00.000Z");
   const bloodPressure = requireValue(firstJobs.find((job) =>
     job.payload?.resource === "blood_pressure"
   ));
@@ -14147,10 +14145,13 @@ test("Junction sparse-history policy keeps schedule-time retry identity stable a
     ...source,
     firstSeenAt: "2026-03-01T12:00:00.000Z",
   };
-  const earlierJobs = provider.jobExecutor?.createScheduledJobs?.(
-    createStoredAccount({ sources: [earlierSource] }),
-    "2026-08-12T12:00:00.000Z",
-  ).jobs ?? [];
+  const earlierJobs = [0, 1].flatMap((offset) =>
+    provider.jobExecutor?.createScheduledJobs?.(
+      createStoredAccount({ sources: [earlierSource] }),
+      new Date(Date.parse("2026-08-12T12:00:00.000Z") + offset * 60 * 60_000)
+        .toISOString(),
+    ).jobs ?? []
+  );
   const earlierBloodPressure = requireValue(earlierJobs.find((job) =>
     job.payload?.resource === "blood_pressure"
   ));
@@ -14574,8 +14575,12 @@ test("Junction exhausted malformed dates advance one lineage to later valid hist
     createStoredAccount({ metadata: accountMetadata, sources: [source] }),
     "2026-08-06T12:00:00.000Z",
   ).jobs.find((candidate) => candidate.payload?.resource === "caffeine"));
+  assert.equal(initial.payload?.historicalNoProgressAttempts, undefined);
   let job: DeviceSyncJobRecord = {
-    ...createJob("resource", initial.payload ?? {}),
+    ...createJob("resource", {
+      ...initial.payload,
+      historicalNoProgressAttempts: 2,
+    }),
     dedupeKey: initial.dedupeKey ?? null,
   };
   let metadata: Record<string, unknown> = accountMetadata;
@@ -14592,9 +14597,7 @@ test("Junction exhausted malformed dates advance one lineage to later valid hist
     executionCount += 1;
     assert.ok(executionCount < 20);
     const attemptedDay = String(job.payload.windowStart);
-    const executionNow = job.payload.windowEnd === "2026-08-06T00:00:00.000Z"
-      ? "2026-08-06T12:00:00.000Z"
-      : now;
+    const executionNow = now;
     const result = await executeJunctionJob(
       provider,
       createJunctionJobContext({
@@ -14627,7 +14630,14 @@ test("Junction exhausted malformed dates advance one lineage to later valid hist
       break;
     }
     assert.equal(continuation.dedupeKey, initial.dedupeKey);
-    const retryAttempts = Number(continuation.payload?.emptyBackfillAttempts ?? 0);
+    assert.equal(
+      continuation.payload?.historicalNoProgressAttempts,
+      2,
+      "date retries and suffix progress must not reset whole-window no-progress state",
+    );
+    const retryAttempts = Number(
+      continuation.payload?.historicalMalformedDateRetryAttempts ?? 0,
+    );
     if (retryAttempts > 0 || malformedDays.has(attemptedDay)) {
       assert.equal(continuation.payload?.historicalProviderRecordsSeen, true);
     }
@@ -14651,16 +14661,23 @@ test("Junction exhausted malformed dates advance one lineage to later valid hist
     6 * 60 * 60_000,
     24 * 60 * 60_000,
   ];
-  for (const malformedDay of malformedDays) {
-    assert.deepEqual(retryDelaysByDay.get(malformedDay), expectedRetryDelays);
-    assert.equal(requestsByDay.get(malformedDay), 5);
-  }
+  assert.deepEqual(
+    retryDelaysByDay.get("2026-08-02T00:00:00.000Z"),
+    expectedRetryDelays,
+  );
+  assert.equal(requestsByDay.get("2026-08-02T00:00:00.000Z"), 5);
+  assert.equal(
+    retryDelaysByDay.get("2026-08-04T00:00:00.000Z"),
+    undefined,
+  );
+  assert.equal(requestsByDay.get("2026-08-04T00:00:00.000Z"), 1);
   assert.deepEqual(importedDays, [
     "2026-08-01T00:00:00.000Z",
     "2026-08-03T00:00:00.000Z",
     "2026-08-05T00:00:00.000Z",
+    "2026-08-06T00:00:00.000Z",
   ]);
-  assert.equal(executionCount, 11);
+  assert.equal(executionCount, 8);
   const coverageValues = [
     metadata.junctionBloodPressureHistoryBackfillCoverage,
     metadata.junctionNoteHistoryBackfillCoverage,
@@ -14681,6 +14698,7 @@ test("Junction exhausted malformed dates advance one lineage to later valid hist
 
 test("Junction exhausted malformed date waits for historical pull readiness before coverage", async () => {
   let historicalPullStatus = "scheduled";
+  let timeseriesRequestCount = 0;
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -14710,8 +14728,11 @@ test("Junction exhausted malformed date waits for historical pull readiness befo
         }] });
       }
       if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+        timeseriesRequestCount += 1;
+        const day = url.searchParams.get("start_date");
+        assert.ok(day);
         return createJsonResponse({ groups: { garmin: [{
-          data: [{ start: "2026-08-05T00:00:00.000Z", value: "not-a-number" }],
+          data: [{ start: `${day}T00:00:00.000Z`, value: "not-a-number" }],
           source: { provider: "garmin", type: "watch" },
         }] } });
       }
@@ -14738,7 +14759,7 @@ test("Junction exhausted malformed date waits for historical pull readiness befo
   const saturatedJob: DeviceSyncJobRecord = {
     ...createJob("resource", {
       ...initial.payload,
-      emptyBackfillAttempts: 4,
+      historicalMalformedDateExhausted: true,
     }),
     dedupeKey: initial.dedupeKey ?? null,
   };
@@ -14758,15 +14779,54 @@ test("Junction exhausted malformed date waits for historical pull readiness befo
     pending.scheduledJobs?.some((candidate) => candidate.payload?.resource === "caffeine"),
     true,
   );
+  const persistedPending = requireValue(pending.scheduledJobs?.find((candidate) =>
+    candidate.payload?.resource === "caffeine"
+  ));
+  assert.equal(persistedPending.dedupeKey, initial.dedupeKey);
+  assert.equal(persistedPending.payload?.historicalMalformedDateExhausted, true);
+  assert.equal(persistedPending.payload?.historicalMalformedDateRetryAttempts, undefined);
 
   historicalPullStatus = "success";
-  const ready = await executeJunctionJob(provider, context, saturatedJob);
+  let readyJob: DeviceSyncJobRecord = {
+    ...createJob("resource", persistedPending.payload ?? {}),
+    dedupeKey: persistedPending.dedupeKey ?? null,
+  };
+  let ready = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: [source] }),
+      now: persistedPending.availableAt ?? "2026-08-07T12:00:00.000Z",
+    }),
+    readyJob,
+  );
+  const catchup = ready.scheduledJobs?.find((candidate) =>
+    candidate.payload?.resource === "caffeine"
+  );
+  if (catchup) {
+    assert.equal(catchup.dedupeKey, initial.dedupeKey);
+    assert.equal(catchup.payload?.historicalMalformedDateExhausted, true);
+    assert.equal(catchup.payload?.historicalCoverageTarget, "2026-08-07T00:00:00.000Z");
+    readyJob = {
+      ...createJob("resource", catchup.payload ?? {}),
+      dedupeKey: catchup.dedupeKey ?? null,
+    };
+    ready = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ sources: [source] }),
+        now: "2026-08-08T12:00:00.000Z",
+      }),
+      readyJob,
+    );
+  }
   assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
     ready.metadataPatch ?? {},
     "garmin",
     "caffeine",
     1,
   ), true);
+  assert.equal(ready.scheduledJobs?.length ?? 0, 0);
+  assert.equal(timeseriesRequestCount, 2);
 });
 
 test("Junction sparse aggregate import failures remain retryable without coverage", async () => {

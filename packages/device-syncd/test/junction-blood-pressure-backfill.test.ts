@@ -1051,19 +1051,27 @@ test("sparse daily resources receive one rollout-anchored summary-history job", 
     createStoredAccount({ sources }),
     "2026-06-11T13:00:00.000Z",
   );
-  const samePage = createScheduledJobs(
-    createStoredAccount({ sources }),
-    "2026-06-11T14:00:00.000Z",
+  const rotation = Array.from({ length: SPARSE_DAILY_HISTORY_RESOURCES.length }, (_, index) =>
+    createScheduledJobs(
+      createStoredAccount({ sources }),
+      new Date(Date.parse(NOW) + index * 60 * 60_000).toISOString(),
+    )
   );
-  const sameRotatedPage = createScheduledJobs(
-    createStoredAccount({ sources }),
-    "2026-06-11T15:00:00.000Z",
+  const repeatedRotation = Array.from(
+    { length: SPARSE_DAILY_HISTORY_RESOURCES.length },
+    (_, index) =>
+      createScheduledJobs(
+        createStoredAccount({ sources }),
+        new Date(
+          Date.parse(NOW)
+            + (SPARSE_DAILY_HISTORY_RESOURCES.length + index) * 60 * 60_000,
+        ).toISOString(),
+      ),
   );
-
-  const rotatedJobs = [...scheduled.jobs, ...nextRotation.jobs];
-  const repeatedRotatedJobs = [...samePage.jobs, ...sameRotatedPage.jobs];
-  assert.equal(scheduled.jobs.filter((job) => job.kind === "resource").length, 8);
-  assert.equal(nextRotation.jobs.filter((job) => job.kind === "resource").length, 2);
+  const rotatedJobs = rotation.flatMap((result) => result.jobs);
+  const repeatedRotatedJobs = repeatedRotation.flatMap((result) => result.jobs);
+  assert.equal(scheduled.jobs.filter((job) => job.kind === "resource").length, 1);
+  assert.equal(nextRotation.jobs.filter((job) => job.kind === "resource").length, 1);
   for (const resource of SPARSE_DAILY_HISTORY_RESOURCES) {
     const job = findResourceJob(rotatedJobs, resource);
     const repeatedJob = findResourceJob(repeatedRotatedJobs, resource);
@@ -1537,7 +1545,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     ...findResourceJob(scheduled.jobs, "caffeine"),
     payload: {
       ...findResourceJob(scheduled.jobs, "caffeine").payload,
-      emptyBackfillAttempts: 4,
+      historicalNoProgressAttempts: 4,
     },
   }, 1);
   const pending = await requireValue(provider.jobExecutor).executeJob(
@@ -1564,14 +1572,14 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     resource: "caffeine",
   });
 
-  assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine", false);
-  assert.equal(requests.length, 180);
+  assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine", true);
+  assert.equal(requests.length, 181);
   assert.equal(
     createScheduledJobs(
       createStoredAccount({ metadata: completed.result.metadataPatch, sources }),
       "2026-06-12T12:00:00.000Z",
     ).jobs.some((job) => job.payload?.resource === "caffeine"),
-    true,
+    false,
   );
 });
 
@@ -1752,7 +1760,7 @@ test("unavailable upstream status cannot certify zero-row sparse history", async
   assert.equal(requests.length, 180);
   assertHistoryCoverage(first.result.metadataPatch, "omron", "caffeine", false);
   assert.equal(retry.availableAt, "2026-06-11T12:15:00.000Z");
-  assert.equal(retry.payload?.emptyBackfillAttempts, 1);
+  assert.equal(retry.payload?.historicalNoProgressAttempts, 1);
   assert.equal(retry.payload?.historicalPullReady, undefined);
 
   historicalPullRequestFailure.active = false;
@@ -1771,7 +1779,7 @@ test("unavailable upstream status cannot certify zero-row sparse history", async
   );
   assert.equal(
     findResourceJob(second.result.scheduledJobs ?? [], "caffeine").payload
-      ?.emptyBackfillAttempts,
+      ?.historicalNoProgressAttempts,
     2,
   );
 });
@@ -1890,7 +1898,7 @@ test("a persistently malformed sparse day exhausts its retry without stale cover
   let now = NOW;
   let finalResult: ProviderJobResult | null = null;
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     const result = await executor.executeJob(createJobContext({ now }), job);
     const retry = result.scheduledJobs?.find((candidate) =>
       candidate.kind === "resource" && candidate.payload?.resource === "caffeine"
@@ -1899,23 +1907,23 @@ test("a persistently malformed sparse day exhausts its retry without stale cover
       finalResult = result;
       break;
     }
-    now = requireValue(retry.availableAt);
+    now = retry.availableAt ?? now;
     job = toJobRecord(retry, attempt + 2);
   }
 
-  assert.equal(requests.length, 5);
+  assert.equal(requests.length, 6);
   assertHistoryCoverage(
     requireValue(finalResult).metadataPatch,
     "omron",
     "caffeine",
-    false,
+    true,
   );
   assert.equal(
     createScheduledJobs(
       createStoredAccount({ metadata: finalResult?.metadataPatch, sources }),
       now,
     ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
-    true,
+    false,
   );
 });
 
@@ -2012,7 +2020,7 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
     );
     assert.equal(requests.length, 0);
     assert.equal(catchUp.payload?.windowStart, "2026-06-11T00:00:00.000Z");
-    assert.equal(catchUp.payload?.windowEnd, "2026-07-04T00:00:00.000Z");
+    assert.equal(catchUp.payload?.windowEnd, "2026-07-11T00:00:00.000Z");
 
     const completed = await executeImmediateResourceContinuations({
       context: createJobContext({
@@ -2025,10 +2033,10 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
       startingIndex: 3,
     });
 
-    assert.equal(completed.executionCount, 2);
-    assert.equal(requests.length, 34);
+    assert.equal(completed.executionCount, 1);
+    assert.equal(requests.length, 30);
     assert.equal(requests[0]?.start, "2026-06-11");
-    assert.equal(requests.at(-1)?.end, "2026-07-14");
+    assert.equal(requests.at(-1)?.end, "2026-07-10");
     assert.equal(
       completed.results.slice(0, -1).some((result) =>
         hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -2040,13 +2048,13 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
       ),
       false,
     );
-    assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine", false);
+    assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine", true);
     assert.equal(
       createScheduledJobs(
         createStoredAccount({ metadata: completed.result.metadataPatch, sources }),
         "2026-07-22T12:00:00.000Z",
       ).jobs.some((job) => job.payload?.resource === "caffeine"),
-      true,
+      false,
     );
   } finally {
     store.close();
@@ -2739,16 +2747,17 @@ test("existing source obligations keep independent windows and queue identities"
   const createScheduledJobs = requireValue(
     requireValue(provider.jobExecutor).createScheduledJobs,
   );
-  const scheduled = createScheduledJobs(
-    createStoredAccount({
-      sources: [
-        createSourceSummary("omron", "2026-05-01T10:00:00.000Z"),
-        createSourceSummary("withings", "2026-06-01T10:00:00.000Z"),
-      ],
-    }),
-    NOW,
-  );
-  const bloodPressureJobs = scheduled.jobs
+  const account = createStoredAccount({
+    sources: [
+      createSourceSummary("omron", "2026-05-01T10:00:00.000Z"),
+      createSourceSummary("withings", "2026-06-01T10:00:00.000Z"),
+    ],
+  });
+  const scheduled = [
+    createScheduledJobs(account, NOW),
+    createScheduledJobs(account, "2026-06-11T13:00:00.000Z"),
+  ];
+  const bloodPressureJobs = scheduled.flatMap((result) => result.jobs)
     .filter((job) => job.kind === "resource" && job.payload?.resource === "blood_pressure")
     .sort((left, right) => String(left.payload?.sourceProviderSlug).localeCompare(
       String(right.payload?.sourceProviderSlug),
