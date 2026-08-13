@@ -84,16 +84,33 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/unsupported field/u);
   });
 
-  it("canonicalizes the bounded legacy action without carrying audience", () => {
+  it("parses trusted audience decisions and canonicalizes the legacy private action", () => {
     const canonical = {
       action: "ask_current_sender",
+      audience: "group",
+      mode: "new",
       origin: CURRENT_SENDER_ASK.origin,
     } as const;
     expect(parseHostedRuntimeGroupToolRequest(canonical)).toEqual(canonical);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "message_current_sender",
       origin: CURRENT_SENDER_ASK.origin,
-    })).toEqual(canonical);
+    })).toEqual({
+      action: "ask_current_sender",
+      audience: "current_sender",
+      mode: "new",
+      origin: CURRENT_SENDER_ASK.origin,
+    });
+
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "ask_current_sender",
+      mode: "clarification",
+      origin: CURRENT_SENDER_ASK.origin,
+    })).toEqual({
+      action: "ask_current_sender",
+      mode: "clarification",
+      origin: CURRENT_SENDER_ASK.origin,
+    });
 
     expect(() => parseHostedRuntimeGroupToolRequest({
       ...canonical,

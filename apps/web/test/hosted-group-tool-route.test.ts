@@ -296,6 +296,8 @@ describe("hosted group tool route", () => {
     {
       expectedRequest: {
         action: "ask_current_sender",
+        audience: "group",
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"b".repeat(32)}`,
           kind: "accepted_input",
@@ -309,8 +311,10 @@ describe("hosted group tool route", () => {
       label: "strict body-marked protocol",
       requestBody: {
         action: "ask_current_sender",
+        audience: "group",
         [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
           HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"b".repeat(32)}`,
           kind: "accepted_input",
@@ -321,6 +325,8 @@ describe("hosted group tool route", () => {
     {
       expectedRequest: {
         action: "ask_current_sender",
+        audience: "group",
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"c".repeat(32)}`,
           kind: "accepted_input",
@@ -344,6 +350,8 @@ describe("hosted group tool route", () => {
     {
       expectedRequest: {
         action: "ask_current_sender",
+        audience: "current_sender",
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"d".repeat(32)}`,
           kind: "accepted_input",
@@ -365,7 +373,7 @@ describe("hosted group tool route", () => {
       },
     },
   ])(
-    "keeps $label compatible while admission receives no audience authority",
+    "keeps $label compatible while admission receives trusted audience authority",
     async ({ expectedRequest, expectedResponse, requestBody }) => {
       mocks.handleTool.mockResolvedValueOnce({
         action: "ask_current_sender",
@@ -412,6 +420,8 @@ describe("hosted group tool route", () => {
         action: "ask_current_sender",
         [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
           HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        audience: "group",
+        mode: "new",
         currentSenderAudienceReview: "v1",
         origin: {
           assistantInputId: `ain_${"4".repeat(32)}`,
@@ -449,6 +459,8 @@ describe("hosted group tool route", () => {
         action: "message_current_sender",
         [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
           HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        audience: "group",
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"a".repeat(32)}`,
           kind: "accepted_input",
@@ -462,6 +474,8 @@ describe("hosted group tool route", () => {
         action: "ask_current_sender",
         [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
           HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        audience: "group",
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"b".repeat(32)}`,
           kind: "accepted_input",

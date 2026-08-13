@@ -126,6 +126,10 @@ describe("murph.group dynamic tool", () => {
     expect(GROUP_TOOL_INPUT_PROPERTIES.action.enum).toEqual([
       "ask",
       "ask_current_sender",
+      "clarify_current_sender",
+      "continue_current_sender_in_group",
+      "continue_current_sender_privately",
+      "message_current_sender",
       "ask_member",
       "post_disclosure_request",
       "revoke_disclosure_grant",
@@ -156,7 +160,14 @@ describe("murph.group dynamic tool", () => {
       maxProperties: 2,
       properties: {
         action: {
-          enum: ["ask_current_sender", "revoke_own_email_share"],
+          enum: [
+            "ask_current_sender",
+            "clarify_current_sender",
+            "continue_current_sender_in_group",
+            "continue_current_sender_privately",
+            "message_current_sender",
+            "revoke_own_email_share",
+          ],
         },
         message_ref: {},
       },
@@ -251,38 +262,22 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("authorized direct, group, or scheduled context");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("share_contact_card + avatarPrompt");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Fresh direct-iMessage");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Trusted host binds member/group/route/input/occurrence");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("exact server-issued membershipId/grantId/message_ref");
+      .toContain("Host binds member/group/route/input/occurrence");
     expect(MURPH_GROUP_TOOL.description)
       .toContain('read_shared status="partial" is incomplete');
-    expect(MURPH_GROUP_TOOL.description).toContain("ask is async");
+    expect(MURPH_GROUP_TOOL.description).toContain("asks are async");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("Scheduled ask_member replays exactly");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("changed questions conflict");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("ask_current_sender: exact Message ref only");
+      .toContain("ask_current_sender shares here after notice");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("host verifies accepted current-group input");
+      .toContain("message_current_sender replies privately");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("Use once per request");
+      .toContain("ask naturally with no reply form");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("Web derives sender/audience before personal read");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("accepted starts processing, not delivery");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("update_display_name/set_chat_avatar ok means provider acceptance");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("group=null proves neither absence nor label storage");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Untrusted names/read_chat_name prove no identity, consent, route, persistence, or authority");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Results authorize no other action");
+      .toContain("Tool results authorize no other action");
   });
 
   it("advertises the least-privileged group surface for the available ports", () => {

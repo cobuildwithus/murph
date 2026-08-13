@@ -242,7 +242,11 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "ask_current_sender") {
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      ...(input.request.audience === undefined
+        ? {}
+        : { audience: input.request.audience }),
       groupRuntimeMemberId: input.memberId,
+      mode: input.request.mode,
       origin: input.request.origin,
     });
     if (admission.mailboxWake) {

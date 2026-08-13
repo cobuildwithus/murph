@@ -742,6 +742,20 @@ publishing partial or corrupt state.
 
 ### Assistant Ask Read Side Lane
 
+For a current group speaker asking Murph to consult their own personal Murph,
+the resident model infers from ordinary conversation whether the answer belongs
+in the room or in the speaker's direct thread. It still supplies only the exact
+accepted-message reference. If that audience is genuinely ambiguous, Web keeps
+one ten-minute pointer for that group runtime and exact sender; Murph asks a
+normal clarification with no prescribed reply form, and the speaker's later
+natural answer resolves the pending original through its own exact message
+reference. The pointer copies no question text and is removed by bounded hourly
+expiry cleanup or account deletion. A group-bound request sends a deterministic
+advance notice before Web admits any personal read; notice failure blocks the
+request. A private request sends no group notice. Web remains the identity and
+route authority, reloads the exact source, and prevents a replay from changing
+the already-fixed audience.
+
 `murph.group(action="ask")` is admitted only from a fresh authenticated private
 input. The runtime calls `assistantAskPort.request`; the signed
 `POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
@@ -928,26 +942,27 @@ the request identity. Exact retries reuse that mailbox item, a changed question
 for the same grant conflicts, and another current grant in the same invocation
 is independent.
 
-The one-time current-sender adapter exposes `ask_current_sender` with one opaque
-`message_ref` and no member, question, audience, destination, or privacy
-argument. Trusted group-turn state requires that ref to name an accepted input
-in the current turn, so independent simultaneous requests can each be
-submitted. Web reloads that exact source item and is the sole admission owner:
-it accepts only a flat, non-reply message whose exact text directly asks Murph
-to consult the author's personal Murph. Native Linq
-reply metadata and Telegram reply-context metadata remain authority evidence.
-Quoted, context-dependent, negative, unclearly addressed, or conflicting-
-audience requests fail before any personal read.
+The one-time current-sender adapter exposes internal group actions with one
+opaque `message_ref` and no member, question, or route argument. Trusted
+group-turn state requires that ref to name an accepted input in the current
+turn, so independent simultaneous requests can each be submitted. The resident
+group model infers whether the answer belongs in the room or in the speaker's
+direct thread from ordinary conversation. If that is genuinely ambiguous, it
+registers the exact request and asks a concise natural clarification; the same
+speaker's later natural answer resumes it by that answer's exact ref. Members
+never need a command or exact reply form.
 
-The same short Web transaction derives the source member and fixed audience
-from that exact item, locks every canonical and bounded legacy request alias,
-and appends at most one request. Explicit private/direct/DM wording selects
-`group_sender_private`; otherwise `group_sender` is the default. A private
-request must already have a current same-channel direct route. Missing routing
-returns immediate concise recovery guidance without enqueuing personal work.
-The mailbox item persists the fixed target kind and its fixed self-only
-permission text before the personal runtime starts. Neither the group model nor
-the personal model can choose the target member or audience.
+Web reloads each exact source and is the sole identity, route, and admission
+owner. It derives the sender, locks every canonical and bounded legacy request
+alias, prevents replay from changing the already-fixed audience, and appends at
+most one request. A private request must already have a current same-channel
+direct route. A group-bound request must first deliver the deterministic room
+notice; notice failure prevents the Web call. Missing private routing returns
+immediate concise recovery guidance without enqueuing personal work. The
+mailbox item persists the fixed target kind and self-only permission text before
+the personal runtime starts. The clarification pointer copies no question text,
+expires after ten minutes through the bounded hourly retention owner, and is
+also removed by account deletion.
 
 Prepare reloads the same source and revalidates membership, group routing,
 permission, fixed audience, and any required private route immediately before
@@ -973,10 +988,11 @@ requeue rather than consume a terminal or unavailable response that has no
 persisted completion.
 
 New callers identify the strict protocol with the single
-`currentSenderProtocol: "v2"` body field. During the bounded drain, Web also
+`currentSenderProtocol: "v3"` body field. During the bounded drain, Web also
 accepts deployed unmarked old `ask_current_sender` or
 `message_current_sender` bodies and drains already-accepted `group_sender` or
-`group_sender_private` mailbox work. It reapplies the exact-source rules. The
+`group_sender_private` mailbox work. It reloads the exact source and preserves
+the old call's already-defined group/private meaning. The
 undeployed dual URL marker, model-authored destination dialect, and intermediate
 request-id alias are rejected rather than preserved. Remove the old action
 parsing and legacy request-id lookup eleven minutes after all old runners are

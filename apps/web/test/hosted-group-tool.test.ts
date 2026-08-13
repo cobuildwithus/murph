@@ -888,6 +888,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "ask_current_sender",
+        audience: "group",
+        mode: "new",
         origin,
       },
       scheduleMailboxWake,
@@ -899,7 +901,9 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(
       mocks.requestHostedGroupCurrentSenderAssistantAsk,
     ).toHaveBeenCalledWith({
+      audience: "group",
       groupRuntimeMemberId: "member_group_runtime",
+      mode: "new",
       origin,
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
@@ -928,6 +932,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "ask_current_sender",
+        audience: "group",
+        mode: "new",
         origin,
       },
       scheduleMailboxWake,

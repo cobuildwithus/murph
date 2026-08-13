@@ -3114,6 +3114,7 @@ async function runCodexAppServerTurnOnProcess(
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
   const groupSharedReadTurnState = {
+    currentSenderGroupPreviewedMessageRefs: new Set<string>(),
     invalid: false,
     readProjectionScopeKeyBatches: [],
     roster: null,
@@ -3991,13 +3992,13 @@ async function runCodexAppServerTurnOnProcess(
     return true
   }
 
-  const applyGroupEmailTerminalNoReplyPatch = (
+  const applyTerminalExternalEffectNoReplyPatch = (
     patch: Extract<MurphDynamicToolFinalActionPatch, { kind: 'none' }>,
     deliveryContextOrdinal: number,
   ): void => {
-    // A host-authorized group email has already crossed the durable external
-    // effect boundary. Its terminal disposition is not a model-requested
-    // finish_without_reply and must not depend on trace callback visibility.
+    // A host-authorized external effect has crossed its delivery boundary.
+    // Its terminal disposition is not a model-requested finish_without_reply
+    // and must not depend on trace callback visibility.
     finalActionPatches = [
       ...finalActionPatches.filter(
         (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
@@ -4403,7 +4404,9 @@ async function runCodexAppServerTurnOnProcess(
           progressDelivery:
             dynamicToolRequest.kind === 'send-progress-update'
               ? dynamicToolProgressDelivery
-              : null,
+              : dynamicToolRequest.kind === 'group'
+                ? resolveCodexAppServerProgressDelivery(input)
+                : null,
           publicFetchImpl: input.publicInternetFetch ?? null,
           request: dynamicToolRequest,
           requireHostedPrivateImageDelivery:
@@ -4441,9 +4444,17 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (
         result.finalActionPatch?.kind === 'none' &&
-        result.finalActionPatch.owner === 'group-email'
+        (
+          result.finalActionPatch.owner === 'group-email'
+          || result.finalActionPatch.owner === 'current-sender-ask'
+        )
       ) {
-        applyGroupEmailTerminalNoReplyPatch(
+        if (result.externallyVisibleOutput) {
+          markExternallyVisibleAssistantOutput(
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        }
+        applyTerminalExternalEffectNoReplyPatch(
           result.finalActionPatch,
           dynamicToolRequestDeliveryContextOrdinal,
         )
@@ -4456,6 +4467,11 @@ async function runCodexAppServerTurnOnProcess(
         dynamicToolRequestSettled = true
         await interruptLiveTurnForTerminalNoReply()
         return
+      }
+      if (result.externallyVisibleOutput) {
+        markExternallyVisibleAssistantOutput(
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
       }
       if (result.responseCardPatch) {
         try {

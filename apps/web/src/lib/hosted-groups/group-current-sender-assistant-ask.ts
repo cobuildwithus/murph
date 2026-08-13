@@ -32,6 +32,7 @@ import type {
 
 import {
   appendHostedMailboxEnvelopeWithIdentityTx,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey,
@@ -69,48 +70,13 @@ const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS =
   "Private current-sender Assistant Ask completion; exact reviewed text is in responsePolicy.";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_UNAVAILABLE_TEXT =
   "I don't have enough context to answer that privately yet.";
-const HOSTED_GROUP_CURRENT_SENDER_FLAT_REQUEST_GUIDANCE =
-  "Ask the sender for a new flat message that explicitly says to ask their Murph.";
-const HOSTED_GROUP_CURRENT_SENDER_AMBIGUOUS_AUDIENCE_GUIDANCE =
-  "Ask the sender to choose either the group or a private reply in a new message.";
 const HOSTED_GROUP_CURRENT_SENDER_DIRECT_ROUTE_GUIDANCE =
-  "Ask the sender to open a direct chat with Murph on this channel, then send a new request.";
+  "Ask the sender to open a direct chat with Murph on this channel, then try again.";
+const HOSTED_GROUP_CURRENT_SENDER_CLARIFICATION_GUIDANCE =
+  "No pending audience clarification was found for this sender.";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE = "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
 const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
-const HOSTED_CURRENT_SENDER_COMMAND_PATTERN =
-  /^(?:murph\s*[,!:;\-]\s*)?(?:(?:can|could|would|will)\s+you\s+|please\s+)?ask\s+my\s+murph(?:\s*[,;:\-—]\s*|\s+)(\S[\s\S]*)$/iu;
-const HOSTED_CURRENT_SENDER_CONTEXT_DEPENDENT_PATTERN =
-  /\b(?:(?:about|answer(?:ing)?|regarding|reply(?:ing)?\s+to|based\s+on|using)\s+(?:it|that|this|those|these)|(?:about|based\s+on|from|using)\s+(?:the|our|this|that)\s+(?:chat|conversation|discussion|message|reply|thread)|same\s+(?:answer|question|thing)|(?:the\s+)?(?:above|earlier|last|previous|prior)\s+(?:chat|conversation|discussion|message|reply|thread)|(?:message|reply)\s+(?:above|earlier)|what\s+(?:(?:he|she|they|someone|the\s+other\s+person)\s+said|(?:was\s+)?(?:just\s+)?(?:asked|discussed|said))|(?:the|our|this|that)\s+(?:chat|conversation|discussion|thread))\b|\b(?:it|that|this|those|these)\s*[?.!]*$|\b(?:again|too)\s*[?.!]*$/iu;
-const HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN =
-  /^(?:do\s+not|don['’]?t|never|not)\b|\b(?:do\s+not|don['’]?t|never|not)\s+(?:ask|answer|share|post|reply|respond|send|message|dm|tell|show|disclose)\b/iu;
-const HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN =
-  /(?:[,;.!?](?:\s+|$)|—\s*|\s+-\s+|(?<!between\s+you)\s+(?:and|then)\s+)/iu;
-const HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_CLAUSE =
-  String.raw`(?:please\s+)?(?:privately|confidentially|in\s+confidence|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|for\s+(?:my\s+eyes|me)\s+only|just\s+between\s+us|between\s+you\s+and\s+me|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+it\s+between\s+us|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|make\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|one(?:\s*-\s*|\s+)on(?:\s*-\s*|\s+)one|one\s+to\s+one|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm)|one(?:\s*-\s*|\s+)on(?:\s*-\s*|\s+)one|one\s+to\s+one)|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|message|reply|respond|answer)\s+(?:(?:the\s+)?answer|it)\s+(?:only\s+)?to\s+(?:me|my\s+dms?)(?:\s+privately)?)`;
-const HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_CLAUSE =
-  String.raw`(?:please\s+)?(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+(?:here|in\s+(?:the\s+)?group(?:\s+chat)?|to\s+(?:the\s+)?group)|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)`;
-const HOSTED_CURRENT_SENDER_PRIVATE_TERMINAL_CLAUSE_PATTERN = new RegExp(
-  `^${HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_CLAUSE}$`,
-  "iu",
-);
-const HOSTED_CURRENT_SENDER_GROUP_TERMINAL_CLAUSE_PATTERN = new RegExp(
-  `^${HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_CLAUSE}$`,
-  "iu",
-);
-const HOSTED_CURRENT_SENDER_LEADING_AUDIENCE_CLAUSE_PATTERN = new RegExp(
-  `^(${HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_CLAUSE})` +
-    String.raw`(?:[,;:—-]\s*|\s+)(\S[\s\S]*)$|` +
-    `^(${HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_CLAUSE})` +
-    String.raw`(?:[,;:—-]\s*|\s+)(\S[\s\S]*)$`,
-  "iu",
-);
-const HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN =
-  /\b(?:private|privately|confidential|confidentially|confidence|direct|dm|group|chat|thread|everyone|here|only|between|eyes|secret|public|publicly|record|me|us)\b/iu;
-const HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN =
-  /^(?:please\s+)?(?=[\s\S]{1,120}$)(?:(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make)\b|(?:for|to|between|in|off|on|outside|inside|under|just|only|no)\b|(?:do\s+not|don['’]?t|never|not)\b|(?:this|that|it)\s+(?:is|stays|remains)\b|[\p{L}'’-]+ly\b)[\s\S]*$/iu;
-const HOSTED_CURRENT_SENDER_UNSEPARATED_DELIVERY_DIRECTIVE_PATTERN =
-  /^(?:please\s+)?(?:reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show)\b|\b(?:reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show)\b[\s\S]{0,80}\b(?:me|my\s+dms?|group|everyone|here|privately|confidentially|directly)\b|\b(?:(?:the\s+)?answer|it|this|that)\s+(?:(?:should|must)\s+)?(?:stay|remain|be)\s+(?:private|confidential)\s*[.!?]*$|\b(?:privately|confidentially|just\s+for\s+me|for\s+me\s+only)\s*[.!?]*$/iu;
 
 for (const [label, permissionText] of [
   ["Hosted current-sender group permission", HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT],
@@ -126,12 +92,9 @@ export type HostedGroupCurrentSenderAudience = "group" | "current_sender";
 export type HostedGroupCurrentSenderAssistantAskTargetKind =
   | "group_sender"
   | "group_sender_private";
-type HostedGroupCurrentSenderAdmissionDecision =
-  | { audience: HostedGroupCurrentSenderAudience }
-  | { unavailableReason: string };
 
 interface HostedGroupCurrentSenderSourceAuthority {
-  admission: HostedGroupCurrentSenderAdmissionDecision;
+  causalSeq: string;
   groupRuntimeMemberId: string;
   occurredAt: string;
   question: string;
@@ -163,145 +126,6 @@ export type HostedGroupCurrentSenderPrivateCompletionAuthority =
 export interface HostedGroupCurrentSenderAssistantAskAdmission {
   mailboxWake: { expectedUserId: string; mailboxItemId: string } | null;
   result: HostedRuntimeGroupCurrentSenderDirectResult;
-}
-
-export function classifyHostedGroupCurrentSenderRequest(input: {
-  hasNativeReplyContext: boolean;
-  text: string;
-}): HostedGroupCurrentSenderAdmissionDecision {
-  const text = input.text.trim();
-  if (
-    input.hasNativeReplyContext
-    || !text
-    || /[\r\n]/u.test(text)
-    || /[>«»“”"]/u.test(text)
-    || /^['‘]|['’]$/u.test(text)
-    || /(?:^|\s)'[^'\r\n]+'(?:\s|$)/u.test(text)
-  ) {
-    return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_FLAT_REQUEST_GUIDANCE };
-  }
-  const command = HOSTED_CURRENT_SENDER_COMMAND_PATTERN.exec(text);
-  if (
-    !command
-    || HOSTED_CURRENT_SENDER_CONTEXT_DEPENDENT_PATTERN.test(command[1] ?? "")
-    || HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN.test(command[1] ?? "")
-  ) {
-    return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_FLAT_REQUEST_GUIDANCE };
-  }
-  const audience = readHostedCurrentSenderTerminalAudience(command[1] ?? "");
-  if (audience === "ambiguous") {
-    return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_AMBIGUOUS_AUDIENCE_GUIDANCE };
-  }
-  return { audience: audience ?? "group" };
-}
-
-function readHostedCurrentSenderTerminalAudience(
-  question: string,
-): HostedGroupCurrentSenderAudience | "ambiguous" | null {
-  const leading = readHostedCurrentSenderLeadingAudience(question);
-  if (leading === "ambiguous") {
-    return "ambiguous";
-  }
-  const questionWithoutLeadingAudience = leading?.question ?? question;
-  const clauses = questionWithoutLeadingAudience
-    .split(HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN)
-    .map((clause) => clause
-      .trim()
-      .replace(/^(?:and|then)\s+/iu, "")
-      .replace(/[.!?]+$/u, "")
-      .trim())
-    .filter(Boolean);
-  const audiences = new Set<HostedGroupCurrentSenderAudience>(
-    leading ? [leading.audience] : [],
-  );
-  for (let index = clauses.length - 1; index >= 0; index -= 1) {
-    const clause = clauses[index];
-    if (clause === undefined) {
-      continue;
-    }
-    const audienceClause = readHostedCurrentSenderAudienceClause({
-      clause,
-      separatedFromQuestion: index > 0,
-    });
-    if (audienceClause === "ambiguous") {
-      return "ambiguous";
-    }
-    if (audienceClause) {
-      audiences.add(audienceClause);
-      continue;
-    }
-    break;
-  }
-  return audiences.size > 1
-    ? "ambiguous"
-    : audiences.values().next().value ?? null;
-}
-
-function readHostedCurrentSenderLeadingAudience(
-  question: string,
-): { audience: HostedGroupCurrentSenderAudience; question: string } | "ambiguous" | null {
-  const match = HOSTED_CURRENT_SENDER_LEADING_AUDIENCE_CLAUSE_PATTERN.exec(
-    question.trim(),
-  );
-  if (match) {
-    const privateClause = match[1];
-    const remainingQuestion = (match[2] ?? match[4] ?? "").trim();
-    if (!remainingQuestion) {
-      return "ambiguous";
-    }
-    return {
-      audience: privateClause ? "current_sender" : "group",
-      question: remainingQuestion,
-    };
-  }
-  const leadingClauses = question.split(
-    HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN,
-  ).map((clause) => clause.trim()).filter(Boolean);
-  const firstClause = leadingClauses[0]?.trim() ?? "";
-  const leadingAudience = readHostedCurrentSenderAudienceClause({
-    clause: firstClause,
-    separatedFromQuestion: leadingClauses.length > 1,
-  });
-  return leadingAudience === "ambiguous"
-    || (
-      leadingClauses.length === 1
-      && HOSTED_CURRENT_SENDER_UNSEPARATED_DELIVERY_DIRECTIVE_PATTERN.test(
-        firstClause,
-      )
-    )
-    ? "ambiguous"
-    : null;
-}
-
-function readHostedCurrentSenderAudienceClause(input: {
-  clause: string;
-  separatedFromQuestion: boolean;
-}): HostedGroupCurrentSenderAudience | "ambiguous" | null {
-  const suffixIndexes = [0];
-  for (const match of input.clause.matchAll(/\b(?:but|please)\s+/giu)) {
-    suffixIndexes.push(match.index + match[0].length);
-  }
-  for (const index of suffixIndexes) {
-    const suffix = input.clause.slice(index);
-    if (HOSTED_CURRENT_SENDER_PRIVATE_TERMINAL_CLAUSE_PATTERN.test(suffix)) {
-      return "current_sender";
-    }
-    if (HOSTED_CURRENT_SENDER_GROUP_TERMINAL_CLAUSE_PATTERN.test(suffix)) {
-      return "group";
-    }
-    if (
-      (input.separatedFromQuestion || index > 0)
-      && (
-        HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN.test(suffix)
-        || HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN.test(
-          suffix,
-        )
-      )
-    ) {
-      return "ambiguous";
-    }
-  }
-  return null;
 }
 
 export function createHostedGroupCurrentSenderAssistantAskRequestId(input: {
@@ -375,7 +199,9 @@ function createHostedGroupCurrentSenderRequestId(
 }
 
 export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
+  audience?: HostedGroupCurrentSenderAudience;
   groupRuntimeMemberId: string;
+  mode: "clarification" | "continuation" | "new";
   now?: Date;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   prisma?: HostedCurrentSenderAssistantAskPrismaClient;
@@ -387,6 +213,32 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
     "Hosted current-sender group runtime member ID",
   );
   const origin = normalizeHostedCurrentSenderOrigin(input.origin);
+  if (
+    (input.mode === "clarification" && input.audience !== undefined)
+    || (input.mode !== "clarification" && input.audience === undefined)
+  ) {
+    throw new TypeError(
+      "Hosted current-sender audience must be omitted only for clarification.",
+    );
+  }
+  if (input.mode === "clarification") {
+    return await createHostedGroupCurrentSenderClarification({
+      groupRuntimeMemberId,
+      now,
+      origin,
+      prisma,
+    });
+  }
+  if (input.mode === "continuation") {
+    return await continueHostedGroupCurrentSenderAssistantAsk({
+      audience: input.audience!,
+      groupRuntimeMemberId,
+      now,
+      origin,
+      prisma,
+    });
+  }
+  const audience = input.audience!;
   const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
     groupRuntimeMemberId,
     originAssistantInputId: origin.assistantInputId,
@@ -409,6 +261,7 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
     const existing = existingItems[0];
     if (existing) {
       return replayHostedGroupCurrentSenderAssistantAskTx({
+        audience,
         existingDedupeKey: existing.item.dedupeKey,
         existingKind: existing.item.kind,
         existingUserId: existing.item.userId,
@@ -430,10 +283,6 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
     if (!sourceAuthority) {
       return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
     }
-    if ("unavailableReason" in sourceAuthority.admission) {
-      return unavailableHostedCurrentSenderAdmission(sourceAuthority.admission.unavailableReason);
-    }
-    const audience = sourceAuthority.admission.audience;
     const targetKind = targetKindForHostedCurrentSenderAudience(audience);
     const permissionText = permissionTextForHostedCurrentSenderAudience(audience);
     const authority = {
@@ -488,6 +337,154 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
   });
 }
 
+async function createHostedGroupCurrentSenderClarification(input: {
+  groupRuntimeMemberId: string;
+  now: Date;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  prisma: HostedCurrentSenderAssistantAskPrismaClient;
+}): Promise<HostedGroupCurrentSenderAssistantAskAdmission> {
+  return await input.prisma.$transaction(async (tx) => {
+    const source = await readHostedGroupCurrentSenderSourceAuthorityTx({
+      expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
+      now: input.now,
+      origin: input.origin,
+      tx,
+    });
+    if (!source) {
+      return unavailableHostedCurrentSenderAdmission(
+        "current_sender_unavailable",
+      );
+    }
+    const expiresAt = new Date(
+      input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+    );
+    await tx.hostedGroupCurrentSenderClarification.upsert({
+      create: {
+        expiresAt,
+        groupRuntimeMemberId: source.groupRuntimeMemberId,
+        originAssistantInputId: input.origin.assistantInputId,
+        originSessionId: input.origin.sessionId,
+        sourceCausalSeq: BigInt(source.causalSeq),
+        targetMemberId: source.targetMemberId,
+      },
+      update: {
+        expiresAt,
+        originAssistantInputId: input.origin.assistantInputId,
+        originSessionId: input.origin.sessionId,
+        resolvedAudience: null,
+        resolvedByAssistantInputId: null,
+        sourceCausalSeq: BigInt(source.causalSeq),
+      },
+      where: {
+        groupRuntimeMemberId_targetMemberId: {
+          groupRuntimeMemberId: source.groupRuntimeMemberId,
+          targetMemberId: source.targetMemberId,
+        },
+      },
+    });
+    return {
+      mailboxWake: null,
+      result: { status: "clarification_required" },
+    };
+  });
+}
+
+async function continueHostedGroupCurrentSenderAssistantAsk(input: {
+  audience: HostedGroupCurrentSenderAudience;
+  groupRuntimeMemberId: string;
+  now: Date;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  prisma: HostedCurrentSenderAssistantAskPrismaClient;
+}): Promise<HostedGroupCurrentSenderAssistantAskAdmission> {
+  const originalOrigin = await input.prisma.$transaction(async (tx) => {
+    const responseSource = await readHostedGroupCurrentSenderSourceAuthorityTx({
+      expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
+      now: input.now,
+      origin: input.origin,
+      tx,
+    });
+    if (!responseSource) {
+      return null;
+    }
+    const pending = await tx.hostedGroupCurrentSenderClarification.findUnique({
+      where: {
+        groupRuntimeMemberId_targetMemberId: {
+          groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+          targetMemberId: responseSource.targetMemberId,
+        },
+      },
+    });
+    if (
+      !pending
+      || pending.expiresAt <= input.now
+      || BigInt(responseSource.causalSeq) <= pending.sourceCausalSeq
+      || (
+        pending.resolvedByAssistantInputId !== null
+        && (
+          pending.resolvedByAssistantInputId !== input.origin.assistantInputId
+          || pending.resolvedAudience !== input.audience
+        )
+      )
+    ) {
+      return null;
+    }
+    if (pending.resolvedByAssistantInputId === null) {
+      const claimed = await tx.hostedGroupCurrentSenderClarification.updateMany({
+        data: {
+          resolvedAudience: input.audience,
+          resolvedByAssistantInputId: input.origin.assistantInputId,
+        },
+        where: {
+          expiresAt: pending.expiresAt,
+          groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+          originAssistantInputId: pending.originAssistantInputId,
+          originSessionId: pending.originSessionId,
+          resolvedByAssistantInputId: null,
+          targetMemberId: responseSource.targetMemberId,
+        },
+      });
+      if (claimed.count !== 1) {
+        const resolved = await tx.hostedGroupCurrentSenderClarification.findUnique({
+          where: {
+            groupRuntimeMemberId_targetMemberId: {
+              groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+              targetMemberId: responseSource.targetMemberId,
+            },
+          },
+        });
+        if (
+          !resolved
+          || resolved.expiresAt <= input.now
+          || resolved.originAssistantInputId !== pending.originAssistantInputId
+          || resolved.originSessionId !== pending.originSessionId
+          || resolved.resolvedAudience !== input.audience
+          || resolved.resolvedByAssistantInputId !== input.origin.assistantInputId
+        ) {
+          return null;
+        }
+      }
+    }
+    return {
+      assistantInputId: pending.originAssistantInputId,
+      kind: "accepted_input" as const,
+      sessionId: pending.originSessionId,
+    };
+  });
+  if (!originalOrigin) {
+    return unavailableHostedCurrentSenderAdmission(
+      HOSTED_GROUP_CURRENT_SENDER_CLARIFICATION_GUIDANCE,
+    );
+  }
+  return await requestHostedGroupCurrentSenderAssistantAsk({
+    audience: input.audience,
+    groupRuntimeMemberId: input.groupRuntimeMemberId,
+    mode: "new",
+    now: input.now,
+    origin: originalOrigin,
+    prisma: input.prisma,
+  });
+}
+
 type HostedGroupCurrentSenderAuthorityReadInput = {
   expectedGroupRuntimeMemberId: string;
   expectedTargetMemberId?: string | null;
@@ -522,6 +519,13 @@ async function readHostedGroupCurrentSenderSourceAuthorityTx(
   });
   const source = sourceWake ? readHostedCurrentSenderSource(sourceWake, groupRuntimeMemberId) : null;
   if (!source || !sourceWake) return null;
+  const sourceInputAuthority =
+    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
+      assistantInputId: origin.assistantInputId,
+      memberId: groupRuntimeMemberId,
+      prisma: input.tx,
+    });
+  if (!sourceInputAuthority) return null;
   try {
     await assertHostedThreadRouteEgressAuthority({ authority: source.routeAuthority, prisma: input.tx });
   } catch (error) {
@@ -550,10 +554,7 @@ async function readHostedGroupCurrentSenderSourceAuthorityTx(
   }
 
   return {
-    admission: classifyHostedGroupCurrentSenderRequest({
-      hasNativeReplyContext: source.hasNativeReplyContext,
-      text: source.question,
-    }),
+    causalSeq: sourceInputAuthority.causalSeq,
     groupRuntimeMemberId,
     occurredAt: sourceWake.occurredAt,
     question: source.question,
@@ -613,10 +614,7 @@ export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
     };
   }
 
-  const admittedAudience = "audience" in sourceAuthority.admission
-    ? sourceAuthority.admission.audience
-    : null;
-  const audience = storedRequest.fixedAudience ?? admittedAudience ?? "group";
+  const audience = storedRequest.fixedAudience ?? "group";
   const permissionText = permissionTextForHostedCurrentSenderAudience(audience);
   const authority = {
     audience,
@@ -624,11 +622,7 @@ export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
     occurredAt: sourceAuthority.occurredAt,
     permissionDigest: input.permissionDigest,
     permissionText,
-    personalReadAllowed: admittedAudience !== null
-      && (
-        storedRequest.fixedAudience === null
-        || storedRequest.fixedAudience === admittedAudience
-      ),
+    personalReadAllowed: true,
     question: sourceAuthority.question,
     requestId: input.requestId,
     sourceChannel: sourceAuthority.sourceChannel,
@@ -648,6 +642,7 @@ export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
 }
 
 async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
+  audience: HostedGroupCurrentSenderAudience;
   existingDedupeKey: string;
   existingKind: string;
   existingUserId: string;
@@ -698,6 +693,9 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
   if (!authority || authority.question !== wake.ask.question) {
     return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
   }
+  if (authority.audience !== input.audience) {
+    return unavailableHostedCurrentSenderAdmission("request_conflict");
+  }
   return {
     mailboxWake: { expectedUserId: input.existingUserId, mailboxItemId: input.requestId },
     result: { status: "accepted" },
@@ -742,8 +740,8 @@ function readHostedGroupCurrentSenderStoredRequest(input: {
           permissionTextForHostedCurrentSenderAudience(legacyAudience),
         )
     ) {
-      // Already-accepted v1 work keeps its persisted audience. Exact-source
-      // classification must agree before personal-model work can continue.
+      // Already-accepted v1 work keeps its persisted audience. The current
+      // source is still reloaded before personal-model work can continue.
       return { fixedAudience: legacyAudience };
     }
   }
@@ -1408,7 +1406,6 @@ function readHostedCurrentSenderSource(
   wake: HostedExecutionConversationMessageWake,
   groupRuntimeMemberId: string,
 ): {
-  hasNativeReplyContext: boolean;
   question: string;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   sourceChannel: "linq" | "telegram";
@@ -1417,7 +1414,6 @@ function readHostedCurrentSenderSource(
     return null;
   }
   const message = wake.message;
-  let hasNativeReplyContext: boolean;
   let routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   let sourceChannel: "linq" | "telegram";
   if (message.channel === "linq") {
@@ -1432,8 +1428,6 @@ function readHostedCurrentSenderSource(
     ) {
       return null;
     }
-    hasNativeReplyContext = message.linqMessage.replyToMessageId != null
-      || message.linqMessage.replyToPartIndex != null;
     routeAuthority = authority;
     sourceChannel = "linq";
   } else if (message.channel === "telegram") {
@@ -1447,7 +1441,6 @@ function readHostedCurrentSenderSource(
     ) {
       return null;
     }
-    hasNativeReplyContext = message.telegramMessage.replyContextPreview != null;
     routeAuthority = authority;
     sourceChannel = "telegram";
   } else {
@@ -1460,7 +1453,7 @@ function readHostedCurrentSenderSource(
   ) {
     return null;
   }
-  return { hasNativeReplyContext, question, routeAuthority, sourceChannel };
+  return { question, routeAuthority, sourceChannel };
 }
 
 async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {

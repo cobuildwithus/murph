@@ -19,9 +19,13 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
+  hostedGroupCurrentSenderClarificationFindUnique: vi.fn(),
+  hostedGroupCurrentSenderClarificationUpdateMany: vi.fn(),
+  hostedGroupCurrentSenderClarificationUpsert: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   lookupHostedGroupParticipantMemberByHandle: vi.fn(),
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
@@ -36,6 +40,11 @@ const fakeTx = {
   $executeRaw: vi.fn(async () => 0),
   hostedThreadContainer: {
     findUnique: mocks.hostedThreadContainerFindUnique,
+  },
+  hostedGroupCurrentSenderClarification: {
+    findUnique: mocks.hostedGroupCurrentSenderClarificationFindUnique,
+    updateMany: mocks.hostedGroupCurrentSenderClarificationUpdateMany,
+    upsert: mocks.hostedGroupCurrentSenderClarificationUpsert,
   },
 };
 
@@ -53,6 +62,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx:
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
@@ -118,7 +129,6 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
   assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
-  classifyHostedGroupCurrentSenderRequest,
   createHostedGroupCurrentSenderAssistantAskRequestId,
   createHostedGroupCurrentSenderPrivateDeliveryId,
   createHostedGroupCurrentSenderLegacyAssistantAskRequestId,
@@ -160,11 +170,13 @@ interface StoredMailboxItem {
 const storedItems = new Map<string, StoredMailboxItem>();
 const storedWakes = new Map<string, HostedExecutionWake>();
 const sourceWakes = new Map<string, ReturnType<typeof createSourceWake>>();
+const pendingClarifications = new Map<string, Record<string, unknown>>();
 let directRouteAvailable = true;
 
 function createSourceWake(input: {
   from?: string;
   messageId?: string;
+  occurredAt?: string;
   replyToMessageId?: string | null;
   text: string;
 }) {
@@ -182,7 +194,7 @@ function createSourceWake(input: {
       service: "imessage",
       threadIsDirect: false,
     },
-    occurredAt: "2026-07-27T19:59:59.000Z",
+    occurredAt: input.occurredAt ?? "2026-07-27T19:59:59.000Z",
     phoneLookupKey: "hplk_sender",
     routeAuthority: ROUTE_AUTHORITY,
     userId: GROUP_RUNTIME_MEMBER_ID,
@@ -199,12 +211,15 @@ function origin(assistantInputId = CURRENT_INPUT_ID) {
 
 async function admit(input: {
   assistantInputId?: string;
+  audience?: "group" | "current_sender";
   text: string;
 }) {
   const assistantInputId = input.assistantInputId ?? CURRENT_INPUT_ID;
   sourceWakes.set(assistantInputId, createSourceWake({ text: input.text }));
   const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+    audience: input.audience ?? "group",
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+    mode: "new",
     now: NOW,
     origin: origin(assistantInputId),
   });
@@ -280,6 +295,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     storedItems.clear();
     storedWakes.clear();
     sourceWakes.clear();
+    pendingClarifications.clear();
     directRouteAvailable = true;
 
     mocks.hostedThreadContainerFindUnique.mockImplementation(
@@ -291,6 +307,18 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.readHostedMailboxConversationWakeByAssistantInputId.mockImplementation(
       async ({ assistantInputId }: { assistantInputId: string }) =>
         sourceWakes.get(assistantInputId) ?? null,
+    );
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx.mockImplementation(
+      async ({ assistantInputId }: { assistantInputId: string }) => {
+        const orderedIds = [OLDER_INPUT_ID, CURRENT_INPUT_ID];
+        const index = orderedIds.indexOf(assistantInputId);
+        return sourceWakes.has(assistantInputId)
+          ? {
+              causalSeq: String(index >= 0 ? index + 1 : 3),
+              occurredAt: sourceWakes.get(assistantInputId)!.occurredAt,
+            }
+          : null;
+      },
     );
     mocks.lookupHostedGroupParticipantMemberByHandle.mockImplementation(
       async ({ handle }: { handle: string }) => ({
@@ -335,6 +363,54 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue(null);
+    mocks.hostedGroupCurrentSenderClarificationUpsert.mockImplementation(
+      async ({ create, update, where }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+        where: { groupRuntimeMemberId_targetMemberId: {
+          groupRuntimeMemberId: string;
+          targetMemberId: string;
+        } };
+      }) => {
+        const key = `${where.groupRuntimeMemberId_targetMemberId.groupRuntimeMemberId}:${where.groupRuntimeMemberId_targetMemberId.targetMemberId}`;
+        const row = pendingClarifications.get(key);
+        const next = row ? { ...row, ...update } : {
+          ...create,
+          resolvedAudience: null,
+          resolvedByAssistantInputId: null,
+        };
+        pendingClarifications.set(key, next);
+        return next;
+      },
+    );
+    mocks.hostedGroupCurrentSenderClarificationFindUnique.mockImplementation(
+      async ({ where }: {
+        where: { groupRuntimeMemberId_targetMemberId: {
+          groupRuntimeMemberId: string;
+          targetMemberId: string;
+        } };
+      }) => pendingClarifications.get(
+        `${where.groupRuntimeMemberId_targetMemberId.groupRuntimeMemberId}:${where.groupRuntimeMemberId_targetMemberId.targetMemberId}`,
+      ) ?? null,
+    );
+    mocks.hostedGroupCurrentSenderClarificationUpdateMany.mockImplementation(
+      async ({ data, where }: {
+        data: Record<string, unknown>;
+        where: {
+          groupRuntimeMemberId: string;
+          resolvedByAssistantInputId: null;
+          targetMemberId: string;
+        };
+      }) => {
+        const key = `${where.groupRuntimeMemberId}:${where.targetMemberId}`;
+        const row = pendingClarifications.get(key);
+        if (!row || row.resolvedByAssistantInputId !== null) {
+          return { count: 0 };
+        }
+        pendingClarifications.set(key, { ...row, ...data });
+        return { count: 1 };
+      },
+    );
     mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
       async (input: {
         envelope: HostedExecutionWake;
@@ -360,234 +436,83 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
   });
 
-  it("admits only the small flat command family and fixes its audience", () => {
-    for (const text of [
-      "Can you ask my Murph how my synthetic activity has changed?",
-      "Murph, ask my Murph how my synthetic activity has changed?",
-    ]) {
-      expect(classifyHostedGroupCurrentSenderRequest({
-        hasNativeReplyContext: false,
-        text,
-      })).toEqual({ audience: "group" });
-    }
-    for (const text of [
-      "Murph, ask my Murph how my synthetic activity changed and DM me.",
-      "Murph, ask my Murph how my synthetic activity changed and send me a direct message.",
-      "Murph, ask my Murph what synthetic medications I take and reply in private.",
-      "Murph, ask my Murph what synthetic medications I take and send me the answer.",
-      "Murph, ask my Murph what synthetic medications I take and text me.",
-      "Murph, ask my Murph what synthetic medications I take and answer me.",
-      "Murph, ask my Murph how my synthetic activity changed and keep this private.",
-      "Murph, ask my Murph how my synthetic activity changed, not for the group.",
-      "Murph, ask my Murph how my synthetic activity changed, just between us.",
-      "Murph, ask my Murph how my synthetic activity changed, confidentially.",
-      "Murph, ask my Murph how my synthetic activity changed, for my eyes only.",
-      "Murph, ask my Murph how my synthetic activity changed, keep it between us.",
-      "Murph, ask my Murph how my synthetic activity changed, between you and me.",
-      "Murph, ask my Murph how my synthetic activity changed, in confidence.",
-      "Murph, ask my Murph how my synthetic activity changed, make this private.",
-      "Murph, ask my Murph how my synthetic activity changed, for me only.",
-      "Murph, ask my Murph how my synthetic activity changed but keep it between us.",
-      "Murph, ask my Murph how my synthetic activity changed; please in confidence.",
-      "Murph, ask my Murph privately, what synthetic medications do I take?",
-      "Murph, ask my Murph confidentially, what synthetic medications do I take?",
-      "Murph, ask my Murph in a private message, what synthetic medications do I take?",
-      "Murph, ask my Murph for my eyes only, what synthetic medications do I take?",
-      "Murph, ask my Murph privately what synthetic medications do I take?",
-      "Murph, ask my Murph what synthetic medications do I take, one-on-one.",
-      "Murph, ask my Murph what synthetic medications do I take, one to one.",
-      "Murph, ask my Murph one-on-one what synthetic medications do I take?",
-      "Murph, ask my Murph what synthetic medications do I take, reply one-on-one.",
-      "Murph, ask my Murph what synthetic medications do I take, send it to my DMs.",
-      "Murph, ask my Murph what synthetic medications do I take, send the answer to my DM.",
-    ]) {
-      expect(classifyHostedGroupCurrentSenderRequest({
-        hasNativeReplyContext: false,
-        text,
-      }), text).toEqual({ audience: "current_sender" });
-    }
 
-    expect(classifyHostedGroupCurrentSenderRequest({
-      hasNativeReplyContext: false,
-      text: "Murph, ask my Murph what private insurance coverage I have?",
-    })).toEqual({ audience: "group" });
-
-    for (const text of [
-      "Murph, ask my Murph what synthetic medications I take and let me know privately.",
-      "Murph, ask my Murph what synthetic medications I take and deliver the answer to the chat owner.",
-      "Murph, ask my Murph what synthetic medications I take, off the record.",
-      "Murph, ask my Murph what synthetic medications I take, don't make it public.",
-      "Murph, ask my Murph what synthetic medications I take, this is a secret.",
-      "Murph, ask my Murph what synthetic medications I take, answer by carrier pigeon.",
-      "Murph, ask my Murph answer by carrier pigeon, what synthetic medications I take?",
-      "Murph, ask my Murph what synthetic medications I take and the answer should stay private.",
-      "Murph, ask my Murph what synthetic medications I take and I want the answer to stay private.",
-      "Murph, ask my Murph what synthetic medications I take and the group shouldn't see the answer.",
-      "Murph, ask my Murph to DM me my synthetic recovery score.",
-      "Murph, ask my Murph to message me what synthetic medications I take.",
-      "Murph, ask my Murph can you DM me my synthetic recovery score?",
-      "Murph, ask my Murph what my synthetic recovery score is privately.",
-      "Murph, ask my Murph what my synthetic recovery score is just for me.",
-    ]) {
-      expect(classifyHostedGroupCurrentSenderRequest({
-        hasNativeReplyContext: false,
-        text,
-      })).toHaveProperty("unavailableReason");
-    }
-
-    for (const input of [
-      {
-        hasNativeReplyContext: true,
-        text: "Murph, ask my Murph about my synthetic activity.",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask my Murph about the previous reply.",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask my Murph based on this discussion.",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask my Murph not to answer this.",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask my Murph how my synthetic activity changed, but don't post it.",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask my Murph \"what the other person said\".",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask someone about my synthetic activity.",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask my Murph and reply in the group and DM me.",
-      },
-      {
-        hasNativeReplyContext: false,
-        text: "Murph, ask my Murph privately, what changed, then tell the group.",
-      },
-    ]) {
-      expect(classifyHostedGroupCurrentSenderRequest(input)).toHaveProperty(
-        "unavailableReason",
-      );
-    }
-  });
-
-  it("rejects conflicting audience wording before enqueue or route resolution", async () => {
-    const { admission } = await admit({
-      text: "Murph, ask my Murph how my synthetic activity changed, tell the group, and DM me.",
-    });
-    expect(admission).toMatchObject({
-      mailboxWake: null,
-      result: {
-        status: "unavailable",
-        unavailableReason: expect.stringMatching(/choose either the group or a private reply/u),
-      },
-    });
-    expect(storedItems.size).toBe(0);
-    expect(
-      mocks.resolveHostedAssistantNotificationDestination,
-    ).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    "Murph, ask my Murph what synthetic medications I take and the answer should stay private.",
-    "Murph, ask my Murph what synthetic medications I take and I want the answer to stay private.",
-    "Murph, ask my Murph what synthetic medications I take and the group shouldn't see the answer.",
-  ])("rejects a subject-led private clause before enqueue: %s", async (text) => {
-    const { admission } = await admit({ text });
-
-    expect(admission).toMatchObject({
-      mailboxWake: null,
-      result: {
-        status: "unavailable",
-        unavailableReason: expect.stringMatching(/choose either the group or a private reply/u),
-      },
-    });
-    expect(storedItems.size).toBe(0);
-    expect(storedWakes.size).toBe(0);
-    expect(
-      mocks.resolveHostedAssistantNotificationDestination,
-    ).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    "Murph, ask my Murph to DM me my synthetic recovery score.",
-    "Murph, ask my Murph to message me what synthetic medications I take.",
-    "Murph, ask my Murph can you DM me my synthetic recovery score?",
-    "Murph, ask my Murph what my synthetic recovery score is privately.",
-    "Murph, ask my Murph what my synthetic recovery score is just for me.",
-  ])("rejects an unconsumed private directive before enqueue: %s", async (text) => {
-    const { admission } = await admit({ text });
-
-    expect(admission).toMatchObject({
-      mailboxWake: null,
-      result: {
-        status: "unavailable",
-        unavailableReason: expect.stringMatching(/choose either the group or a private reply/u),
-      },
-    });
-    expect(storedItems.size).toBe(0);
-    expect(storedWakes.size).toBe(0);
-    expect(
-      mocks.resolveHostedAssistantNotificationDestination,
-    ).not.toHaveBeenCalled();
-  });
-
-  it("binds a mixed-sender batch to the later exact author, never an older native reply", async () => {
-    sourceWakes.set(OLDER_INPUT_ID, createSourceWake({
-      from: "+15550001001",
-      messageId: "message_older",
-      replyToMessageId: "message_human",
-      text: "Synthetic conversational reply.",
-    }));
-    sourceWakes.set(CURRENT_INPUT_ID, createSourceWake({
-      from: "+15550001002",
-      messageId: "message_current",
-      text: "Murph, ask my Murph how my synthetic activity has changed?",
-    }));
-
-    await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      now: NOW,
-      origin: origin(CURRENT_INPUT_ID),
-    })).resolves.toMatchObject({
-      mailboxWake: { expectedUserId: CURRENT_SENDER_MEMBER_ID },
-      result: { status: "accepted" },
-    });
-    expect(
-      mocks.readHostedMailboxConversationWakeByAssistantInputId,
-    ).toHaveBeenCalledWith({
-      assistantInputId: CURRENT_INPUT_ID,
-      availableAt: NOW,
-      memberId: GROUP_RUNTIME_MEMBER_ID,
-      prisma: fakeTx,
-    });
-    expect(
-      mocks.readHostedMailboxConversationWakeByAssistantInputId,
-    ).not.toHaveBeenCalledWith(expect.objectContaining({
-      assistantInputId: OLDER_INPUT_ID,
-    }));
+  it("binds model-inferred audience without parsing the sender's wording", async () => {
+    const text = "Could you check this for me? I'm not sure where the answer belongs.";
+    const group = await admit({ text });
+    expect(requireRequestedWake(group.requestId).ask.target.kind).toBe(
+      "group_sender",
+    );
 
     storedItems.clear();
     storedWakes.clear();
+    const privateResult = await admit({ audience: "current_sender", text });
+    expect(requireRequestedWake(privateResult.requestId).ask.target.kind).toBe(
+      "group_sender_private",
+    );
+  });
+
+  it("holds an ambiguous request and resumes it from the same sender's natural answer", async () => {
+    sourceWakes.set(CURRENT_INPUT_ID, createSourceWake({
+      text: "Can my Murph answer this?",
+    }));
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "clarification",
       now: NOW,
-      origin: origin(OLDER_INPUT_ID),
+      origin: origin(),
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "clarification_required" },
+    });
+    expect(storedItems.size).toBe(0);
+
+    const otherSenderResponseInputId = `ain_${"e".repeat(32)}`;
+    sourceWakes.set(otherSenderResponseInputId, createSourceWake({
+      from: "+15550001001",
+      occurredAt: "2026-07-27T19:59:59.500Z",
+      text: "Put it here.",
+    }));
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "group",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "continuation",
+      now: NOW,
+      origin: origin(otherSenderResponseInputId),
     })).resolves.toMatchObject({
       mailboxWake: null,
       result: { status: "unavailable" },
     });
+
+    const responseInputId = `ain_${"d".repeat(32)}`;
+    sourceWakes.set(responseInputId, createSourceWake({
+      occurredAt: "2026-07-27T19:59:59.500Z",
+      text: "Here is fine, thanks.",
+    }));
+    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "group",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "continuation",
+      now: NOW,
+      origin: origin(responseInputId),
+    });
+    const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      originAssistantInputId: CURRENT_INPUT_ID,
+    });
+    expect(admission).toEqual({
+      mailboxWake: {
+        expectedUserId: CURRENT_SENDER_MEMBER_ID,
+        mailboxItemId: requestId,
+      },
+      result: { status: "accepted" },
+    });
+    expect(requireRequestedWake(requestId).ask.question).toBe(
+      "Can my Murph answer this?",
+    );
   });
 
-  it("admits two independent flat requests from one mixed-sender batch", async () => {
+  it("admits two independent natural requests from one mixed-sender batch", async () => {
     sourceWakes.set(OLDER_INPUT_ID, createSourceWake({
       from: "+15550001001",
       messageId: "message_older",
@@ -609,12 +534,16 @@ describe("hosted current-sender Assistant Ask authority", () => {
     });
     const [olderAdmission, currentAdmission] = await Promise.all([
       requestHostedGroupCurrentSenderAssistantAsk({
+        audience: "group",
         groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        mode: "new",
         now: NOW,
         origin: origin(OLDER_INPUT_ID),
       }),
       requestHostedGroupCurrentSenderAssistantAsk({
+        audience: "group",
         groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        mode: "new",
         now: NOW,
         origin: origin(CURRENT_INPUT_ID),
       }),
@@ -665,14 +594,16 @@ describe("hosted current-sender Assistant Ask authority", () => {
     });
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "new",
       now: NOW,
       origin: origin(),
     })).resolves.toEqual(admission);
     expect(storedItems.size).toBe(1);
   });
 
-  it("drains legacy fixed targets only when exact-source classification agrees", async () => {
+  it("drains legacy work with its already-persisted audience", async () => {
     const legacyGroupId = storeLegacyRequest({
       assistantInputId: CURRENT_INPUT_ID,
       legacyAudience: "group",
@@ -683,21 +614,21 @@ describe("hosted current-sender Assistant Ask authority", () => {
       now: NOW,
       request: { action: "prepare", requestId: legacyGroupId },
     })).resolves.toMatchObject({
-      mailboxWake: {
-        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
-        mailboxItemId: createHostedAssistantAskCompletionId(legacyGroupId),
+      mailboxWake: null,
+      response: {
+        action: "prepare",
+        disclosure: {
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+        },
+        status: "ready",
       },
-      response: { action: "prepare", status: "already_completed" },
     });
-    expect(requireCompletedWake(
-      createHostedAssistantAskCompletionId(legacyGroupId),
-    ).ask.result).toEqual({ answer: null, outcome: "cannot_answer" });
 
     storedItems.clear();
     storedWakes.clear();
     sourceWakes.clear();
     const legacyPrivateId = storeLegacyRequest({
-      assistantInputId: OLDER_INPUT_ID,
+      assistantInputId: CURRENT_INPUT_ID,
       legacyAudience: "current_sender",
       text: "Murph, ask my Murph about my synthetic activity in the group.",
     });
@@ -706,19 +637,20 @@ describe("hosted current-sender Assistant Ask authority", () => {
       now: NOW,
       request: { action: "prepare", requestId: legacyPrivateId },
     })).resolves.toMatchObject({
-      mailboxWake: {
-        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
-        mailboxItemId: createHostedAssistantAskCompletionId(legacyPrivateId),
+      mailboxWake: null,
+      response: {
+        action: "prepare",
+        disclosure: {
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+        },
+        status: "ready",
       },
-      response: { action: "prepare", status: "already_completed" },
     });
-    expect(requireCompletedWake(
-      createHostedAssistantAskCompletionId(legacyPrivateId),
-    ).ask.result).toEqual({ answer: null, outcome: "cannot_answer" });
   });
 
   it("fixes private audience only after resolving a same-channel direct route", async () => {
     const { admission, requestId } = await admit({
+      audience: "current_sender",
       text: "Murph, ask my Murph one-on-one how my synthetic activity changed?",
     });
     expect(admission.result).toEqual({ status: "accepted" });
@@ -734,6 +666,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     storedWakes.clear();
     directRouteAvailable = false;
     const unavailable = await admit({
+      audience: "current_sender",
       text: "Murph, ask my Murph send the answer to my DMs, how did my synthetic activity change?",
     });
     expect(unavailable.admission).toMatchObject({
@@ -775,6 +708,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
 
   it("persists a group terminal before personal work when the admitted private route is lost", async () => {
     const { requestId } = await admit({
+      audience: "current_sender",
       text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
     });
     directRouteAvailable = false;
@@ -896,6 +830,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
 
   it("delivers a fixed private answer as exact text on the admitted channel", async () => {
     const { requestId } = await admit({
+      audience: "current_sender",
       text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
     });
     await expect(handleHostedRuntimeAssistantAskControl({
@@ -948,6 +883,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
 
   it("falls back once to a non-disclosing group terminal when the private route is lost", async () => {
     const { requestId } = await admit({
+      audience: "current_sender",
       text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
     });
     await expect(handleHostedRuntimeAssistantAskControl({
@@ -1072,6 +1008,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
 
   it("persists the group terminal when private delivery authority is lost", async () => {
     const { requestId } = await admit({
+      audience: "current_sender",
       text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
     });
     const answer = "Synthetic private answer that must stay private.";
@@ -1122,6 +1059,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
 
   it("persists a fresh group terminal when private delivery reaches provider entry after expiry", async () => {
     const { requestId } = await admit({
+      audience: "current_sender",
       text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
     });
     const answer = "Synthetic expired private answer that must stay private.";

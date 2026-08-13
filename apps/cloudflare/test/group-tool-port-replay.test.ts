@@ -52,6 +52,8 @@ const replaySafeRequests = [
     action: "ask_current_sender",
     request: {
       action: "ask_current_sender",
+      audience: "group",
+      mode: "new",
       origin: {
         assistantInputId: `ain_${"c".repeat(32)}`,
         kind: "accepted_input",
@@ -64,8 +66,10 @@ const replaySafeRequests = [
     },
     wireRequest: {
       action: "ask_current_sender",
+      audience: "group",
       [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
         HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+      mode: "new",
       origin: {
         assistantInputId: `ain_${"c".repeat(32)}`,
         kind: "accepted_input",

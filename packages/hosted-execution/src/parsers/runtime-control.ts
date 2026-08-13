@@ -1139,9 +1139,29 @@ export function parseHostedRuntimeGroupToolRequest(
     const label = "Hosted runtime group tool ask_current_sender request";
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "origin"]),
+      new Set(["action", "audience", "mode", "origin"]),
       label,
     );
+    const mode = parseAllowedString(
+      record.mode,
+      `${label} mode`,
+      ["clarification", "continuation", "new"] as const,
+    );
+    const audience = record.audience === undefined
+      ? undefined
+      : parseAllowedString(
+          record.audience,
+          `${label} audience`,
+          ["current_sender", "group"] as const,
+        );
+    if (
+      (mode === "clarification" && audience !== undefined)
+      || (mode !== "clarification" && audience === undefined)
+    ) {
+      throw new TypeError(
+        `${label} audience must be omitted only for clarification.`,
+      );
+    }
     const origin = parseHostedExecutionAssistantAskOrigin(
       record.origin,
       `${label} origin`,
@@ -1149,7 +1169,12 @@ export function parseHostedRuntimeGroupToolRequest(
     if (origin.kind !== "accepted_input") {
       throw new TypeError(`${label} origin must be an accepted input.`);
     }
-    return { action, origin };
+    return {
+      action,
+      ...(audience === undefined ? {} : { audience }),
+      mode,
+      origin,
+    };
   }
   if (action === "message_current_sender") {
     const label = "Hosted runtime group tool legacy message_current_sender request";
@@ -1161,7 +1186,12 @@ export function parseHostedRuntimeGroupToolRequest(
     if (origin.kind !== "accepted_input") {
       throw new TypeError(`${label} origin must be an accepted input.`);
     }
-    return { action: "ask_current_sender", origin };
+    return {
+      action: "ask_current_sender",
+      audience: "current_sender",
+      mode: "new",
+      origin,
+    };
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";

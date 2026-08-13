@@ -425,6 +425,19 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
   z
     .object({
+      action: z.enum([
+        'clarify_current_sender',
+        'continue_current_sender_in_group',
+        'continue_current_sender_privately',
+        'message_current_sender',
+      ]),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal('ask_member'),
       grantId: groupDisclosureGrantIdSchema,
       question: groupQuestionSchema,
@@ -914,7 +927,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'group-email' | 'vault-file'
+      owner?: 'current-sender-ask' | 'group-email' | 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -946,6 +959,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  externallyVisibleOutput?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
@@ -960,6 +974,7 @@ export interface MurphDynamicToolExecutionResult {
 }
 
 export interface MurphGroupSharedReadTurnState {
+  currentSenderGroupPreviewedMessageRefs?: Set<string>
   invalid: boolean
   readProjectionScopeKeyBatches: string[][]
   roster: Array<{
@@ -1010,7 +1025,9 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'ask_current_sender'
+      audience?: 'current_sender' | 'group'
       messageRef: string
+      mode: 'clarification' | 'continuation' | 'new'
     }
   | {
       action: 'ask_member'
@@ -2621,6 +2638,7 @@ export async function executeMurphDynamicToolRequest(input: {
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
+        progressDelivery: input.progressDelivery,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
         vaultRoot: input.vaultRoot ?? null,
@@ -4139,10 +4157,12 @@ async function executeGroupTool(input: {
   groupSharedReadTurnState: MurphGroupSharedReadTurnState | null
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
+  progressDelivery: AssistantProgressDelivery | null
   request: MurphGroupToolRequest
   toolCallId: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  let currentSenderGroupPreviewSent = false
   if (input.request.action === 'read_shared') {
     if (
       'audience' in input.request
@@ -4366,8 +4386,40 @@ async function executeGroupTool(input: {
         'current-sender request requires the selected accepted message in this group turn',
       )
     }
+    const previewedMessageRefs =
+      input.groupSharedReadTurnState?.currentSenderGroupPreviewedMessageRefs
+    let previewSent = previewedMessageRefs?.has(input.request.messageRef) === true
+    if (input.request.audience === 'group' && !previewSent) {
+      if (!input.progressDelivery || input.deliveryContextOrdinal === null) {
+        return toolTextResult(
+          false,
+          'group sharing is unavailable because the required advance notice could not be delivered',
+        )
+      }
+      const preview = await input.progressDelivery.send(
+        'I’ll ask your Murph and share the answer here.',
+        {
+          deliveryContextOrdinal: input.deliveryContextOrdinal,
+          required: true,
+          source: 'system',
+        },
+      )
+      if (preview.kind !== 'sent') {
+        return toolTextResult(
+          false,
+          'group sharing is unavailable because the required advance notice could not be delivered',
+        )
+      }
+      previewedMessageRefs?.add(input.request.messageRef)
+      previewSent = true
+    }
+    currentSenderGroupPreviewSent = previewSent
     request = {
       action: 'ask_current_sender',
+      ...(input.request.audience === undefined
+        ? {}
+        : { audience: input.request.audience }),
+      mode: input.request.mode,
       origin: {
         assistantInputId: input.request.messageRef,
         kind: 'accepted_input',
@@ -4585,8 +4637,24 @@ async function executeGroupTool(input: {
     const payload = generatedAvatarCapture
       ? { ...modelResult, generatedImage: generatedAvatarCapture }
       : modelResult
+    const currentSenderAccepted =
+      input.request.action === 'ask_current_sender'
+      && result.action === 'ask_current_sender'
+      && result.result.status === 'accepted'
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
+      ...(currentSenderAccepted
+        ? {
+            finalActionPatch: {
+              kind: 'none' as const,
+              owner: 'current-sender-ask' as const,
+            },
+          }
+        : {}),
+      ...(input.request.action === 'ask_current_sender'
+        && currentSenderGroupPreviewSent
+        ? { externallyVisibleOutput: true }
+        : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {
@@ -4602,6 +4670,9 @@ async function executeGroupTool(input: {
           ? buildGroupAskRequestFailureText(error)
           : 'group tool request failed',
       ),
+      ...(currentSenderGroupPreviewSent
+        ? { externallyVisibleOutput: true }
+        : {}),
       ...(runtimeIssueInput ? { runtimeIssueInputs: [runtimeIssueInput] } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
@@ -6275,11 +6346,19 @@ function parseGroupArguments(
   ) {
     return { ok: true, request: parsed.data }
   }
-  if (parsed.data.action === 'ask_current_sender') {
+  if (
+    parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'clarify_current_sender'
+    || parsed.data.action === 'continue_current_sender_in_group'
+    || parsed.data.action === 'continue_current_sender_privately'
+    || parsed.data.action === 'message_current_sender'
+  ) {
+    const decision = readCurrentSenderToolDecision(parsed.data.action)
     return {
       ok: true,
       request: {
         action: 'ask_current_sender',
+        ...decision,
         messageRef: parsed.data.message_ref,
       },
     }
@@ -6468,6 +6547,30 @@ function parseGroupArguments(
     }
   }
   return { ok: true, request: { action: 'read_current' } }
+}
+
+function readCurrentSenderToolDecision(action:
+  | 'ask_current_sender'
+  | 'clarify_current_sender'
+  | 'continue_current_sender_in_group'
+  | 'continue_current_sender_privately'
+  | 'message_current_sender'
+): {
+  audience?: 'current_sender' | 'group'
+  mode: 'clarification' | 'continuation' | 'new'
+} {
+  switch (action) {
+    case 'ask_current_sender':
+      return { audience: 'group', mode: 'new' }
+    case 'message_current_sender':
+      return { audience: 'current_sender', mode: 'new' }
+    case 'clarify_current_sender':
+      return { mode: 'clarification' }
+    case 'continue_current_sender_in_group':
+      return { audience: 'group', mode: 'continuation' }
+    case 'continue_current_sender_privately':
+      return { audience: 'current_sender', mode: 'continuation' }
+  }
 }
 
 function parseFinishWithoutReplyArguments(

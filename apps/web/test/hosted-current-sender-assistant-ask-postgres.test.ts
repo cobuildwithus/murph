@@ -59,8 +59,14 @@ describe.skipIf(!runPostgresProof)(
           throw new Error("Expected a second synthetic participant.");
         }
 
-        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+        const priorRequestId = createHostedGroupCurrentSenderAssistantAskRequestId({
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.priorAssistantInputId,
+        });
+        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "group",
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "new",
           now,
           origin: {
             assistantInputId: fixture.priorAssistantInputId,
@@ -68,9 +74,12 @@ describe.skipIf(!runPostgresProof)(
             sessionId: "session_prior_participant",
           },
           prisma,
-        })).resolves.toMatchObject({
-          mailboxWake: null,
-          result: { status: "unavailable" },
+        })).resolves.toEqual({
+          mailboxWake: {
+            expectedUserId: fixture.priorSenderMemberId,
+            mailboxItemId: priorRequestId,
+          },
+          result: { status: "accepted" },
         });
 
         const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
@@ -85,13 +94,17 @@ describe.skipIf(!runPostgresProof)(
           result: { status: "accepted" as const },
         };
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "new",
           now,
           origin: fixture.origin,
           prisma,
         })).resolves.toEqual(expectedAdmission);
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "new",
           now,
           origin: fixture.origin,
           prisma,
@@ -229,7 +242,9 @@ describe.skipIf(!runPostgresProof)(
         });
 
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "current_sender",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "new",
           now,
           origin: fixture.origin,
           prisma,
@@ -245,6 +260,92 @@ describe.skipIf(!runPostgresProof)(
         await expect(prisma.hostedMailboxItem.count({
           where: { id: { in: [...requestIds] } },
         })).resolves.toBe(0);
+      } finally {
+        if (fixture) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("binds a natural clarification response to its exact sender and original message under concurrency", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 6 });
+      const now = new Date();
+      let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
+
+      try {
+        fixture = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          priorQuestion: "Could my Murph answer this?",
+          prisma,
+          question: "Here is fine.",
+        });
+        if (!fixture.priorAssistantInputId) {
+          throw new Error("Expected a synthetic clarification source message.");
+        }
+        const ambiguousOrigin = {
+          assistantInputId: fixture.priorAssistantInputId,
+          kind: "accepted_input" as const,
+          sessionId: "session_synthetic_ambiguous_request",
+        };
+        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "clarification",
+          now,
+          origin: ambiguousOrigin,
+          prisma,
+        })).resolves.toEqual({
+          mailboxWake: null,
+          result: { status: "clarification_required" },
+        });
+
+        const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.priorAssistantInputId,
+        });
+        const continuations = await Promise.all(
+          Array.from({ length: 4 }, () =>
+            requestHostedGroupCurrentSenderAssistantAsk({
+              audience: "group",
+              groupRuntimeMemberId: fixture!.groupRuntimeMemberId,
+              mode: "continuation",
+              now,
+              origin: fixture!.origin,
+              prisma,
+            })
+          ),
+        );
+        expect(continuations).toHaveLength(4);
+        expect(continuations.every((continuation) =>
+          continuation.result.status === "accepted"
+          && continuation.mailboxWake?.mailboxItemId === requestId
+        )).toBe(true);
+        await expect(prisma.hostedGroupCurrentSenderClarification.findUnique({
+          where: {
+            groupRuntimeMemberId_targetMemberId: {
+              groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+              targetMemberId: fixture.senderMemberId,
+            },
+          },
+        })).resolves.toMatchObject({
+          originAssistantInputId: fixture.priorAssistantInputId,
+          resolvedAudience: "group",
+          resolvedByAssistantInputId: fixture.assistantInputId,
+        });
+        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "current_sender",
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "continuation",
+          now,
+          origin: fixture.origin,
+          prisma,
+        })).resolves.toMatchObject({
+          mailboxWake: null,
+          result: { status: "unavailable" },
+        });
+        await expect(prisma.hostedMailboxItem.count({
+          where: { id: requestId },
+        })).resolves.toBe(1);
       } finally {
         if (fixture) {
           await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
@@ -269,7 +370,9 @@ describe.skipIf(!runPostgresProof)(
           originAssistantInputId: fixture.assistantInputId,
         });
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "current_sender",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "new",
           now,
           origin: fixture.origin,
           prisma,
@@ -370,7 +473,9 @@ describe.skipIf(!runPostgresProof)(
         const admissions = await Promise.all(
           Array.from({ length: 4 }, () =>
             requestHostedGroupCurrentSenderAssistantAsk({
+              audience: "group",
               groupRuntimeMemberId: fixture!.groupRuntimeMemberId,
+              mode: "new",
               now,
               origin: fixture!.origin,
               prisma,

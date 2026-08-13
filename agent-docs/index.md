@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Purpose
 
@@ -56,10 +56,11 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
-Current-sender Assistant Ask binds one exact accepted-message reference, gives
-Web sole exact-source admission and fixed-audience ownership, requires
-same-channel private routing before personal work, and persists one authorized
-terminal experience. Private delivery has a distinct identity from the
+Current-sender Assistant Ask binds one exact accepted-message reference. Group
+Murph infers a fixed audience from ordinary language, asks a natural
+clarification when needed, and sends advance notice before a group-bound
+personal read; Web keeps exact-source identity, route, replay, and same-sender
+continuation authority. Private delivery has a distinct identity from the
 canonical group completion/fallback, so expiry or a lost private route produces
 only a fresh non-disclosing group `cannot_answer` completion. Its exact
 reviewed-text binding, personal direct-route revalidation at every provider

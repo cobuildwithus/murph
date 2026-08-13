@@ -1,6 +1,6 @@
 # PR #1705 Current-Sender Replacement
 
-Status: ReviewGPT round-9 unseparated privacy remediation in progress; corrected exact-head CI, follow-up PASS, and merge remain active.
+Status: completed
 Baseline: supplied snapshot at `fb965713898e0fb00afc215a69e93d16c8c6fb78`.
 Owner: Assistant Ask current-sender admission and completion owners.
 Risk: High — privacy-sensitive cross-runtime disclosure.
@@ -9,26 +9,40 @@ Risk: High — privacy-sensitive cross-runtime disclosure.
 
 Replace the failed model-selected origin and audience remediation with one trusted, auditable flow:
 
-- the model can call `ask_current_sender` with only one opaque `message_ref`;
+- internal model intent actions each accept only one opaque `message_ref`;
 - trusted current-turn state requires that ref to belong to the accepted group turn;
-- Web reloads that exact source and alone decides admission, sender, and fixed audience;
+- the model infers whether the answer belongs here or privately from ordinary
+  conversation, while Web reloads the exact source and alone decides admission,
+  sender, and route authority;
+- genuine ambiguity creates one short-lived exact-source pointer and a normal
+  clarification; the same sender's natural follow-up resumes the original;
+- group-bound reads require a trusted advance notice before Web admission;
 - a private request requires a same-channel direct route before personal work;
 - the existing consented read and outgoing reviewer can only allow or deny the answer for that fixed audience;
 - every admitted request converges on one authorized terminal experience.
 
-No service, dependency, schema, queue, classifier turn, reconciliation path, or broad abstraction is added. The replacement deletes the second audience-selection model path and legacy completion authority.
+No service, dependency, queue, classifier turn, reconciliation path, or broad
+abstraction is added. One typed short-lived clarification table is added because
+natural follow-up crosses turns; it stores no copied question text and has
+bounded retention and account-deletion ownership. The replacement deletes the
+Web phrase parser and legacy completion authority.
 
 ## Invariants
 
 - One origin creates at most one canonical accepted request across replay and bounded legacy aliases.
 - Multiple valid origins in one accepted turn remain independent instead of collapsing to the newest message.
 - Linq native-reply and Telegram reply-context evidence remain admission authority.
-- Neither group nor personal model supplies a member or an audience; Web derives both from the exact selected source.
+- Neither group nor personal model supplies a member or route. Audience is an
+  internal intent decision tied to the exact selected source and cannot change
+  on replay.
 - Completion cannot change the persisted target kind.
 - Private reviewed text is delivered only by the exact current same-channel direct route.
 - Private delivery has a separate deterministic identity and cannot occupy the canonical group completion/fallback identity.
 - Route loss at completion or provider entry, and request expiry before prepare, persist only a fresh non-disclosing `cannot_answer` result to the authorized originating group.
 - Terminal or unavailable control responses without a persisted completion are retryable, not successful consumption.
+- One pending clarification is scoped to one group runtime and exact sender;
+  another simultaneous sender cannot resolve it.
+- Group notice failure prevents the personal request from reaching Web.
 
 ## Implementation
 
@@ -47,8 +61,10 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 
 - [x] `git diff --check`
 - [x] Hosted execution, Assistant Engine, Assistant Runtime, Cloudflare, and prepared Web typechecks.
-- [x] Focused Assistant Ask parser, tool, runtime, Web authority, route, and Cloudflare port suites: 310 tests.
-- [x] Opt-in PostgreSQL mixed-sender, route-loss, and concurrency proof: 4 tests.
+- [x] Final focused proof: 307 Web, 110 Assistant Engine, 34 Assistant Runtime,
+  6 Hosted Execution, 9 Cloudflare port, and 57 changelog assertions.
+- [x] Opt-in PostgreSQL mixed-sender, natural-clarification, route-loss, and
+  concurrency proof: 5 tests.
 - [x] Focused Web ESLint and agent-doc drift checks.
 - [x] ReviewGPT round 3 findings remediated: common private wording, expiry/route-loss terminal convergence, and undeployed compatibility deletion.
 - [x] Remediation proof includes fresh provider-entry expiry/route-loss fallbacks, duplicate-terminal suppression, legacy/current private-ID dirty-checkpoint dispatch on Linq and Telegram, and a 572-test affected runtime pass.
@@ -74,10 +90,26 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
   guard rejects unconsumed delivery-to-audience or terminal confidentiality
   directives before route resolution or enqueue while preserving substantive
   `private insurance` wording; focused Web authority proof passes 27 tests.
+- [x] ReviewGPT round 10 finding accepted: the phrase grammar still both leaked
+  private intent to the group default and rejected ordinary substantive text.
+  No further phrase patch was accepted.
+- [x] User chose and authorized the natural-intent redesign: infer intent,
+  clarify genuine ambiguity conversationally, and announce group sharing first.
+- [x] Delete the Web phrase parser; add exact-ref-only internal intent actions,
+  same-sender clarification continuation, replay fencing, trusted group notice,
+  bounded pointer retention, and account deletion.
+- [x] Use the mailbox's monotonic causal sequence for follow-up ordering instead
+  of timestamp comparison; schema validation/generation, prepared Web, Web lint,
+  all affected package typechecks, docs drift, and privacy/stale scans pass.
+- [x] Superseded the older active replacement checklist with this completed
+  implementation record; the primary active plan owns final review, CI, and
+  merge closeout.
 - [ ] Corrected exact-head GitHub Actions and a follow-up ReviewGPT `PASS` remain required.
 
 ## Rollout And Removal
 
-Deploy Web admission/completion support before recycling Cloudflare and detached runners. New callers use only the strict `currentSenderProtocol: "v2"` body marker. During the drain, Web parses deployed unmarked old `ask_current_sender` and `message_current_sender` calls and drains existing accepted `group_sender` or `group_sender_private` work. Exact-source rules remain authoritative. The undeployed dual URL marker, destination dialect, and intermediate request-id alias are rejected.
+Deploy Web admission/completion support before recycling Cloudflare and detached runners. New callers use only the strict `currentSenderProtocol: "v3"` body marker. During the drain, Web parses deployed unmarked old `ask_current_sender` as group-bound and `message_current_sender` as private, and drains existing accepted `group_sender` or `group_sender_private` work. Exact-source identity and route rules remain authoritative. The undeployed dual URL marker, destination dialect, and intermediate request-id alias are rejected.
 
 After all old runners are recycled, wait the ten-minute request TTL plus a one-minute queue margin. Then remove the legacy action alias and legacy request-id lookups.
+Updated: 2026-08-13
+Completed: 2026-08-13

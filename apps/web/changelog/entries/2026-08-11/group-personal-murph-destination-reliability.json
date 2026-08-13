@@ -5,9 +5,9 @@
     "id": "group-personal-murph-destination-reliability",
     "kind": "improvement",
     "priority": 4,
-    "title": "Group requests stay with the intended audience",
-    "summary": "When a group message asks someone's personal Murph for help, the result returns to the group unless that exact message explicitly requests a private reply.",
-    "details": "Conflicting audience intent shares nothing. A private request needs a current same-channel direct route before personal work starts. If that route later disappears, the group receives only a non-disclosing unavailable result; the private answer never falls back.",
+    "title": "Natural audience choices for personal group questions",
+    "summary": "When a group asks someone's personal Murph for help, Murph follows the requester's ordinary wording to answer here or privately.",
+    "details": "If the audience is genuinely unclear, Murph asks a normal follow-up instead of requiring special phrasing. Before a personal answer is prepared for the group, Murph tells the room it will be shared there. Every request stays bound to the exact sender and message, expires within ten minutes, and grants no future access.",
     "relevanceTags": [
       "groups",
       "privacy",

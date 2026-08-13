@@ -61,6 +61,8 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     const signal = new AbortController().signal;
     const currentSenderRequest = {
       action: "ask_current_sender" as const,
+      audience: "group" as const,
+      mode: "new" as const,
       origin: {
         assistantInputId: `ain_${"a".repeat(32)}`,
         kind: "accepted_input" as const,
@@ -234,6 +236,8 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
     await expect(groupTool.request({
       action: "ask_current_sender",
+      audience: "group",
+      mode: "new",
       origin: {
         assistantInputId: `ain_${"a".repeat(32)}`,
         kind: "accepted_input",
@@ -1191,6 +1195,8 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     for (const actionRequest of [
       {
         action: "ask_current_sender" as const,
+        audience: "group" as const,
+        mode: "new" as const,
         origin: {
           assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
           kind: "accepted_input" as const,

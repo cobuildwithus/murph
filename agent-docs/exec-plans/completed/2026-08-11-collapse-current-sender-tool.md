@@ -1,25 +1,27 @@
 # Collapse current-sender personal runtime requests into one tool
 
-Status: active
+Status: completed
 Created: 2026-08-11
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
-- Replace the two competing current-sender personal-runtime actions with one
-  composable, destination-free request path. The exact accepted group input
-  remains the authority source, while the personal runtime's existing fresh
-  outgoing reviewer determines whether the result returns to the group caller
-  or is delivered directly to the sender.
+- Let Group Murph infer the answer audience from ordinary conversation while
+  keeping the exact accepted group input as the only sender/source authority.
+  If the answer audience is genuinely ambiguous, ask one natural clarification
+  without prescribing how the member must reply. Tell the room before any
+  group-bound personal read is admitted.
 - Prevent stale conversational context from changing the destination of a fresh
   group request while preserving the existing privacy and route-binding gates.
 
 ## Success criteria
 
-- The model-facing group tool exposes one current-sender personal-runtime action,
-  not separate read and private-message actions.
+- The model-facing group tool exposes internal intent actions that each accept
+  only one exact message ref; members never need to use a command form.
 - One shared Web admission path validates the exact accepted message, sender,
   and route before dispatch, with one origin-level request identity.
+- Ambiguity is held by one short-lived exact-source pointer per group/sender,
+  and only that same sender's later natural answer can resume it.
 - Group-return and direct-recipient completions remain target-bound and cannot
   cross recipients or routes.
 - Focused tests cover both destinations and a fresh non-private request following
@@ -32,14 +34,14 @@ Updated: 2026-08-12
 - In scope: assistant tool schema/parser/execution, hosted execution contracts,
   Web group-tool admission and completion routing, runtime answer-mode mapping,
   focused tests, durable owner docs, and a public-safe changelog fragment.
-- Out of scope: new persisted state, a new classifier/provider turn, group
-  membership semantics, unrelated assistant tools, and frontend UI.
+- Out of scope: a rule-based language parser, a second classifier/provider
+  turn, group membership semantics, unrelated assistant tools, and frontend UI.
 
 ## Constraints
 
 - Technical constraints: deletion-first architecture; one authority resolver;
-  no model-supplied sender, route, or destination; no new service, classifier,
-  provider turn, or storage owner; preserve deployed-runtime skew safety.
+  no model-supplied sender or route; no new service or classifier provider
+  turn; store no copied question text; preserve deployed-runtime skew safety.
 - Product/process constraints: confidential incident evidence must not enter the
   repository or PR; use synthetic tests; obtain a ReviewGPT implementation patch
   as advisory input; run the mandatory preliminary and final PR review gates.
@@ -61,9 +63,9 @@ Updated: 2026-08-12
 
 1. Ask ReviewGPT Pro for a scoped deletion-first implementation patch and inspect
    its assumptions before applying any hunk.
-2. Trace and collapse the model, Web authority, hosted contract, and runtime
-   paths into one destination-free current-sender request whose exact source
-   deterministically fixes the audience before the existing final reviewer.
+2. Trace and collapse Web phrase classification into exact-ref internal intent
+   actions, same-sender clarification continuation, and one fixed audience
+   before the existing final reviewer.
 3. Add focused regression coverage and update the live architecture/security/
    reliability contracts plus member-visible changelog.
 4. Run focused tests, typechecks, static stale-symbol checks, and direct scenario
@@ -79,13 +81,13 @@ Updated: 2026-08-12
   intent classifier or provider turn.
 - Treat the ReviewGPT patch as untrusted design input: inspect it fully and adapt
   only the smallest maintainable change that preserves repository invariants.
-- Keep one canonical model/runtime action with no response destination. Web
-  deterministically fixes private delivery only from the exact selected
-  message; otherwise a valid request returns read-only to the group caller. The
-  existing outgoing reviewer can only allow or deny that fixed disclosure.
+- Keep member-facing conversation natural. Internal actions express the inferred
+  group/private/clarify/continue decision using only an exact ref; Web derives
+  sender and route and prevents audience changes on replay. The existing
+  outgoing reviewer can only allow or deny that fixed disclosure.
 - Retain the two old wire spellings only as a bounded rolling-deploy seam. The
-  parser immediately canonicalizes them, while in-process ownership and all new
-  model output use the single destination-free action. Lock canonical and legacy
+  parser immediately canonicalizes them, while in-process ownership uses one
+  canonical request shape. Lock canonical and legacy
   request aliases together so one origin can admit only one personal read.
 
 ## Progress
@@ -204,6 +206,33 @@ Updated: 2026-08-12
   request append, or wake; the focused Web authority suite passes 27 tests. This
   is a predicate correction inside the existing Web owner, not another parser
   owner, model turn, state, queue, service, or phrase-selected destination.
+- Full-snapshot ReviewGPT round 10 found that the round-9 regex still defaulted
+  several ordinary private endings to the group and falsely rejected ordinary
+  questions containing delivery-looking verbs. The finding was accepted; no
+  additional phrase was added. The user rejected exact-form UX and explicitly
+  chose a requirement-level redesign on 2026-08-13: Murph infers natural
+  audience intent, clarifies genuine ambiguity conversationally, and gives the
+  room advance notice before a group-bound answer.
+- The redesign deletes the Web phrase parser. Internal model actions still take
+  only the exact accepted message ref. Web reloads that source and derives its
+  authenticated sender and route. One short-lived group/sender clarification
+  pointer retains only exact input/session/order metadata, never copied question
+  text; continuation resolves only from the same sender and is replay-safe.
+  A deterministic system notice must be delivered before Web receives any
+  group-bound request. Private and clarification paths send no group notice.
+  Hourly bounded retention and account deletion own the pointer lifecycle.
+- The new architecture adds one narrowly demonstrated persisted owner for
+  natural clarification, while deleting the repeated phrase grammar that drove
+  rounds 3 through 10. It adds no service, queue, timer, manager, dependency, or
+  classifier turn.
+- Final local proof after the causal-order simplification passes: 307 focused
+  Web behavior/privacy/retention assertions; 110 Assistant Engine assertions;
+  34 Assistant Runtime assertions; 6 Hosted Execution assertions; 9 Cloudflare
+  port assertions; 57 changelog assertions; 5 opt-in PostgreSQL cases; Web,
+  Cloudflare, and the three affected package typechecks; Prisma validation and
+  generation; Web lint with zero errors; docs drift; stale-symbol, diff, and
+  private-identifier scans. The PostgreSQL lane proves four concurrent natural
+  continuations converge on one exact original request.
 
 ## Verification
 
@@ -211,8 +240,8 @@ Updated: 2026-08-12
   hosted current-sender asks, assistant-runtime, and Cloudflare contract ports;
   affected package typechecks; `git diff --check`; stale-symbol searches;
   exact-head GitHub Actions; ReviewGPT specialist/final presets; `git merge-tree`.
-- Expected outcomes: both terminal audiences remain functional through the one
-  destination-free tool, only explicit private/direct wording can message the
-  sender, ordinary requests return read-only to the group, no old action remains
-  model-visible, all required checks are green, and the PR is reviewable without
-  confidential production evidence.
+- Expected outcomes: Murph understands ordinary audience intent, asks naturally
+  when it cannot tell, announces group sharing before personal access, binds
+  concurrent speakers by their exact refs, keeps Web identity/route authority,
+  and passes the new full-snapshot ReviewGPT gate and exact-head CI.
+Completed: 2026-08-13

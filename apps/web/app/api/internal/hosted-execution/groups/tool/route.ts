@@ -157,12 +157,30 @@ function readHostedCurrentSenderWire(
 
   const action = readHostedCurrentSenderWireAction(payload);
   if (action === "message_current_sender" || action === "ask_current_sender") {
+    assertHostedCurrentSenderLegacyWireShape(payload);
     return {
       compatibility: { action },
-      payload,
+      payload: action === "ask_current_sender"
+        ? {
+            action,
+            audience: "group",
+            mode: "new",
+            origin: readHostedWireProperty(payload, "origin"),
+          }
+        : payload,
     };
   }
   return { compatibility: null, payload };
+}
+
+function assertHostedCurrentSenderLegacyWireShape(payload: unknown): void {
+  if (
+    typeof payload !== "object"
+    || payload === null
+    || Object.keys(payload).some((key) => key !== "action" && key !== "origin")
+  ) {
+    throw new TypeError("Hosted current-sender legacy protocol is invalid.");
+  }
 }
 
 function hasHostedWireProperty(

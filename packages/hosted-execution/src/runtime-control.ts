@@ -1006,7 +1006,7 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER =
  */
 export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
   "currentSenderProtocol";
-export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v2";
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v3";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1467,6 +1467,8 @@ export type HostedRuntimeGroupToolRequest =
     }
   | {
       action: "ask_current_sender";
+      audience?: "current_sender" | "group";
+      mode: "clarification" | "continuation" | "new";
       origin: Extract<
         HostedExecutionAssistantAskOrigin,
         { kind: "accepted_input" }
@@ -1600,6 +1602,7 @@ export type HostedRuntimeGroupMemberAskResult =
 
 export type HostedRuntimeGroupCurrentSenderDirectResult =
   | { status: "accepted" }
+  | { status: "clarification_required" }
   | { status: "unavailable"; unavailableReason: string };
 
 export type HostedRuntimeGroupToolResponse =
