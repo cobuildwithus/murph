@@ -90,7 +90,7 @@ declare module 'incur' {
       'doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
-      'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; note?: string; source?: "manual" | "import" | "device" | "derived" } }
+      'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; note?: string; source?: "manual" | "import" | "device" | "derived"; reuseExact: boolean } }
       'document list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }

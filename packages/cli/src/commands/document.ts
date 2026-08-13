@@ -48,6 +48,10 @@ export function registerDocumentCommands(
         source: eventSourceSchema
           .optional()
           .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+        reuseExact: z
+          .boolean()
+          .default(false)
+          .describe('Reuse one live document with verified identical bytes instead of creating another document.'),
       },
       output: documentImportResultSchema,
       async run({ args, options, requestId }) {
@@ -64,6 +68,7 @@ export function registerDocumentCommands(
           }),
           note: typeof options.note === 'string' ? options.note : undefined,
           source: sourceResult.success ? sourceResult.data : undefined,
+          reuseExact: options.reuseExact === true,
         })
       },
     },

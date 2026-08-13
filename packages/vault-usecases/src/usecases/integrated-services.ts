@@ -898,7 +898,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
 function createIntegratedImporterServices(): ImporterServices {
   return {
     async importDocument(input) {
-      const { vault, file, title, occurredAt, note, source } = input
+      const { vault, file, title, occurredAt, note, source, reuseExact } = input
       const importers = await loadImporterRuntime()
       const result = await importers.importDocument({
         filePath: file,
@@ -907,6 +907,7 @@ function createIntegratedImporterServices(): ImporterServices {
         occurredAt,
         note,
         source,
+        reuseExact,
       })
 
       return {
@@ -917,6 +918,7 @@ function createIntegratedImporterServices(): ImporterServices {
         documentId: result.documentId,
         eventId: result.event.id,
         lookupId: result.documentId,
+        created: result.created,
       }
     },
     async importSamplesCsv(input) {

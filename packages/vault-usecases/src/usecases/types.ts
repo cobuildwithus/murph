@@ -1221,6 +1221,7 @@ export interface ImporterServices {
       occurredAt?: string
       note?: string
       source?: "manual" | "import" | "device" | "derived"
+      reuseExact?: boolean
     },
   ): Promise<DocumentImportResult>
   importSamplesCsv(
@@ -1749,7 +1750,9 @@ export interface ImportersRuntime {
     occurredAt?: string
     note?: string
     source?: ImporterSource
+    reuseExact?: boolean
   }): Promise<{
+    created: boolean
     raw: {
       relativePath: string
     }

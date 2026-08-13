@@ -23,7 +23,9 @@ batch write. Keep raw rows out of model context and user-facing replies.
 ## Preserve and map an unfamiliar source
 
 1. Preserve the CSV once with `vault-cli document import <readable-file-path>
-   --source import --title "Workout CSV source" --format json`. Keep the
+   --source import --title "Workout CSV source" --reuse-exact --format json`.
+   This exact-byte mode reuses a prior live source document across turns instead
+   of minting attempt-local provenance. Keep the
    returned document id and raw file ref. This is the durable source if mapping
    cannot safely finish; a temporary script or JSONL file is not durable proof.
 2. Use a small local Python 3 script and only the standard-library `csv`,
@@ -48,10 +50,10 @@ batch write. Keep raw rows out of model context and user-facing replies.
 ## Make replay behavior explicit
 
 - Add `externalRef` only when a deterministic, unique session identity can be
-  derived from stable source fields. A provider session id is best. A digest of
-  the immutable raw source plus a unique, normalized source-backed workout key
-  makes replay of that exact artifact safe, but does not make a later refreshed
-  export safe; disclose that limitation when it applies. Never use row number,
+  derived from stable source fields. A provider session id is best. The verified
+  immutable raw-source digest plus a unique, normalized source-backed workout
+  key makes replay of that exact artifact safe, but does not make a later
+  refreshed export safe; disclose that limitation when it applies. Never use row number,
   row order, or a model-created label as identity.
 - Check uniqueness before writing JSONL. Use a stable lowercase slug for
   `system` and `resourceType`; keep `resourceId` deterministic and within the

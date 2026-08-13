@@ -506,7 +506,9 @@ export async function stopExperiment(
 export async function importDocument(
   input: Parameters<typeof importDocumentInternal>[0],
 ): ReturnType<typeof importDocumentInternal> {
-  return importDocumentInternal(input);
+  return input.reuseExact === true
+    ? withCanonicalInputWriteLock(input, importDocumentInternal)
+    : importDocumentInternal(input);
 }
 
 export async function addMeal(

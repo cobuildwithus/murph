@@ -48,6 +48,17 @@ Updated: 2026-08-13
 - Reuse `vault-cli event import-jsonl` as the generalized canonical bulk primitive; do not add a new parser package or Python dependency.
 - Keep the dedicated Strong/Hevy importer first because it preserves immutable raw manifests and provider-specific refresh/correction semantics that a generic transform cannot safely infer.
 
+## Review anomaly retrospective
+
+- Original requirement: preserve an unfamiliar workout CSV as durable raw evidence, make an exact-source retry idempotent across turns or runtime replacement, and reject changed workout content without overwriting a member edit.
+- First-reviewed shape: model-authored stable workout `externalRef` values used the existing superseding event importer, without generic raw-source ownership. Review correctly found that changed content could overwrite an edited workout.
+- Round-two shape: remediation added a new document import on every attempt, attached that attempt-local raw path to each workout, and selected the existing batch owner's new reject policy. The reject policy protects edits, but a second exact-source attempt receives a different raw path, so otherwise identical workouts compare as changed and the rejected retry leaves another durable document behind.
+- Repeated mechanism: both failures ask event reconciliation alone to decide whether a source-semantic workout identity represents identical or changed content while its provenance identity changes outside that owner. Another event equality exception would repeat the same design mistake.
+- Decision: continue in this PR by making exact-source reuse an explicit option of the existing document-import owner. That owner will hash and verify the source, reuse one prior live document/raw artifact with identical bytes, and otherwise perform the current atomic import. The generic workout skill will select that option before transformation, so exact replays retain the same raw path and ordinary event equality works unchanged. Do not ignore `rawRefs`, add a registry, add another event policy, or make all document imports deduplicate by default.
+- Replay equivalence: the source boundary is exact file bytes; the event boundary is the current canonical workout payload, including the stable reused raw locator. A source-backed workout key owns the cross-turn `externalRef`; row position and refreshed-export coincidence do not.
+- Provenance side effects: an identical `--reuse-exact` document import returns the existing live document and creates no raw artifact, document event, or audit row. A different source creates a new document. A changed workout under the same stable source identity still rejects the complete event batch and leaves the previously imported workout untouched.
+- Proof boundary: use two independent real CLI invocations over the real document importer and core event batch owner to prove exact-source document reuse, unchanged replay skip, changed-content rejection, one retained source document, and unchanged default supersede behavior. The App Server scenarios remain model-routing proof only; they do not claim to emulate document-store identity.
+
 ## Verification
 
 - Commands to run: focused assistant prompt Vitest, assistant-engine typecheck, synthetic Python CSV transformation followed by JSONL dry-run/apply/replay/readback, exact-head required CI, ReviewGPT specialist and final gates.

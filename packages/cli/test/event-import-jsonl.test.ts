@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -15,6 +15,19 @@ interface EventImportJsonlResult {
   supersededCount: number
   eventShardPaths: string[]
   auditPath: string | null
+}
+
+interface EventListResult {
+  items: Array<{ id: string }>
+  count: number
+}
+
+interface DocumentImportResult {
+  created: boolean
+  documentId: string
+  eventId: string
+  rawFile: string
+  manifestFile: string
 }
 
 function buildSleepSessionPayload(dayOfMonth: number) {
@@ -62,6 +75,129 @@ function buildActivitySessionPayload() {
 function toJsonl(payloads: Array<Record<string, unknown>>): string {
   return `${payloads.map((payload) => JSON.stringify(payload)).join('\n')}\n`
 }
+
+function withRawRef(rawFile: string, durationMinutes = 45) {
+  return {
+    ...buildActivitySessionPayload(),
+    durationMinutes,
+    rawRefs: [rawFile],
+  }
+}
+
+test('independent exact-source document imports keep workout replay identity stable', async () => {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-document-replay-'))
+  const vaultRoot = path.join(workDir, 'vault')
+  const sourcePath = path.join(workDir, 'workout-history.csv')
+  await writeFile(sourcePath, 'session,exercise,reps\nsession-a,Squat,5\n', 'utf8')
+  await runCli(['init', '--vault', vaultRoot])
+
+  const firstDocument = await runCli<DocumentImportResult>([
+    'document',
+    'import',
+    sourcePath,
+    '--reuse-exact',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(firstDocument.ok, true, firstDocument.ok ? undefined : JSON.stringify(firstDocument.error))
+  assert.equal(requireData(firstDocument).created, true)
+  const first = requireData(firstDocument)
+  const firstJsonl = path.join(workDir, 'first.jsonl')
+  await writeFile(firstJsonl, toJsonl([withRawRef(first.rawFile)]), 'utf8')
+  const firstApply = await runCli<EventImportJsonlResult>([
+    'event',
+    'import-jsonl',
+    '--input',
+    `@${firstJsonl}`,
+    '--conflict-policy',
+    'reject',
+    '--apply',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(firstApply.ok, true)
+  assert.equal(requireData(firstApply).createdCount, 1)
+
+  const secondDocument = await runCli<DocumentImportResult>([
+    'document',
+    'import',
+    sourcePath,
+    '--reuse-exact',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(secondDocument.ok, true)
+  const second = requireData(secondDocument)
+  assert.equal(second.created, false)
+  assert.equal(second.documentId, first.documentId)
+  assert.equal(second.eventId, first.eventId)
+  assert.equal(second.rawFile, first.rawFile)
+  assert.equal(second.manifestFile, first.manifestFile)
+
+  const secondJsonl = path.join(workDir, 'second.jsonl')
+  await writeFile(secondJsonl, toJsonl([withRawRef(second.rawFile)]), 'utf8')
+  assert.equal(await readFile(secondJsonl, 'utf8'), await readFile(firstJsonl, 'utf8'))
+  const replay = await runCli<EventImportJsonlResult>([
+    'event',
+    'import-jsonl',
+    '--input',
+    `@${secondJsonl}`,
+    '--conflict-policy',
+    'reject',
+    '--apply',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(replay.ok, true)
+  assert.equal(requireData(replay).applied, false)
+  assert.equal(requireData(replay).skippedExistingCount, 1)
+
+  const listed = await runCli<EventListResult>([
+    'event',
+    'list',
+    '--kind',
+    'activity_session',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(listed.ok, true)
+  assert.equal(requireData(listed).count, 1)
+  const importedEventId = requireData(listed).items[0]?.id
+  assert.ok(importedEventId)
+
+  const memberEdit = await runCli([
+    'event',
+    'edit',
+    importedEventId,
+    '--note',
+    'Member correction',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(memberEdit.ok, true)
+
+  const changed = await runCli<EventImportJsonlResult>([
+    'event',
+    'import-jsonl',
+    '--input',
+    `@${secondJsonl}`,
+    '--conflict-policy',
+    'reject',
+    '--apply',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(changed.ok, false)
+  if (changed.ok) {
+    throw new Error('expected an exact-source replay to preserve the member edit')
+  }
+  assert.equal(changed.error.code, 'conflict')
+
+  const documentDirectories = await readdir(path.join(vaultRoot, 'raw', 'documents'))
+  const manifestFiles = await readdir(path.dirname(path.join(vaultRoot, first.manifestFile)))
+  assert.equal(documentDirectories.length, 1)
+  assert.equal(manifestFiles.filter((name) => name.startsWith('manifest.')).length, 1)
+})
 
 test('event import-jsonl dry-runs, applies, and stays idempotent', async () => {
   const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-'))

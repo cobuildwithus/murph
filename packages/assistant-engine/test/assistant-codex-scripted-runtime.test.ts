@@ -629,7 +629,7 @@ exit 4
       `#!/bin/sh
 set -eu
 ./vault-cli workout import inspect workout-history.csv --format json > inspect.json
-./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --format json > document.json
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > document.json
 ./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > schema.json
 python3 workout-csv-helper.py transform workout-history.csv document.json events.jsonl events.sha256 stable
 ./vault-cli event import-jsonl --input @events.jsonl --conflict-policy reject --format json > dry-run.json
@@ -706,7 +706,7 @@ text(result.output);
       .split('\n')
     expect(commands).toEqual([
       'workout import inspect workout-history.csv --format json',
-      'document import workout-history.csv --source import --title Workout CSV source --format json',
+      'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
       'event payload-schema --for import-jsonl --kind activity_session --format json',
       'event import-jsonl --input @events.jsonl --conflict-policy reject --format json',
       'event import-jsonl --input @events.jsonl --conflict-policy reject --apply --format json',
@@ -811,7 +811,7 @@ exit 4
       `#!/bin/sh
 set -eu
 ./vault-cli workout import inspect workout-history.csv --format json > inspect.json
-./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --format json > document.json
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > document.json
 ./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > schema.json
 python3 workout-csv-helper.py transform workout-history.csv document.json events.jsonl events.sha256 append-only
 ./vault-cli event import-jsonl --input @events.jsonl --conflict-policy reject --format json > dry-run.json

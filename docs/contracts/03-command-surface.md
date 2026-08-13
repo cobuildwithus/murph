@@ -111,7 +111,7 @@ vault-cli event exposure add --vault <path> --exposure-type <type> --substance <
 vault-cli event edit <id> --vault <path> [--kind <kind>] [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli event show <id> --vault <path> [--request-id <id>]
 vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--request-id <id>]
-vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--request-id <id>]
+vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--reuse-exact] [--request-id <id>]
 vault-cli document edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli document show <id> --vault <path> [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
@@ -473,8 +473,16 @@ The examples below are the full successful plain `--format json` response bodies
 
 ### `document import`
 
+Document import creates a new immutable document by default. `--reuse-exact`
+instead hashes the source and reuses one prior live document only after its raw
+artifact and manifest independently verify the same bytes. A reuse returns
+`created: false` and writes no document event, raw artifact, manifest, or audit
+row. Deleted documents are never revived or reused; different bytes create a
+new document normally.
+
 ```json
 {
+  "created": true,
   "vault": "<path>",
   "sourceFile": "<path>",
   "rawFile": "<path>",
@@ -573,7 +581,7 @@ An explicit recognized `--source strong|hevy` selects that parser dialect. Witho
 
 The `workout-csv-import` assistant skill owns both the dedicated and unfamiliar-layout paths without adding its detailed workflow to every conversation. It may adapt a workout CSV that the Strong/Hevy planner does not recognize by using local Python's standard-library CSV parser, but Python remains a transformation layer rather than a vault writer. The dedicated planner always runs first; a recognized file with an unresolved provider or unit requirement must satisfy that gate instead of bypassing it through the generic path.
 
-For a genuinely unfamiliar layout, the assistant first preserves the CSV through `document import`, reads the current `activity_session` row contract from `event payload-schema --for import-jsonl`, maps the complete source into one temporary JSONL batch with one row per grouped workout and a reference to the preserved raw artifact, and performs one `event import-jsonl --conflict-policy reject` dry run followed by one apply of the byte-identical file. That policy lets an identical external-reference replay skip but rejects the whole batch when changed content would otherwise supersede an existing workout. The mapping must resolve grouping, timestamps and timezone, required duration, units, and exercise/set meaning without guessing. Assistant-facing discussion stays bounded to mappings, choices, warnings, and aggregate counts rather than source rows or per-set tool calls. The canonical write remains the existing atomic core batch importer.
+For a genuinely unfamiliar layout, the assistant first preserves the CSV through `document import --reuse-exact`, reads the current `activity_session` row contract from `event payload-schema --for import-jsonl`, maps the complete source into one temporary JSONL batch with one row per grouped workout and a reference to the preserved raw artifact, and performs one `event import-jsonl --conflict-policy reject` dry run followed by one apply of the byte-identical file. Exact-byte document reuse keeps that raw reference stable across independent attempts. The event policy then lets an identical external-reference replay skip but rejects the whole batch when changed workout content would otherwise supersede an existing workout. The mapping must resolve grouping, timestamps and timezone, required duration, units, and exercise/set meaning without guessing. Assistant-facing discussion stays bounded to mappings, choices, warnings, and aggregate counts rather than source rows or per-set tool calls. The canonical write remains the existing atomic core batch importer.
 
 Transformed rows use `externalRef` only when the source proves stable, unique session identities; input row positions alone are not identities. A deterministic identity derived from the immutable raw-source digest plus a unique normalized source-backed workout key protects exact-artifact replay, but is not treated as identity across a refreshed export. A batch without stable identities retains the command's documented append-only retry behavior, so the assistant discloses that consequence before apply, applies at most once for the current import request, and never blindly retries it. A successful apply is confirmed through a bounded canonical read. Temporary scripts and JSONL files remain scratch and do not count as durable import state.
 

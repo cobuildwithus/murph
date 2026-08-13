@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 
 import type {
   ContractSchema,
@@ -91,8 +92,16 @@ import {
 import {
   normalizeMealNutrition,
 } from "./nutrition.ts";
-import { stageRawImportManifest } from "./operations/raw-manifests.ts";
-import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
+import {
+  isRawManifestFileName,
+  parseRawImportManifest,
+  stageRawImportManifest,
+} from "./operations/raw-manifests.ts";
+import {
+  runCanonicalWrite,
+  type CommittedPayloadReceipt,
+  type WriteBatch,
+} from "./operations/write-batch.ts";
 import { assertCanonicalWriteLockScope } from "./operations/canonical-write-lock.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
@@ -117,6 +126,7 @@ import {
   toLocalDayKey,
 } from "./time.ts";
 import { loadVault } from "./vault.ts";
+import { statAndHashVaultFile } from "./raw-artifact-integrity.ts";
 
 import type { PreparedEventAttachment } from "./event-attachments.ts";
 import type { RawArtifact } from "./raw.ts";
@@ -189,14 +199,16 @@ interface ImportDocumentInput {
   title?: string;
   note?: string;
   source?: string;
+  reuseExact?: boolean;
 }
 
 interface ImportDocumentResult {
+  created: boolean;
   documentId: string;
   raw: RawArtifact;
   event: DocumentEventRecord;
   eventPath: string;
-  auditPath: string;
+  auditPath: string | null;
   manifestPath: string;
 }
 
@@ -3603,6 +3615,123 @@ function prepareDeviceBatchPlan({
   };
 }
 
+async function hashSourceFile(sourcePath: string): Promise<CommittedPayloadReceipt> {
+  const hash = createHash("sha256");
+  let byteLength = 0;
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(sourcePath);
+    stream.on("data", (chunk) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      byteLength += bytes.byteLength;
+      hash.update(bytes);
+    });
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+  return { byteLength, sha256: hash.digest("hex") };
+}
+
+async function findExactDocumentImport(input: {
+  vaultRoot: string;
+  sourceReceipt: CommittedPayloadReceipt;
+}): Promise<(ImportDocumentResult & { created: false }) | null> {
+  const manifestPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.rawDocumentsDirectory, {
+    extension: ".json",
+  });
+  const matchingManifests = new Map<string, {
+    manifestPath: string;
+    rawRef: string;
+    originalFileName: string;
+    mediaType: string;
+  }>();
+
+  for (const manifestPath of manifestPaths) {
+    const manifestFileName = manifestPath.slice(manifestPath.lastIndexOf("/") + 1);
+    if (!isRawManifestFileName(manifestFileName)) {
+      continue;
+    }
+    const manifest = parseRawImportManifest(JSON.parse(await readUtf8File(input.vaultRoot, manifestPath)));
+    if (
+      manifest.importKind !== "document"
+      || manifest.owner.kind !== "document"
+      || manifest.owner.id !== manifest.importId
+    ) {
+      continue;
+    }
+    const artifact = manifest.artifacts.find((candidate) =>
+      candidate.role === "source_document"
+      && candidate.byteSize === input.sourceReceipt.byteLength
+      && candidate.sha256 === input.sourceReceipt.sha256
+    );
+    if (!artifact) {
+      continue;
+    }
+    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
+    if (
+      integrity?.byteSize === input.sourceReceipt.byteLength
+      && integrity.sha256 === input.sourceReceipt.sha256
+    ) {
+      matchingManifests.set(manifest.importId, {
+        manifestPath,
+        rawRef: artifact.relativePath,
+        originalFileName: artifact.originalFileName,
+        mediaType: artifact.mediaType,
+      });
+    }
+  }
+  if (matchingManifests.size === 0) {
+    return null;
+  }
+
+  const shardPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const entries: EventSpineEntry<DocumentEventRecord>[] = [];
+
+  for (const relativePath of shardPaths) {
+    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const parsed = safeParseContract(eventRecordSchema, rawRecord);
+      if (parsed.success && parsed.data.kind === "document") {
+        entries.push({ relativePath, record: parsed.data });
+      }
+    }
+  }
+
+  const liveDocuments = collapseEventSpineEntries(entries)
+    .filter((entry) => !isDeletedEventSpineRecord(entry.record))
+    .sort((left, right) => left.record.id.localeCompare(right.record.id));
+
+  for (const entry of liveDocuments) {
+    const stored = matchingManifests.get(entry.record.documentId);
+    if (!stored || !entry.record.rawRefs?.includes(stored.rawRef)) {
+      continue;
+    }
+    const raw = entry.record.attachments?.find((attachment) =>
+      attachment.role === "source_document"
+      && attachment.relativePath === stored.rawRef
+      && attachment.sha256 === input.sourceReceipt.sha256
+    );
+    if (!raw) {
+      continue;
+    }
+    return {
+      created: false,
+      documentId: entry.record.documentId,
+      raw: {
+        relativePath: stored.rawRef,
+        originalFileName: stored.originalFileName,
+        mediaType: stored.mediaType,
+      },
+      event: entry.record,
+      eventPath: entry.relativePath,
+      auditPath: null,
+      manifestPath: stored.manifestPath,
+    };
+  }
+
+  return null;
+}
+
 export async function importDocument({
   vaultRoot,
   sourcePath,
@@ -3610,8 +3739,26 @@ export async function importDocument({
   title,
   note,
   source = "import",
+  reuseExact = false,
 }: ImportDocumentInput): Promise<ImportDocumentResult> {
   const vault = await loadVault({ vaultRoot });
+  const sourceReceipt = reuseExact ? await hashSourceFile(sourcePath) : null;
+  if (sourceReceipt) {
+    const existing = await findExactDocumentImport({ vaultRoot, sourceReceipt });
+    if (existing) {
+      const verifiedSourceReceipt = await hashSourceFile(sourcePath);
+      if (
+        verifiedSourceReceipt.byteLength !== sourceReceipt.byteLength
+        || verifiedSourceReceipt.sha256 !== sourceReceipt.sha256
+      ) {
+        throw new VaultError(
+          "DOCUMENT_SOURCE_CHANGED",
+          "Document source changed while exact reuse was being verified.",
+        );
+      }
+      return existing;
+    }
+  }
   const documentId = generateRecordId(ID_PREFIXES.document);
   const eventId = generateRecordId(ID_PREFIXES.event);
   const preparedAttachments = prepareEventAttachments({
@@ -3623,6 +3770,7 @@ export async function importDocument({
         role: "source_document",
         kind: "document",
         sourcePath,
+        ...(sourceReceipt ? { expectedSourceReceipt: sourceReceipt } : {}),
       },
     ],
   });
@@ -3696,6 +3844,7 @@ export async function importDocument({
       });
 
       return {
+        created: true,
         documentId,
         raw,
         event: event.record,
