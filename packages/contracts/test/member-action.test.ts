@@ -81,10 +81,21 @@ describe("member action contract", () => {
       ...request,
       action: {
         ...request.action,
-        mutations: Array.from(
-          { length: 72 },
-          () => request.action.mutations[0],
-        ),
+        mutations: [
+          ...Array.from({ length: 8 }, (_, index) => ({
+            exercisePosition: index + 1,
+            kind: "exercise.append" as const,
+            mode: null,
+            name: `Exercise ${index + 1}`,
+            setCount: 1,
+            unitOverride: null,
+          })),
+          ...Array.from({ length: 64 }, (_, index) => ({
+            ...request.action.mutations[0],
+            exercisePosition: Math.floor(index / 8) + 1,
+            setPosition: (index % 8) + 1,
+          })),
+        ],
       },
     }).success).toBe(true);
     expect(memberActionRequestV1Schema.safeParse({
@@ -110,6 +121,38 @@ describe("member action contract", () => {
           expectedResult: { kind: "reps", reps: 7 },
           requiresExistingSet: false,
         }],
+      },
+    }).success).toBe(false);
+  });
+
+  it("rejects duplicate mutation targets so exact replay has one postcondition", () => {
+    const request = validRequest();
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [
+          request.action.mutations[0],
+          {
+            ...request.action.mutations[0],
+            result: { kind: "weight_reps", reps: 6, weight: 200, weightUnit: "lb" },
+          },
+        ],
+      },
+    }).success).toBe(false);
+    const append = {
+      exercisePosition: 2,
+      kind: "exercise.append" as const,
+      mode: null,
+      name: "Push-up",
+      setCount: 1,
+      unitOverride: null,
+    };
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [append, append],
       },
     }).success).toBe(false);
   });

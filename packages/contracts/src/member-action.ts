@@ -147,7 +147,24 @@ export const workoutLiveApplyMemberActionV1Schema = z
       .max(memberActionV1Bounds.mutations),
     version: z.literal(1),
   })
-  .strict();
+  .strict()
+  .superRefine((action, context) => {
+    const targets = new Set<string>();
+    action.mutations.forEach((mutation, index) => {
+      const target = mutation.kind === "exercise.append"
+        ? `exercise:${mutation.exercisePosition}`
+        : `set:${mutation.exercisePosition}:${mutation.setPosition}`;
+      if (targets.has(target)) {
+        context.addIssue({
+          code: "custom",
+          message: "Each workout mutation target must be unique.",
+          path: ["mutations", index],
+        });
+        return;
+      }
+      targets.add(target);
+    });
+  });
 
 export type WorkoutLiveApplyMemberActionV1 = z.infer<
   typeof workoutLiveApplyMemberActionV1Schema

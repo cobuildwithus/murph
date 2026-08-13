@@ -84,6 +84,8 @@ Messages extension as the first action family.
 - Append replay convergence proves the exact action-owned exercise and set
   state; an extra set, different result, or non-canonical order is stale state,
   not an unchanged retry.
+- Admission rejects duplicate exercise or set mutation coordinates, keeping one
+  action batch single-valued across exact replay.
 
 ## Verification
 

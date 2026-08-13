@@ -111,8 +111,10 @@ An active workout may have zero pending sets after the final result is logged; i
 
 The expanded native editor derives one bounded expected shape from the visible
 V6 workout snapshot and emits only closed `exercise.append` and `set.put`
-mutations. Positions are one-based presentation coordinates. The action carries
-no member id or canonical workout id. Its one-way action binding is a stale-card
+mutations. Positions are one-based presentation coordinates, and each exercise
+or set coordinate may appear at most once so the batch has one exact,
+single-valued postcondition. The action carries no member id or canonical
+workout id. Its one-way action binding is a stale-card
 precondition, not authentication: the server derives the member from the scoped
 credential and the workout owner requires exactly one active workout whose
 binding, ordered exercise names, set counts, and logged states still match. Each
