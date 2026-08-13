@@ -3619,6 +3619,60 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("binds and durably appends an active member's first inbound on a managed warning line", async () => {
+    const hostedLinqLine = buildManagedInboundHostedLinqLineFixture(
+      "+15550000000",
+      { healthStatus: "warning" },
+    );
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine,
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_active_managed_warning_line",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledOnce();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps a matching active home chat without filling a missing recipient from inbound metadata", async () => {
     const establishedParticipantLookupKey = "hbidx:email:v1:established-participant";
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
@@ -12599,6 +12653,9 @@ function buildUnassignableHostedLinqLineFixture(): HostedLinqLineFixture {
  */
 function buildManagedInboundHostedLinqLineFixture(
   phoneNumber: string,
+  overrides: {
+    healthStatus?: "healthy" | "warning";
+  } = {},
 ): HostedLinqLineFixture {
   const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
   return {
@@ -12615,7 +12672,7 @@ function buildManagedInboundHostedLinqLineFixture(
             assignmentWeight: 1,
             configuredAt: new Date("2026-03-26T00:00:00.000Z"),
             egressPolicy: "enabled",
-            healthStatus: "healthy",
+            healthStatus: overrides.healthStatus ?? "healthy",
             maxNewConversationsPerDay: null,
             phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
             phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { JunctionClient as JunctionSdkClient, type BaseRequestOptions } from "@junction-api/sdk";
+
 import type {
   HostedRuntimeLabsLocation,
   HostedRuntimeLabsLocationsRequest,
@@ -40,10 +42,6 @@ interface JunctionLabsRuntime {
   now: () => Date;
   signal?: AbortSignal;
   timeoutMs: number;
-}
-
-interface JunctionRequestOptions {
-  maxResponseBytes: number;
 }
 
 interface JunctionAreaLabsProjection {
@@ -94,16 +92,22 @@ async function searchJunctionLabs(
   const providerSize = kind === "all"
     ? limit
     : Math.min(100, Math.max(50, limit * 5));
-  const url = junctionUrl("/v3/lab_tests/markers", {
-    a_la_carte_enabled: "true",
-    include_pricing: "true",
-    name: request.query,
-    page: "1",
-    size: String(providerSize),
-  });
-  const payload = await requestJunctionJson(runtime, url, {
-    maxResponseBytes: JUNCTION_SEARCH_RESPONSE_MAX_BYTES,
-  });
+  const payload = await requestJunctionResource(
+    runtime,
+    JUNCTION_SEARCH_RESPONSE_MAX_BYTES,
+    (client, requestOptions) => {
+      requestOptions.queryParams = { include_pricing: "true" };
+      return client.labTests.getMarkers(
+        {
+          aLaCarteEnabled: true,
+          name: request.query,
+          page: 1,
+          size: providerSize,
+        },
+        requestOptions,
+      );
+    },
+  );
   if (!isRecord(payload)) {
     throw labsUnavailableError(true);
   }
@@ -133,13 +137,17 @@ async function findJunctionLabLocations(
 ): Promise<HostedRuntimeLabsLocationsResponse> {
   const radiusMiles = request.radiusMiles ?? 25;
   const limit = request.limit ?? 5;
-  const areaUrl = junctionUrl("/v3/order/area/info", {
-    radius: String(radiusMiles),
-    zip_code: request.zipCode,
-  });
-  const areaPayload = await requestJunctionJson(runtime, areaUrl, {
-    maxResponseBytes: JUNCTION_AREA_RESPONSE_MAX_BYTES,
-  });
+  const areaPayload = await requestJunctionResource(
+    runtime,
+    JUNCTION_AREA_RESPONSE_MAX_BYTES,
+    (client, requestOptions) => client.labTests.getAreaInfo(
+      {
+        radius: toJunctionAllowedRadius(radiusMiles),
+        zipCode: request.zipCode,
+      },
+      requestOptions,
+    ),
+  );
   const homeCollectionAvailable = readHomeCollectionAvailable(areaPayload);
   const areaLabs = readEligibleAreaLabIds(areaPayload);
   const eligibleLabIds = areaLabs.labIds.slice(0, JUNCTION_MAX_PSC_LABS);
@@ -149,14 +157,18 @@ async function findJunctionLabLocations(
   for (let index = 0; index < eligibleLabIds.length; index += JUNCTION_PSC_CONCURRENCY) {
     const batch = eligibleLabIds.slice(index, index + JUNCTION_PSC_CONCURRENCY);
     const batchLocations = await Promise.all(batch.map(async (labId) => {
-      const pscUrl = junctionUrl("/v3/order/psc/info", {
-        lab_id: String(labId),
-        radius: String(radiusMiles),
-        zip_code: request.zipCode,
-      });
-      const payload = await requestJunctionJson(runtime, pscUrl, {
-        maxResponseBytes: JUNCTION_PSC_RESPONSE_MAX_BYTES,
-      });
+      const payload = await requestJunctionResource(
+        runtime,
+        JUNCTION_PSC_RESPONSE_MAX_BYTES,
+        (client, requestOptions) => client.labTests.getPscInfo(
+          {
+            labId,
+            radius: toJunctionAllowedRadius(radiusMiles),
+            zipCode: request.zipCode,
+          },
+          requestOptions,
+        ),
+      );
       return normalizeJunctionPscLocations(payload, labId);
     }));
     for (const projection of batchLocations) {
@@ -215,24 +227,29 @@ function requireJunctionLabsApiKey(source: EnvSource): string {
   return candidate;
 }
 
-function junctionUrl(
-  path: string,
-  query: Readonly<Record<string, string>> = {},
-): URL {
-  const url = new URL(path, JUNCTION_LABS_BASE_URL);
-
-  for (const [key, value] of Object.entries(query)) {
-    url.searchParams.set(key, value);
+function toJunctionAllowedRadius(
+  radiusMiles: 10 | 20 | 25 | 50,
+): "10" | "20" | "25" | "50" {
+  switch (radiusMiles) {
+    case 10:
+      return "10";
+    case 20:
+      return "20";
+    case 25:
+      return "25";
+    case 50:
+      return "50";
   }
-
-  return url;
 }
 
-async function requestJunctionJson(
+async function requestJunctionResource<T>(
   runtime: JunctionLabsRuntime,
-  url: URL,
-  options: JunctionRequestOptions,
-): Promise<unknown> {
+  maxResponseBytes: number,
+  invoke: (
+    client: JunctionSdkClient,
+    requestOptions: BaseRequestOptions,
+  ) => PromiseLike<T>,
+): Promise<T> {
   const controller = new AbortController();
   const abortFromCaller = () => controller.abort();
 
@@ -243,44 +260,69 @@ async function requestJunctionJson(
   }
 
   const timeout = setTimeout(() => controller.abort(), runtime.timeoutMs);
-
-  try {
-    let response: Response;
-    try {
-      response = await runtime.fetchImpl(url, {
-        cache: "no-store",
-        headers: {
-          accept: "application/json",
-          "x-vital-api-key": runtime.apiKey,
-        },
-        method: "GET",
-        redirect: "error",
-        signal: controller.signal,
-      });
-    } catch {
-      throw labsUnavailableError(true);
-    }
+  const sdkFetch: typeof fetch = async (input, init) => {
+    const response = await runtime.fetchImpl(input, {
+      ...init,
+      cache: "no-store",
+      redirect: "error",
+      signal: controller.signal,
+    });
 
     if (!response.ok) {
       await cancelResponseBody(response);
-      throw labsUnavailableError(true);
+      return new Response(null, {
+        headers: response.headers,
+        status: response.status,
+        statusText: response.statusText,
+      });
     }
 
-    try {
-      return await readBoundedJsonResponse(response, options.maxResponseBytes);
-    } catch {
-      throw labsUnavailableError(true);
+    const body = await readBoundedResponseBody(response, maxResponseBytes);
+    const headers = new Headers(response.headers);
+    // Fetch exposes decoded bytes while retaining the wire encoding/length
+    // headers. The reconstructed response contains the decoded bounded body.
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    headers.delete("transfer-encoding");
+    return new Response(body, {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
+    });
+  };
+
+  const timeoutInSeconds = runtime.timeoutMs / 1_000;
+  const client = new JunctionSdkClient({
+    apiKey: runtime.apiKey,
+    baseUrl: JUNCTION_LABS_BASE_URL,
+    fetch: sdkFetch,
+    headers: { accept: "application/json" },
+    maxRetries: 0,
+    timeoutInSeconds,
+  });
+
+  try {
+    const payload = await invoke(client, {
+      abortSignal: controller.signal,
+      maxRetries: 0,
+      timeoutInSeconds,
+    });
+    if (controller.signal.aborted) {
+      throw controller.signal.reason;
     }
+    return payload;
+  } catch {
+    throw labsUnavailableError(true);
   } finally {
     clearTimeout(timeout);
     runtime.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
-async function readBoundedJsonResponse(
+async function readBoundedResponseBody(
   response: Response,
   maxBytes: number,
-): Promise<unknown> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const contentLength = response.headers.get("content-length");
   if (contentLength !== null) {
     const parsedLength = Number.parseInt(contentLength, 10);
@@ -295,8 +337,7 @@ async function readBoundedJsonResponse(
   }
 
   const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let text = "";
+  const chunks: Uint8Array[] = [];
   let totalBytes = 0;
 
   try {
@@ -314,14 +355,19 @@ async function readBoundedJsonResponse(
         await reader.cancel();
         throw new RangeError("Junction response exceeded the allowed size.");
       }
-      text += decoder.decode(value, { stream: true });
+      chunks.push(value);
     }
-    text += decoder.decode();
   } finally {
     reader.releaseLock();
   }
 
-  return JSON.parse(text);
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 
 async function cancelResponseBody(response: Response): Promise<void> {
@@ -355,8 +401,8 @@ function normalizeJunctionOffering(value: unknown): JunctionOfferingProjection |
     return null;
   }
 
-  const labId = readPositiveInteger(value, "lab_id");
-  const providerId = readBoundedText(value.provider_id, 120);
+  const labId = readPositiveInteger(value, "lab_id", "labId");
+  const providerId = readBoundedText(value.provider_id ?? value.providerId, 120);
   const name = readBoundedText(value.name, 240);
   const kind = value.type === "panel" || value.type === "biomarker"
     ? value.type
@@ -367,20 +413,24 @@ function normalizeJunctionOffering(value: unknown): JunctionOfferingProjection |
     || providerId === null
     || name === null
     || kind === null
-    || value.a_la_carte_enabled !== true
-    || value.is_orderable !== true
+    || (value.a_la_carte_enabled ?? value.aLaCarteEnabled) !== true
+    || (value.is_orderable ?? value.isOrderable) !== true
   ) {
     return null;
   }
 
-  const includedMarkerProjection = readIncludedMarkers(value.expected_results);
-  const providerIncludedCount = readNonnegativeInteger(value, "expected_results_count");
+  const includedMarkerProjection = readIncludedMarkers(value.expected_results ?? value.expectedResults);
+  const providerIncludedCount = readNonnegativeInteger(
+    value,
+    "expected_results_count",
+    "expectedResultsCount",
+  );
 
   return {
     identity: `${labId}:${providerId}`,
     offering: {
       catalogPrice: normalizeCatalogPrice(value.price),
-      commonTurnaroundDays: readNonnegativeInteger(value, "common_tat_days"),
+      commonTurnaroundDays: readNonnegativeInteger(value, "common_tat_days", "commonTatDays"),
       description: readNullableBoundedText(value.description, 8_000),
       includedMarkerCount: Math.max(
         providerIncludedCount ?? includedMarkerProjection.total,
@@ -388,7 +438,11 @@ function normalizeJunctionOffering(value: unknown): JunctionOfferingProjection |
       ),
       includedMarkers: includedMarkerProjection.markers,
       kind,
-      maximumTurnaroundDays: readNonnegativeInteger(value, "worst_case_tat_days"),
+      maximumTurnaroundDays: readNonnegativeInteger(
+        value,
+        "worst_case_tat_days",
+        "worstCaseTatDays",
+      ),
       name,
       unit: readNullableBoundedText(value.unit, 120),
     },
@@ -448,10 +502,10 @@ function readEligibleAreaLabIds(value: unknown): JunctionAreaLabsProjection {
     throw labsUnavailableError(true);
   }
 
-  const centralLabs = isRecord(value.central_labs)
-    ? value.central_labs
-    : isRecord(value.data) && isRecord(value.data.central_labs)
-      ? value.data.central_labs
+  const centralLabs = isRecord(value.central_labs ?? value.centralLabs)
+    ? value.central_labs ?? value.centralLabs
+    : isRecord(value.data) && isRecord(value.data.central_labs ?? value.data.centralLabs)
+      ? value.data.central_labs ?? value.data.centralLabs
       : null;
 
   if (!centralLabs) {
@@ -465,11 +519,17 @@ function readEligibleAreaLabIds(value: unknown): JunctionAreaLabsProjection {
       return [];
     }
 
-    const labId = readPositiveInteger(candidate, "lab_id");
-    const patientServiceCenters = isRecord(candidate.patient_service_centers)
-      ? candidate.patient_service_centers
+    const labId = readPositiveInteger(candidate, "lab_id", "labId");
+    const rawPatientServiceCenters =
+      candidate.patient_service_centers ?? candidate.patientServiceCenters;
+    const patientServiceCenters = isRecord(rawPatientServiceCenters)
+      ? rawPatientServiceCenters
       : candidate;
-    const withinRadius = readNonnegativeInteger(patientServiceCenters, "within_radius");
+    const withinRadius = readNonnegativeInteger(
+      patientServiceCenters,
+      "within_radius",
+      "withinRadius",
+    );
 
     if (labId === null || withinRadius === null) {
       hadMalformedEntries = true;
@@ -494,12 +554,12 @@ function readHomeCollectionAvailable(value: unknown): boolean {
   const root = isRecord(value.data) ? value.data : value;
   if (
     !isRecord(root.phlebotomy)
-    || typeof root.phlebotomy.is_served !== "boolean"
+    || typeof (root.phlebotomy.is_served ?? root.phlebotomy.isServed) !== "boolean"
   ) {
     throw labsUnavailableError(true);
   }
 
-  return root.phlebotomy.is_served;
+  return (root.phlebotomy.is_served ?? root.phlebotomy.isServed) as boolean;
 }
 
 function normalizeJunctionPscLocations(
@@ -511,17 +571,18 @@ function normalizeJunctionPscLocations(
   }
 
   const root = isRecord(value.data) ? value.data : value;
-  const responseLabId = readPositiveInteger(root, "lab_id");
+  const responseLabId = readPositiveInteger(root, "lab_id", "labId");
   if (responseLabId !== null && responseLabId !== requestedLabId) {
     throw labsUnavailableError(true);
   }
 
-  if (!Array.isArray(root.patient_service_centers)) {
+  const patientServiceCenters = root.patient_service_centers ?? root.patientServiceCenters;
+  if (!Array.isArray(patientServiceCenters)) {
     throw labsUnavailableError(true);
   }
 
   let hadMalformedEntries = false;
-  const locations = root.patient_service_centers.flatMap((candidate) => {
+  const locations = patientServiceCenters.flatMap((candidate) => {
     const location = normalizeJunctionPscLocation(candidate, requestedLabId);
     if (!location) {
       hadMalformedEntries = true;
@@ -542,12 +603,12 @@ function normalizeJunctionPscLocation(
   }
 
   const metadata = value.metadata;
-  const siteCode = readBoundedText(value.site_code, 120);
+  const siteCode = readBoundedText(value.site_code ?? value.siteCode, 120);
   const name = readBoundedText(metadata.name, 240);
-  const line1 = readBoundedText(metadata.first_line, 240);
+  const line1 = readBoundedText(metadata.first_line ?? metadata.firstLine, 240);
   const city = readBoundedText(metadata.city, 120);
   const state = normalizeState(metadata.state);
-  const postalCode = normalizePostalCode(metadata.zip_code);
+  const postalCode = normalizePostalCode(metadata.zip_code ?? metadata.zipCode);
   const distanceMiles = readNonnegativeFiniteNumber(value.distance);
 
   if (
@@ -569,14 +630,14 @@ function normalizeJunctionPscLocation(
       address: {
         city,
         line1,
-        line2: readNullableBoundedText(metadata.second_line, 240),
+        line2: readNullableBoundedText(metadata.second_line ?? metadata.secondLine, 240),
         postalCode,
         state,
       },
       coordinates: normalizeCoordinates(value.location),
       distanceMiles,
       name,
-      phoneNumber: readNullableBoundedText(metadata.phone_number, 40),
+      phoneNumber: readNullableBoundedText(metadata.phone_number ?? metadata.phoneNumber, 40),
     },
   };
 }
@@ -638,9 +699,9 @@ function dedupeOfferings(
 
 function readPositiveInteger(
   value: Record<string, unknown>,
-  key: string,
+  ...keys: readonly string[]
 ): number | null {
-  const candidate = value[key];
+  const candidate = keys.map((key) => value[key]).find((entry) => entry !== undefined);
   return typeof candidate === "number"
     && Number.isSafeInteger(candidate)
     && candidate > 0
@@ -650,9 +711,9 @@ function readPositiveInteger(
 
 function readNonnegativeInteger(
   value: Record<string, unknown>,
-  key: string,
+  ...keys: readonly string[]
 ): number | null {
-  const candidate = value[key];
+  const candidate = keys.map((key) => value[key]).find((entry) => entry !== undefined);
   return typeof candidate === "number"
     && Number.isSafeInteger(candidate)
     && candidate >= 0

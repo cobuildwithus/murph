@@ -10,6 +10,7 @@ import {
 describe("hosted Resend plain-text email sender", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("reads shared sender env config and clamps the timeout", () => {
@@ -36,17 +37,16 @@ describe("hosted Resend plain-text email sender", () => {
     })).toBeNull();
   });
 
-  it("sends a plain-text Resend request with provider idempotency", async () => {
+  it("sends a plain-text Resend SDK request with provider idempotency", async () => {
     const signal = new AbortController().signal;
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock: typeof fetch = async (input, init) => {
       expect(input).toBe("https://api.resend.com/emails");
       expect(init?.method).toBe("POST");
+      expect(init?.redirect).toBe("error");
       expect(init?.signal).toBe(signal);
-      expect(init?.headers).toMatchObject({
-        Authorization: expect.stringMatching(/^Bearer\s+\S+$/u),
-        "Content-Type": "application/json",
-        "Idempotency-Key": "message/idempotency-key",
+      expectResendSdkHeaders(init?.headers, {
+        idempotencyKey: "message/idempotency-key",
       });
       expect(JSON.parse(String(init?.body))).toEqual({
         from: "Murph <founder@example.com>",
@@ -75,6 +75,55 @@ describe("hosted Resend plain-text email sender", () => {
       providerMessageId: "resend_email_123",
     });
     expect(timeoutSpy).toHaveBeenCalledWith(1_000);
+  });
+
+  it("preserves an explicit empty idempotency header", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      expect(new Headers(init?.headers).get("idempotency-key")).toBe("");
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    await sendHostedResendPlainTextEmail({
+      config: {
+        apiKey: "re_test",
+        from: "Murph <founder@example.com>",
+        timeoutMs: 1_000,
+      },
+      fetchImpl: fetchMock,
+      idempotencyKey: "",
+      subject: "Subject",
+      text: "Plain text only.",
+      to: ["member@example.com"],
+    });
+  });
+
+  it("keeps fixed SDK transport defaults despite ambient overrides", async () => {
+    vi.stubEnv("RESEND_BASE_URL", "http://127.0.0.1:4999");
+    vi.stubEnv("RESEND_USER_AGENT", "unexpected-agent");
+    const fetchMock: typeof fetch = async (input, init) => {
+      expect(input).toBe("https://api.resend.com/emails");
+      expect(new Headers(init?.headers).get("user-agent")).toBe(
+        "resend-node:6.18.0",
+      );
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    await sendHostedResendPlainTextEmail({
+      config: {
+        apiKey: "re_test",
+        from: "Murph <founder@example.com>",
+        timeoutMs: 1_000,
+      },
+      fetchImpl: fetchMock,
+      idempotencyKey: "message/idempotency-key",
+      subject: "Subject",
+      text: "Plain text only.",
+      to: ["member@example.com"],
+    });
   });
 
   it("combines the caller abort with the timeout for a local E2E origin", async () => {
@@ -130,31 +179,64 @@ describe("hosted Resend plain-text email sender", () => {
   });
 
   it("throws sanitized provider metadata when Resend rejects the request", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const cancel = vi.fn();
+
     await expect(sendHostedResendPlainTextEmail({
       config: {
         apiKey: "re_sensitive_test",
         from: "Murph <founder@example.com>",
         timeoutMs: 1_000,
       },
-      fetchImpl: async () => new Response("invalid key", { status: 401 }),
+      fetchImpl: async () => new Response(
+        new ReadableStream({ cancel }),
+        { status: 401 },
+      ),
       idempotencyKey: "message/idempotency-key",
       subject: "Subject",
       text: "Plain text only.",
       to: ["member@example.com"],
     })).rejects.toMatchObject({
       code: "RESEND_SEND_FAILED",
+      message: "Hosted Resend email send failed.",
       providerStatus: 401,
     } satisfies Partial<HostedResendPlainTextEmailError>);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
-  it("sends separate plain-text emails through one idempotent batch request", async () => {
+  it("does not retry or translate an ambiguous transport failure", async () => {
+    const transportFailure = new Error("transport outcome unknown");
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      throw transportFailure;
+    });
+
+    await expect(sendHostedResendPlainTextEmail({
+      config: {
+        apiKey: "re_test",
+        from: "Murph <founder@example.com>",
+        timeoutMs: 1_000,
+      },
+      fetchImpl: fetchMock,
+      idempotencyKey: "message/idempotency-key",
+      subject: "Subject",
+      text: "Plain text only.",
+      to: ["member@example.com"],
+    })).rejects.toBe(transportFailure);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends separate plain-text emails through one idempotent SDK batch", async () => {
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock: typeof fetch = async (input, init) => {
       expect(input).toBe("https://api.resend.com/emails/batch");
       expect(init?.method).toBe("POST");
-      expect(init?.headers).toMatchObject({
-        Authorization: expect.stringMatching(/^Bearer\s+\S+$/u),
-        "Content-Type": "application/json",
-        "Idempotency-Key": "batch/idempotency-key",
+      expect(init?.signal).toBe(signal);
+      expectResendSdkHeaders(init?.headers, {
+        batchValidation: "strict",
+        idempotencyKey: "batch/idempotency-key",
       });
       expect(JSON.parse(String(init?.body))).toEqual([
         {
@@ -172,7 +254,12 @@ describe("hosted Resend plain-text email sender", () => {
       ]);
 
       return new Response(JSON.stringify({
-        data: [{ id: "email_1" }, { id: "email_2" }],
+        data: [
+          { id: "email_1" },
+          { id: "" },
+          { id: 42 },
+          { id: "email_2", provider_extra: "ignored" },
+        ],
       }), { status: 200 });
     };
 
@@ -191,9 +278,13 @@ describe("hosted Resend plain-text email sender", () => {
     })).resolves.toEqual({
       providerMessageIds: ["email_1", "email_2"],
     });
+    expect(timeoutSpy).toHaveBeenCalledWith(1_000);
   });
 
   it("returns only sanitized metadata when a batch is rejected", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
     await expect(sendHostedResendPlainTextEmailBatch({
       config: {
         apiKey: "re_sensitive_test",
@@ -210,5 +301,24 @@ describe("hosted Resend plain-text email sender", () => {
       message: "Hosted Resend email batch send failed.",
       providerStatus: 429,
     } satisfies Partial<HostedResendPlainTextEmailError>);
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 });
+
+function expectResendSdkHeaders(
+  value: HeadersInit | undefined,
+  input: {
+    batchValidation?: "strict";
+    idempotencyKey: string;
+  },
+): void {
+  const headers = new Headers(value);
+
+  expect(headers.get("authorization")).toMatch(/^Bearer\s+\S+$/u);
+  expect(headers.get("content-type")).toBe("application/json");
+  expect(headers.get("idempotency-key")).toBe(input.idempotencyKey);
+  expect(headers.get("user-agent")).toBe("resend-node:6.18.0");
+  expect(headers.get("x-batch-validation")).toBe(
+    input.batchValidation ?? null,
+  );
+}

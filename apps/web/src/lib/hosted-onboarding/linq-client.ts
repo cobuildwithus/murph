@@ -10,7 +10,9 @@ import {
   hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
 } from "@murphai/hosted-execution/runtime-control";
+import type { LinqAPIV3 } from "@linqapp/sdk";
 import type { TextPart } from "@linqapp/sdk/resources";
+import type { SupportedContentType } from "@linqapp/sdk/resources/attachments";
 import type {
   Chat,
   ChatCreateParams,
@@ -20,10 +22,12 @@ import type {
 } from "@linqapp/sdk/resources/chats";
 
 import {
-  fetchLinqApi,
-  fetchLinqApiJson,
   LINQ_API_DEFAULT_TIMEOUT_MS,
   LinqApiTimeoutError,
+  isLinqApiResponseUnreadableError,
+  readLinqApiErrorPayload,
+  readLinqApiErrorStatus,
+  runLinqApiRequest,
 } from "../linq/api";
 import {
   readHostedExecutionControlOrigin,
@@ -37,6 +41,24 @@ const HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS =
 const HOSTED_LINQ_RICH_LINK_ATTEMPT_TIMEOUT_MS =
   Math.floor(HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS / 2);
 const HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES = 16 * 1024;
+const HOSTED_LINQ_ATTACHMENT_CONTENT_TYPES = [
+  "image/jpeg", "image/png", "image/gif", "image/heic", "image/heif",
+  "image/tiff", "image/bmp", "image/svg+xml", "image/webp", "image/x-icon",
+  "video/mp4", "video/quicktime", "video/mpeg", "video/mpeg2", "video/x-m4v",
+  "video/x-msvideo", "video/3gpp", "audio/mpeg", "audio/mp3", "audio/x-m4a",
+  "audio/mp4", "audio/x-caf", "audio/x-wav", "audio/x-aiff", "audio/aiff",
+  "audio/aac", "audio/midi", "audio/amr", "application/pdf",
+  "application/vnd.apple.pkpass", "text/plain", "text/markdown", "text/vcard",
+  "text/rtf", "text/csv", "text/html", "text/calendar", "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/x-iwork-pages-sffpages", "application/x-iwork-numbers-sffnumbers",
+  "application/x-iwork-keynote-sffkey", "application/epub+zip", "text/xml",
+  "application/json", "application/zip", "application/x-gzip",
+] satisfies readonly SupportedContentType[];
 // One attachment-send attempt when the caller supplies a deadline, covering
 // headers and body together. Owned here because this is the layer that spends
 // it; callers size their own budgets against it rather than restating it. Two
@@ -149,30 +171,18 @@ async function createHostedLinqChatWithPrimaryMessage(input: {
     to: normalizeRequiredStringList(input.to, "recipient"),
   };
 
-  const response = await fetchHostedLinqJsonApiOrThrow({
-    body: JSON.stringify(body),
-    method: "POST",
-    path: "chats",
+  const response = await requestHostedLinqSdkOrThrow({
+    operation: "chat create",
+    request: (client) => client.chats.create(body, { signal: input.signal }),
     signal: input.signal,
     timeoutMessage: "Linq chat create timed out.",
     timeoutMs: input.timeoutMs,
   });
 
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "chat create",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
-
-  const chat = readHostedLinqJsonObjectField(response.payload, "chat");
-  const message = readHostedLinqJsonObjectField(chat, "message");
+  const chat = response.chat;
   return {
-    chatId: normalizeNullableString(readHostedLinqJsonField(chat, "id")),
-    messageId: normalizeNullableString(
-      readHostedLinqJsonField(message, "id"),
-    ),
+    chatId: normalizeNullableString(chat?.id),
+    messageId: normalizeNullableString(chat?.message?.id),
   };
 }
 
@@ -285,35 +295,24 @@ async function sendHostedLinqMessageBody(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<HostedLinqSendResult> {
-  const response = await fetchHostedLinqJsonApiOrThrow({
-    body: JSON.stringify(input.body),
-    method: "POST",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/messages`,
+  const chatId = normalizeRequiredString(input.chatId, "chat id");
+  const response = await requestHostedLinqSdkOrThrow({
+    operation: "outbound reply",
+    request: (client) => client.chats.messages.send(chatId, input.body, {
+      signal: input.signal,
+    }),
     signal: input.signal,
     timeoutMessage: "Linq outbound reply timed out.",
     timeoutMs: input.timeoutMs,
   });
 
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "outbound reply",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
-
-  const message = readHostedLinqJsonObjectField(response.payload, "message");
   const messageCreatedAt = normalizeHostedLinqMessageCreatedAt(
-    readHostedLinqJsonField(message, "created_at"),
+    response.message?.created_at,
   );
   return {
-    chatId: normalizeNullableString(
-      readHostedLinqJsonField(response.payload, "chat_id"),
-    ),
+    chatId: normalizeNullableString(response.chat_id),
     ...(messageCreatedAt ? { messageCreatedAt } : {}),
-    messageId: normalizeNullableString(
-      readHostedLinqJsonField(message, "id"),
-    ),
+    messageId: normalizeNullableString(response.message?.id),
   };
 }
 
@@ -458,31 +457,21 @@ export async function updateHostedLinqChatAvatar(input: {
   groupChatIconUrl: string;
   signal?: AbortSignal;
 }): Promise<void> {
-  // Mirrors @linqapp/sdk Chats.update / ChatUpdateParams.group_chat_icon while
-  // preserving this wrapper's shared auth, timeout, and redacted-error behavior.
   const body: ChatUpdateParams = {
     group_chat_icon: normalizeHostedLinqGroupChatIconUrl(input.groupChatIconUrl),
   };
-
-  const response = await fetchHostedLinqJsonApiOrThrow({
-    body: JSON.stringify(body),
+  await requestHostedLinqSdkOrThrow({
     maxResponseBytes: HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES,
-    method: "PUT",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
+    operation: "chat avatar update",
+    providerErrorDiagnostics: true,
+    request: (client) => client.chats.update(
+      normalizeRequiredString(input.chatId, "chat id"),
+      body,
+      { signal: input.signal },
+    ),
     signal: input.signal,
     timeoutMessage: "Linq chat avatar update timed out.",
   });
-
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "chat avatar update",
-      providerErrorDiagnostics: readHostedLinqProviderErrorDiagnostics(
-        response.payload,
-      ),
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
 }
 
 export async function updateHostedLinqChatDisplayName(input: {
@@ -490,28 +479,19 @@ export async function updateHostedLinqChatDisplayName(input: {
   displayName: string;
   signal?: AbortSignal;
 }): Promise<void> {
-  // Mirrors @linqapp/sdk Chats.update / ChatUpdateParams.display_name while
-  // preserving this wrapper's shared auth, timeout, and redacted-error behavior.
   const body: ChatUpdateParams = {
     display_name: normalizeHostedLinqChatDisplayName(input.displayName),
   };
-
-  const response = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify(body),
-    method: "PUT",
+  await requestHostedLinqSdkOrThrow({
     operation: "chat display name update",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
+    request: (client) => client.chats.update(
+      normalizeRequiredString(input.chatId, "chat id"),
+      body,
+      { signal: input.signal },
+    ),
     signal: input.signal,
     timeoutMessage: "Linq chat display name update timed out.",
   });
-
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "chat display name update",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
 }
 
 export async function sendHostedLinqReadReceipt(input: {
@@ -522,21 +502,18 @@ export async function sendHostedLinqReadReceipt(input: {
   ok: boolean;
   status: number;
 }> {
-  const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
-
-  const response = await fetchLinqApi({
-    apiBaseUrl,
-    apiToken,
-    method: "POST",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/read`,
+  return requestHostedLinqNoContentStatus({
+    request: async (client) => {
+      const result = await client.chats.markAsRead(
+        normalizeRequiredString(input.chatId, "chat id"),
+        { signal: input.signal },
+      ).withResponse();
+      return result.response.status;
+    },
     signal: input.signal,
+    timeoutMessage: "Linq read receipt timed out.",
     timeoutMs: input.timeoutMs,
   });
-
-  return {
-    ok: response.ok,
-    status: response.status,
-  };
 }
 
 export async function startHostedLinqChatTypingIndicator(input: {
@@ -547,21 +524,18 @@ export async function startHostedLinqChatTypingIndicator(input: {
   ok: boolean;
   status: number;
 }> {
-  const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
-
-  const response = await fetchLinqApi({
-    apiBaseUrl,
-    apiToken,
-    method: "POST",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/typing`,
+  return requestHostedLinqNoContentStatus({
+    request: async (client) => {
+      const result = await client.chats.typing.start(
+        normalizeRequiredString(input.chatId, "chat id"),
+        { signal: input.signal },
+      ).withResponse();
+      return result.response.status;
+    },
     signal: input.signal,
+    timeoutMessage: "Linq typing indicator start timed out.",
     timeoutMs: input.timeoutMs,
   });
-
-  return {
-    ok: response.ok,
-    status: response.status,
-  };
 }
 
 export async function stopHostedLinqChatTypingIndicator(input: {
@@ -572,21 +546,18 @@ export async function stopHostedLinqChatTypingIndicator(input: {
   ok: boolean;
   status: number;
 }> {
-  const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
-
-  const response = await fetchLinqApi({
-    apiBaseUrl,
-    apiToken,
-    method: "DELETE",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/typing`,
+  return requestHostedLinqNoContentStatus({
+    request: async (client) => {
+      const result = await client.chats.typing.stop(
+        normalizeRequiredString(input.chatId, "chat id"),
+        { signal: input.signal },
+      ).withResponse();
+      return result.response.status;
+    },
     signal: input.signal,
+    timeoutMessage: "Linq typing indicator stop timed out.",
     timeoutMs: input.timeoutMs,
   });
-
-  return {
-    ok: response.ok,
-    status: response.status,
-  };
 }
 
 const HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS = 30_000;
@@ -619,26 +590,21 @@ export async function getHostedLinqChatSummary(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<HostedLinqChatSummary> {
-  const response = await fetchHostedLinqJsonApiOrThrow({
-    method: "GET",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
+  const payload = await requestHostedLinqSdkOrThrow({
+    operation: "chat read",
+    request: (client) => client.chats.retrieve(
+      normalizeRequiredString(input.chatId, "chat id"),
+      { signal: input.signal },
+    ),
     signal: input.signal,
     timeoutMessage: "Linq chat read timed out.",
     timeoutMs: input.timeoutMs,
   });
 
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "chat read",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
-
-  const payload = readHostedLinqCanonicalChat(response.payload);
-  const displayName = normalizeNullableString(payload?.display_name);
-  const handles: Chat["handles"] = payload?.handles ?? [];
-  const isGroup: Chat["is_group"] | null = payload?.is_group ?? null;
+  const canonical = readHostedLinqCanonicalChat(payload);
+  const displayName = normalizeNullableString(canonical?.display_name);
+  const handles: Chat["handles"] = canonical?.handles ?? [];
+  const isGroup: Chat["is_group"] | null = canonical?.is_group ?? null;
 
   return {
     displayName,
@@ -653,21 +619,17 @@ export async function getHostedLinqReactionTargetMessage(input: {
   messageId: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqReactionTargetMessage> {
-  const response = await fetchHostedLinqJsonApiOrThrow({
-    method: "GET",
-    path: `messages/${encodeURIComponent(normalizeRequiredString(input.messageId, "message id"))}`,
+  const payload = await requestHostedLinqSdkOrThrow({
+    operation: "message read",
+    request: (client) => client.messages.retrieve(
+      normalizeRequiredString(input.messageId, "message id"),
+      { signal: input.signal },
+    ),
     signal: input.signal,
     timeoutMessage: "Linq message read timed out.",
   });
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "message read",
-      retryable: isRetryableHostedLinqStatus(response.status),
-      status: response.status,
-    });
-  }
 
-  const message = parseHostedLinqReactionTargetMessage(response.payload);
+  const message = parseHostedLinqReactionTargetMessage(payload);
   if (!message) {
     throw hostedOnboardingError({
       code: "LINQ_MESSAGE_READ_INVALID",
@@ -785,11 +747,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
    * caller signal: cutting an irreversible send short is worse than waiting.
    */
   prepareSignal?: AbortSignal;
-  /**
-   * Absolute deadline for the prepare phase, covering its response bodies too.
-   * `fetchLinqApi` stops its own timer once headers arrive, so without this an
-   * attachment-create body could stall past the pre-send bound.
-   */
+  /** Absolute deadline for the prepare phase, including SDK response parsing. */
   prepareDeadlineAt?: number;
   /** Absolute deadline shared by the message POST and its one reconciliation. */
   sendDeadlineAt?: number;
@@ -797,45 +755,33 @@ export async function sendHostedLinqAttachmentMessage(input: {
 }): Promise<HostedLinqSendResult> {
   const chatId = normalizeRequiredString(input.chatId, "chat id");
   const prepareSignal = input.prepareSignal ?? input.signal;
-  const readPrepareBody = async (response: Response) =>
-    input.prepareDeadlineAt === undefined
-      ? await response.text().catch(() => null)
-      : await readHostedLinqBoundedResponseText(
-        response,
-        input.prepareDeadlineAt - Date.now(),
-      );
-  // Everything before the final message POST is tagged phase "prepare":
-  // failures here provably never created a chat message, so callers may undo
-  // side effects such as share reservations. The message POST itself stays
-  // untagged/ambiguous (it may have been accepted with a lost response).
+
   const { attachmentId } = await withHostedLinqAttachmentPreparePhase(async () => {
-    const createResponse = await fetchHostedLinqApiOrThrow({
-      body: JSON.stringify({
-        content_type: normalizeRequiredString(input.contentType, "attachment content type"),
-        filename: normalizeRequiredString(input.fileName, "attachment file name"),
-        size_bytes: input.bytes.byteLength,
-      }),
-      method: "POST",
-      operation: "attachment create",
-      path: "attachments",
-      signal: prepareSignal,
-      timeoutMessage: "Linq attachment create timed out.",
-    });
-    if (!createResponse.ok) {
-      await endHostedLinqResponseBody(createResponse);
-      throw buildHostedLinqRequestFailedError({
-        operation: "attachment create",
-        retryable: isRetryableHostedLinqStatus(createResponse.status),
-        status: createResponse.status,
+    const prepareRemainingMs = input.prepareDeadlineAt === undefined
+      ? LINQ_API_DEFAULT_TIMEOUT_MS
+      : input.prepareDeadlineAt - Date.now();
+    if (prepareRemainingMs <= 0) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: "Linq attachment preparation exceeded its deadline.",
+        httpStatus: 502,
+        retryable: false,
       });
     }
-    const created = parseHostedLinqOptionalJson<{
-      attachment_id?: unknown;
-      required_headers?: unknown;
-      upload_url?: unknown;
-    }>(await readPrepareBody(createResponse));
-    const createdAttachmentId = normalizeNullableString(created?.attachment_id);
-    const uploadUrl = normalizeNullableString(created?.upload_url);
+
+    const created = await requestHostedLinqSdkOrThrow({
+      operation: "attachment create",
+      request: (client) => client.attachments.create({
+        content_type: normalizeHostedLinqAttachmentContentType(input.contentType),
+        filename: normalizeRequiredString(input.fileName, "attachment file name"),
+        size_bytes: input.bytes.byteLength,
+      }, { signal: prepareSignal }),
+      signal: prepareSignal,
+      timeoutMessage: "Linq attachment create timed out.",
+      timeoutMs: Math.min(LINQ_API_DEFAULT_TIMEOUT_MS, prepareRemainingMs),
+    });
+    const createdAttachmentId = normalizeNullableString(created.attachment_id);
+    const uploadUrl = normalizeNullableString(created.upload_url);
     if (!createdAttachmentId || !uploadUrl) {
       throw buildHostedLinqRequestFailedError({
         operation: "attachment create",
@@ -845,15 +791,16 @@ export async function sendHostedLinqAttachmentMessage(input: {
     }
 
     const uploadTimeout = AbortSignal.timeout(HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS);
+    // provider-request-boundary-allow-next-line: linq-presigned-bytes
     const uploadResponse = await fetch(uploadUrl, {
       body: new Uint8Array(input.bytes).buffer,
-      headers: parseHostedLinqAttachmentUploadHeaders(created?.required_headers),
+      headers: parseHostedLinqAttachmentUploadHeaders(created.required_headers),
       method: "PUT",
-      signal: prepareSignal ? AbortSignal.any([prepareSignal, uploadTimeout]) : uploadTimeout,
+      signal: prepareSignal
+        ? AbortSignal.any([prepareSignal, uploadTimeout])
+        : uploadTimeout,
     });
-    // The upload's own body is never read, on either branch, so it is ended
-    // here rather than left holding a connection into the message POST.
-    await endHostedLinqResponseBody(uploadResponse);
+    await endHostedLinqPresignedResponseBody(uploadResponse);
     if (!uploadResponse.ok) {
       throw buildHostedLinqRequestFailedError({
         operation: "attachment upload",
@@ -864,33 +811,28 @@ export async function sendHostedLinqAttachmentMessage(input: {
     return { attachmentId: createdAttachmentId };
   });
 
+  if (
+    input.prepareDeadlineAt !== undefined
+    && Date.now() >= input.prepareDeadlineAt
+  ) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { phase: HOSTED_LINQ_ATTACHMENT_SEND_PHASE_PREPARE },
+      message: "Linq attachment preparation exceeded its deadline.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
   const idempotencyKey = normalizeNullableString(input.idempotencyKey);
   const message: MessageSendParams["message"] = {
-    parts: [
-      {
-        attachment_id: attachmentId,
-        type: "media",
-      },
-    ],
+    parts: [{ attachment_id: attachmentId, type: "media" }],
   };
   if (idempotencyKey) {
     message.idempotency_key = idempotencyKey;
   }
-  // Captured once so a reconciliation attempt can resubmit the byte-identical
-  // body: same attachment, same key, same URL is what lets the provider answer
-  // with the original message instead of accepting a second one.
-  const sendBody = JSON.stringify({ message } satisfies MessageSendParams);
-  const sendPath = `chats/${encodeURIComponent(chatId)}/messages`;
-  // fetchLinqApi's timer stops when headers arrive, so an attempt's deadline is
-  // tracked here and the body read below is charged against what is left of it.
-  // Otherwise a stalled body outlives the budget the caller was promised.
-  let attemptDeadlineAt = 0;
-  const submitSend = async () => {
-    // Each attempt gets its own budget, never more than what the caller's
-    // deadline still allows, so two attempts cannot outlive one operation.
-    // Compared here rather than left to a scheduled abort: a timer callback is
-    // a scheduling mechanism, and a busy event loop can run it after its own
-    // deadline, by which time the request has already been dispatched.
+  const sendBody: MessageSendParams = { message };
+  const submitSend = async (): Promise<HostedLinqSendResult> => {
     const remainingMs = input.sendDeadlineAt === undefined
       ? LINQ_API_DEFAULT_TIMEOUT_MS
       : input.sendDeadlineAt - Date.now();
@@ -905,242 +847,102 @@ export async function sendHostedLinqAttachmentMessage(input: {
     const attemptBudgetMs = input.sendDeadlineAt === undefined
       ? LINQ_API_DEFAULT_TIMEOUT_MS
       : Math.min(HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS, remainingMs);
-    attemptDeadlineAt = Date.now() + attemptBudgetMs;
-    return await fetchHostedLinqApiOrThrow({
-      body: sendBody,
-      method: "POST",
-      operation: "attachment send",
-      path: sendPath,
+    const body = await requestHostedLinqSdk({
+      maxResponseBytes: HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES,
+      preserveResponseStatusOnReadAbort: true,
+      request: async (client) => {
+        const response = await client.chats.messages.send(
+          chatId,
+          sendBody,
+          { signal: input.signal },
+        ).asResponse();
+        return await response.text();
+      },
       signal: input.signal,
       timeoutMessage: "Linq attachment send timed out.",
-      ...(input.sendDeadlineAt === undefined ? {} : { timeoutMs: attemptBudgetMs }),
+      timeoutMs: attemptBudgetMs,
     });
+    return readHostedLinqAttachmentSendResult(body);
   };
-  const readRemainingBody = async (response: Response) =>
-    await readHostedLinqBoundedResponseText(
-      response,
-      attemptDeadlineAt - Date.now(),
-    );
 
-  // The pre-send deadline is the admission check for the irreversible POST, so
-  // it is compared here rather than trusted to the abort callback that may not
-  // have run yet. Refusing here is still provably before any message reached
-  // the chat, which is why it stays a prepare-phase failure.
-  if (
-    input.prepareDeadlineAt !== undefined
-    && Date.now() >= input.prepareDeadlineAt
-  ) {
-    throw hostedOnboardingError({
-      code: "LINQ_SEND_FAILED",
-      details: { phase: HOSTED_LINQ_ATTACHMENT_SEND_PHASE_PREPARE },
-      message: "Linq attachment preparation exceeded its deadline.",
-      httpStatus: 502,
-      retryable: false,
-    });
-  }
-
-  let sendResponse: Response;
   try {
-    sendResponse = await submitSend();
+    return await submitSend();
   } catch (error) {
-    // A timeout or transport loss says nothing about acceptance: the request
-    // may already have created the message. Only a keyed send can safely ask
-    // the provider again.
-    if (idempotencyKey === null) {
-      throw error;
-    }
-    return await reconcileHostedLinqAttachmentSend({
-      cause: error,
-      readRemainingBody,
-      submitSend,
-    });
-  }
-  if (!sendResponse.ok) {
-    // A replay of one accepted request re-creates its attachment, so the body
-    // under a reused idempotency key legitimately differs and the provider
-    // answers with a key-reuse conflict. Classify only that exact response so
-    // a caller with a stable per-request key can read it as "already sent";
-    // every other 409 and error stays an ordinary failure.
-    let conflict: "conflict" | "not_conflict" | "unreadable" = "not_conflict";
-    if (idempotencyKey !== null && sendResponse.status === 409) {
-      conflict = await readHostedLinqIdempotencyKeyReuseConflict(
-        await readRemainingBody(sendResponse),
-      );
-    } else {
-      // Only the status matters on these, and nothing else will end them.
-      await endHostedLinqResponseBody(sendResponse);
-    }
-    const retryable = isRetryableHostedLinqStatus(sendResponse.status);
-    const failure = buildHostedLinqRequestFailedError({
-      operation: "attachment send",
-      retryable,
-      status: sendResponse.status,
-      ...(conflict === "conflict" ? { idempotencyKeyReuseConflict: true } : {}),
-    });
-    // A retryable response can arrive after the provider already accepted the
-    // message and lost the acknowledgement, so it does not prove the card is
-    // absent. A definitive rejection does, and stays an ordinary failure. An
-    // answer we could not finish reading is not an answer either.
+    const status = readLinqApiErrorStatus(error);
     if (
-      idempotencyKey !== null
-      && conflict !== "conflict"
-      && (retryable || conflict === "unreadable")
+      status !== null
+      && status >= 200
+      && status < 300
+      && isLinqApiResponseUnreadableError(error)
     ) {
+      if (idempotencyKey === null) {
+        return { chatId: null, messageId: null };
+      }
       return await reconcileHostedLinqAttachmentSend({
-        cause: failure,
-        readRemainingBody,
+        cause: buildHostedLinqUnreadAcknowledgementCause(status),
         submitSend,
       });
     }
-    throw failure;
+    if (status !== null) {
+      const conflict = idempotencyKey !== null
+        && isHostedLinqIdempotencyKeyReuseApiError(error);
+      const retryable = isRetryableHostedLinqStatus(status);
+      const failure = buildHostedLinqRequestFailedError({
+        operation: "attachment send",
+        retryable,
+        status,
+        ...(conflict ? { idempotencyKeyReuseConflict: true } : {}),
+      });
+      if (conflict || idempotencyKey === null) {
+        throw failure;
+      }
+      if (!retryable && !isLinqApiResponseUnreadableError(error)) {
+        throw failure;
+      }
+      return await reconcileHostedLinqAttachmentSend({
+        cause: failure,
+        submitSend,
+      });
+    }
+    if (idempotencyKey === null) {
+      throw error;
+    }
+    return await reconcileHostedLinqAttachmentSend({ cause: error, submitSend });
   }
-
-  const acceptedBody = await readRemainingBody(sendResponse);
-  if (acceptedBody === null && idempotencyKey !== null) {
-    // Accepted, but the answer never finished arriving, so the send owner has
-    // not established anything it can report. The same-key resubmission is the
-    // one way to turn that into a fact, and it replays rather than accepting a
-    // second message. An unkeyed send has no such move, so it keeps the 200.
-    return await reconcileHostedLinqAttachmentSend({
-      cause: buildHostedLinqUnreadAcknowledgementCause(sendResponse.status),
-      readRemainingBody,
-      submitSend,
-    });
-  }
-  return readHostedLinqAttachmentSendResult(acceptedBody);
 }
 
-/**
- * Establish the provider result for one already-submitted final message whose
- * response was ambiguous. The provider owns exactly-once for the idempotency
- * key, so resubmitting the byte-identical body is the only way to learn what
- * happened: an accepted request replays its original message identity, and a
- * body that differs under that key is rejected outright. Exactly one extra
- * attempt, inside the original call, with no durable record.
- *
- * When it still cannot resolve, the failure carries `acknowledgementUnconfirmed`
- * so the caller can report uncertainty rather than claim the send failed.
- */
 async function reconcileHostedLinqAttachmentSend(input: {
   cause: unknown;
-  readRemainingBody: (response: Response) => Promise<string | null>;
-  submitSend: () => Promise<Response>;
+  submitSend: () => Promise<HostedLinqSendResult>;
 }): Promise<HostedLinqSendResult> {
-  let response: Response;
   try {
-    response = await input.submitSend();
-  } catch {
-    throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
-  }
-  if (response.ok) {
-    const body = await input.readRemainingBody(response);
-    if (body === null) {
-      // Same rule as everywhere else on this boundary: an answer we could not
-      // finish reading is not an answer. Reconciliation was the one attempt
-      // available, so this is where the request ends unresolved.
-      throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
-    }
-    return readHostedLinqAttachmentSendResult(body);
-  }
-  if (response.status === 409) {
-    const conflict = await readHostedLinqIdempotencyKeyReuseConflict(
-      await input.readRemainingBody(response),
-    );
-    if (conflict === "conflict") {
+    return await input.submitSend();
+  } catch (error) {
+    if (isHostedLinqIdempotencyKeyReuseApiError(error)) {
       throw buildHostedLinqRequestFailedError({
         idempotencyKeyReuseConflict: true,
         operation: "attachment send",
         retryable: false,
-        status: response.status,
+        status: 409,
       });
     }
-  } else {
-    await endHostedLinqResponseBody(response);
+    throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
   }
-  throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
 }
 
 function readHostedLinqAttachmentSendResult(
   body: string | null,
 ): HostedLinqSendResult {
-  let payload: MessageSendResponse | null = null;
-  if (body?.trim()) {
-    try {
-      payload = JSON.parse(body) as MessageSendResponse;
-    } catch {
-      payload = null;
-    }
-  }
+  const payload = parseHostedLinqOptionalJson<MessageSendResponse>(body);
   return {
     chatId: normalizeNullableString(payload?.chat_id),
     messageId: normalizeNullableString(payload?.message?.id),
   };
 }
 
-/**
- * Read a response body within whatever is left of its attempt's budget, and
- * terminate it when that runs out. `fetchLinqApi` stops its own timer once
- * headers arrive, so without this a stalled body would outlive the deadline the
- * caller was told it had.
- *
- * The read owns the stream reader rather than calling `response.text()`: that
- * helper locks the body, so cancelling through `response.body` afterwards
- * throws and leaves the read and its connection alive. Holding the reader means
- * the cancel below actually ends both. A body that does not finish in time
- * reads as absent, never as a different answer.
- */
-async function readHostedLinqBoundedResponseText(
+async function endHostedLinqPresignedResponseBody(
   response: Response,
-  timeoutMs: number,
-): Promise<string | null> {
-  const body = response.body;
-  if (!body) {
-    return "";
-  }
-  if (!(timeoutMs > 0)) {
-    await body.cancel().catch(() => undefined);
-    return null;
-  }
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let cancelled: Promise<void> | null = null;
-  const timer = setTimeout(() => {
-    cancelled = reader.cancel().catch(() => undefined);
-  }, timeoutMs);
-  let text = "";
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) {
-        // Joined, not fired and forgotten: the caller must not settle while the
-        // stream this read owns is still being torn down.
-        if (cancelled) {
-          await cancelled;
-          return null;
-        }
-        return text + decoder.decode();
-      }
-      text += decoder.decode(next.value, { stream: true });
-    }
-  } catch {
-    if (cancelled) {
-      await cancelled;
-    }
-    return null;
-  } finally {
-    clearTimeout(timer);
-    reader.releaseLock();
-  }
-}
-
-/**
- * End a response whose status is all this path needs. Every `Response` on the
- * attachment-send path gets exactly one terminal owner: either a bounded read
- * above, or this. `fetchLinqApi` clears its own timer once headers arrive, so
- * an ignored body has nothing left to end it and would hold its connection.
- */
-async function endHostedLinqResponseBody(response: Response): Promise<void> {
+): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
@@ -1181,6 +983,19 @@ async function withHostedLinqAttachmentPreparePhase<T>(run: () => Promise<T>): P
   }
 }
 
+function normalizeHostedLinqAttachmentContentType(
+  value: unknown,
+): SupportedContentType {
+  const normalized = normalizeRequiredString(value, "attachment content type");
+  const contentType = HOSTED_LINQ_ATTACHMENT_CONTENT_TYPES.find(
+    (candidate) => candidate === normalized,
+  );
+  if (!contentType) {
+    throw new TypeError("attachment content type is not supported by Linq.");
+  }
+  return contentType;
+}
+
 function parseHostedLinqAttachmentUploadHeaders(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object") {
     return {};
@@ -1198,47 +1013,57 @@ export async function shareHostedLinqContactCard(input: {
   chatId: string;
   signal?: AbortSignal;
 }): Promise<void> {
-  const response = await fetchHostedLinqApiOrThrow({
-    method: "POST",
+  await requestHostedLinqSdkOrThrow({
     operation: "contact-card share",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/share_contact_card`,
+    request: (client) => client.chats.shareContactCard(
+      normalizeRequiredString(input.chatId, "chat id"),
+      { signal: input.signal },
+    ),
+    retryableForStatus: () => false,
     signal: input.signal,
     timeoutMessage: "Linq contact-card share timed out.",
   });
-
-  if (!response.ok) {
-    throw buildHostedLinqRequestFailedError({
-      operation: "contact-card share",
-      retryable: false,
-      status: response.status,
-    });
-  }
 }
 
-async function fetchHostedLinqApiOrThrow(input: {
-  body?: string;
-  method: string;
-  operation: string;
-  path: string;
+async function requestHostedLinqSdk<T>(input: {
+  maxResponseBytes?: number;
+  preserveResponseStatusOnReadAbort?: boolean;
+  request: (client: LinqAPIV3) => Promise<T>;
   signal?: AbortSignal;
   timeoutMessage: string;
   timeoutMs?: number;
-}): Promise<Response> {
+}): Promise<T> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
+  return await runLinqApiRequest({
+    apiBaseUrl,
+    apiToken,
+    ...(input.maxResponseBytes === undefined
+      ? {}
+      : { maxResponseBytes: input.maxResponseBytes }),
+    request: input.request,
+    preserveResponseStatusOnReadAbort: input.preserveResponseStatusOnReadAbort,
+    signal: input.signal,
+    timeoutMessage: input.timeoutMessage,
+    timeoutMs: input.timeoutMs,
+  });
+}
 
+async function requestHostedLinqSdkOrThrow<T>(input: {
+  maxResponseBytes?: number;
+  operation: string;
+  providerErrorDiagnostics?: boolean;
+  request: (client: LinqAPIV3) => Promise<T>;
+  retryableForStatus?: (status: number) => boolean;
+  signal?: AbortSignal;
+  timeoutMessage: string;
+  timeoutMs?: number;
+}): Promise<T> {
   try {
-    return await fetchLinqApi({
-      apiBaseUrl,
-      apiToken,
-      body: input.body,
-      method: input.method,
-      path: input.path,
-      signal: input.signal,
-      timeoutMs: input.timeoutMs,
-    });
+    return await requestHostedLinqSdk(input);
   } catch (error) {
     if (error instanceof LinqApiTimeoutError) {
       throw hostedOnboardingError({
+        cause: error,
         code: "LINQ_SEND_FAILED",
         message: input.timeoutMessage,
         httpStatus: 502,
@@ -1246,44 +1071,36 @@ async function fetchHostedLinqApiOrThrow(input: {
       });
     }
 
+    const status = readLinqApiErrorStatus(error);
+    if (status !== null) {
+      throw buildHostedLinqRequestFailedError({
+        operation: input.operation,
+        providerErrorDiagnostics: input.providerErrorDiagnostics
+          ? readHostedLinqProviderErrorDiagnostics(readLinqApiErrorPayload(error))
+          : null,
+        retryable: input.retryableForStatus?.(status)
+          ?? isRetryableHostedLinqStatus(status),
+        status,
+      });
+    }
     throw error;
   }
 }
 
-async function fetchHostedLinqJsonApiOrThrow(input: {
-  body?: string;
-  maxResponseBytes?: number;
-  method: string;
-  path: string;
+async function requestHostedLinqNoContentStatus(input: {
+  request: (client: LinqAPIV3) => Promise<number>;
   signal?: AbortSignal;
   timeoutMessage: string;
   timeoutMs?: number;
-}) {
-  const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
-
+}): Promise<{ ok: boolean; status: number }> {
   try {
-    return await fetchLinqApiJson({
-      apiBaseUrl,
-      apiToken,
-      body: input.body,
-      method: input.method,
-      ...(input.maxResponseBytes === undefined
-        ? {}
-        : { maxResponseBytes: input.maxResponseBytes }),
-      path: input.path,
-      signal: input.signal,
-      timeoutMs: input.timeoutMs,
-    });
+    const status = await requestHostedLinqSdk(input);
+    return { ok: true, status };
   } catch (error) {
-    if (error instanceof LinqApiTimeoutError) {
-      throw hostedOnboardingError({
-        code: "LINQ_SEND_FAILED",
-        message: input.timeoutMessage,
-        httpStatus: 502,
-        retryable: true,
-      });
+    const status = readLinqApiErrorStatus(error);
+    if (status !== null) {
+      return { ok: false, status };
     }
-
     throw error;
   }
 }
@@ -1316,36 +1133,13 @@ function buildHostedLinqRequestFailedError(input: {
 const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE =
   "Conflicting Linq idempotency-key reuse.";
 
-/**
- * Narrow reader for the provider's exact same-key/different-payload conflict.
- * It rejects bodies above 500 code units and requires the exact JSON shape, so
- * a generic 409 or wrapped phrase cannot be mistaken for a proven duplicate. A
- * body that could not be read is its own outcome rather than "not a conflict",
- * so a keyed caller reads an unread answer as uncertainty, not as failure.
- */
-async function readHostedLinqIdempotencyKeyReuseConflict(
-  body: string | null,
-): Promise<"conflict" | "not_conflict" | "unreadable"> {
-  if (body === null) {
-    return "unreadable";
-  }
-  return await readHostedLinqIdempotencyKeyReuseConflictBody(body)
-    ? "conflict"
-    : "not_conflict";
-}
-
-async function readHostedLinqIdempotencyKeyReuseConflictBody(
-  body: string,
-): Promise<boolean> {
-  if (body.length > 500) {
+function isHostedLinqIdempotencyKeyReuseApiError(error: unknown): boolean {
+  if (readLinqApiErrorStatus(error) !== 409) {
     return false;
   }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(body);
-  } catch {
-    return false;
+  const payload = readLinqApiErrorPayload(error);
+  if (payload === HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE) {
+    return true;
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return false;
@@ -1353,8 +1147,7 @@ async function readHostedLinqIdempotencyKeyReuseConflictBody(
   const keys = Object.keys(payload);
   return keys.length === 1
     && keys[0] === "error"
-    && Reflect.get(payload, "error")
-      === HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE;
+    && Reflect.get(payload, "error") === HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE;
 }
 
 /**
@@ -1366,6 +1159,7 @@ export function isHostedLinqIdempotencyKeyReuseFailure(error: unknown): boolean 
   return isHostedOnboardingError(error)
     && error.details?.idempotencyKeyReuseConflict === true;
 }
+
 
 function buildHostedLinqUnreadAcknowledgementCause(status: number) {
   return hostedOnboardingError({
@@ -1404,12 +1198,10 @@ export function isHostedLinqUnconfirmedAcknowledgementFailure(error: unknown): b
 function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
   providerErrorCode?: number;
 } | null {
-  if (
-    payload === null
-    || typeof payload !== "object"
-    || Array.isArray(payload)
-    || Reflect.get(payload, "success") !== false
-  ) {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  if (Reflect.get(payload, "success") !== false) {
     return null;
   }
   const providerError = Reflect.get(payload, "error");
@@ -1428,11 +1220,9 @@ function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
     && code <= 9_999
       ? code
       : null;
-  if (providerErrorCode === null) {
-    return null;
-  }
   if (
-    hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
+    providerErrorCode === null
+    || hostedRuntimeLinqProviderErrorMessageForCode(providerErrorCode) === null
   ) {
     return null;
   }
@@ -1448,23 +1238,6 @@ function parseHostedLinqOptionalJson<T>(body: string | null): T | null {
   } catch {
     return null;
   }
-}
-
-function readHostedLinqJsonField(
-  input: unknown,
-  field: string,
-): unknown {
-  return input !== null && typeof input === "object"
-    ? Reflect.get(input, field)
-    : null;
-}
-
-function readHostedLinqJsonObjectField(
-  input: unknown,
-  field: string,
-): object | null {
-  const value = readHostedLinqJsonField(input, field);
-  return value !== null && typeof value === "object" ? value : null;
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {

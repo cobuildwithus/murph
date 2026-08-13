@@ -35,6 +35,9 @@ import {
   resolveCanonicalRuntimeState,
   type ResolvedAssistantCronJob,
 } from './cron/canonical-jobs.ts'
+import type {
+  AssistantCronOccurrenceUnverifiedReason,
+} from './cron/timing-verification.js'
 import {
   assertAssistantCronJobRunnableInRuntime,
   buildRunnableAssistantCronJobProjection,
@@ -260,6 +263,7 @@ export async function getAssistantCronAutomationTimingProjection(
 ): Promise<{
   job: AssistantCronJob
   nextOccurrenceAt: string | null
+  occurrenceUnverifiedReason: AssistantCronOccurrenceUnverifiedReason | null
   occurrenceVerified: boolean
 }> {
   const paths = resolveAssistantStatePaths(vault)
@@ -281,6 +285,7 @@ export async function getAssistantCronAutomationTimingProjection(
   return {
     job: projectCanonicalAssistantCronJob({ source, runtimeState }),
     nextOccurrenceAt: occurrenceProjection.nextOccurrenceAt,
+    occurrenceUnverifiedReason: occurrenceProjection.unverifiedReason,
     occurrenceVerified: occurrenceProjection.verified,
   }
 }
