@@ -20,7 +20,10 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: controlPlaneMocks.createHostedDeviceSyncControlPlane,
 }));
 
-import { readHostedDeviceSyncRuntimeState } from "@/src/lib/device-sync/hosted-runtime-authority";
+import {
+  applyHostedDeviceSyncRuntimeResult,
+  readHostedDeviceSyncRuntimeState,
+} from "@/src/lib/device-sync/hosted-runtime-authority";
 import { readCompanionDeviceSyncStatus } from "@/src/lib/device-sync/companion";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { handleHostedDeviceSyncWebhookAccepted } from "@/src/lib/device-sync/wake-service";
@@ -54,6 +57,9 @@ const INCIDENT_SNAPSHOT_READS = 20;
 const REPLAY_FOREGROUND_READS = 40;
 const REPLAY_WEBHOOK_CONCURRENCY = 31;
 const REPLAY_POOL_MAX = 15;
+const RUNTIME_APPLY_CONNECTIONS = 100;
+const RUNTIME_APPLY_FOREGROUND_READS = 40;
+const RUNTIME_APPLY_POOL_MAX = 2;
 
 describe.skipIf(!runPostgresProof)(
   "device-sync database-spike resilience (real PostgreSQL)",
@@ -1023,6 +1029,187 @@ describe.skipIf(!runPostgresProof)(
         controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
       }
     }, 90_000);
+    it("keeps foreground reads serviceable during a 100-update no-op apply on a two-connection pool", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const applicationName = `murph_device_sync_apply_${suffix}`;
+      const observerApplicationName = `murph_device_sync_apply_observer_${suffix}`;
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(databaseUrl, applicationName),
+        poolMax: RUNTIME_APPLY_POOL_MAX,
+      });
+      const observer = createPrismaClient({
+        databaseUrl: withApplicationName(databaseUrl, observerApplicationName),
+        poolMax: 1,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const runWithConnectionMutationLock =
+        store.withConnectionMutationLock.bind(store);
+      let firstTransactionEnteredResolve!: () => void;
+      const firstTransactionEntered = new Promise<void>((resolve) => {
+        firstTransactionEnteredResolve = resolve;
+      });
+      let releaseFirstTransactionResolve!: () => void;
+      const releaseFirstTransaction = new Promise<void>((resolve) => {
+        releaseFirstTransactionResolve = resolve;
+      });
+      let activeApplyTransactions = 0;
+      let maxActiveApplyTransactions = 0;
+      const withConnectionMutationLock = vi.spyOn(
+        store,
+        "withConnectionMutationLock",
+      ).mockImplementation(async (connectionId, callback) =>
+        runWithConnectionMutationLock(connectionId, async (tx) => {
+          activeApplyTransactions += 1;
+          maxActiveApplyTransactions = Math.max(
+            maxActiveApplyTransactions,
+            activeApplyTransactions,
+          );
+          try {
+            if (withConnectionMutationLock.mock.calls.length === 1) {
+              firstTransactionEnteredResolve();
+              await releaseFirstTransaction;
+            }
+            return await callback(tx);
+          } finally {
+            activeApplyTransactions -= 1;
+          }
+        })
+      );
+      const memberId = `hbm_device_sync_apply_${suffix}`;
+      const connectedAt = new Date("2026-08-11T12:00:00.000Z");
+      const connectionIds = Array.from(
+        { length: RUNTIME_APPLY_CONNECTIONS },
+        (_, index) => `dsc_device_sync_apply_${suffix}_${String(index).padStart(3, "0")}`,
+      );
+      const foregroundLatenciesMs: number[] = [];
+      const poolSamples: Array<{ activeSessions: number; sessions: number }> = [];
+      let keepSampling = true;
+      let sampler: Promise<void> | null = null;
+
+      controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+        store,
+      });
+
+      try {
+        await prisma.hostedMember.create({
+          data: { id: memberId },
+        });
+        await prisma.deviceConnection.createMany({
+          data: connectionIds.map((connectionId, index) => ({
+            connectedAt,
+            credentialKind: "none",
+            credentialMetadataJson: {},
+            externalAccountIdEncrypted: null,
+            id: connectionId,
+            metadataJson: {},
+            provider: "oura",
+            providerAccountBlindIndex:
+              `blind_device_sync_apply_${suffix}_${String(index).padStart(3, "0")}`,
+            scopesJson: [],
+            status: "active",
+            userId: memberId,
+          })),
+        });
+
+        sampler = sampleReplayPool({
+          applicationName,
+          observer,
+          poolSamples,
+          shouldContinue: () => keepSampling,
+        });
+
+        const operationTimings: PrismaOperationTiming[] = [];
+        const response = await runWithPrismaOperationTimings(
+          operationTimings,
+          async () => {
+            const applyPromise = applyHostedDeviceSyncRuntimeResult({
+              request: new Request("https://control.example.test/api/internal/device-sync/runtime/apply", {
+                body: JSON.stringify({
+                  updates: connectionIds.map((connectionId) => ({ connectionId })),
+                  userId: memberId,
+                }),
+                method: "POST",
+              }),
+              trustedUserId: memberId,
+            });
+            await firstTransactionEntered;
+            expect(activeApplyTransactions).toBe(1);
+            expect(withConnectionMutationLock).toHaveBeenCalledTimes(1);
+            const foreground = Array.from(
+              { length: RUNTIME_APPLY_FOREGROUND_READS },
+              async () => {
+                const startedAt = performance.now();
+                await prisma.hostedMember.findUnique({
+                  select: { id: true },
+                  where: { id: memberId },
+                });
+                foregroundLatenciesMs.push(performance.now() - startedAt);
+              },
+            );
+            const foregroundFailure = await Promise.all(foreground).then(
+              () => null,
+              (error: unknown) => error,
+            );
+            expect(activeApplyTransactions).toBe(1);
+            expect(withConnectionMutationLock).toHaveBeenCalledTimes(1);
+            releaseFirstTransactionResolve();
+            const applyResponse = await applyPromise;
+            if (foregroundFailure) {
+              throw foregroundFailure;
+            }
+            return applyResponse;
+          },
+        );
+        const operationCounts = countPrismaOperations(operationTimings);
+
+        expect(response.updates).toHaveLength(RUNTIME_APPLY_CONNECTIONS);
+        expect(response.updates.every((update) =>
+          update.tokenUpdate === "missing"
+          && update.writeUpdate === "unchanged"
+        )).toBe(true);
+        expect(withConnectionMutationLock).toHaveBeenCalledTimes(
+          RUNTIME_APPLY_CONNECTIONS,
+        );
+        expect(maxActiveApplyTransactions).toBe(1);
+        expect(operationCounts.get("DeviceConnection.findMany") ?? 0).toBe(1);
+        expect(operationCounts.get("DeviceConnection.findFirst") ?? 0).toBe(
+          RUNTIME_APPLY_CONNECTIONS,
+        );
+        expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(
+          RUNTIME_APPLY_CONNECTIONS,
+        );
+        expect(operationCounts.get("DeviceConnection.update") ?? 0).toBe(0);
+        expect(operationCounts.get("DeviceConnectionSource.upsert") ?? 0).toBe(0);
+        expect(operationCounts.get("HostedMember.findUnique") ?? 0).toBe(
+          RUNTIME_APPLY_FOREGROUND_READS,
+        );
+        expect(foregroundLatenciesMs).toHaveLength(
+          RUNTIME_APPLY_FOREGROUND_READS,
+        );
+        expect(Number.isFinite(percentile(foregroundLatenciesMs, 0.95))).toBe(true);
+        expect(poolSamples.length).toBeGreaterThan(0);
+        expect(Math.max(...poolSamples.map((sample) => sample.sessions))).toBeLessThanOrEqual(
+          RUNTIME_APPLY_POOL_MAX,
+        );
+        expect(Math.max(...poolSamples.map((sample) => sample.activeSessions))).toBeLessThanOrEqual(
+          RUNTIME_APPLY_POOL_MAX,
+        );
+      } finally {
+        keepSampling = false;
+        if (sampler) {
+          await sampler;
+        }
+        await prisma.deviceConnection.deleteMany({
+          where: { id: { in: connectionIds } },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
+        await observer.$disconnect();
+        controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
+      }
+    }, 60_000);
   },
 );
 

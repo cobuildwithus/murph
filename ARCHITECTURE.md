@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Accepted-Message Targeting
 
@@ -47,6 +47,53 @@ sharing state or persist a copy in the workspace. Private self-leave atomically
 removes the non-owner membership and its shares under Web ownership. It does
 not append a runtime cleanup wake. Other permission mutations remain on the
 authenticated group join page or route-bound group-chat offer flow.
+After a successful personal checkpoint, the runtime offers complete replacement
+snapshots before a complete device-sync-only maintenance prefix may resume;
+the dedicated system-mailbox lane likewise offers before acknowledging imported
+dirty state. Conversation work still preempts the offer. Group reads query the
+current Web-owned snapshot on demand, so publication adds no per-group wake,
+cache invalidation, fanout, or second projection owner.
+The runtime resolves active Web-owned scopes without touching the vault, then
+materializes every selected record while the invocation still owns the restored
+vault path. Scope resolution receives the invocation's abort signal, so a
+foreground wake cancels and drains that read. An already-started immutable
+delivery instead remains owned and
+finishes its current scope. A foreground wake, exact host abort, or shutdown
+prevents admission of every undispatched captured scope, including the first,
+and that offer reports
+preempted instead of treating its successful prefix as complete. Foreground's
+stop bit belongs only to the active delivery owner, so
+a later opportunity begins fresh and can retry every scope before the existing
+dirty or recording obligation is acknowledged. Web
+owns a finite effect deadline for that current scope, stops admitting destination
+replacements on deadline or request cancellation, and bounds the final database
+transaction by the remaining deadline. Runtime creates that one absolute
+effect deadline and carries it unchanged through the proxy to Web. Transport
+timeouts add a fixed settlement margin. Only a proxy response marked after an
+actual Web response can prove terminal settlement; an unmarked proxy response
+or transport failure retains the invocation owner until the absolute settlement
+boundary. A marked actual-Web failure received before the effect deadline is
+terminal for that scope only when Web has proved the failure is the absence of
+one destination member's ingress-root envelope. The same sequential owner then
+records the attempt as failed and offers later independent scopes. Unknown
+crypto/provider, access-query, database, transaction, deadline, transport, and
+owner-ending failures stop the undispatched suffix.
+Finalization drains that owner
+before release or retry, so projection work never overlaps a successor
+invocation. Local capture is bounded and likewise drains before its result is
+either delivered or discarded. Every captured offer names
+the committed personal-workspace version that produced those bytes. Web
+serializes only the final replacement against that existing workspace row; an
+older in-flight offer becomes a no-op after a newer checkpoint instead of
+overwriting the newer group snapshot. One opportunity has at most one active
+request. One destination's explicitly typed missing-root failure does not starve
+healthy scopes behind it; the aggregate failure retains the durable retry.
+Unclassified or shared-infrastructure failure, foreground preemption, exact host
+abort, shutdown, deadline exhaustion, or ambiguous transport instead drains only
+the active request before leaving the undispatched suffix to the existing continuation.
+Projection
+failure retains the existing dirty or recording obligation and its bounded
+continuation rather than creating a projection-specific queue or watermark.
 After an authenticated group join or sharing save, the page reuses the
 dashboard auth owner's first-checkout decision: a member who still requires
 checkout continues directly to `/join`, while an accessible member retains the
@@ -474,7 +521,8 @@ instead of a durable deletion-timestamp trail in anonymous analytics.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
-Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs as a fresh ephemeral thread on the resident App Server; its thread-local deny configuration leaves the ordinary provider-process launch identity unchanged. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For every hosted Linq send, foreground or scheduled, persisted route data, binding delivery, session actor, invocation-local delivery context, and explicit target are only bounded hints. Immediately before capability or provider work, the existing Web egress owner resolves one ephemeral typed route containing the canonical target, target kind, direct/group fact, privacy-blinded conversation locator, and only the raw recipient and sender coordinates required by that provider call. Runtime delivery consumes no other recipient or thread source and reasserts the identical route before capability access and the idempotent provider-dispatch claim; a mismatch fails before provider mutation. Raw coordinates remain transient across that signed control-plane exchange and the immediate provider call; they are never copied into prompts, logs, outbox/checkpoint/Temporal state, or artifacts. Exact-message authority, durable groups, known-group no-fallback, personal current-home fallback, and authorized stale direct-thread recovery retain their existing owners. An authorized private scheduled occurrence can therefore perform native-card capability lookup without a foreground actor or inbound delivery context, while unresolved authority remains retryable without a marker or manual-repair protocol.
+Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. Ordinary hosted model processes use the native `murph-member-workspace` permission profile: they retain normal workspace and temporary-file writes plus automation reads, while `bank/automations` is read-only at the filesystem boundary. The root-turn automation port remains outside that profile, and local operator CLI mutation behavior remains unchanged. Relative one-shot day words resolve from the persisted accepted input's ingress receipt time, with the stored event time only as a legacy fallback; if one delivery context spans different calendar dates in the requested IANA timezone, the host requires an explicit date instead of choosing a context-wide day. DST gap and fold recovery stays root-turn-local as an insertion-ordered collection keyed by an opaque recovery correlation and trusted date: each failure returns its key, each unresolved reminder receives a target-specific question in delivered and transcript text, and only a successful explicit-date owner mutation echoing that exact key and date removes the entry as completed. The correlation is stripped before the canonical owner call and grants no mutation authority; every executable or locally invalid correlated retry must match an existing exact key and date before owner execution or recovery-state mutation. An invalid matching retry retains the original target-specific entry, while an unknown, consumed, dismissed, or mismatched correlation is rejected without minting or resurrecting one; omission or a failed owner call leaves existing obligations untouched. The same key can cross the expected create-only conflict, read-only inspection, versioned patch, ID/slug lookup change, or participant-directed rename without asking the host to infer identity from mutable model text. When the participant instead withdraws the reminder or supersedes its trusted date, one active-root, offered-tool dismissal carrying that exact key and date removes only the matching ephemeral entry without calling the automation owner; any replacement date then proceeds as an ordinary independent save or versioned patch. No-reply or response-card delivery remains suppressed until the collection is empty. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs as a fresh ephemeral thread on the resident App Server; its thread-local deny configuration leaves the ordinary provider-process launch identity unchanged. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For every hosted Linq send, foreground or scheduled, persisted route data, binding delivery, session actor, invocation-local delivery context, and explicit target are only bounded hints. Immediately before capability or provider work, the existing Web egress owner resolves one ephemeral typed route containing the canonical target, target kind, direct/group fact, privacy-blinded conversation locator, and only the raw recipient and sender coordinates required by that provider call. Runtime delivery consumes no other recipient or thread source and reasserts the identical route before capability access and the idempotent provider-dispatch claim; a mismatch fails before provider mutation. Raw coordinates remain transient across that signed control-plane exchange and the immediate provider call; they are never copied into prompts, logs, outbox/checkpoint/Temporal state, or artifacts. Exact-message authority, durable groups, known-group no-fallback, personal current-home fallback, and authorized stale direct-thread recovery retain their existing owners. An authorized private scheduled occurrence can therefore perform native-card capability lookup without a foreground actor or inbound delivery context, while unresolved authority remains retryable without a marker or manual-repair protocol.
+
 
 Detached phone-call results and usage-referral celebrations are the only
 notification families admitted through the dirty runtime's pre-checkpoint
@@ -1194,7 +1242,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   admission state. Metric families normalize independently: an unavailable
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
-  never treated as zero. A telemetry-only notification opens after two
+  never treated as zero. Unusable collections receive one bounded confirmation
+  attempt. Usable partial collections stay single-pass whenever available
+  evidence is unsafe; a safe observation missing only the direct-error counter
+  uses the same confirmation budget. The confirmation's available signals are
+  evaluated, a recovered counter joins the original complete gauge evidence,
+  and failure or continued absence retains the original incomplete observation.
+  A telemetry-only notification opens after two
   consecutive incomplete or failed collections. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families observed on partial checks, and uses the threshold
@@ -2538,6 +2592,31 @@ transaction can consequently use only the matching request-scoped root and
 performs no first-time provider/KMS unwrap. This exact-root contract belongs to
 the Linq reaction append path; it does not assert that every generic mailbox
 producer prewarms its root.
+
+The standalone generic mailbox-item append has its own narrower prepared
+boundary. It checks for an already-durable dedupe replay before crypto work and,
+on a miss, unwraps the exact active ingress root before opening its transaction.
+The transaction locks and re-reads root authority, seals only from the matching
+request-scoped cache entry, and permits one full reprepare after typed root
+drift. Its prepared envelope adapter retains the envelope owner's ordinary
+target and workspace checks while carrying the same generic prepared-root
+capability; mailbox adds no proxy capability or drift-error owner. Existing
+transaction-owned envelope, identity,
+source-message, and specialized append adapters remain explicitly legacy and
+provider-capable until their owning flows migrate; they gain neither implicit
+preparation nor a second retry owner from the standalone append.
+
+Web identity reconciliation uses the same crypto-only root preparation
+boundary for the control domain. Privy live authority, the exact control root,
+and existing private projections settle outside the owner transaction; sibling
+work is drained while preserving the first observed failure. The transaction
+revalidates the exact root under the canonical root lock and member identity
+and verified-email writes seal from that local root. Exact winner drift rolls
+back and permits one fresh full attempt. The prepared root conveys no member,
+invite, email, routing, or provider authority, all of which remain revalidated
+by their owning stores. Phone-conflict suppression reads only the blind-index
+owner id, so preserving another member's binding never decrypts that member's
+private identity or requires a second prepared root inside the transaction.
 
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner

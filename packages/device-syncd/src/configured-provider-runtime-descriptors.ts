@@ -1,6 +1,7 @@
 export {
   assertValidJunctionClientUserIdSecret,
   buildConfiguredDeviceSyncProviderRuntimeDescriptor,
+  buildJunctionDeviceSyncRuntimeDescriptor,
   buildOuraDeviceSyncRuntimeDescriptor,
   buildOuraDeviceSyncScopes,
   buildStravaDeviceSyncRuntimeDescriptor,

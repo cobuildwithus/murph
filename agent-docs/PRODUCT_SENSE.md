@@ -185,7 +185,8 @@ default destination for every goal or the definition of activation.
   structured presentation that can carry the complete answer, Murph must use
   it instead of rebuilding the same answer as one or more long messages. A
   complete routine, training plan, or schedule must not degrade to long plain
-  text while a suitable owned presentation is available.
+  text while a suitable owned presentation is available. A request to repeat
+  or improve that answer keeps the same owned presentation when it still fits.
 - Telegram Rich Messages support headings, paragraphs, lists, quotations,
   bordered or striped tables, expandable details, collages, slideshows, and
   embedded media. Murph authors semantic cards through its tools; the Telegram

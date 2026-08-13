@@ -507,7 +507,7 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).toContain("verify it with `vault-cli wearables sources list --format json`");
   });
 
-  it("keeps disabled Junction Strava status visible without offering a reconnect command", () => {
+  it("keeps disabled Junction sources visible with truthful unavailable guidance", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
         {
@@ -538,8 +538,44 @@ describe("hosted device sync status prompt", () => {
 
     expect(prompt).toContain("Strava currently needs reconnect");
     expect(prompt).toContain("source `strava`");
-    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).toContain("Reconnect is not currently available for this wearable/source");
+    expect(prompt).toContain("Do not offer or issue a reconnect link");
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
+  });
+
+  it("keeps modern Dexcom recovery visible without offering a reconnect command", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectionAvailable: false,
+          connectTarget: "dexcom_v3",
+          connectTargetCommandSafe: false,
+          label: "Dexcom",
+          provider: "junction",
+          sourceProviderSlug: "dexcom_v3",
+        },
+      ],
+      snapshot: buildSnapshot({
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-06-01T00:00:00.000Z",
+            lastErrorCode: "TOKEN_REFRESH_FAILED",
+            lastErrorMessage: "refresh failed",
+            lastSeenAt: "2026-06-29T00:00:00.000Z",
+            lastDataAt: null,
+            resourceCount: 0,
+            sourceProviderSlug: "dexcom_v3",
+            status: "error",
+          },
+        ],
+      }),
+    });
+
+    expect(prompt).toContain("Dexcom currently needs reconnect");
+    expect(prompt).toContain("Reconnect is not currently available for this wearable/source");
+    expect(prompt).toContain("Do not offer or issue a reconnect link");
+    expect(prompt).not.toContain("vault-cli device connect dexcom_v3 --format json");
   });
 
   it("guides Garmin historical recovery through the confirmed connection reset", () => {

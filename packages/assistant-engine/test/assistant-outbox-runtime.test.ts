@@ -2559,6 +2559,116 @@ describe('assistant outbox runtime', () => {
     })).toBe(false)
   })
 
+  it('retains unresolved private continuity until application, then restores ordinary pruning', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-private-continuity-retention-',
+    )
+    const outstanding = await createIntent(vaultRoot, {
+      createdAt: '2026-04-19T00:00:00.000Z',
+      message: 'unbound private continuity',
+      privateCompletionContinuitySessionId: null,
+      sessionId: 'session-private-continuity-unbound',
+      turnId: 'turn-private-continuity-unbound',
+    })
+    const outstandingSent = await saveAssistantOutboxIntent(vaultRoot, {
+      ...outstanding,
+      delivery: createDelivery({
+        sentAt: '2026-04-19T00:01:00.000Z',
+      }),
+      sentAt: '2026-04-19T00:01:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-19T00:01:00.000Z',
+    })
+    const prepared = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:00:00.000Z',
+      message: 'prepared private continuity',
+      privateCompletionContinuitySessionId: 'session-private-continuity-prepared',
+      sessionId: 'session-private-continuity-prepared',
+      turnId: 'turn-private-continuity-prepared',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...prepared,
+      delivery: createDelivery({ sentAt: '2026-03-01T00:01:00.000Z' }),
+      privateCompletionContinuity: {
+        baseTurnCount: 0,
+        preparedAt: '2026-03-01T00:01:01.000Z',
+        sessionId: prepared.sessionId,
+        status: 'prepared',
+        transcriptCreatedAt: '2026-03-01T00:01:00.000Z',
+      },
+      sentAt: '2026-03-01T00:01:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:01:01.000Z',
+    })
+    const ordinaryOld = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:02:00.000Z',
+      message: 'ordinary old terminal',
+      sessionId: 'session-ordinary-old-terminal',
+      turnId: 'turn-ordinary-old-terminal',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...ordinaryOld,
+      sentAt: '2026-03-01T00:03:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:03:00.000Z',
+    })
+    for (let index = 0; index < 101; index += 1) {
+      const createdAt = new Date(Date.UTC(2026, 3, 19, 1, index, 0)).toISOString()
+      const recent = await createIntent(vaultRoot, {
+        createdAt,
+        message: `recent terminal ${index}`,
+        sessionId: `session-recent-terminal-${index}`,
+        turnId: `turn-recent-terminal-${index}`,
+      })
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...recent,
+        status: 'failed',
+        updatedAt: createdAt,
+      })
+    }
+
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2026-04-20T12:00:00.000Z'),
+      paths,
+      vault: vaultRoot,
+    })).resolves.toBe(2)
+    let retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained.some((intent) => intent.intentId === outstanding.intentId)).toBe(
+      true,
+    )
+    expect(retained.some((intent) => intent.intentId === prepared.intentId)).toBe(
+      true,
+    )
+    expect(retained.some((intent) => intent.intentId === ordinaryOld.intentId)).toBe(
+      false,
+    )
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...outstandingSent,
+      privateCompletionContinuity: {
+        appliedAt: '2026-04-20T12:01:00.000Z',
+        baseTurnCount: 0,
+        preparedAt: '2026-04-20T12:00:59.000Z',
+        sessionId: outstandingSent.sessionId,
+        status: 'applied',
+        transcriptCreatedAt: outstandingSent.delivery!.sentAt,
+      },
+      updatedAt: '2026-04-20T12:01:00.000Z',
+    })
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2026-04-20T12:02:00.000Z'),
+      paths,
+      vault: vaultRoot,
+    })).resolves.toBe(1)
+    retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained.some((intent) => intent.intentId === outstanding.intentId)).toBe(
+      false,
+    )
+    expect(retained.some((intent) => intent.intentId === prepared.intentId)).toBe(
+      true,
+    )
+  })
+
   it('retains legacy group newsletter terminal occurrence evidence during outbox pruning', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-newsletter-retention-',
@@ -6672,6 +6782,7 @@ async function createIntent(
     nativeReplyRequested: true
     replyToMessageId: string | null
     media: AssistantOutboxIntent['media']
+    privateCompletionContinuitySessionId: string | null
     reviewedAssistantAskCompletionExpiresAt: string | null
     sessionId: string
     threadId: string | null
@@ -6699,6 +6810,12 @@ async function createIntent(
     identityId: overrides.identityId ?? 'participant-1',
     media: overrides.media ?? [],
     message: overrides.message ?? `${sessionId}:${turnId}:message`,
+    ...(overrides.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            overrides.privateCompletionContinuitySessionId,
+        }),
     reviewedAssistantAskCompletionExpiresAt:
       overrides.reviewedAssistantAskCompletionExpiresAt,
     ...(overrides.nativeReplyRequested === undefined
