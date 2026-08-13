@@ -76,6 +76,70 @@ Updated: 2026-08-13
   integrate only its isolated target-local contract sections into current
   Murph docs and retain current unrelated packaging behavior.
 
+## Scope-anomaly retrospective
+
+Decision: continue unchanged as one indivisible target-embedded feature. The
+immutable first-reviewed head is
+`745591dc912bbf2ed32cfd6aa7c2acd1a4180c57`. ReviewGPT round 1 found no code
+defect and required this retrospective because that head contains 6,544
+authored-source additions. The runtime source has not changed since that head,
+so review-driven source growth is zero.
+
+The irreducible current requirement is one operator-controlled invocation that
+takes at most one authenticated, committed Frog task through candidate
+acquisition, sandboxed integration, PR publication, canonical review, required
+CI, and either a narrowly authorized merge plus issue closure or a durable
+human handoff. A smaller workflow ending before publication and review does not
+satisfy the requested end-to-end PR delivery. Product, policy, workflow, and
+ambiguous changes deliberately still stop for a human.
+
+The considered split was activation/admission, candidate integration, and
+publication/review/finalization. It was rejected for this deployment: the ten
+source files are the byte-identical release already reviewed in the private
+source repository, and those phases form one fail-closed authority protocol.
+An earlier phase alone is either inert or exposes an irreversible boundary
+without the later reconciliation phase. Splitting also creates cross-version
+recovery states and repeats review of the same trust inventory. Shrinking to a
+manual pre-publication handoff removes the requested delivery outcome, while a
+hosted redesign adds a service, credentials, and a queue. The intended source
+shape therefore remains 6,544 additions and zero deletions; this documentation
+record is the only post-round-1 movement and does not change runtime behavior.
+
+Retained concepts and owners:
+
+- launchd owns only load and two-hour cadence; GitHub remains the queue.
+- The native advisory gate and bounded process record serialize manual,
+  scheduled, install, parent, and detached-worker ownership without signaling
+  an ambiguous process. launchd alone cannot prove those overlaps.
+- The dependency bootstrap bounds and reaps only its proven scriptless install
+  process group before the parent exists; worktree helpers do not own it.
+- The GitHub issue plus protected-main binding own admission and immutable task
+  identity. No local task database or issue-body authority is added.
+- The sanctioned deterministic worktree, branch, and GitHub PR own candidate
+  bytes, publication, recovery, and durable handoff. There is no repair ledger.
+- Bounded parent-only metadata retains only process identity, task digest,
+  PR/body provenance, and exact-head review evidence that cannot safely live in
+  public GitHub state; transient model/browser material is removed after use.
+- Existing ReviewGPT owns candidate and canonical review. The parent validates
+  one candidate patch and binds PASS evidence to exact candidate/runner heads.
+- The native Codex profile enforces edit-only worktree access because a prompt
+  prohibition cannot isolate Git, GitHub, network, credentials, browser state,
+  review evidence, or other checkouts.
+- Existing Git/GitHub primitives and the non-model parent own commit, push, PR,
+  checks, current-base proof, ordinary protected merge, and explicit closure.
+  Fresh task, provenance, scope, rename/copy, and loaded-control checks prevent
+  stale evidence or product changes from gaining merge authority.
+- The narrow scope classifier allows only enumerated local Frog files to merge
+  unattended. Broader changes retain the ready PR as a human handoff. One
+  bounded merged-but-open recovery prevents issue closure without merge proof
+  and prevents re-running a completed repair.
+
+No hosted scheduler or service, database, second queue, credential owner,
+generic framework, ruleset bypass, model publication/review/merge/closure
+authority, product runtime path, or compatibility lifecycle is introduced. The
+large source shape is explicit trust-boundary and recovery code for this one
+feature, not a generalized automation platform.
+
 ## Verification
 
 - `pnpm exec vitest run scripts/frog-autofix.test.ts --config scripts/vitest.config.ts --no-coverage`
