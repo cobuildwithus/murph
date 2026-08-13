@@ -76,7 +76,7 @@ describe("database health monitor", () => {
     expect(harness.monitor.readRecentSamples()).toEqual([
       expect.objectContaining({
         clientWaitSeconds: 0,
-        directConnectionErrorDelta: 0,
+        connectionErrorDelta: 0,
         observedAtMs: FIVE_MINUTES_MS,
         scrapeStatus: "ok",
         serverPoolSaturationRatio: 0.2,
@@ -1053,7 +1053,7 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
-  it("retries a safe partial scrape when only the direct-error counter is missing", async () => {
+  it("retries a safe partial scrape when the connection-error family is missing", async () => {
     const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
     const partialMetricsBody = completeMetricsBody.replace(
       /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
@@ -1079,7 +1079,7 @@ describe("database health monitor", () => {
     expect(harness.retryWaits).toEqual([1_000]);
     expect(harness.monitor.readRecentSamples()).toEqual([
       expect.objectContaining({
-        directConnectionErrorDelta: 0,
+        connectionErrorDelta: 0,
         failureCode: null,
         scrapeStatus: "ok",
       }),
@@ -1087,7 +1087,137 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
-  it("keeps multi-family omissions single-pass when the direct-error counter is also missing", async () => {
+  it("composes safe single-port scrapes and advances both counter baselines", async () => {
+    const baselineMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 4,
+      pooledErrors: 8,
+    });
+    const directOnlyMetricsBody = baselineMetricsBody.replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="6432".*$/mu,
+      "",
+    );
+    const pooledOnlyMetricsBody = baselineMetricsBody.replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="5432".*$/mu,
+      "",
+    );
+    const incrementedMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 5,
+      pooledErrors: 9,
+    });
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        if (scrapeAttempt === 1) {
+          return baselineMetricsBody;
+        }
+        if (scrapeAttempt === 2) {
+          return directOnlyMetricsBody;
+        }
+        return scrapeAttempt === 3
+          ? pooledOnlyMetricsBody
+          : incrementedMetricsBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 1, kind: "direct_migration_admission_failures" },
+        { count: 1, kind: "pooled_application_connection_errors" },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "ok",
+    });
+
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      connectionErrorDelta: 2,
+      scrapeStatus: "ok",
+    });
+  });
+
+  it("keeps an observed reset baseline when the complementary port pages on confirmation", async () => {
+    const baselineMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 4,
+      pooledErrors: 5,
+    });
+    const resetDirectOnlyMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 1,
+      pooledErrors: 5,
+    }).replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="6432".*$/mu,
+      "",
+    );
+    const incrementedPooledOnlyMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 1,
+      pooledErrors: 7,
+    }).replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="5432".*$/mu,
+      "",
+    );
+    const nextCompleteMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 2,
+      pooledErrors: 7,
+    });
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        if (scrapeAttempt === 1) {
+          return baselineMetricsBody;
+        }
+        if (scrapeAttempt === 2) {
+          return resetDirectOnlyMetricsBody;
+        }
+        return scrapeAttempt === 3
+          ? incrementedPooledOnlyMetricsBody
+          : nextCompleteMetricsBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 2, kind: "pooled_application_connection_errors" },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "ok",
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + ONE_HOUR_MS),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 1, kind: "direct_migration_admission_failures" },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "ok",
+    });
+
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(
+      harness.monitor
+        .readRecentSamples(3)
+        .map((sample) => sample.connectionErrorDelta),
+    ).toEqual([1, 2, 0]);
+  });
+
+  it("keeps multi-family omissions single-pass when the connection-error family is also missing", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
     }).replace(
@@ -1115,9 +1245,9 @@ describe("database health monitor", () => {
     ]);
   });
 
-  it("joins a recovered direct-error counter to first-scrape gauges when confirmation loses another family", async () => {
+  it("joins recovered connection-error counters to first-scrape gauges when confirmation loses another family", async () => {
     const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
-    const missingDirectErrorMetricsBody = completeMetricsBody.replace(
+    const missingConnectionErrorMetricsBody = completeMetricsBody.replace(
       /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
       "",
     );
@@ -1130,7 +1260,7 @@ describe("database health monitor", () => {
       readMetricsBody() {
         scrapeAttempt += 1;
         return scrapeAttempt === 1
-          ? missingDirectErrorMetricsBody
+          ? missingConnectionErrorMetricsBody
           : missingMaxConnectionsMetricsBody;
       },
     });
@@ -1145,7 +1275,7 @@ describe("database health monitor", () => {
     expect(harness.retryWaits).toEqual([1_000]);
     expect(harness.monitor.readRecentSamples()).toEqual([
       expect.objectContaining({
-        directConnectionErrorDelta: 0,
+        connectionErrorDelta: 0,
         failureCode: null,
         postgresMaxConnections: 50,
         scrapeStatus: "ok",
@@ -1153,7 +1283,7 @@ describe("database health monitor", () => {
     ]);
   });
 
-  it("retains the original incomplete observation when direct-error confirmation fails", async () => {
+  it("retains the original incomplete observation when connection-error confirmation fails", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
     }).replace(
@@ -1185,7 +1315,7 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
-  it("pages an available unsafe signal without retrying a missing direct-error counter", async () => {
+  it("pages an available unsafe signal without retrying a missing connection-error family", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
       clientWaitSeconds: 8,
@@ -1205,6 +1335,42 @@ describe("database health monitor", () => {
     expect(harness.planetScaleRequests).toHaveLength(2);
     expect(harness.retryWaits).toEqual([]);
     expect(harness.primaryLinqRequests).toHaveLength(1);
+  });
+
+  it("does not delay a known pooled delta when the direct port is missing", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      pooledErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      pooledErrors: 7,
+    }).replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="5432".*$/mu,
+      "",
+    );
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 2, kind: "pooled_application_connection_errors" },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+
+    expect(harness.retryWaits).toEqual([]);
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      connectionErrorDelta: 2,
+      failureCode: "required_metrics_missing",
+    });
   });
 
   it("pages a positive direct-error delta recovered by the partial retry", async () => {
@@ -1249,13 +1415,13 @@ describe("database health monitor", () => {
     expect(harness.retryWaits).toEqual([1_000]);
     expect(harness.primaryLinqRequests).toHaveLength(1);
     expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
-      directConnectionErrorDelta: 2,
+      connectionErrorDelta: 2,
       failureCode: null,
       scrapeStatus: "ok",
     });
   });
 
-  it("pages pressure that appears while confirming the missing direct-error counter", async () => {
+  it("pages pressure that appears while confirming the missing connection-error family", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
     }).replace(
@@ -1291,7 +1457,7 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toHaveLength(1);
   });
 
-  it("retains the two-check telemetry page when direct-error retries stay incomplete", async () => {
+  it("retains the two-check telemetry page when connection-error retries stay incomplete", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
     }).replace(
@@ -1326,7 +1492,8 @@ describe("database health monitor", () => {
     const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
     expect(alert.message.parts[0]?.value).toBe(
       "Database monitor telemetry was incomplete for 2 checks "
-      + "(missing PlanetScale metric observed: direct connection errors). "
+      + "(missing PlanetScale metric observed: connection errors on ports "
+      + "5432 and 6432). "
       + "Window ended 00:10 UTC.",
     );
   });
@@ -2445,7 +2612,7 @@ describe("database health monitor", () => {
       });
 
     expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
-      directConnectionErrorDelta: 0,
+      connectionErrorDelta: 0,
       failureCode: "required_metrics_missing",
     });
   });
@@ -2685,6 +2852,151 @@ describe("database health monitor", () => {
     expect(directErrorMessage)
       .not.toMatch(/\b(?:capacity|headroom|pressure|utilization)\b/iu);
     expectObservationScopedDatabaseOpening(directErrorMessage);
+  });
+
+  it("pages pooled application errors at low utilization with two stable deliveries", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 0,
+      pooledErrors: 5,
+      postgresStates: { active: 5, idle: 5 },
+      serverConnections: 10,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 0,
+      pooledErrors: 7,
+      postgresStates: { active: 5, idle: 5 },
+      serverConnections: 10,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 2, kind: "pooled_application_connection_errors" },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "ok",
+    });
+
+    const deliveredBodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    expect(deliveredBodies).toHaveLength(2);
+    expect(deliveredBodies[0]?.message.parts)
+      .toEqual(deliveredBodies[1]?.message.parts);
+    expect(deliveredBodies.map((body) => body.message.idempotency_key).sort())
+      .toEqual([
+        "murph-db-1-1",
+        "murph-db-1-1-recipient-2",
+      ]);
+    const message = deliveredBodies[0]?.message.parts[0]?.value;
+    expect(message).toContain(
+      "2 pooled application connection errors (port 6432)",
+    );
+    expect(message).not.toContain("direct migration");
+    expect(message)
+      .not.toMatch(/\b(?:capacity|headroom|pressure|utilization)\b/iu);
+    expectObservationScopedDatabaseOpening(message);
+  });
+
+  it("preserves pooled errors behind a pending page across restart and acknowledgment", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+      pooledErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => new Response(null, { status: 503 }),
+      ],
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      pooledErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 2, kind: "pooled_application_connection_errors" },
+      ],
+      outcome: "alert_deferred",
+    });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredPooledErrorCheckedAtMs: FIVE_MINUTES_MS * 2,
+      deferredPooledErrorCount: 2,
+      pendingAlertMessage: expect.stringContaining("PgBouncer wait 8s"),
+    });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      pooledErrors: 7,
+    });
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + ONE_HOUR_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredPooledErrorCount: 2,
+      pendingAlertMessage: null,
+    });
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + ONE_HOUR_MS),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    const pooledPending = harness.monitor.readAlertState();
+    const pooledIdempotencyKey = pooledPending.pendingAlertIdempotencyKey;
+    const pooledMessage = pooledPending.pendingAlertMessage;
+    if (!pooledIdempotencyKey || !pooledMessage) {
+      throw new Error("Expected a persisted pooled connection-error alert.");
+    }
+    expect(pooledPending).toMatchObject({
+      deferredPooledErrorCheckedAtMs: null,
+      deferredPooledErrorCount: 0,
+      pendingAlertMessage: expect.stringContaining(
+        "2 pooled application connection errors (port 6432)",
+      ),
+    });
+
+    harness.restartMonitor();
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: pooledIdempotencyKey,
+      pendingAlertMessage: pooledMessage,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + ONE_HOUR_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    const pooledDeliveries = await Promise.all(
+      harness.allLinqRequests.slice(-2).map(readLinqRequestBody),
+    );
+    expect(pooledDeliveries.map((body) => body.message.idempotency_key).sort())
+      .toEqual([
+        pooledIdempotencyKey,
+        `${pooledIdempotencyKey}-recipient-2`,
+      ].sort());
+    expect(pooledDeliveries.map((body) => body.message.parts[0]?.value))
+      .toEqual([
+        pooledMessage,
+        pooledMessage,
+      ]);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredPooledErrorCount: 0,
+      incidentOpen: false,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
   });
 
   it("delivers a one-sample direct error admitted inside the attempt fence", async () => {
@@ -2929,7 +3241,7 @@ describe("database health monitor", () => {
       .not.toContain("PgBouncer wait");
     expect(
       harness.monitor.readRecentSamples(10)
-        .filter((sample) => sample.directConnectionErrorDelta === 2),
+        .filter((sample) => sample.connectionErrorDelta === 2),
     ).toHaveLength(1);
     expect(harness.monitor.readAlertState()).toMatchObject({
       deferredDirectErrorCount: 0,
@@ -3166,7 +3478,7 @@ describe("database health monitor", () => {
       .toBe(`${combinedBodies[0]?.message.idempotency_key}-recipient-2`);
     expect(
       harness.monitor.readRecentSamples(20)
-        .filter((sample) => sample.directConnectionErrorDelta === 2),
+        .filter((sample) => sample.connectionErrorDelta === 2),
     ).toHaveLength(2);
     expect(harness.monitor.readAlertState()).toMatchObject({
       deferredDirectErrorCheckedAtMs: null,

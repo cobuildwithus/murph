@@ -567,31 +567,35 @@ supported provider credential.
   bounded monitor query. It also proves that recent resumed activity survives
   seven-day trace cleanup through quiet-hour deferral and alerts after quiet
   hours, while a fully stale trace is deleted.
-- `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
-  covers the independent PlanetScale/Linq database-health plane. The tests
-  prove strict per-family metric normalization, explicit unknowns for missing
-  required series, continued evaluation of available signals, positive
-  direct-port counter deltas with reset/new-series suppression across complete
-  and partial samples, one bounded confirmation for a safe direct-counter-only
-  omission, multi-family confirmation rejection, cross-scrape evidence
-  composition, immediate unsafe-signal paging before that confirmation, unsafe
-  confirmation-signal paging, failed-confirmation retention, positive
-  recovered-counter deltas, persistent-gap telemetry paging, and the scheduled
-  Durable Object boundary for that retry,
+- `apps/cloudflare/test/database-health-{metrics,monitor,store,worker}.test.ts`
+  and `apps/cloudflare/test/workers/database-health-e2e.test.ts` cover the
+  independent PlanetScale/Linq database-health plane. The tests prove strict
+  per-family metric normalization, explicit unknowns when either expected
+  connection-error port is missing, collision-free region-plus-port series,
+  continued evaluation of available signals, positive 5432 and 6432 deltas,
+  and independent reset/new-series suppression across complete and partial
+  samples. They also prove per-port baseline advancement with omitted-port
+  retention, one bounded confirmation for a safe connection-error-family
+  omission, multi-family confirmation rejection, cross-scrape port composition,
+  immediate unsafe-signal paging before that confirmation, unsafe confirmation
+  paging without losing the complementary baseline, failed-confirmation
+  retention, positive recovered-counter deltas, persistent-gap telemetry
+  paging, and the scheduled Durable Object boundary for that retry,
   SQLite sample persistence and 30-day pruning, concrete
   connection thresholds, two-failure collection hysteresis, one acknowledged
   page per unresolved telemetry-notification window, recovered threshold
   coalescing before acknowledgment, truthful partial-then-unavailable,
   unavailable-then-partial, and different-family partial-window summaries with
   bounded observed evidence, failed-scrape incident preservation,
-  telemetry obligation retention behind older pending and direct-error-only
+  telemetry obligation retention behind older pending and connection-error-only
   pages across restart and recovery, current-pressure priority at the first
   eligible provider slot with historical observation time, exact combined
-  pressure, telemetry, and direct-error retention when concrete evidence appears
-  at or after the unadmitted threshold across recovery and restart,
-  rollback-compatible additive SQLite alert-state migration and legacy-ack
-  normalization, recovery reset and rearming, post-ack monitoring suppression
-  inside concrete-pressure
+  pressure, telemetry, and category-specific connection-error retention when
+  concrete evidence appears at or after the unadmitted threshold across
+  recovery and restart, rollback-compatible additive SQLite alert-state
+  migration, generalized-baseline storage in legacy physical sample columns,
+  and legacy-ack normalization, recovery reset and rearming, post-ack monitoring
+  suppression inside concrete-pressure
   recurrence, stale pressure retry isolation from a later rearmed obligation,
   global one-hour wall-time provider-attempt pacing across incident recovery,
   current actual-check-time and full reachability of the one-hundred-opening
@@ -599,18 +603,23 @@ supported provider credential.
   across condition families, and delayed post-recovery delivery through the
   scheduled Worker and real SQLite Durable Object boundary,
   no stale fenced gauge page after recovery, exact body/idempotency reuse after
-  an ambiguous Linq send, transactional rollback before direct
-  counter-baseline advancement, one-sample direct errors admitted inside the
+  an ambiguous Linq send, transactional rollback before connection-error
+  baseline advancement, one-sample connection errors admitted inside the
   attempt fence and retained across clean samples, mixed inside-fence pages
-  limited to direct-error evidence, full current mixed evidence when no older
-  pending obligation owns the open boundary, and later direct-error evidence
-  retained behind an older health-suppressed page across baseline advancement,
-  recovery, provider pacing, and monitor restarts,
-  documented formatted/deprecated Linq inventory shapes with duplicate and
-  mismatch rejection, zero message POSTs for unhealthy or indeterminate
-  chat/line health, healthy auto-selected Linq delivery, discovery-only
-  PlanetScale service authorization plus bounded signed scrape parameters,
-  unsafe discovered-target rejection, and singleton cron dispatch.
+  limited to non-replayable connection-error evidence, full current mixed
+  evidence when no older pending obligation owns the open boundary, and later
+  category-specific evidence retained behind an older health-suppressed page
+  across baseline advancement, recovery, provider pacing, and monitor restarts.
+  The pooled-path cases additionally prove factual 6432 copy at zero wait and
+  low server/Postgres utilization, unchanged 5432 wording, category-specific
+  pending/deferred/restart/ack behavior, stable two-recipient idempotency, and
+  the five-minute scheduled Durable Object path. Existing
+  coverage continues to prove documented formatted/deprecated Linq inventory
+  shapes with duplicate and mismatch rejection, zero message POSTs for
+  unhealthy or indeterminate chat/line health, healthy auto-selected Linq
+  delivery, discovery-only PlanetScale service authorization plus bounded
+  signed scrape parameters, unsafe discovered-target rejection, and singleton
+  cron dispatch.
   The deploy-automation test keeps the five-minute trigger, v4 SQLite class
   migration, Durable Object binding, required vars/secrets, checked-in scaffold,
   and generated Wrangler config aligned.
