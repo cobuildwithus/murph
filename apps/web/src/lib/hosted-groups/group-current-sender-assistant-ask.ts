@@ -110,7 +110,7 @@ const HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN =
 const HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN =
   /^(?:please\s+)?(?=[\s\S]{1,120}$)(?:(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make)\b|(?:for|to|between|in|off|on|outside|inside|under|just|only|no)\b|(?:do\s+not|don['’]?t|never|not)\b|(?:this|that|it)\s+(?:is|stays|remains)\b|[\p{L}'’-]+ly\b)[\s\S]*$/iu;
 const HOSTED_CURRENT_SENDER_UNSEPARATED_DELIVERY_DIRECTIVE_PATTERN =
-  /^(?:please\s+)?(?:reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show)\b/iu;
+  /^(?:please\s+)?(?:reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show)\b|\b(?:reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show)\b[\s\S]{0,80}\b(?:me|my\s+dms?|group|everyone|here|privately|confidentially|directly)\b|\b(?:(?:the\s+)?answer|it|this|that)\s+(?:(?:should|must)\s+)?(?:stay|remain|be)\s+(?:private|confidential)\s*[.!?]*$|\b(?:privately|confidentially|just\s+for\s+me|for\s+me\s+only)\s*[.!?]*$/iu;
 
 for (const [label, permissionText] of [
   ["Hosted current-sender group permission", HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT],

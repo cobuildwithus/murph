@@ -193,6 +193,17 @@ Updated: 2026-08-12
   22-test Web authority suite remains green.
 - Exact-head CI on `12634c58ab99` passed before the round-8 correction. The
   corrected head still requires its own CI and the follow-up ReviewGPT PASS.
+- Full-snapshot ReviewGPT round 9 accepted the round-8 correction and verified
+  every earlier authority, replay, expiry, and terminal mechanism, but found the
+  same fail-open class in a single unseparated complement: delivery-to-audience
+  wording or a terminal confidentiality modifier could still reach the group
+  default. The existing no-separator guard now rejects a bounded delivery verb
+  followed by a recipient/audience or a terminal confidentiality directive. It
+  does not treat substantive wording such as `private insurance` as delivery
+  intent. Five classifier and Web-admission cases prove zero route resolution,
+  request append, or wake; the focused Web authority suite passes 27 tests. This
+  is a predicate correction inside the existing Web owner, not another parser
+  owner, model turn, state, queue, service, or phrase-selected destination.
 
 ## Verification
 

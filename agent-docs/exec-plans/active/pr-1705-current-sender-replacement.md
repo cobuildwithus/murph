@@ -1,6 +1,6 @@
 # PR #1705 Current-Sender Replacement
 
-Status: ReviewGPT round-8 subject-led privacy remediation in progress; corrected exact-head CI, follow-up PASS, and merge remain active.
+Status: ReviewGPT round-9 unseparated privacy remediation in progress; corrected exact-head CI, follow-up PASS, and merge remain active.
 Baseline: supplied snapshot at `fb965713898e0fb00afc215a69e93d16c8c6fb78`.
 Owner: Assistant Ask current-sender admission and completion owners.
 Risk: High — privacy-sensitive cross-runtime disclosure.
@@ -70,6 +70,10 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
   private clauses restore the bounded audience-signal fail-closed guard and
   cannot enqueue or resolve a private route; focused Web authority proof passes
   22 tests.
+- [x] ReviewGPT round 9 finding accepted and remediated: a bounded no-separator
+  guard rejects unconsumed delivery-to-audience or terminal confidentiality
+  directives before route resolution or enqueue while preserving substantive
+  `private insurance` wording; focused Web authority proof passes 27 tests.
 - [ ] Corrected exact-head GitHub Actions and a follow-up ReviewGPT `PASS` remain required.
 
 ## Rollout And Removal

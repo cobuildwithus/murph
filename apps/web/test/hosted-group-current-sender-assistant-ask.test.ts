@@ -423,6 +423,11 @@ describe("hosted current-sender Assistant Ask authority", () => {
       "Murph, ask my Murph what synthetic medications I take and the answer should stay private.",
       "Murph, ask my Murph what synthetic medications I take and I want the answer to stay private.",
       "Murph, ask my Murph what synthetic medications I take and the group shouldn't see the answer.",
+      "Murph, ask my Murph to DM me my synthetic recovery score.",
+      "Murph, ask my Murph to message me what synthetic medications I take.",
+      "Murph, ask my Murph can you DM me my synthetic recovery score?",
+      "Murph, ask my Murph what my synthetic recovery score is privately.",
+      "Murph, ask my Murph what my synthetic recovery score is just for me.",
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest({
         hasNativeReplyContext: false,
@@ -496,6 +501,29 @@ describe("hosted current-sender Assistant Ask authority", () => {
     "Murph, ask my Murph what synthetic medications I take and I want the answer to stay private.",
     "Murph, ask my Murph what synthetic medications I take and the group shouldn't see the answer.",
   ])("rejects a subject-led private clause before enqueue: %s", async (text) => {
+    const { admission } = await admit({ text });
+
+    expect(admission).toMatchObject({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: expect.stringMatching(/choose either the group or a private reply/u),
+      },
+    });
+    expect(storedItems.size).toBe(0);
+    expect(storedWakes.size).toBe(0);
+    expect(
+      mocks.resolveHostedAssistantNotificationDestination,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Murph, ask my Murph to DM me my synthetic recovery score.",
+    "Murph, ask my Murph to message me what synthetic medications I take.",
+    "Murph, ask my Murph can you DM me my synthetic recovery score?",
+    "Murph, ask my Murph what my synthetic recovery score is privately.",
+    "Murph, ask my Murph what my synthetic recovery score is just for me.",
+  ])("rejects an unconsumed private directive before enqueue: %s", async (text) => {
     const { admission } = await admit({ text });
 
     expect(admission).toMatchObject({
