@@ -1,6 +1,7 @@
 ---
 title: 'Scenario integrity default skips documented-command coverage'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1768'
 ---
 
 ## Expected Behavior

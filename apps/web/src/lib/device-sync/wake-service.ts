@@ -84,7 +84,7 @@ import {
 } from "./shared";
 
 const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
-const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v2";
+const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v3";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "

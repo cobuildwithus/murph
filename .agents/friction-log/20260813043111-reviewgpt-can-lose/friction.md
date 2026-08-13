@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT can lose a ZIP after confirming the attachment is ready'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1770'
 ---
 
 ## Expected Behavior

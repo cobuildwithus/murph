@@ -1,6 +1,7 @@
 ---
 title: 'Changelog content updates contend on a production-coupled design-study test'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1667'
 ---
 
 ## Expected Behavior

@@ -1367,14 +1367,21 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("versions scheduled wake identity past legacy unhashed envelopes", () => {
-    expect(buildHostedDeviceSyncScheduledReconcileWakeEventId({
+  it("cuts scheduled wake identity over from consumed v2 envelopes", () => {
+    const input = {
       connectionId: "dsc_123",
       expectedConnectedAt: "2026-03-26T12:00:00.000Z",
       nextReconcileAt: "2026-03-26T12:30:00.000Z",
-    })).toBe(
-      "device-sync:scheduled-reconcile:v2:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z",
+    };
+    const legacyConsumedEventId =
+      "device-sync:scheduled-reconcile:v2:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z";
+    const currentEventId = buildHostedDeviceSyncScheduledReconcileWakeEventId(input);
+
+    expect(currentEventId).toBe(
+      "device-sync:scheduled-reconcile:v3:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z",
     );
+    expect(currentEventId).not.toBe(legacyConsumedEventId);
+    expect(buildHostedDeviceSyncScheduledReconcileWakeEventId(input)).toBe(currentEventId);
   });
 
   it("does not append scheduled reconcile work after explicit consent withdrawal", async () => {
