@@ -57,6 +57,10 @@ batch write. Keep raw rows out of model context and user-facing replies.
   `system` and `resourceType`; keep `resourceId` deterministic and within the
   returned schema. Do not invent `externalRef.version` unless the source
   provides a version with proved ordering semantics.
+- Always use `event import-jsonl --conflict-policy reject` for this generic
+  workflow. An identical external-reference replay may skip, but changed
+  content must fail closed instead of superseding a workout that may have been
+  edited after import.
 - Without a stable identity, say before apply that the batch is append-only and
   a repeat can duplicate workouts. Apply it at most once for the current request
   and never blindly retry after an ambiguous failure.
@@ -68,14 +72,14 @@ batch write. Keep raw rows out of model context and user-facing replies.
    rows by reason, and the mapped date range. Do not log raw rows.
 2. Dry-run the complete file:
 
-   `vault-cli event import-jsonl --input @<temporary.jsonl> --format json`
+   `vault-cli event import-jsonl --input @<temporary.jsonl> --conflict-policy reject --format json`
 
    Require `receivedCount` to equal the grouped-workout count. Explain any
    ignored source rows. Stop on validation errors or surprising skips or
    supersedes; do not narrow the batch until it passes.
 3. Confirm the JSONL SHA-256 is unchanged, then apply those exact bytes once:
 
-   `vault-cli event import-jsonl --input @<temporary.jsonl> --apply --format json`
+   `vault-cli event import-jsonl --input @<temporary.jsonl> --conflict-policy reject --apply --format json`
 
 4. Treat the apply receipt as the batch result. Confirm a bounded,
    representative selection through canonical `event list` or `show` reads,

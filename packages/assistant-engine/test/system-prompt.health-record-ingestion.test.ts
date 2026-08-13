@@ -78,6 +78,8 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(instructions).toContain('only the standard-library `csv`')
     expect(instructions).toContain('one temporary JSONL row per workout')
     expect(instructions).toContain('Never use row number')
+    expect(instructions).toContain('event import-jsonl --conflict-policy reject')
+    expect(instructions).toContain('edited after import')
     expect(instructions).toContain('Confirm the JSONL SHA-256 is unchanged')
     expect(instructions).toContain('never blindly retry after an ambiguous failure')
   })

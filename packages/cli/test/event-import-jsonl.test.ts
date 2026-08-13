@@ -214,6 +214,36 @@ test('event import-jsonl requires activity-session duration before writing', asy
     ['event', 'list', '--kind', 'activity_session', '--vault', vaultRoot],
   )
   assert.equal(requireData(listAfterRetry).count, 1)
+
+  const changedImport = await runCli<EventImportJsonlResult>(
+    [
+      'event',
+      'import-jsonl',
+      '--input',
+      '-',
+      '--conflict-policy',
+      'reject',
+      '--apply',
+      '--vault',
+      vaultRoot,
+    ],
+    {
+      stdin: toJsonl([{
+        ...buildActivitySessionPayload(),
+        durationMinutes: 60,
+      }]),
+    },
+  )
+  assert.equal(changedImport.ok, false)
+  if (changedImport.ok) {
+    throw new Error('expected changed externalRef content to be rejected')
+  }
+  assert.equal(changedImport.error.code, 'conflict')
+
+  const listAfterConflict = await runCli<{ count: number }>(
+    ['event', 'list', '--kind', 'activity_session', '--vault', vaultRoot],
+  )
+  assert.equal(requireData(listAfterConflict).count, 1)
 })
 
 // The CLI error envelope only carries code/message, so per-line failure

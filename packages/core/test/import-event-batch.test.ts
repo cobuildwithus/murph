@@ -472,6 +472,80 @@ test("importEventBatch supersedes changed content for an existing externalRef in
   );
 });
 
+test("importEventBatch reject policy preserves existing externalRef content atomically", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-reject-conflict");
+  const original = buildSleepSessionPayload(10);
+  await importEventBatch({
+    vaultRoot,
+    payloads: [original],
+    apply: true,
+  });
+
+  const replay = await importEventBatch({
+    vaultRoot,
+    payloads: [original],
+    conflictPolicy: "reject",
+    apply: true,
+  });
+  assert.equal(replay.applied, false);
+  assert.equal(replay.skippedExistingCount, 1);
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [
+        buildSleepSessionPayload(11),
+        buildSleepSessionPayload(10, { title: "Changed imported title" }),
+      ],
+      conflictPolicy: "reject",
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal(
+        (error as VaultError).code,
+        "EVENT_EXTERNAL_REF_CONTENT_CONFLICT",
+      );
+      return true;
+    },
+  );
+
+  const stored = await findEventByExternalRef({
+    vaultRoot,
+    system: original.externalRef.system,
+    resourceType: original.externalRef.resourceType,
+    resourceId: original.externalRef.resourceId,
+  });
+  assert.equal(stored?.title, original.title);
+  assert.equal(stored?.lifecycle?.revision, undefined);
+});
+
+test("importEventBatch rejects unsupported payload conflict policies", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-invalid-conflict-policy");
+
+  await assert.rejects(
+    importEventBatchFromRuntime({
+      vaultRoot,
+      payloads: [buildSleepSessionPayload(10)],
+      conflictPolicy: "overwrite",
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_INVALID");
+      return true;
+    },
+  );
+
+  const stored = await findEventByExternalRef({
+    vaultRoot,
+    system: "whoop",
+    resourceType: "sleep",
+    resourceId: "sleep-2026-03-10",
+  });
+  assert.equal(stored, null);
+});
+
 test("importEventBatch does not let an older source revision replace a newer event", async () => {
   const vaultRoot = await makeVault("murph-event-batch-source-revision-order");
   const newerBase = buildObservationPayload(10, "heart-rate", 72);

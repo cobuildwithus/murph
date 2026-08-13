@@ -9080,6 +9080,15 @@
                           "default": false,
                           "description": "Apply the import. Without this flag the command only reports what it would create, skip, or update.",
                           "type": "boolean"
+                        },
+                        "conflictPolicy": {
+                          "default": "supersede",
+                          "description": "How changed content for an existing externalRef is handled. `supersede` updates in place; `reject` fails the whole batch while identical replays still skip.",
+                          "type": "string",
+                          "enum": [
+                            "supersede",
+                            "reject"
+                          ]
                         }
                       }
                     }

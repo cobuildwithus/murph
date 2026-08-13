@@ -1392,6 +1392,7 @@ export const vaultCliCommandDescriptors = [
           {
             description: 'Dry-run a bulk import to see created/skipped/updated counts.',
             options: {
+              conflictPolicy: 'reject',
               input: '@events.jsonl',
               vault: './vault',
             },
@@ -1400,13 +1401,14 @@ export const vaultCliCommandDescriptors = [
             description: 'Apply the same bulk import after the dry-run counts look right.',
             options: {
               apply: true,
+              conflictPolicy: 'reject',
               input: '@events.jsonl',
               vault: './vault',
             },
           },
         ],
         hint:
-          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId. Include externalRef for retry-safe dedupe; rows without externalRef are append-only and create fresh events on each apply. Dry-run by default; --apply writes.',
+          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId. Include externalRef for retry-safe dedupe; use --conflict-policy reject when changed content must fail instead of updating an existing event. Rows without externalRef are append-only and create fresh events on each apply. Dry-run by default; --apply writes.',
       },
       {
         path: ['event', 'payload-schema'],

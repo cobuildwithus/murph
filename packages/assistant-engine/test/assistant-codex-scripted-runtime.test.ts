@@ -632,12 +632,12 @@ set -eu
 ./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --format json > document.json
 ./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > schema.json
 python3 workout-csv-helper.py transform workout-history.csv document.json events.jsonl events.sha256 stable
-./vault-cli event import-jsonl --input @events.jsonl --format json > dry-run.json
+./vault-cli event import-jsonl --input @events.jsonl --conflict-policy reject --format json > dry-run.json
 python3 workout-csv-helper.py verify events.jsonl events.sha256
-./vault-cli event import-jsonl --input @events.jsonl --apply --format json > apply.json
+./vault-cli event import-jsonl --input @events.jsonl --conflict-policy reject --apply --format json > apply.json
 python3 workout-csv-helper.py verify events.jsonl events.sha256
 ./vault-cli event list --kind activity_session --from 2026-03-13 --to 2026-03-14 --limit 10 --format json > readback.json
-./vault-cli event import-jsonl --input @events.jsonl --format json > replay.json
+./vault-cli event import-jsonl --input @events.jsonl --conflict-policy reject --format json > replay.json
 python3 workout-csv-helper.py summarize transform-summary.json dry-run.json apply.json readback.json replay.json
 `,
       { encoding: 'utf8', mode: 0o755 },
@@ -708,10 +708,10 @@ text(result.output);
       'workout import inspect workout-history.csv --format json',
       'document import workout-history.csv --source import --title Workout CSV source --format json',
       'event payload-schema --for import-jsonl --kind activity_session --format json',
-      'event import-jsonl --input @events.jsonl --format json',
-      'event import-jsonl --input @events.jsonl --apply --format json',
+      'event import-jsonl --input @events.jsonl --conflict-policy reject --format json',
+      'event import-jsonl --input @events.jsonl --conflict-policy reject --apply --format json',
       'event list --kind activity_session --from 2026-03-13 --to 2026-03-14 --limit 10 --format json',
-      'event import-jsonl --input @events.jsonl --format json',
+      'event import-jsonl --input @events.jsonl --conflict-policy reject --format json',
     ])
     const digests = (await readFile(path.join(workdir, 'import-digests.log'), 'utf8'))
       .trim()
@@ -814,10 +814,10 @@ set -eu
 ./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --format json > document.json
 ./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > schema.json
 python3 workout-csv-helper.py transform workout-history.csv document.json events.jsonl events.sha256 append-only
-./vault-cli event import-jsonl --input @events.jsonl --format json > dry-run.json
+./vault-cli event import-jsonl --input @events.jsonl --conflict-policy reject --format json > dry-run.json
 python3 workout-csv-helper.py verify events.jsonl events.sha256
 set +e
-./vault-cli event import-jsonl --input @events.jsonl --apply --format json > apply.json 2> apply-error.txt
+./vault-cli event import-jsonl --input @events.jsonl --conflict-policy reject --apply --format json > apply.json 2> apply-error.txt
 apply_status=$?
 set -e
 test "$apply_status" -ne 0

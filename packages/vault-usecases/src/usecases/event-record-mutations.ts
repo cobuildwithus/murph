@@ -61,6 +61,7 @@ interface EventMutationCoreRuntime {
   importEventBatch(input: {
     vaultRoot: string
     payloads: JsonObject[]
+    conflictPolicy?: 'supersede' | 'reject'
     apply?: boolean
   }): Promise<{
     applied: boolean
@@ -536,6 +537,7 @@ function toJsonlLineFailure(failure: unknown, lineNumbers: readonly number[]) {
 export async function importEventRecordsFromJsonl(input: {
   vault: string
   inputFile: string
+  conflictPolicy?: 'supersede' | 'reject'
   apply?: boolean
 }) {
   const raw = await loadTextInput(input.inputFile, 'events JSONL', {
@@ -601,6 +603,7 @@ export async function importEventRecordsFromJsonl(input: {
     const result = await core.importEventBatch({
       vaultRoot: input.vault,
       payloads,
+      conflictPolicy: input.conflictPolicy,
       apply: input.apply === true,
     })
 
@@ -618,6 +621,9 @@ export async function importEventRecordsFromJsonl(input: {
             ? details.failures.map((failure) => toJsonlLineFailure(failure, lineNumbers))
             : details.failures,
         }),
+      },
+      EVENT_EXTERNAL_REF_CONTENT_CONFLICT: {
+        code: 'conflict',
       },
     })
 

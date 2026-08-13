@@ -2952,6 +2952,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
 async function reconcileEventImportDecisionsByExternalRef(
   vaultRoot: string,
   decisions: readonly PreparedEventImportDecision[],
+  conflictPolicy: "supersede" | "reject",
   signal?: AbortSignal | null,
 ): Promise<EventImportReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
@@ -3139,6 +3140,15 @@ async function reconcileEventImportDecisionsByExternalRef(
         skippedExistingCount += 1;
         continue;
       }
+    }
+
+    if (conflictPolicy === "reject") {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_CONTENT_CONFLICT",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" already exists with different content; ` +
+          "the whole batch was rejected without writes.",
+      );
     }
 
     if (latest.kind !== entry.record.kind && !decision.allowsKindReplacement) {
@@ -5420,6 +5430,7 @@ export interface ImportEventPayloadBatchInput {
   vaultRoot: string;
   payloads: readonly LooseRecord[];
   decisions?: never;
+  conflictPolicy?: "supersede" | "reject";
   apply?: boolean;
   signal?: AbortSignal | null;
 }
@@ -5428,6 +5439,7 @@ export interface ImportEventDecisionBatchInput {
   vaultRoot: string;
   decisions: readonly LooseRecord[];
   payloads?: never;
+  conflictPolicy?: never;
   apply?: boolean;
   signal?: AbortSignal | null;
 }
@@ -5521,6 +5533,23 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
       "Event batch must define exactly one of payloads or decisions.",
     );
   }
+  if (
+    input.conflictPolicy !== undefined
+    && input.conflictPolicy !== "supersede"
+    && input.conflictPolicy !== "reject"
+  ) {
+    throw new VaultError(
+      "EVENT_BATCH_INVALID",
+      'Event batch conflictPolicy must be "supersede" or "reject".',
+    );
+  }
+  if (usesDecisions && input.conflictPolicy !== undefined) {
+    throw new VaultError(
+      "EVENT_BATCH_INVALID",
+      "Event import decisions do not accept a payload conflict policy.",
+    );
+  }
+  const conflictPolicy = input.conflictPolicy ?? "supersede";
   const normalizedRows = usesDecisions
     ? normalizeImportEventBatchDecisions(input.decisions, signal)
     : normalizeImportEventBatchPayloads(input.payloads, signal);
@@ -5609,6 +5638,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
   const reconciliation = await reconcileEventImportDecisionsByExternalRef(
     vaultRoot,
     decisions,
+    conflictPolicy,
     signal,
   );
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {
