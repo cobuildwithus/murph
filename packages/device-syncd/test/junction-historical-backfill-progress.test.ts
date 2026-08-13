@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
+  canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   mergeHostedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
+  resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey,
 } from "../src/junction-historical-backfill-progress.ts";
 
 const WINDOW_START = "2025-12-20T00:00:00.000Z";
@@ -51,6 +57,90 @@ describe("Junction historical backfill progress versions", () => {
       [JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|renpho,withings",
     });
     expect(result.preservedLocalProgress).toBe(true);
+  });
+
+  it("tracks contracts-owned summary-history resources by source and resource", () => {
+    expect(resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey("fat")).toBe(
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+    );
+    expect(resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey("body_fat")).toBe(
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+    );
+    expect(resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey("weight")).toBe(
+      JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+    );
+    expect(resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey("steps")).toBeNull();
+
+    const fatCoverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: null,
+      providerSlug: "garmin",
+      resource: "body_fat",
+      version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+    });
+    const completeCoverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: fatCoverage,
+      providerSlug: "garmin",
+      resource: "waist_circumference",
+      version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+    });
+
+    expect(fatCoverage).toBe("v1|garmin:4");
+    expect(completeCoverage).toBe("v1|garmin:1l0");
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      completeCoverage,
+      "garmin",
+      "fat",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      completeCoverage,
+      "garmin",
+      "lean_body_mass",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+    )).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      "v2|garmin:4",
+      "fat",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+    )).toBe(false);
+  });
+
+  it("merges independently advanced compact resource coverage", () => {
+    const result = mergeHostedJunctionHistoricalBackfillMetadata({
+      hostedMetadata: {
+        [JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]:
+          "v1|garmin:4",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        [JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]:
+          "v1|garmin:1kw,withings:4",
+      },
+    });
+
+    expect(result.metadata[
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY
+    ]).toBe("v1|garmin:1l0,withings:4");
+    expect(result.preservedLocalProgress).toBe(true);
+  });
+
+  it("leaves future compact resource coverage opaque and immutable", () => {
+    const result = mergeHostedJunctionHistoricalBackfillMetadata({
+      hostedMetadata: {
+        [JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]:
+          "v2|future-encoding",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        [JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]:
+          "v1|garmin:4",
+      },
+    });
+
+    expect(result.metadata[
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY
+    ]).toBe("v2|future-encoding");
+    expect(result.preservedLocalProgress).toBe(false);
   });
 
   it("leaves future coverage versions opaque and immutable", () => {

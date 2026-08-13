@@ -6,6 +6,7 @@ import {
 } from "./provider-job-definitions.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -1161,7 +1162,39 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
-      const failure = normalizeExecutionError(error);
+      const timeseriesProgress = error instanceof JunctionTimeseriesProgressError
+        ? error
+        : null;
+      const failure = normalizeExecutionError(timeseriesProgress?.failure ?? error);
+      const replacementPayload = timeseriesProgress
+        ? normalizeConfiguredDeviceSyncJobRecord(
+            provider.provider,
+            {
+              ...job,
+              payload: {
+                ...job.payload,
+                ...(job.kind === "backfill"
+                  ? {
+                      timeseriesCursor: timeseriesProgress.windowStart,
+                      timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                      timeseriesResourceCursor:
+                        timeseriesProgress.timeseriesResourceCursor ?? undefined,
+                    }
+                  : job.kind === "reconcile"
+                    ? {
+                        timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                        timeseriesResourceCursor:
+                          timeseriesProgress.timeseriesResourceCursor ?? undefined,
+                        windowStart: timeseriesProgress.windowStart,
+                      }
+                    : { windowStart: timeseriesProgress.windowStart }),
+                workoutStreamCursor:
+                  timeseriesProgress.workoutStreamCursor ?? undefined,
+              },
+            },
+            "retry progress",
+          ).payload
+        : undefined;
       const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
         && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
       const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
@@ -1192,6 +1225,7 @@ class DeviceSyncServiceController {
             retryAt,
             retainedFailureRetryable,
             retainsAcceptedCompanionHrvUntilSuccess,
+            activeJob.id === job.id ? replacementPayload : undefined,
           );
         })
         .some(Boolean);

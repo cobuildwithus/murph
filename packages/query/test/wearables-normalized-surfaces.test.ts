@@ -556,8 +556,8 @@ test("unadmitted Junction timeseries stay out of default query/search and wearab
         sourceProviderSlug: "garmin",
         sourceType: "watch",
         timestamp: "2026-05-20T08:00:00Z",
-        unit: "bpm",
-        value: 61,
+        unit: "sample",
+        value: 0.42,
       }],
     },
   };
@@ -583,8 +583,8 @@ test("unadmitted Junction timeseries stay out of default query/search and wearab
     const persistedRawVault = await readVault(vaultRoot);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["event"] }), []);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["sample"] }), []);
-    assert.equal(searchVault(persistedRawVault, "heart rate").total, 0);
-    assert.equal((await searchVaultRuntime(vaultRoot, "heart rate")).total, 0);
+    assert.equal(searchVault(persistedRawVault, "vendor waveform").total, 0);
+    assert.equal((await searchVaultRuntime(vaultRoot, "vendor waveform")).total, 0);
     assert.equal(summarizeWearableLatest(persistedRawVault, { providers: ["garmin"] }), null);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
