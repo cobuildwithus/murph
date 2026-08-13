@@ -177,34 +177,54 @@ export interface HostedVaultShareProjectionOfferResult {
     | "error"
     | "no-active-share"
     | "no-port"
-    | "no-projectable-records";
+    | "no-projectable-records"
+    | "preempted";
 }
 
-/**
- * Deterministic, best-effort projection offer: ask the web control plane for the active
- * projection kinds first, then read and offer only those projectable kinds from the
- * member's own vault. The web control plane is the sole authority on whether shares exist;
- * this step holds no share state.
- *
- * Never throws — a projection failure must never affect the runtime's primary work. For
- * a projectable scope, an empty read still replaces the Web-owned snapshot so records
- * that disappeared from the member vault cannot remain visible as current data.
- */
-export async function offerHostedVaultShareProjectionBestEffort(input: {
-  projectionMode?: HostedVaultShareProjectionMode;
-  vaultRoot: string;
-  vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
-}): Promise<HostedVaultShareProjectionOfferResult> {
-  const port = input.vaultSharePort ?? null;
-
-  if (!port) {
-    return { outcome: "no-port" };
+export type HostedVaultShareProjectionScopeResolution =
+  | {
+    generationTokensByProjectionScopeKey: Record<string, string>;
+    hasDeferredProjectionWork: boolean;
+    outcome: "active-scopes";
+    projectionMode?: HostedVaultShareProjectionMode;
+    projectionScopes: HostedVaultShareProjectionScope[];
   }
+  | { outcome: "deferred" }
+  | { outcome: "error" }
+  | { outcome: "no-active-share" };
 
-  let activeProjections: HostedVaultShareActiveProjectionKindsResponse;
+export interface HostedVaultShareProjectionCapture {
+  hasDeferredProjectionWork: boolean;
+  projectionMode?: HostedVaultShareProjectionMode;
+  sourceWorkspaceVersion: string;
+  snapshots: Array<{
+    generationToken: string;
+    projectionScope: HostedVaultShareProjectionScope;
+    records: HostedVaultShareDeliveryRecord[];
+  }>;
+}
+
+export type HostedVaultShareProjectionCaptureResult =
+  | {
+    capture: HostedVaultShareProjectionCapture;
+    outcome: "captured";
+  }
+  | { outcome: "error" }
+  | { outcome: "no-projectable-records" };
+
+/**
+ * Resolve Web-owned active share scopes without retaining access to the member vault.
+ * The caller may cancel this network-only phase when foreground work wakes.
+ */
+export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
+  projectionMode?: HostedVaultShareProjectionMode;
+  signal?: AbortSignal | null;
+  vaultSharePort: HostedRuntimeVaultSharePort;
+}): Promise<HostedVaultShareProjectionScopeResolution> {
   try {
-    activeProjections = await port.listActiveProjectionScopes({
-      projectionMode: input.projectionMode,
+    const activeProjections = await input.vaultSharePort.listActiveProjectionScopes({
+      ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
     });
     if (
       input.projectionMode
@@ -212,65 +232,107 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     ) {
       return { outcome: "error" };
     }
-    activeProjections = {
-      ...activeProjections,
-      projectionScopes: uniqueHostedVaultShareProjectionScopes(
-        activeProjections.projectionScopes,
-      ),
+    const projectionScopes = uniqueHostedVaultShareProjectionScopes(
+      activeProjections.projectionScopes,
+    );
+    if (projectionScopes.length === 0) {
+      return {
+        outcome: activeProjections.hasDeferredProjectionWork === true
+          ? "deferred"
+          : "no-active-share",
+      };
+    }
+    const generationTokensByProjectionScopeKey: Record<string, string> = {};
+    for (const projectionScope of projectionScopes) {
+      const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+        projectionScope,
+      );
+      const generationToken =
+        activeProjections.generationTokensByProjectionScopeKey?.[
+          projectionScopeKey
+        ];
+      if (!generationToken) {
+        return { outcome: "error" };
+      }
+      generationTokensByProjectionScopeKey[projectionScopeKey] = generationToken;
+    }
+    return {
+      generationTokensByProjectionScopeKey,
+      hasDeferredProjectionWork:
+        activeProjections.hasDeferredProjectionWork === true,
+      outcome: "active-scopes",
+      ...(activeProjections.projectionMode
+        ? { projectionMode: activeProjections.projectionMode }
+        : {}),
+      projectionScopes,
     };
   } catch {
     return { outcome: "error" };
   }
+}
 
-  const projectionScopes = activeProjections.projectionScopes;
-  if (projectionScopes.length === 0) {
-    return {
-      outcome: activeProjections.hasDeferredProjectionWork === true
-        ? "deferred"
-        : "no-active-share",
-    };
-  }
-
-  const outcomes: HostedVaultShareOfferOutcome[] = [];
+/**
+ * Materialize every active projectable scope while the invocation still owns the
+ * restored vault. The returned capture contains no vault path or lazy read, so later
+ * delivery cannot observe a successor invocation's mutable workspace generation.
+ *
+ * Never throws. If any read fails, no scope is delivered from this capture. For a
+ * projectable scope, an empty read remains an intentional replacement snapshot.
+ */
+export async function captureHostedVaultShareProjectionBestEffort(input: {
+  generationTokensByProjectionScopeKey: Readonly<Record<string, string>>;
+  hasDeferredProjectionWork: boolean;
+  projectionMode?: HostedVaultShareProjectionMode;
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
+  sourceWorkspaceVersion: string;
+  vaultRoot: string;
+}): Promise<HostedVaultShareProjectionCaptureResult> {
+  const snapshots: HostedVaultShareProjectionCapture["snapshots"] = [];
   const context: HostedVaultShareProjectionReadContext = {};
 
-  for (const projectionScope of projectionScopes) {
+  for (const projectionScope of input.projectionScopes) {
     const readRecords = resolveProjectableRecordReader(projectionScope);
     if (!readRecords) {
       continue;
     }
-    const generationToken = activeProjections.generationTokensByProjectionScopeKey?.[
-      buildHostedVaultShareProjectionScopeKey(projectionScope)
-    ];
-    if (!generationToken) {
-      outcomes.push("error");
-      continue;
+    try {
+      const generationToken = input.generationTokensByProjectionScopeKey[
+        buildHostedVaultShareProjectionScopeKey(projectionScope)
+      ];
+      if (!generationToken) {
+        return { outcome: "error" };
+      }
+      snapshots.push({
+        generationToken,
+        projectionScope,
+        records: await readRecords({
+          context,
+          vaultRoot: input.vaultRoot,
+        }),
+      });
+    } catch {
+      return { outcome: "error" };
     }
-    outcomes.push(await offerHostedVaultShareScopeBestEffort({
-      context,
-      port,
-      projectionScope,
-      generationToken,
-      readRecords,
-      projectionMode: input.projectionMode,
-      vaultRoot: input.vaultRoot,
-    }));
   }
 
-  const outcome = combineHostedVaultShareOfferOutcomes(outcomes);
-  return {
-    outcome: outcome !== "error" && activeProjections.hasDeferredProjectionWork === true
-      ? projectionScopes.length > 0 && input.projectionMode
-        ? "continued"
-        : "deferred"
-      : outcome,
-  };
+  return snapshots.length === 0
+    ? { outcome: "no-projectable-records" }
+    : {
+      capture: {
+        hasDeferredProjectionWork: input.hasDeferredProjectionWork,
+        ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
+        snapshots,
+        sourceWorkspaceVersion: input.sourceWorkspaceVersion,
+      },
+      outcome: "captured",
+    };
 }
 
-type HostedVaultShareOfferOutcome = Exclude<
-  HostedVaultShareProjectionOfferResult["outcome"],
-  "continued" | "deferred"
->;
+type HostedVaultShareOfferOutcome =
+  | "delivered"
+  | "error"
+  | "no-active-share"
+  | "no-projectable-records";
 
 export interface HostedVaultShareProjectionReadContext {
   activityRowsByVaultAndCutoff?: Map<
@@ -285,33 +347,54 @@ type ProjectableRecordReader = (input: {
   vaultRoot: string;
 }) => Promise<HostedVaultShareDeliveryRecord[]>;
 
-async function offerHostedVaultShareScopeBestEffort(input: {
-  context: HostedVaultShareProjectionReadContext;
-  generationToken: string;
-  port: HostedRuntimeVaultSharePort;
-  projectionMode?: HostedVaultShareProjectionMode;
-  projectionScope: HostedVaultShareProjectionScope;
-  readRecords: ProjectableRecordReader;
-  vaultRoot: string;
-}): Promise<HostedVaultShareOfferOutcome> {
-  try {
-    const records = await input.readRecords({
-      context: input.context,
-      vaultRoot: input.vaultRoot,
-    });
-
-    const response = await input.port.deliver({
-      expectedGenerationToken: input.generationToken,
-      ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
-      projectionKind: input.projectionScope.projectionKind,
-      projectionScope: input.projectionScope,
-      records,
-    });
-
-    return response.status === "delivered" ? "delivered" : "no-active-share";
-  } catch {
-    return "error";
+/**
+ * Deliver an immutable capture. This phase performs no vault reads and is safe to
+ * finish after its originating invocation releases the mutable workspace path; Web's
+ * committed-version fence remains the final stale-writer authority.
+ */
+export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
+  capture: HostedVaultShareProjectionCapture;
+  shouldStop?: () => boolean;
+  vaultSharePort: HostedRuntimeVaultSharePort;
+}): Promise<HostedVaultShareProjectionOfferResult> {
+  const outcomes: HostedVaultShareOfferOutcome[] = [];
+  for (const snapshot of input.capture.snapshots) {
+    if (input.shouldStop?.()) {
+      return { outcome: "preempted" };
+    }
+    try {
+      const request = {
+        expectedGenerationToken: snapshot.generationToken,
+        ...(input.capture.projectionMode
+          ? { projectionMode: input.capture.projectionMode }
+          : {}),
+        projectionKind: snapshot.projectionScope.projectionKind,
+        projectionScope: snapshot.projectionScope,
+        records: snapshot.records,
+        sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
+      };
+      const response = await input.vaultSharePort.deliver(request);
+      if (response.status === "scope-failed") {
+        outcomes.push("error");
+        continue;
+      }
+      outcomes.push(
+        response.status === "delivered" ? "delivered" : "no-active-share",
+      );
+    } catch {
+      return { outcome: "error" };
+    }
   }
+  const outcome = combineHostedVaultShareOfferOutcomes(outcomes);
+  if (outcome !== "error" && input.capture.hasDeferredProjectionWork) {
+    return {
+      outcome:
+        input.capture.projectionMode && input.capture.snapshots.length > 0
+          ? "continued"
+          : "deferred",
+    };
+  }
+  return { outcome };
 }
 
 function resolveProjectableRecordReader(

@@ -17,11 +17,25 @@ import {
 } from "./parsers/assertions.ts";
 import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  parseHostedVaultShareEffectDeadlineAtEpochMs,
 } from "./vault-share-limits.ts";
 
 export {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  parseHostedVaultShareEffectDeadlineAtEpochMs,
 };
+
+export const HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_DELIVERY_FAILED";
+
+export const HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_SCOPE_FAILED";
 
 /**
  * VaultShare v0: a member grants a standing share of a fixed vault projection to a
@@ -661,6 +675,7 @@ export interface HostedVaultShareDeliverRequest {
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   records: HostedVaultShareDeliveryRecord[];
+  sourceWorkspaceVersion: string;
 }
 
 /**
@@ -2102,6 +2117,9 @@ export function parseHostedVaultShareDeliverRequest(
   value: unknown,
 ): HostedVaultShareDeliverRequest {
   const request = requireObject(value, "Vault share deliver request");
+  const sourceWorkspaceVersion = requireHostedVaultShareSourceWorkspaceVersion(
+    request.sourceWorkspaceVersion,
+  );
   const projectionScope = parseHostedVaultShareRequestProjectionScope(
     request,
     "Vault share deliver request",
@@ -2160,7 +2178,24 @@ export function parseHostedVaultShareDeliverRequest(
     projectionKind,
     projectionScope,
     records: parsedRecords,
+    sourceWorkspaceVersion,
   };
+}
+
+function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
+  const sourceWorkspaceVersion = requireString(
+    value,
+    "Vault share deliver request sourceWorkspaceVersion",
+  );
+  if (
+    !/^(?:0|[1-9]\d{0,18})$/u.test(sourceWorkspaceVersion)
+    || BigInt(sourceWorkspaceVersion) > 9_223_372_036_854_775_807n
+  ) {
+    throw new TypeError(
+      "Vault share deliver request sourceWorkspaceVersion must be a canonical PostgreSQL bigint version.",
+    );
+  }
+  return sourceWorkspaceVersion;
 }
 
 export function parseHostedVaultShareDeliverResponse(

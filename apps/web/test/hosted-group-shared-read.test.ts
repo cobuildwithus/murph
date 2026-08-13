@@ -12,10 +12,15 @@ import {
 
 const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
+  isHostedRuntimeInactiveAccessError: vi.fn(),
+  requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
+  isHostedRuntimeInactiveAccessError: mocks.isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeActiveAccessForUpdateTx:
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx,
 }));
 
 import {
@@ -31,6 +36,9 @@ import {
   parseHostedVaultShareProjectionSnapshot,
   serializeHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-snapshot";
+import {
+  replaceHostedVaultShareProjectionSnapshot,
+} from "@/src/lib/hosted-vault-share/projection-store";
 
 const RUNTIME_MEMBER_ID = "member_group_runtime";
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
@@ -71,6 +79,8 @@ type TestProjectionScope =
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+  mocks.isHostedRuntimeInactiveAccessError.mockReturnValue(false);
+  mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -512,6 +522,103 @@ describe("workouts.v0 snapshot bounds", () => {
 });
 
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
+  it("reads the replacement snapshot written from the current personal workspace", async () => {
+    const memberId = "member_projected_steps";
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1_000)
+      .toISOString()
+      .slice(0, 10);
+    const record: HostedVaultShareDeliveryRecord = {
+      data: {
+        date,
+        metricKey: "steps",
+        unit: "count",
+        value: 9_123,
+      },
+      occurredAt: `${date}T00:00:00.000Z`,
+      recordKey: date,
+    };
+    const row = shareRow({
+      id: "share_projected_steps",
+      memberId,
+      projectionScope: STEPS_SCOPE,
+    });
+    let projectionSnapshotCiphertext: string | null = null;
+    const plaintextByCiphertext = new Map<string, string>();
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt(input) {
+        const plaintext = plaintextByCiphertext.get(input.value);
+        if (plaintext === undefined) {
+          throw new Error("Synthetic projection ciphertext was not stored.");
+        }
+        return plaintext;
+      },
+      encrypt(input) {
+        const ciphertext = "ciphertext_projected_steps";
+        plaintextByCiphertext.set(ciphertext, input.value);
+        return ciphertext;
+      },
+    });
+
+    const hostedVaultShareFindMany = vi.fn().mockImplementation(
+      (args: { where?: { id?: unknown } }) => Promise.resolve(
+        args.where?.id
+          ? [{
+              id: row.id,
+              projectionSnapshotCiphertext,
+            }]
+          : [row],
+      ),
+    );
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ version: 7n }]),
+      deviceConnection: { findMany: vi.fn().mockResolvedValue([]) },
+      hostedGroup: {
+        findUnique: vi.fn().mockResolvedValue({
+          members: [{ id: "participant_projected_steps", memberId }],
+        }),
+      },
+      hostedVaultShare: {
+        findMany: hostedVaultShareFindMany,
+        updateMany: vi.fn().mockImplementation((input: {
+          data: { projectionSnapshotCiphertext: string };
+        }) => {
+          projectionSnapshotCiphertext = input.data.projectionSnapshotCiphertext;
+          return Promise.resolve({ count: 1 });
+        }),
+      },
+    };
+    const prisma = createPrismaClientTestDouble({
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        await callback(tx)
+      ),
+    });
+
+    await expect(replaceHostedVaultShareProjectionSnapshot({
+      prisma,
+      records: [record],
+      share: {
+        destinationMemberId: row.destinationMemberId,
+        grantorMemberId: row.grantorMemberId,
+        id: row.id,
+        projectionKind: STEPS_SCOPE.projectionKind,
+        projectionScope: STEPS_SCOPE,
+        projectionScopeKey: row.projectionScopeKey,
+      },
+      sourceWorkspaceVersion: "7",
+    })).resolves.toBe("replaced");
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [STEPS_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") {
+      throw new Error("Expected the projected group snapshot to be readable.");
+    }
+    expect(result.members[0]?.projections[0]?.records).toEqual([record]);
+  });
+
   it("reports an active readable grant as pending until its first snapshot materializes", async () => {
     const pendingShare = shareRow({
       id: "share_steps_pending",

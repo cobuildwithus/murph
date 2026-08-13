@@ -94,6 +94,10 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+} from "@murphai/hosted-execution/vault-share";
+import {
   encryptHostedStorageEnvelope,
   type R2PutValueLike,
 } from "../src/crypto.ts";
@@ -117,6 +121,7 @@ import {
 import {
   HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
@@ -1462,7 +1467,7 @@ describe("handleRunnerOutboundRequest", () => {
             },
           ],
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createVaultShareRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -1517,7 +1522,7 @@ describe("handleRunnerOutboundRequest", () => {
             },
           ],
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createVaultShareRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
           "x-hosted-runtime-attempt-id": "attempt_1",
           "x-hosted-runtime-lease-generation": "9",
@@ -1538,6 +1543,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get(HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER)).toBe("1");
     expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",
@@ -1548,6 +1554,7 @@ describe("handleRunnerOutboundRequest", () => {
     const headers = new Headers(requestInit?.headers);
     expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER)).toMatch(/^\d{13}$/u);
     expect(headers.get("authorization")).toBeNull();
     expect(headers.get("x-api-key")).toBeNull();
   });
@@ -1573,7 +1580,7 @@ describe("handleRunnerOutboundRequest", () => {
             },
           ],
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createVaultShareRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
           "x-hosted-runtime-attempt-id": "attempt_1",
           "x-hosted-runtime-lease-generation": "9",
@@ -9972,6 +9979,17 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
     [RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
     ...headers,
   };
+}
+
+function createVaultShareRunnerProxyHeaders(
+  headers: Record<string, string> = {},
+) {
+  return createRunnerProxyHeaders({
+    [HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER]: String(
+      Date.now() + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+    ),
+    ...headers,
+  });
 }
 
 function createAssistantPersonalizationRunnerRequest(
