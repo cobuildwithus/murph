@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
     telegramBotUsername: null as string | null,
     telegramWebhookSecret: null as string | null,
   },
+  signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
   verifyIdentityToken: vi.fn(),
 }));
 
@@ -60,6 +61,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   lookupHostedMemberForPrivyPrincipal: mocks.lookupHostedMemberForPrivyPrincipal,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
+  signalHostedMemberActivationRuntimeWakeBestEffortResult:
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -240,6 +246,14 @@ describe("device sync companion routes", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue(null);
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
+      accepted: true,
+      configured: true,
+      errorCode: null,
+      mailboxItemIdPresent: true,
+      signalAccepted: true,
+      workflowIdPresent: true,
+    });
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.createSdkSignInSession.mockResolvedValue({
       account: {
@@ -763,6 +777,69 @@ describe("device sync companion routes", () => {
         memberId: "member_1",
         prisma: mocks.prismaClient,
       });
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns a retryable error before Junction when a pending activation wake is rejected", async () => {
+      mockVerifiedPrivyUser();
+      mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue({
+        consumedAt: null,
+        id: "mailbox_activation_1",
+      });
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
+        accepted: false,
+        configured: true,
+        errorCode: "runtime_signal_rejected",
+        mailboxItemIdPresent: true,
+        signalAccepted: false,
+        workflowIdPresent: true,
+      });
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({}));
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "HOSTED_STARTER_USAGE_RUNTIME_WAKE_REQUIRED",
+          retryable: true,
+        },
+      });
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          mailboxItemId: "mailbox_activation_1",
+          memberId: "member_1",
+          source: "starter-usage.activation.retry",
+        }));
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    });
+
+    it("issues a device sign-in token after a pending activation wake is accepted", async () => {
+      mockVerifiedPrivyUser();
+      mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue({
+        consumedAt: null,
+        id: "mailbox_activation_1",
+      });
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({}));
+
+      expect(response.status).toBe(200);
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .toHaveBeenCalledTimes(1);
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not re-signal a consumed activation before issuing a device sign-in token", async () => {
+      mockVerifiedPrivyUser();
+      mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue({
+        consumedAt: new Date("2026-07-09T11:59:00.000Z"),
+        id: "mailbox_activation_1",
+      });
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({}));
+
+      expect(response.status).toBe(200);
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .not.toHaveBeenCalled();
       expect(mocks.createSdkSignInSession).toHaveBeenCalledTimes(1);
     });
 
