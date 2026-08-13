@@ -299,7 +299,7 @@ Last verified: 2026-08-11
   generated output, fixtures, and tests. For the explicit provider registry it
   preserves the SDK request-object checks, reports the global fetch primitive,
   imported Node HTTP/HTTPS and Undici transports, explicit aliases, injected
-  fetch-call signatures, CommonJS `require` and destructured transport forms,
+  fetch-call signatures, CommonJS `require`, direct invocation, and destructured transport forms,
   and strict fetch-shaped wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data, and reports only concrete low-level
   handwritten wire contracts that
@@ -315,13 +315,18 @@ Last verified: 2026-08-11
   the auditable provider/exception registry: opaque presigned GET/HEAD transfer
   or PUT of a provable byte/stream body with no credentials or only static
   `credentials: "omit"` and either an allowlisted literal header set or a
-  path-scoped audited transfer-header factory; statically known internal or
-  unambiguous single-slash same-origin application traffic; incoming
+  path-scoped audited transfer-header factory resolved to its unique top-level
+  declaration; statically known internal or
+  unambiguous single-slash application traffic, plus `new URL` composition only
+  against the exact static `location.origin` owner; incoming
   `Request` pass-through in hosted runner proxies; dynamic SMART/FHIR endpoints
   with no explicit registered-provider identifier or host;
   registered providers without a verified provider-owned TypeScript SDK, and
   the exact xAI Responses request carrying one `x_search` extension with storage
-  disabled. These are structural, purpose-specific exceptions, not line- or
+  disabled and closed request, payload, and tool object shapes whose effective
+  values cannot be replaced by spreads, computed or duplicate properties,
+  custom serialization, or prototype hooks. These are structural,
+  purpose-specific exceptions, not line- or
   provider-wide suppression; the xAI and transfer-header exceptions are also
   restricted to their audited owner paths.
   Register each newly verified provider SDK and host explicitly; the guard does

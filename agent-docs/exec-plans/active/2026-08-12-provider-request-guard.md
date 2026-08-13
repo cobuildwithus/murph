@@ -142,6 +142,16 @@ Updated: 2026-08-12
   and composed-fixture redesign; the parallel provider walker, dynamic-header
   name heuristic, and source-text stream proof were deleted rather than
   extended.
+- ReviewGPT round 3 accepted three bounded bypasses inside that same design:
+  effective-value overrides in the xAI object literals, direct CommonJS
+  transport invocations that skipped binding discovery, and text-only trust in
+  `request.url`/`input.request.url` as same-origin bases. The correction rejects
+  open or custom-serialized xAI objects, reuses the existing transport module
+  and method classifiers for direct `require(...)` calls, and deletes the two
+  unproven origin spellings. Parent review also bound each registered transfer
+  header factory call to its unique audited top-level declaration instead of
+  trusting a same-named local function. No new policy owner or compatibility
+  path was introduced.
 
 ## Verification
 
@@ -154,9 +164,9 @@ Updated: 2026-08-12
 
 Current evidence:
 
-- Focused guard suite: 59 tests passed.
-- Repository-tool suite: 34 files and 565 tests passed after the round-2
-  redesign.
+- Focused guard suite: 62 tests passed after the round-3 correction.
+- Repository-tool suite: 34 files and 568 tests passed after the round-3
+  correction.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
 - `pnpm provider-requests:guard`: intentionally exits 1 with 44 current
   low-level provider transports/contracts; sibling migrations own those call

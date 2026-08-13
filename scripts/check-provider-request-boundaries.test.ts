@@ -626,6 +626,44 @@ describe("check-provider-request-boundaries", () => {
     expect(namespaceMatches.map((match) => match.line)).toEqual([3]);
   });
 
+  it("reports direct CommonJS transports without treating unrelated require calls as HTTP", () => {
+    const commonJsMatches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "require('node:https').request('https://api.openai.com/v1/responses');",
+        "require('node:http').get('https://api.openai.com/v1/responses');",
+        "require('undici').fetch('https://api.openai.com/v1/responses');",
+        "require('undici').request('https://api.openai.com/v1/responses');",
+        "require('node-fetch')('https://api.openai.com/v1/responses');",
+        "require('cross-fetch')('https://api.openai.com/v1/responses');",
+        "require('unrelated').fetch('https://api.openai.com/v1/responses');",
+        "require('unrelated')('https://api.openai.com/v1/responses');",
+      ].join("\n"),
+      "scripts/direct-provider-transports.cjs",
+    );
+    const typedCommonJsMatches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "require('node:https').request('https://api.openai.com/v1/responses');",
+        "require('node-fetch')('https://api.openai.com/v1/responses');",
+        "function shadow(require: (name: string) => { request: (url: string) => void }) {",
+        "  require('node:https').request('https://api.openai.com/v1/responses');",
+        "}",
+        "function localLoader() {",
+        "  const require = (name: string) => ({ request: (_url: string) => name });",
+        "  require('node:https').request('https://api.openai.com/v1/responses');",
+        "}",
+        "try {} catch (require) {",
+        "  require('node:https').request('https://api.openai.com/v1/responses');",
+        "}",
+      ].join("\n"),
+      "scripts/direct-provider-transports.cts",
+    );
+
+    expect(commonJsMatches.map((match) => match.line)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(typedCommonJsMatches.map((match) => match.line)).toEqual([1, 2]);
+  });
+
   it("allows a Node HTTP presigned PUT with a proven piped stream", () => {
     expect(
       violationsOfKind(
@@ -792,6 +830,7 @@ describe("check-provider-request-boundaries", () => {
       violationsOfKind(
         "raw-provider-http",
         [
+          "function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return headers; }",
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
           "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
           "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
@@ -804,6 +843,7 @@ describe("check-provider-request-boundaries", () => {
       violationsOfKind(
         "raw-provider-http",
         [
+          "function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return headers; }",
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
           "  const headers = normalizeOtherRequiredHeaders(input.requiredHeaders);",
           "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
@@ -811,7 +851,22 @@ describe("check-provider-request-boundaries", () => {
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
       ).map((match) => match.line),
-    ).toEqual([3]);
+    ).toEqual([4]);
+
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        [
+          "function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return headers; }",
+          "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
+          "  function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return { authorization: headers.authorization }; }",
+          "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
+          "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "}",
+        ].join("\n"),
+        "packages/operator-config/src/linq-runtime.ts",
+      ).map((match) => match.line),
+    ).toEqual([5]);
   });
 
   it("allows incoming Request pass-through but reports a direct provider call in the same proxy", () => {
@@ -920,6 +975,59 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([7]);
   });
 
+  it("rejects effective-value overrides in the path-scoped xAI exception", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses';",
+        "const initOverrides = {};",
+        "const payloadOverrides = {};",
+        "const toolOverrides = {};",
+        "const computedMethod = 'method';",
+        "const computedStore = 'store';",
+        "const computedType = 'type';",
+        "async function search(fetchImpl: typeof fetch) {",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', ...initOverrides });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], ...payloadOverrides }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', ...toolOverrides }] }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', [computedMethod]: 'GET' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], [computedStore]: true }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', [computedType]: 'web_search' }] }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', method: 'GET' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST', body: JSON.stringify({ store: true, tools: [] }) });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, store: true, tools: [{ type: 'x_search' }] }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], tools: [{ type: 'web_search' }] }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search', type: 'web_search' }] }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }, null), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], toJSON() { return { store: true, tools: [] }; } }), method: 'POST' });",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }], __proto__: { toJSON() { return { store: true, tools: [] }; } } }), method: 'POST' });",
+        "}",
+      ].join("\n"),
+      "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([
+      10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+    ]);
+  });
+
+  it("rejects a shadowed JSON serializer in the path-scoped xAI exception", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses';",
+        "async function search(fetchImpl: typeof fetch) {",
+        "  const JSON = { stringify: (_payload: unknown) => '{\"store\":true}' };",
+        "  await fetchImpl(XAI_RESPONSES_URL, { body: JSON.stringify({ store: false, tools: [{ type: 'x_search' }] }), method: 'POST' });",
+        "}",
+      ].join("\n"),
+      "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4]);
+  });
+
   it("registers the known verified-SDK bypass inventory explicitly", () => {
     const registeredIds = new Set(providerBoundaryRegistry.map((provider) => provider.id));
     expect([
@@ -967,6 +1075,13 @@ describe("check-provider-request-boundaries", () => {
       "fetch('http://localhost:3000/api/junction/status');",
       "async function replay(input: { request: Request }) {",
       "  await fetch(input.request.url);",
+      "  await fetch(new URL('/api/openai/status', input.request.url));",
+      "  const request = { url: 'https://api.openai.com' };",
+      "  await fetch(new URL('/v1/responses', request.url));",
+      "  const location = { origin: 'https://api.openai.com' };",
+      "  await fetch(new URL('/v1/responses', location.origin));",
+      "  const URL = class { constructor(_path: string, _base: string) { return 'https://api.openai.com/v1/responses'; } };",
+      "  await fetch(new URL('/v1/responses', globalThis.location.origin));",
       "}",
     ].join("\n");
 
@@ -976,7 +1091,7 @@ describe("check-provider-request-boundaries", () => {
         source,
         "apps/web/src/lib/openai/internal-status.ts",
       ).map((match) => match.line),
-    ).toEqual([6]);
+    ).toEqual([6, 7, 9, 11, 13]);
   });
 
   it("accumulates provider evidence and rejects network-path URLs", () => {
@@ -996,7 +1111,7 @@ describe("check-provider-request-boundaries", () => {
       "apps/cloudflare/src/provider-url-resolution.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([2, 4, 6]);
+    expect(matches.map((match) => match.line)).toEqual([2, 4, 6, 8]);
   });
 
   it("rejects network paths composed through template interpolation", () => {
