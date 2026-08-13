@@ -33,6 +33,12 @@ describe('hosted domain dynamic tools', () => {
       'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'immediately call inspect once with its returned lookupId',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Do not ask the member to authorize another inspection',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
@@ -1202,6 +1208,7 @@ describe('hosted domain dynamic tools', () => {
       },
       status: 'paused',
       timingVerified: true,
+      timingVerificationIssues: [],
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
     const mismatchedTool = {
@@ -1298,6 +1305,7 @@ describe('hosted domain dynamic tools', () => {
       },
       status: 'active',
       timingVerified: true,
+      timingVerificationIssues: [],
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
   })

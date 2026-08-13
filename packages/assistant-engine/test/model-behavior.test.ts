@@ -3213,7 +3213,7 @@ describe('assistant conversation scope', () => {
       'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
     )
     expect(prompt).toContain(
-      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
+      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `timingVerificationIssues`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
     )
     for (const scheduleExample of [
       '`{"kind":"every","everyMs":3600000}`',
@@ -3262,8 +3262,19 @@ describe('assistant conversation scope', () => {
       'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'When a time-based result has `timingVerified: false`, say that the save or patch succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-patch recovery action; do not retry the write.',
+      'When a save or patch returns `timingVerified: false`, immediately call `action: inspect` once with its returned `lookupId`',
     )
+    expect(prompt).toContain(
+      'If that inspection verifies timing, confirm from the inspection normally.',
+    )
+    expect(prompt).toContain(
+      'Do not ask the member to authorize another inspection or offer an inspection you already performed.',
+    )
+    expect(prompt).toContain('do not retry the write or create a fallback automation')
+    expect(prompt).toContain(
+      'Interpret `runtime_state_pending` as the scheduler finishing existing work',
+    )
+    expect(prompt).toContain('Do not expose these internal code names.')
     expect(prompt).not.toContain('save or update succeeded')
     expect(prompt).not.toContain('inspect-or-update recovery action')
     expect(prompt).toContain(

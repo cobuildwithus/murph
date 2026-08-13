@@ -46,6 +46,7 @@ import {
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
+  type AssistantAutomationTimingVerificationIssue,
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
@@ -937,6 +938,7 @@ function readHostedInitialAssistantInputIds(
 
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  redactedLogEntries: HostedExecutionRedactedLogEntry[],
 ): AssistantAutomationOperationScope {
   return {
     async runAutoReplyGroup<T>(scopeInput: {
@@ -974,6 +976,7 @@ function createHostedAssistantAutomationOperationScope(
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
+        redactedLogEntries,
         route,
         vaultRoot: input.restored.vaultRoot,
       });
@@ -1385,6 +1388,7 @@ type HostedAssistantAutomationTool = NonNullable<
 
 function scopeHostedAutomationToolToAssistantOperation(input: {
   executionContext: AssistantExecutionContext;
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute | null;
   vaultRoot: string;
 }): AssistantExecutionContext {
@@ -1402,6 +1406,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
       && input.route.threadIsDirect === false
     )
     ? createHostedAssistantAutomationTool({
+        redactedLogEntries: input.redactedLogEntries,
         route: input.route,
         vaultRoot: input.vaultRoot,
       })
@@ -1416,6 +1421,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
 }
 
 function createHostedAssistantAutomationTool(input: {
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute;
   vaultRoot: string;
 }): HostedAssistantAutomationTool {
@@ -1423,6 +1429,37 @@ function createHostedAssistantAutomationTool(input: {
     resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
   );
   let onboardingFirstReadCompletionTransitionConsumed = false;
+  const pendingTimingVerificationLookupIds = new Set<string>();
+  const observeTimingVerification = <T extends Awaited<
+    ReturnType<HostedAssistantAutomationTool["request"]>
+  >>(response: T): T => {
+    if (response.action === "reconcile") {
+      return response;
+    }
+    const issues = response.timingVerificationIssues ?? [];
+    if (!response.timingVerified) {
+      pendingTimingVerificationLookupIds.add(response.lookupId);
+      input.redactedLogEntries.push(
+        buildHostedAutomationTimingVerificationLogEntry({
+          action: response.action,
+          issues,
+          recovered: false,
+        }),
+      );
+    } else if (
+      response.action === "inspect"
+      && pendingTimingVerificationLookupIds.delete(response.lookupId)
+    ) {
+      input.redactedLogEntries.push(
+        buildHostedAutomationTimingVerificationLogEntry({
+          action: response.action,
+          issues: [],
+          recovered: true,
+        }),
+      );
+    }
+    return response;
+  };
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -1535,12 +1572,12 @@ function createHostedAssistantAutomationTool(input: {
           title: request.title,
           vaultRoot: input.vaultRoot,
         });
-        return await buildHostedAutomationToolResponse({
+        return observeTimingVerification(await buildHostedAutomationToolResponse({
           action: "save",
           result,
           routeBinding: "current_conversation",
           vaultRoot: input.vaultRoot,
-        });
+        }));
       }
 
       const existing = await showAutomation({
@@ -1556,12 +1593,12 @@ function createHostedAssistantAutomationTool(input: {
       }
       context?.signal?.throwIfAborted();
       if (request.action === "inspect") {
-        return await buildHostedAutomationToolResponse({
+        return observeTimingVerification(await buildHostedAutomationToolResponse({
           action: "inspect",
           record: existing,
           routeBinding: "preserved",
           vaultRoot: input.vaultRoot,
-        });
+        }));
       }
       const route = request.retargetToCurrentConversation === true
         ? currentRoute
@@ -1613,14 +1650,14 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.title === undefined ? {} : { title: request.title }),
         vaultRoot: input.vaultRoot,
       });
-      return await buildHostedAutomationToolResponse({
+      return observeTimingVerification(await buildHostedAutomationToolResponse({
         action: "patch",
         result,
         routeBinding: request.retargetToCurrentConversation === true
           ? "current_conversation"
           : "preserved",
         vaultRoot: input.vaultRoot,
-      });
+      }));
     },
   };
 }
@@ -1636,6 +1673,31 @@ function stripHostedAssistantAvailabilityConflictBlock(
     }
     throw error;
   }
+}
+
+function buildHostedAutomationTimingVerificationLogEntry(input: {
+  action: "inspect" | "patch" | "save";
+  issues: readonly AssistantAutomationTimingVerificationIssue[];
+  recovered: boolean;
+}): HostedExecutionRedactedLogEntry {
+  return {
+    component: "automation.tool",
+    level: input.recovered ? "info" : "warn",
+    message: input.recovered
+      ? "Hosted automation timing verification recovered after read-only inspection."
+      : "Hosted automation timing verification was incomplete.",
+    phase: "timing-verification",
+    redacted: {
+      ...(input.recovered
+        ? {}
+        : { errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED" }),
+      automationTimingVerificationAction: input.action,
+      automationTimingVerificationIssues: [...input.issues],
+      automationTimingVerificationRecovered: input.recovered,
+      schema: "murph.hosted-automation-timing-verification.v1",
+      type: "automation.timing-verification",
+    },
+  };
 }
 
 function normalizeHostedAutomationSupportTags(input: {
@@ -1703,7 +1765,9 @@ async function buildHostedAutomationToolResponse(input:
       ? schedule.timeZone ?? null
       : null;
   let nextOccurrenceAt: string | null = null;
-  let timingVerified = true;
+  const timingVerificationIssues = new Set<
+    AssistantAutomationTimingVerificationIssue
+  >();
   let defaultTimeZone: string | undefined;
   if (schedule.kind !== "deviceActivity") {
     const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
@@ -1716,7 +1780,7 @@ async function buildHostedAutomationToolResponse(input:
     ) {
       effectiveTimeZone = timeZoneProjection.timeZone;
       if (!timeZoneProjection.vaultTimeZoneVerified) {
-        timingVerified = false;
+        timingVerificationIssues.add("default_timezone_unverified");
       }
     }
   }
@@ -1736,18 +1800,21 @@ async function buildHostedAutomationToolResponse(input:
       const { job } = projection;
       nextOccurrenceAt = projection.nextOccurrenceAt;
       if (!projection.occurrenceVerified) {
-        timingVerified = false;
+        timingVerificationIssues.add(
+          projection.occurrenceUnverifiedReason ?? "projection_unavailable",
+        );
       }
       if (
         job.updatedAt !== record.updatedAt
         || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
       ) {
-        timingVerified = false;
+        timingVerificationIssues.add("record_readback_mismatch");
       }
     } catch {
-      timingVerified = false;
+      timingVerificationIssues.add("projection_unavailable");
     }
   }
+  const timingVerificationIssueList = [...timingVerificationIssues];
   const responseFields = {
     automationId: record.automationId,
     effectiveTimeZone,
@@ -1755,7 +1822,8 @@ async function buildHostedAutomationToolResponse(input:
     nextOccurrenceAt,
     schedule,
     status: record.status,
-    timingVerified,
+    timingVerified: timingVerificationIssueList.length === 0,
+    timingVerificationIssues: timingVerificationIssueList,
     updatedAt: record.updatedAt,
   };
   return input.action === "inspect"
@@ -2068,7 +2136,11 @@ export async function runHostedWorkspaceAssistantPhase(
     },
   );
   const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
-  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
+  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(
+    input,
+    assistantAutomationRedactedLogEntries,
+  );
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const systemMailboxMaintenanceStartedAt = Date.now();
@@ -2194,7 +2266,6 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
-    const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;

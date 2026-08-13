@@ -841,7 +841,6 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
       env: {
         ...scenario.turnInput.env,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -1984,6 +1983,7 @@ if (!tool) {
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
       dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
       env: {
         ...scenario.turnInput.env,
@@ -2273,7 +2273,6 @@ text(JSON.stringify(result));
         earliestAt: '2031-02-15T09:59:59.900Z',
         latestAt: '2031-02-15T09:59:59.900Z',
       },
-      baseInstructions: buildScriptedHostedSystemPrompt('group', true),
       dynamicTools: [MURPH_AUTOMATION_TOOL],
       hostedToolContext: {
         automationTool: {
@@ -4365,6 +4364,7 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
         customToolCall: {
@@ -4698,10 +4698,11 @@ text(JSON.stringify(result));
     expect(result.finalMessage).toMatch(/new time|reschedule/iu)
   })
 
-  it('does not describe an unverified stale recurrence as exhausted', {
+  it('inspects once after an unverified write and confirms recovered timing', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
         customToolCall: {
@@ -4718,7 +4719,19 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording was updated, but I could not verify its next occurrence. I can inspect or update the schedule if you want.',
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The reminder wording was updated. I checked the scheduler and confirmed the daily schedule is active.',
       },
     )
 
@@ -4729,8 +4742,24 @@ text(JSON.stringify(result));
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            automationRequests.push(request)
+            if (request.action === 'inspect') {
+              return {
+                action: 'inspect',
+                automationId: 'automation-daily-interval',
+                effectiveTimeZone: null,
+                lookupId: 'daily-interval-reminder',
+                nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
+                routeBinding: 'preserved',
+                schedule: { everyMs: 86_400_000, kind: 'every' },
+                status: 'active',
+                timingVerified: true,
+                timingVerificationIssues: [],
+                updatedAt: '2026-08-10T00:01:00.000Z',
+              }
+            }
             if (request.action !== 'patch') {
-              throw new Error('Expected an automation patch request.')
+              throw new Error('Expected an automation patch or inspect request.')
             }
             return {
               action: 'patch',
@@ -4743,6 +4772,7 @@ text(JSON.stringify(result));
               schedule: { everyMs: 86_400_000, kind: 'every' },
               status: 'active',
               timingVerified: false,
+              timingVerificationIssues: ['stale_recurring_occurrence'],
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -4765,11 +4795,121 @@ text(JSON.stringify(result));
     expect(toolOutputs).toContain('"kind":"every"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":null')
     expect(toolOutputs).toContain('"timingVerified":false')
-    expect(result.finalMessage).toMatch(/could not verify/iu)
-    expect(result.finalMessage).toMatch(/inspect|update/iu)
-    expect(result.finalMessage).not.toMatch(
-      /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+    expect(toolOutputs).toContain('"timingVerificationIssues":["stale_recurring_occurrence"]')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":"2026-08-11T00:01:00.000Z"')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+      {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+    ])
+    expect(result.finalMessage).toMatch(/checked|confirmed/iu)
+    expect(result.finalMessage).not.toMatch(/could not verify|if you want/iu)
+  })
+
+  it('reports persistent timing uncertainty without offering more inspection', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is still finishing existing work, so the next run is not confirmed yet.',
+      },
     )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            const response = {
+              automationId: 'automation-daily-interval',
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved' as const,
+              schedule: { everyMs: 86_400_000, kind: 'every' as const },
+              status: 'active' as const,
+              timingVerified: false,
+              timingVerificationIssues: ['runtime_state_pending'] as const,
+              updatedAt: '2026-08-10T00:01:00.000Z',
+            }
+            if (request.action === 'inspect') {
+              return { action: 'inspect' as const, ...response }
+            }
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch or inspect request.')
+            }
+            return {
+              action: 'patch' as const,
+              ...response,
+              created: false,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my daily interval reminder now.',
+    })
+
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+      {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+    ])
+    expect(result.finalMessage).toMatch(/updated|active/iu)
+    expect(result.finalMessage).toMatch(/next run is not confirmed yet/iu)
+    expect(result.finalMessage).not.toMatch(/if you want|inspect|10:30|tomorrow/iu)
   })
 
   it('keeps active device-triggered saves distinct from exhausted clock schedules', {
@@ -7612,6 +7752,7 @@ text(JSON.stringify(result));
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('group', true),
       dynamicTools: [
         MURPH_AUTOMATION_TOOL,
         MURPH_GROUP_SHARED_READ_TOOL,
