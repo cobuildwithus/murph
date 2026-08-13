@@ -140,8 +140,8 @@ describe("hosted member action runtime", () => {
           expectedResult: {
             kind: "weight_reps" as const,
             reps: 8,
-            weight: 185,
-            weightUnit: "lb" as const,
+            weight: null,
+            weightUnit: null,
           },
           kind: "set.put" as const,
           requiresExistingSet: true,

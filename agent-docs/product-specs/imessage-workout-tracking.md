@@ -25,6 +25,9 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 - A set edit owns only its explicit result family (`note`, `reps`, or
   `weight_reps`): optimistic comparison, canonical merge, and exact replay
   preserve unrelated annotations and metrics on the same set.
+  Its expected-state projection records null versus present prior fields
+  independently, so adding load to a reps-only set cannot overwrite a newer
+  reps correction.
 
 ## Response-card contract
 

@@ -1,6 +1,8 @@
 import {
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
+  type WorkoutMemberActionExpectedSetResultV1,
+  type WorkoutMemberActionSetResultV1,
   type WorkoutSession,
   type WorkoutSet,
   workoutSessionSchema,
@@ -317,10 +319,7 @@ function buildMemberActionWorkoutSet(input: {
   }
 }
 
-type MemberActionSetResult = Extract<
-  WorkoutLiveApplyMemberActionV1['mutations'][number],
-  { kind: 'set.put' }
->['result']
+type MemberActionSetResult = WorkoutMemberActionSetResultV1 | null
 type MemberActionSetResultKind = NonNullable<MemberActionSetResult>['kind']
 
 function applyMemberActionWorkoutSetResult(
@@ -342,7 +341,7 @@ function applyMemberActionWorkoutSetResult(
 }
 
 function memberActionWorkoutSetMatches(input: {
-  expected: MemberActionSetResult
+  expected: WorkoutMemberActionExpectedSetResultV1 | null
   ownedKind: MemberActionSetResultKind | null
   set: WorkoutSet
 }): boolean {
@@ -353,7 +352,10 @@ function memberActionWorkoutSetMatches(input: {
       type: input.set.type,
     })) === JSON.stringify(input.set)
   }
-  if (input.expected !== null && input.expected.kind !== input.ownedKind) {
+  if (input.expected === null) {
+    return !hasLoggedWorkoutSet(input.set)
+  }
+  if (input.expected.kind !== input.ownedKind) {
     return false
   }
 
@@ -367,25 +369,18 @@ function memberActionWorkoutSetMatches(input: {
 function projectMemberActionWorkoutSetResult(
   set: WorkoutSet,
   kind: MemberActionSetResultKind,
-): MemberActionSetResult {
+): WorkoutMemberActionExpectedSetResultV1 {
   if (kind === 'note') {
-    return set.note === undefined ? null : { kind, note: set.note }
+    return { kind, note: set.note ?? null }
   }
   if (kind === 'reps') {
-    return set.reps === undefined ? null : { kind, reps: set.reps }
-  }
-  if (
-    set.reps === undefined
-    || set.weight === undefined
-    || set.weightUnit === undefined
-  ) {
-    return null
+    return { kind, reps: set.reps ?? null }
   }
   return {
     kind,
-    reps: set.reps,
-    weight: set.weight,
-    weightUnit: set.weightUnit,
+    reps: set.reps ?? null,
+    weight: set.weight ?? null,
+    weightUnit: set.weightUnit ?? null,
   }
 }
 

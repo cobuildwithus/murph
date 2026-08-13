@@ -66,6 +66,36 @@ export type WorkoutMemberActionSetResultV1 = z.infer<
   typeof workoutMemberActionSetResultV1Schema
 >;
 
+export const workoutMemberActionExpectedSetResultV1Schema = z.discriminatedUnion(
+  "kind",
+  [
+    z
+      .object({
+        kind: z.literal("note"),
+        note: singleLineText(memberActionV1Bounds.freeformResult).nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("reps"),
+        reps: z.number().int().min(1).max(999).nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("weight_reps"),
+        reps: z.number().int().min(1).max(999).nullable(),
+        weight: z.number().finite().positive().max(9_999).nullable(),
+        weightUnit: z.enum(["lb", "kg"]).nullable(),
+      })
+      .strict(),
+  ],
+);
+
+export type WorkoutMemberActionExpectedSetResultV1 = z.infer<
+  typeof workoutMemberActionExpectedSetResultV1Schema
+>;
+
 const workoutMemberActionExpectedSetV1Schema = z
   .object({
     logged: z.boolean(),
@@ -103,7 +133,7 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
       .object({
         exerciseName: singleLineText(memberActionV1Bounds.exerciseName),
         exercisePosition: workoutExercisePositionSchema,
-        expectedResult: workoutMemberActionSetResultV1Schema.nullable(),
+        expectedResult: workoutMemberActionExpectedSetResultV1Schema.nullable(),
         kind: z.literal("set.put"),
         requiresExistingSet: z.boolean(),
         result: workoutMemberActionSetResultV1Schema.nullable(),

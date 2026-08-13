@@ -13,13 +13,16 @@ const request = {
   action: {
     expectedWorkout: {
       actionBinding: "a".repeat(64),
-      exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+      exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
     },
     kind: "workout.live.apply" as const,
     mutations: [{
       exerciseName: "Leg press",
       exercisePosition: 1,
-      expectedResult: null,
+      expectedResult: {
+        kind: "reps" as const,
+        reps: null,
+      },
       kind: "set.put" as const,
       requiresExistingSet: true,
       result: { kind: "reps" as const, reps: 8 },

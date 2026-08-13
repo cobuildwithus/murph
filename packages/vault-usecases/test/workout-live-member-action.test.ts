@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  WorkoutMemberActionExpectedSetResultV1,
   WorkoutMemberActionSetResultV1,
   WorkoutSession,
 } from "@murphai/contracts";
@@ -52,7 +53,7 @@ function shownWorkout(
 function setAction(
   result: WorkoutMemberActionSetResultV1,
   input: {
-    expectedResult?: WorkoutMemberActionSetResultV1 | null;
+    expectedResult?: WorkoutMemberActionExpectedSetResultV1 | null;
     logged?: boolean;
   } = {},
 ) {
@@ -363,6 +364,126 @@ describe("live workout member action", () => {
       ),
       vault: "/vault",
     })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("adds weight to a reps-only set using its exact partial prior state", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ note: "Controlled", order: 1, reps: 8, rpe: 8 }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 185, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: null,
+            weightUnit: null,
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
+      ...BASE_WORKOUT.exercises[0],
+      sets: [{
+        note: "Controlled",
+        order: 1,
+        reps: 8,
+        rpe: 8,
+        weight: 185,
+        weightUnit: "lb",
+      }],
+    }]);
+  });
+
+  it("rejects a stale add-weight action after the reps-only value changed", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1, reps: 10 }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 185, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: null,
+            weightUnit: null,
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("recognizes an exact add-weight replay from a partial prior state", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1, reps: 8, weight: 185, weightUnit: "lb" }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 185, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: null,
+            weightUnit: null,
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a truly empty set from a reps-only set", async () => {
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 185, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: null,
+            weightUnit: null,
+          },
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 

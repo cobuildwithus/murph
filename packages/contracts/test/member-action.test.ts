@@ -149,6 +149,29 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
+  it("represents exact partial prior fields separately from a strict result", () => {
+    const request = validRequest();
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        expectedWorkout: {
+          ...request.action.expectedWorkout,
+          exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
+        },
+        mutations: [{
+          ...request.action.mutations[0],
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: null,
+            weightUnit: null,
+          },
+        }],
+      },
+    }).success).toBe(true);
+  });
+
   it("rejects duplicate mutation targets so exact replay has one postcondition", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({

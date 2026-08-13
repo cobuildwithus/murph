@@ -92,6 +92,9 @@ Messages extension as the first action family.
 - A set mutation owns only the explicit result field family. Optimistic
   comparison, exact replay, and canonical merge preserve unrelated annotations
   and metrics; existing-set mutations cannot use an ambiguous null clear.
+- Expected set state is a separate closed projection whose fields may be null,
+  while the result stays strict. This distinguishes partial canonical values
+  such as reps-only from a truly empty set without introducing generic patches.
 
 ## Verification
 

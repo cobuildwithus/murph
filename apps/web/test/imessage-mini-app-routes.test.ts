@@ -362,6 +362,18 @@ describe("iMessage mini-app routes", () => {
       envelope: expect.objectContaining({
         eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
         kind: "member.action.requested",
+        request: expect.objectContaining({
+          action: expect.objectContaining({
+            mutations: [expect.objectContaining({
+              expectedResult: {
+                kind: "weight_reps",
+                reps: 8,
+                weight: null,
+                weightUnit: null,
+              },
+            })],
+          }),
+        }),
         userId: "member-1",
       }),
       prepared: { prepared: "mailbox-crypto" },
@@ -586,13 +598,18 @@ function validMemberActionRequest() {
     action: {
       expectedWorkout: {
         actionBinding: "a".repeat(64),
-        exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+        exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
       },
       kind: "workout.live.apply",
       mutations: [{
         exerciseName: "Leg press",
         exercisePosition: 1,
-        expectedResult: null,
+        expectedResult: {
+          kind: "weight_reps",
+          reps: 8,
+          weight: null,
+          weightUnit: null,
+        },
         kind: "set.put",
         requiresExistingSet: true,
         result: { kind: "weight_reps", reps: 8, weight: 180, weightUnit: "lb" },
