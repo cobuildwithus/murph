@@ -805,6 +805,81 @@ describe("database health monitor", () => {
     expect(harness.allLinqRequests).toEqual([]);
   });
 
+  it("cancels a Linq health body whose declared length exceeds the response cap", async () => {
+    const cancelBody = vi.fn();
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              cancel: cancelBody,
+              start(controller) {
+                controller.enqueue(new Uint8Array([123]));
+              },
+            }),
+            {
+              headers: {
+                "content-length": String(256 * 1_024 + 1),
+              },
+              status: 200,
+            },
+          ),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+
+    expect(cancelBody).toHaveBeenCalledTimes(1);
+    expect(harness.allLinqRequests).toEqual([]);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: expect.any(String),
+      pendingAlertMessage: expect.any(String),
+    });
+  });
+
+  it("cancels an underreported Linq health stream after it crosses the response cap", async () => {
+    const cancelBody = vi.fn();
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              cancel: cancelBody,
+              start(controller) {
+                controller.enqueue(new Uint8Array(256 * 1_024));
+                controller.enqueue(new Uint8Array(1));
+              },
+            }),
+            {
+              headers: {
+                "content-length": "1",
+              },
+              status: 200,
+            },
+          ),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+
+    expect(cancelBody).toHaveBeenCalledTimes(1);
+    expect(harness.allLinqRequests).toEqual([]);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: expect.any(String),
+      pendingAlertMessage: expect.any(String),
+    });
+  });
+
   it.each([
     {
       chatBody: createLinqChatResponseBody({ isGroup: true }),
