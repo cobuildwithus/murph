@@ -92,6 +92,16 @@ an active Murph line first when no line may safely open a proactive conversation
   durably without proactive eligibility, while unowned or unsafe inputs remain
   fail-closed. Focused unit and real-PostgreSQL proof cover the first bind and
   duplicate replay.
+- Final ReviewGPT round 3 found that a selected fallback could still persist a
+  companion route after every proactive capacity claim was lost. Companion
+  activation now remains route-less in that state, with focused unit and
+  PostgreSQL proof covering both hard-cap and claim-loss recovery.
+- Final ReviewGPT round 4 identified the shared sign-in-token entry point as an
+  undisclosed consumer of pending activation-wake recovery. The durable
+  device-sync contract now discloses that retry boundary, and focused route
+  tests prove that a rejected wake returns the retryable setup error without a
+  Junction session, an accepted retry proceeds once, and a consumed activation
+  does not signal again.
 
 ## Rollout
 
