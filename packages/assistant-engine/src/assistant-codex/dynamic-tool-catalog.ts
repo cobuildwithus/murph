@@ -32,6 +32,7 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import { HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES } from '@murphai/hosted-execution/plan-usage'
+import { ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS } from '../assistant/response-media.js'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -162,16 +163,16 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    'Attach image media to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.',
+    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       media: {
         type: 'array',
-        maxItems: 40,
+        maxItems: ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
         description:
-          'The complete image batch for the final assistant reply. Passing an empty array clears the current reply media batch.',
+          `The complete image batch for the final assistant reply, limited to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images. Passing an empty array clears the current reply media batch.`,
         items: {
           oneOf: [
             {
@@ -276,7 +277,7 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one private-direct exercise routine card when this tool is available for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language that tells them to open each exercise for instructions and images. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. The current channel renders the card with its supported native presentation. Do not repeat values in final send_message and do not combine this card with response media.',
+    'Attach one private-direct exercise routine card when this tool is available for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. Also use it when the current message asks to repeat, resend, or improve the presentation of a movement routine already present in the committed conversation. A request for a richer or more visual layout means this card, not styled plain text. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language that tells them to open each exercise for instructions and images. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. The current channel renders the card with its supported native presentation. Do not repeat values in final send_message and do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -299,7 +300,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response. Local runs stay synchronous and save under CODEX_HOME/generated_images.`,
+    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

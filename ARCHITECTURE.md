@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Accepted-Message Targeting
 
@@ -1194,7 +1194,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   admission state. Metric families normalize independently: an unavailable
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
-  never treated as zero. A telemetry-only notification opens after two
+  never treated as zero. Unusable collections receive one bounded confirmation
+  attempt. Usable partial collections stay single-pass whenever available
+  evidence is unsafe; a safe observation missing only the direct-error counter
+  uses the same confirmation budget. The confirmation's available signals are
+  evaluated, a recovered counter joins the original complete gauge evidence,
+  and failure or continued absence retains the original incomplete observation.
+  A telemetry-only notification opens after two
   consecutive incomplete or failed collections. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families observed on partial checks, and uses the threshold
@@ -2538,6 +2544,31 @@ transaction can consequently use only the matching request-scoped root and
 performs no first-time provider/KMS unwrap. This exact-root contract belongs to
 the Linq reaction append path; it does not assert that every generic mailbox
 producer prewarms its root.
+
+The standalone generic mailbox-item append has its own narrower prepared
+boundary. It checks for an already-durable dedupe replay before crypto work and,
+on a miss, unwraps the exact active ingress root before opening its transaction.
+The transaction locks and re-reads root authority, seals only from the matching
+request-scoped cache entry, and permits one full reprepare after typed root
+drift. Its prepared envelope adapter retains the envelope owner's ordinary
+target and workspace checks while carrying the same generic prepared-root
+capability; mailbox adds no proxy capability or drift-error owner. Existing
+transaction-owned envelope, identity,
+source-message, and specialized append adapters remain explicitly legacy and
+provider-capable until their owning flows migrate; they gain neither implicit
+preparation nor a second retry owner from the standalone append.
+
+Web identity reconciliation uses the same crypto-only root preparation
+boundary for the control domain. Privy live authority, the exact control root,
+and existing private projections settle outside the owner transaction; sibling
+work is drained while preserving the first observed failure. The transaction
+revalidates the exact root under the canonical root lock and member identity
+and verified-email writes seal from that local root. Exact winner drift rolls
+back and permits one fresh full attempt. The prepared root conveys no member,
+invite, email, routing, or provider authority, all of which remain revalidated
+by their owning stores. Phone-conflict suppression reads only the blind-index
+owner id, so preserving another member's binding never decrypts that member's
+private identity or requires a second prepared root inside the transaction.
 
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner
