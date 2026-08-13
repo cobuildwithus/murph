@@ -406,6 +406,16 @@ function requireCommittedFrictionTask(
   return committedFrictionTask(root, issueNumber);
 }
 
+function refreshAndRequireCommittedFrictionTask(
+  root: string,
+  issueNumber: number,
+  expected: FrogTaskIdentity,
+): CommittedFrictionTask {
+  fetchMain(root);
+  verifyIssueAuthority(root, issueNumber);
+  return requireCommittedFrictionTask(root, issueNumber, expected);
+}
+
 export interface DiscoveryDependencies {
   authenticatedOperator: (root: string) => string;
   assertRepository: (root: string) => void;
@@ -1792,7 +1802,7 @@ function runParentReview(options: {
     }
     throw new TerminalPrePullRequestFailure("implementation-output");
   }
-  requireCommittedFrictionTask(
+  refreshAndRequireCommittedFrictionTask(
     options.primary,
     options.issueNumber,
     options.task,
@@ -1951,7 +1961,7 @@ function runCanonicalPullRequestReview(options: {
       environment,
       3 * 60 * 60 * 1_000,
     );
-    requireCommittedFrictionTask(
+    refreshAndRequireCommittedFrictionTask(
       options.primary,
       options.issueNumber,
       options.task,
@@ -2035,7 +2045,7 @@ function downloadImplementationPatch(
     {},
     30 * 60 * 1_000,
   );
-  requireCommittedFrictionTask(primary, issueNumber, task);
+  refreshAndRequireCommittedFrictionTask(primary, issueNumber, task);
   const statusPath = path.join(outputDirectory, "status.json");
   if (wake.status !== 0) {
     throw new Error(`ReviewGPT wake failed with status ${wake.status}`);
@@ -2275,7 +2285,11 @@ export function createEmptyRepairHandoffCommit(
   issueNumber: number,
 ): string {
   requireCommand("git", ["reset", "--hard", "origin/main"], worktree);
-  requireCommand("git", ["clean", "-ffdx"], worktree);
+  requireCommand(
+    "git",
+    ["clean", "-ffdx", "-e", FROG_AUTOFIX_PR_BODY_PATH],
+    worktree,
+  );
   if (requireCommand("git", ["status", "--porcelain"], worktree)) {
     throw new Error("terminal repair handoff did not recover a clean worktree");
   }
@@ -2317,6 +2331,36 @@ export function createEmptyRepairHandoffCommit(
   return head;
 }
 
+export function isEmptyRepairHandoffCommit(
+  worktree: string,
+  head: string,
+  issueNumber: number,
+): boolean {
+  if (
+    !/^[0-9a-f]{40}$/u.test(head)
+    || !Number.isSafeInteger(issueNumber)
+    || issueNumber <= 0
+  ) return false;
+  const parentTree = runCommand(
+    "git",
+    ["rev-parse", `${head}^1^{tree}`],
+    worktree,
+  );
+  const headTree = runCommand("git", ["rev-parse", `${head}^{tree}`], worktree);
+  const metadata = runCommand(
+    "git",
+    ["show", "-s", "--format=%an%n%ae%n%s", head],
+    worktree,
+  );
+  return parentTree.status === 0
+    && headTree.status === 0
+    && parentTree.stdout.trim() === headTree.stdout.trim()
+    && metadata.status === 0
+    && metadata.stdout.trim()
+      === `Frog Autofix\nfrog-autofix@users.noreply.github.com\nHand off Frog issue #${issueNumber}`
+    && !requireCommand("git", ["status", "--porcelain"], worktree);
+}
+
 function remoteIssueBranchHead(worktree: string, branch: string): string | null {
   const result = runCommand(
     "git",
@@ -2333,8 +2377,31 @@ function remoteIssueBranchHead(worktree: string, branch: string): string | null 
   return match[1] ?? null;
 }
 
+export function authorizedTerminalHandoffLease(options: {
+  currentHandoffHead: string;
+  observedRemoteHead: string | null;
+  previousHandoffHead: string;
+}): string {
+  for (const head of [options.currentHandoffHead, options.previousHandoffHead]) {
+    if (!/^[0-9a-f]{40}$/u.test(head)) {
+      throw new Error("terminal handoff head is invalid");
+    }
+  }
+  if (
+    options.observedRemoteHead
+    && options.observedRemoteHead !== options.previousHandoffHead
+  ) {
+    throw new Error("unproven remote issue branch cannot be replaced");
+  }
+  // An empty expected SHA is Git's explicit "the ref must not exist" lease.
+  // Supplying a lease even for a create/up-to-date push closes the race where a
+  // foreign branch appears or moves after ls-remote but before publication.
+  return options.observedRemoteHead ?? "";
+}
+
 function persistRepairHandoff(options: {
   branch: string;
+  expectedPullRequest: BranchPullRequestRecord | null;
   failure?: TerminalPrePullRequestFailureClass;
   issueNumber: number;
   primary: string;
@@ -2342,6 +2409,84 @@ function persistRepairHandoff(options: {
   task?: FrogTaskIdentity;
   worktree: string;
 }): number {
+  let head = requireCommand("git", ["rev-parse", "HEAD"], options.worktree);
+  let firstHead: string | undefined;
+  if (options.recoveredExistingBody) {
+    try {
+      firstHead = extractFirstReviewedHead(options.recoveredExistingBody)
+        ?? undefined;
+    } catch {
+      // The fixed handoff body does not carry ambiguous review provenance.
+    }
+  }
+  let body: string;
+  const bodyPath = path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH);
+  if (options.expectedPullRequest) {
+    body = renderTerminalRepairHandoffBody({
+      failure: options.failure,
+      firstHead,
+      head,
+      issueNumber: options.issueNumber,
+      task: options.task,
+    });
+    writePrivateFileAtomically(bodyPath, body, 0o600);
+  } else {
+    let retainedBody: string | null = null;
+    if (existsSync(bodyPath)) {
+      try {
+        const candidate = validatedWorkerPrBody(
+          options.worktree,
+          options.issueNumber,
+        );
+        if (
+          bodyHandoff(candidate, head) === "review-findings"
+          && (options.task === undefined
+            || (extractFrogTaskIdentity(candidate)?.path === options.task.path
+              && extractFrogTaskIdentity(candidate)?.sha256 === options.task.sha256))
+          && (options.failure === undefined
+            || extractTerminalPrePullRequestFailure(candidate) === options.failure)
+        ) {
+          retainedBody = candidate;
+        }
+      } catch {
+        // Only an exact validated local handoff is reusable.
+      }
+    }
+    if (
+      retainedBody
+      && isEmptyRepairHandoffCommit(options.worktree, head, options.issueNumber)
+    ) {
+      body = retainedBody;
+    } else {
+      body = renderTerminalRepairHandoffBody({
+        failure: options.failure,
+        firstHead: head,
+        head,
+        issueNumber: options.issueNumber,
+        task: options.task,
+      });
+      writePrivateFileAtomically(bodyPath, body, 0o600);
+      head = createEmptyRepairHandoffCommit(
+        options.worktree,
+        options.issueNumber,
+      );
+      body = renderTerminalRepairHandoffBody({
+        failure: options.failure,
+        firstHead: head,
+        head,
+        issueNumber: options.issueNumber,
+        task: options.task,
+      });
+      writePrivateFileAtomically(bodyPath, body, 0o600);
+    }
+  }
+  validatePullRequestBody(
+    body,
+    options.issueNumber,
+    homedir(),
+    userInfo().username,
+  );
+
   const operator = parseAuthenticatedGitHubOperator(
     recoveryCommands.authenticatedOperator(options.primary),
   );
@@ -2355,35 +2500,14 @@ function persistRepairHandoff(options: {
   if (existing) {
     fetchMain(options.primary);
     verifyIssueAuthority(options.primary, options.issueNumber);
-    const head = requireCommand("git", ["rev-parse", "HEAD"], options.worktree);
     if (
       existing.headRefOid !== head
       || !isParentOwnedPullRequest(existing, operator, options.branch)
+      || (options.expectedPullRequest
+        && !samePullRequestProjection(existing, options.expectedPullRequest))
     ) {
       throw new Error("terminal repair handoff lost exact pull request authority");
     }
-    let firstHead: string | undefined;
-    if (options.recoveredExistingBody) {
-      try {
-        firstHead = extractFirstReviewedHead(options.recoveredExistingBody)
-          ?? undefined;
-      } catch {
-        // The fixed handoff body does not carry ambiguous review provenance.
-      }
-    }
-    const body = renderTerminalRepairHandoffBody({
-      failure: options.failure,
-      firstHead,
-      head,
-      issueNumber: options.issueNumber,
-      task: options.task,
-    });
-    validatePullRequestBody(
-      body,
-      options.issueNumber,
-      homedir(),
-      userInfo().username,
-    );
     const current = branchOpenPullRequest(
       options.primary,
       options.branch,
@@ -2423,32 +2547,44 @@ function persistRepairHandoff(options: {
     }
     return existing.number;
   }
+  if (options.expectedPullRequest) {
+    throw new Error("terminal repair handoff lost its expected pull request");
+  }
 
   fetchMain(options.primary);
   verifyIssueAuthority(options.primary, options.issueNumber);
-  const priorRemoteHead = remoteIssueBranchHead(options.worktree, options.branch);
-  const head = createEmptyRepairHandoffCommit(
+  const observedRemoteHead = remoteIssueBranchHead(
     options.worktree,
-    options.issueNumber,
+    options.branch,
   );
-  const body = renderTerminalRepairHandoffBody({
-    failure: options.failure,
-    firstHead: head,
-    head,
-    issueNumber: options.issueNumber,
-    task: options.task,
+  const previousHandoffHead = head;
+  const currentMainTree = requireCommand(
+    "git",
+    ["rev-parse", "origin/main^{tree}"],
+    options.worktree,
+  );
+  const localHandoffTree = requireCommand(
+    "git",
+    ["rev-parse", `${head}^{tree}`],
+    options.worktree,
+  );
+  let authorizedLeaseHead: string;
+  if (localHandoffTree !== currentMainTree) {
+    head = createEmptyRepairHandoffCommit(options.worktree, options.issueNumber);
+    body = renderTerminalRepairHandoffBody({
+      failure: options.failure,
+      firstHead: head,
+      head,
+      issueNumber: options.issueNumber,
+      task: options.task,
+    });
+    writePrivateFileAtomically(bodyPath, body, 0o600);
+  }
+  authorizedLeaseHead = authorizedTerminalHandoffLease({
+    currentHandoffHead: head,
+    observedRemoteHead,
+    previousHandoffHead,
   });
-  validatePullRequestBody(
-    body,
-    options.issueNumber,
-    homedir(),
-    userInfo().username,
-  );
-  writePrivateFileAtomically(
-    path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH),
-    body,
-    0o600,
-  );
   const pullRequest = publishDraftRepair(head, {
     createPullRequest: () => requireCommand(
       "gh",
@@ -2465,7 +2601,7 @@ function persistRepairHandoff(options: {
         "--title",
         `Hand off Frog issue #${options.issueNumber}`,
         "--body-file",
-        path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH),
+        bodyPath,
       ],
       options.primary,
     ),
@@ -2493,9 +2629,7 @@ function persistRepairHandoff(options: {
         "core.hooksPath=/dev/null",
         "push",
         "--set-upstream",
-        ...(priorRemoteHead
-          ? [`--force-with-lease=refs/heads/${options.branch}:${priorRemoteHead}`]
-          : []),
+        `--force-with-lease=refs/heads/${options.branch}:${authorizedLeaseHead}`,
         "origin",
         `${head}:refs/heads/${options.branch}`,
       ],
@@ -2850,7 +2984,7 @@ async function runEditOnlyCycle(options: {
     throw new TerminalPrePullRequestFailure(workerFailure);
   }
   try {
-    requireCommittedFrictionTask(
+    refreshAndRequireCommittedFrictionTask(
       options.primary,
       options.issueNumber,
       options.task,
@@ -3091,7 +3225,6 @@ function exactHeadIsLocalAgentOnly(
   head: string,
   issueNumber: number,
 ): boolean {
-  fetchMain(primary);
   const mergeBase = requireCommand(
     "git",
     ["merge-base", "origin/main", head],
@@ -3586,6 +3719,36 @@ async function runOnce() {
       return;
     }
     const worktree = prepareIssueWorktree(primary, issue.number);
+    const localBodyPath = path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH);
+    if (existsSync(localBodyPath)) {
+      let localBody: string | null = null;
+      try {
+        localBody = validatedWorkerPrBody(worktree, issue.number);
+      } catch {
+        // Ordinary interrupted worker residue remains recovery-classifier input.
+      }
+      if (localBody && bodyHandoffRecord(localBody)?.kind === "review-findings") {
+        const expectedPullRequest = repairPullRequests.length === 1
+          && repairPullRequests[0]?.state === "OPEN"
+          ? repairPullRequests[0]
+          : null;
+        persistRepairHandoff({
+          branch,
+          expectedPullRequest,
+          failure: extractTerminalPrePullRequestFailure(localBody) ?? undefined,
+          issueNumber: issue.number,
+          primary,
+          recoveredExistingBody: localBody,
+          task: extractFrogTaskIdentity(localBody) ?? undefined,
+          worktree,
+        });
+        recordEvent("awaiting_human_merge", issue.number);
+        console.log(
+          "Repair reached a durable human-review handoff; continuing with later issues on the next run.",
+        );
+        return;
+      }
+    }
     const workerMode = resolveWorkerMode(
       worktree,
       branch,
@@ -3605,31 +3768,6 @@ async function runOnce() {
         existingPullRequest,
       )
       : null;
-    const localBodyPath = path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH);
-    if (
-      !existingPullRequest
-      && workerMode === "resume"
-      && existsSync(localBodyPath)
-    ) {
-      const localBody = validatedWorkerPrBody(worktree, issue.number);
-      const currentHead = requireCommand("git", ["rev-parse", "HEAD"], worktree);
-      if (bodyHandoff(localBody, currentHead)) {
-        persistRepairHandoff({
-          branch,
-          failure: extractTerminalPrePullRequestFailure(localBody) ?? undefined,
-          issueNumber: issue.number,
-          primary,
-          recoveredExistingBody: localBody,
-          task: extractFrogTaskIdentity(localBody) ?? undefined,
-          worktree,
-        });
-        recordEvent("awaiting_human_merge", issue.number);
-        console.log(
-          "Repair reached a durable human-review handoff; continuing with later issues on the next run.",
-        );
-        return;
-      }
-    }
     const authenticatedOperator = parseAuthenticatedGitHubOperator(
       recoveryCommands.authenticatedOperator(primary),
     );
@@ -3787,6 +3925,7 @@ async function runOnce() {
       ) {
         persistRepairHandoff({
           branch,
+          expectedPullRequest: existingPullRequest,
           failure: error instanceof TerminalPrePullRequestFailure
             ? error.failureClass
             : undefined,

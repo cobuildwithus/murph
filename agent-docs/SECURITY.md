@@ -1141,7 +1141,8 @@ Last verified: 2026-08-12
   canonical-review archives contain one parent-materialized task blob read
   directly from its exact `origin/main` friction path, plus a path/digest
   manifest. The parent stores that same identity only in trusted local/PR
-  metadata and revalidates it after every long wait and at both final merge
+  metadata, fetches before every post-wait comparison, and revalidates it at
+  both final merge
   fences. Any edit, move, deletion, replacement, or binding drift revokes
   unattended authority. They include neither the whole friction tree nor a
   candidate copy.
@@ -1180,7 +1181,15 @@ Last verified: 2026-08-12
   deletes candidate bytes, resets to `origin/main`, creates a neutral
   parent-only empty commit with the same tree, and publishes only the fixed
   draft body, admitted task identity when available, bounded failure class, and
-  exact-head review-findings handoff. Model prose never enters that PR.
+  exact-head review-findings handoff. The private body receives the terminal
+  marker before authenticated-operator lookup, PR traversal, fetch, issue
+  verification, remote lookup, push, or PR creation, and recovery consumes it
+  before branch synchronization or model work. A newly appeared remote branch
+  grants no replacement authority. Force-with-lease is allowed only when its
+  expected SHA is the exact neutral handoff head already retained in local
+  provenance after an interrupted parent push; a new branch uses an empty
+  expected-SHA lease so a concurrent creator wins and Frog fails closed. Model
+  prose never enters that PR.
   ReviewGPT/browser/command/GitHub infrastructure unavailability remains
   retryable and does not manufacture a terminal classification.
 - Automatic merge authority is narrower than change authority. The parent
@@ -1189,7 +1198,9 @@ Last verified: 2026-08-12
   re-fetches and revalidates App author, open state, label, the exact admitted
   committed task path/content digest and sole binding, PR head, exact body
   digest/editor/non-closing issue binding, checks,
-  and the exact-head scope classifier immediately before an ordinary
+  and the exact-head scope classifier immediately before an ordinary merge.
+  The final scope classifier consumes that fetched ref without fetching again,
+  and the final task comparison follows it before a
   `--match-head-commit` squash merge. Only the enumerated Frog autofix
   implementation/launcher/worker/test files, the exact Frog package script,
   the isolated Local Frog Autofix architecture section, and one canonical

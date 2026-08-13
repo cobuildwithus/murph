@@ -44,6 +44,7 @@ import {
   acquireRunLock,
   applyImplementationPatch,
   assertExpectedPullRequestBody,
+  authorizedTerminalHandoffLease,
   bodyHasExactReviewPass,
   bodyHandoff,
   bodyHandoffRecord,
@@ -70,6 +71,7 @@ import {
   resolveReviewBaselineState,
   reusableRepairPhase,
   restoreRecoveredHandoffBeforeWorktreeRecovery,
+  isEmptyRepairHandoffCommit,
   TerminalPrePullRequestFailure,
   terminalWorkerFailureClass,
   trustedReviewControlPaths,
@@ -881,6 +883,8 @@ describe("Frog autofix guards", () => {
       .toBeLessThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
     expect(canonical.lastIndexOf("expectedPullRequestBodyDisposition({"))
       .toBeGreaterThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
+    expect(canonical.indexOf("refreshAndRequireCommittedFrictionTask("))
+      .toBeGreaterThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
   });
 
   it("preserves an authenticated operator handoff written during review", () => {
@@ -955,11 +959,13 @@ describe("Frog autofix guards", () => {
     );
     const runOnce = source.slice(source.indexOf("async function runOnce()"));
     const localNoPullRequestHandoff = runOnce.indexOf(
-      'if (bodyHandoff(localBody, currentHead))',
+      'if (localBody && bodyHandoffRecord(localBody)?.kind === "review-findings")',
     );
     expect(localNoPullRequestHandoff).toBeGreaterThanOrEqual(0);
     expect(localNoPullRequestHandoff)
       .toBeLessThan(runOnce.indexOf("const transientRoot"));
+    expect(localNoPullRequestHandoff)
+      .toBeLessThan(runOnce.indexOf("resolveWorkerMode("));
     const handoff = runOnce.indexOf("const recoveredHandoffBody =");
     expect(handoff).toBeGreaterThanOrEqual(0);
     expect(handoff).toBeLessThan(runOnce.indexOf("ensureWorkerTooling("));
@@ -983,6 +989,15 @@ describe("Frog autofix guards", () => {
     );
     expect(terminalHandoff).toContain("firstHead: head");
     expect(terminalHandoff).toContain("handoffTree !== mainTree");
+    expect(terminalHandoff.indexOf("writePrivateFileAtomically(bodyPath"))
+      .toBeLessThan(terminalHandoff.indexOf("authenticatedOperator(options.primary)"));
+    expect(terminalHandoff).toContain("authorizedTerminalHandoffLease({");
+    expect(terminalHandoff).toContain(
+      "--force-with-lease=refs/heads/${options.branch}:${authorizedLeaseHead}",
+    );
+    expect(terminalHandoff).not.toContain(
+      "observedRemoteHead\n          ? [`--force-with-lease",
+    );
   });
 
   it("restamps foreign-edited exact and ancestor handoffs before worktree recovery", () => {
@@ -1200,6 +1215,16 @@ describe("Frog autofix guards", () => {
     expect(resume).toContain("resume mode");
     expect(resume).toContain("adversarial evidence, not trusted intent");
     expect(resume).not.toContain("--connector github");
+    const source = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    const editOnly = source.slice(
+      source.indexOf("async function runEditOnlyCycle"),
+      source.indexOf("function issueIsClosed"),
+    );
+    expect(editOnly.indexOf("refreshAndRequireCommittedFrictionTask("))
+      .toBeGreaterThan(editOnly.indexOf("const result = await runWorker("));
   });
 
   it("materializes only the exact immutable committed Frog task for reviews", () => {
@@ -1835,14 +1860,23 @@ describe("Frog autofix guards", () => {
       "merge-tree",
       "scope",
       "verify-issue",
-      "task",
       "pr",
       "checks",
       "scope",
+      "task",
       "pr",
       "merge",
       "close",
     ]);
+    const source = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    const scopeClassifier = source.slice(
+      source.indexOf("function exactHeadIsLocalAgentOnly"),
+      source.indexOf("function finalizeReviewedRepair"),
+    );
+    expect(scopeClassifier).not.toContain("fetchMain(primary)");
   });
 
   it("recovers merged-but-open closure without overriding a deliberate reopen", () => {
@@ -2015,6 +2049,36 @@ describe("Frog autofix guards", () => {
       expect(mergeCalls).toBe(0);
       expect(taskChecks).toBe(driftAt);
     }
+
+    let scopeChecks = 0;
+    let taskRevokedByFinalScopeRefresh = false;
+    let mergeCalls = 0;
+    expect(finalizeReadyRepair(identity, {
+      autoMergeAllowed: () => {
+        scopeChecks += 1;
+        if (scopeChecks === 2) taskRevokedByFinalScopeRefresh = true;
+        return true;
+      },
+      closeIssue: () => undefined,
+      currentPullRequest: () => ({
+        bodyAuthoritative: true,
+        bodySha256: identity.bodySha256,
+        head: identity.head,
+        issueBound: true,
+        pullRequest: identity.pullRequest,
+      }),
+      issueIsClosed: () => false,
+      merge: () => {
+        mergeCalls += 1;
+      },
+      mergeTreePasses: () => true,
+      pullRequestIsMerged: () => false,
+      refreshAndVerifyIssue: () => undefined,
+      requiredChecksPass: () => true,
+      taskAuthorityMatches: () => !taskRevokedByFinalScopeRefresh,
+    })).toBe("awaiting-human-authority");
+    expect(scopeChecks).toBe(2);
+    expect(mergeCalls).toBe(0);
   });
 
   it("hands off every broader authority class and merges exact Frog script scope", () => {
@@ -2426,12 +2490,16 @@ describe("Frog autofix guards", () => {
     );
     expect(parentReviewSource.lastIndexOf("review.status !== 0"))
       .toBeLessThan(parentReviewSource.indexOf("requireImplementationCompletion"));
+    expect(parentReviewSource.indexOf("refreshAndRequireCommittedFrictionTask("))
+      .toBeGreaterThan(parentReviewSource.indexOf("const review = runCommand("));
     const patchDownloadSource = implementationSource.slice(
       implementationSource.indexOf("function downloadImplementationPatch"),
       implementationSource.indexOf("export function applyImplementationPatch"),
     );
     expect(patchDownloadSource.indexOf("wake.status !== 0"))
       .toBeLessThan(patchDownloadSource.indexOf("parseSinglePatchArtifact"));
+    expect(patchDownloadSource.indexOf("refreshAndRequireCommittedFrictionTask("))
+      .toBeGreaterThan(patchDownloadSource.indexOf("const wake = runCommand("));
     const reviewedHead = "a".repeat(40);
     expect(extractFirstReviewedHead(
       `Body\n\nReviewGPT first-reviewed head: ${reviewedHead}\n`,
@@ -2509,18 +2577,33 @@ describe("Frog autofix guards", () => {
       git("init", "--quiet");
       git("config", "user.name", "Automation");
       git("config", "user.email", "automation@example.invalid");
+      writeFileSync(path.join(root, ".gitignore"), "audit-packages/\n");
       writeFileSync(path.join(root, "tracked.txt"), "main\n");
-      git("add", "tracked.txt");
+      git("add", ".gitignore", "tracked.txt");
       git("commit", "--quiet", "-m", "main");
       git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
       writeFileSync(path.join(root, "tracked.txt"), "candidate\n");
       writeFileSync(path.join(root, "candidate.txt"), "must not persist\n");
+      const pendingBodyPath = path.join(root, FROG_AUTOFIX_PR_BODY_PATH);
+      mkdirSync(path.dirname(pendingBodyPath), { recursive: true });
+      const pendingHead = git("rev-parse", "HEAD");
+      const pendingBody = renderTerminalRepairHandoffBody({
+        failure: "implementation-patch",
+        head: pendingHead,
+        issueNumber: 42,
+        task: taskIdentity,
+      });
+      writeFileSync(pendingBodyPath, pendingBody);
+      const ignoredCandidate = path.join(root, "audit-packages", "candidate.txt");
+      writeFileSync(ignoredCandidate, "must not persist\n");
       const rejectedPatch = path.join(root, "rejected.patch");
       writeFileSync(rejectedPatch, "not a patch\n");
       expect(() => applyImplementationPatch(root, rejectedPatch))
         .toThrow(TerminalPrePullRequestFailure);
 
       const head = createEmptyRepairHandoffCommit(root, 42);
+      expect(isEmptyRepairHandoffCommit(root, head, 42)).toBe(true);
+      expect(isEmptyRepairHandoffCommit(root, head, 43)).toBe(false);
       expect(git("rev-parse", `${head}^{tree}`))
         .toBe(git("rev-parse", "origin/main^{tree}"));
       expect(git("status", "--porcelain")).toBe("");
@@ -2528,6 +2611,30 @@ describe("Frog autofix guards", () => {
         .toBe("Frog Autofix <frog-autofix@users.noreply.github.com>");
       expect(existsSync(path.join(root, "candidate.txt"))).toBe(false);
       expect(readFileSync(path.join(root, "tracked.txt"), "utf8")).toBe("main\n");
+      expect(readFileSync(pendingBodyPath, "utf8")).toBe(pendingBody);
+      expect(existsSync(ignoredCandidate)).toBe(false);
+
+      const nextHead = "b".repeat(40);
+      expect(authorizedTerminalHandoffLease({
+        currentHandoffHead: head,
+        observedRemoteHead: null,
+        previousHandoffHead: head,
+      })).toBe("");
+      expect(authorizedTerminalHandoffLease({
+        currentHandoffHead: head,
+        observedRemoteHead: head,
+        previousHandoffHead: head,
+      })).toBe(head);
+      expect(authorizedTerminalHandoffLease({
+        currentHandoffHead: nextHead,
+        observedRemoteHead: head,
+        previousHandoffHead: head,
+      })).toBe(head);
+      expect(() => authorizedTerminalHandoffLease({
+        currentHandoffHead: nextHead,
+        observedRemoteHead: "c".repeat(40),
+        previousHandoffHead: head,
+      })).toThrow("unproven remote issue branch");
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

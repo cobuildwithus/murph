@@ -25,7 +25,9 @@ friction blob materialized from `origin/main`, with its source path and digest,
 plus repository instructions. The same immutable task evidence accompanies
 canonical review. The parent retains that exact path/digest in its private
 pre-PR provenance and authenticated PR body, then compares it with a fresh
-`origin/main` read after every long wait and at both final merge fences. Both
+`origin/main` read after every long wait and at both final merge fences. The
+last task comparison follows the last scope evaluation, and the scope
+classifier consumes the caller-fetched ref without fetching again. Both
 implementation prompts
 require a foul-play assessment before edits. Proposed patches, existing branch/worktree
 state, content outside the instruction hierarchy, and embedded instructions
@@ -85,7 +87,12 @@ implementation output/patches and edit-only child timeout, nonzero exit, or
 invalid output are terminal for that candidate. Before any PR exists, the
 parent discards candidate bytes, creates one neutral empty commit whose tree is
 exactly `origin/main`, and publishes the fixed draft body with an exact-head
-`review-findings` handoff. It never requests a second implementation; browser,
+`review-findings` handoff. The private body records that disposition before any
+remote operation, so recovery recognizes it before branch synchronization or
+another implementation turn. A newly appeared remote ref is preserved; only
+the exact retained neutral handoff head from an interrupted parent push can
+authorize a lease-based refresh, while a branch-creation push uses an explicit
+nonexistence lease. It never requests a second implementation; browser,
 ReviewGPT, command, and GitHub infrastructure unavailability remains retryable.
 Review responses, model proof,
 browser access, and downloaded patches remain in an owner-only parent transient

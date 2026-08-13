@@ -23,7 +23,8 @@ post-commit/pre-first-push continuation and exact parent-local body/head
 provenance for remote-no-PR continuation, dual pre-push/pre-create issue
 authority refresh, exact immutable `origin/main` friction-task blob/path/digest
 packaging plus trusted local/PR identity retention and post-wait/final-merge
-revalidation for implementation and canonical review without the mutable
+fresh-ref revalidation after the final scope evaluation for implementation and
+canonical review without the mutable
 GitHub-content connector, mandatory
 foul-play assessment in both implementation prompts without hostile-comment
 queue veto, no historical
@@ -39,7 +40,9 @@ closure and bounded never-closed recovery that refuses a deliberate reopen, dura
 descendant/closed-unmerged findings/retrospective
 handoffs for terminal checks and conflicts, fixed-body empty-tree human
 handoff for terminal pre-PR implementation/worker outcomes without a second
-implementation, one absolute process-group-bounded
+implementation, pre-remote local disposition recovery, and exact retained-head
+or nonexistence lease authorization that preserves foreign deterministic
+branches, one absolute process-group-bounded
 invocation, a native-advisory-serialized two-hour LaunchAgent, and bounded
 metadata-only local state. Its ownership and proof are jointly
 specified by

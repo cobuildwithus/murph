@@ -222,7 +222,8 @@ Last verified: 2026-08-12
   rejected implementation output/patches and edit-only child timeout, nonzero
   exit, or invalid output are terminal for that candidate. The parent replaces
   any pre-PR candidate tree with a neutral empty commit equal to `origin/main`,
-  publishes the fixed draft body plus exact-head review-findings handoff, and
+  records the fixed exact-head body locally before remote operations, publishes
+  the same review-findings handoff, and
   never requests a second implementation. Definitive failed/cancelled required
   checks and a
   current-base conflict instead publish the existing review-findings handoff so
@@ -267,7 +268,14 @@ Last verified: 2026-08-12
   receives the fixed-body handoff without autonomous rebaselining. The same
   task path/digest must still resolve to the sole issue binding after every
   long model wait and at both final merge fences; edit, move, replacement,
-  deletion, or binding drift produces the fixed human handoff. Before merge it
+  deletion, or binding drift produces the fixed human handoff. The last scope
+  evaluation cannot fetch past that fence: it uses the caller-fetched ref, then
+  the parent performs the final task comparison. A local terminal marker is
+  recovered before remote synchronization. Remote replacement is authorized
+  only by an exact locally retained neutral handoff head from a proven parent
+  push; a newly appeared or different deterministic branch is preserved and
+  fails closed, including through an explicit nonexistence lease on branch
+  creation. Before merge it
   revalidates live issue authority, PR head, exact parent body digest/editor/
   issue binding, required checks, current-base mergeability, and both old and
   new paths of any rename or copy. Only the enumerated Frog autofix script files,

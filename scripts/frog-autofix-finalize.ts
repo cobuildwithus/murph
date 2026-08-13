@@ -77,14 +77,14 @@ export function finalizeReadyRepair(
   if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
 
   dependencies.refreshAndVerifyIssue();
-  if (!dependencies.taskAuthorityMatches(identity)) {
-    return "awaiting-human-authority";
-  }
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   if (!dependencies.requiredChecksPass(identity)) {
     throw new Error("required pull request checks changed before merge");
   }
   if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
+  if (!dependencies.taskAuthorityMatches(identity)) {
+    return "awaiting-human-authority";
+  }
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   dependencies.merge(identity);
   if (!dependencies.pullRequestIsMerged(identity)) {
