@@ -37,7 +37,7 @@ describe('expanded wearable awareness', () => {
     expect(prompt).toContain('Connected health data can include body-composition')
     expect(prompt).toContain('respiratory, metabolic, treatment, alert, accessibility, environmental')
     expect(prompt).toContain('ECG-summary, and workout-summary observations')
-    expect(prompt).toContain('Read these global observations with bounded `vault-cli measurement entry list`')
+    expect(prompt).toContain('Read these signals with bounded `vault-cli measurement entry list`')
     expect(prompt).toContain('reserve `wearables metric` for catalog aliases')
     expect(prompt).toContain('not proof a source supplied it')
     expect(prompt).toContain('missing means unavailable, not zero')

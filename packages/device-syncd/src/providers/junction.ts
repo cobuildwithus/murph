@@ -6276,9 +6276,8 @@ function filterJunctionTimeseriesRecordsToWindow(
     return [...records];
   }
 
-  const preferIntervalStart = usesJunctionTimeseriesIntervalStartOwnership(
-    resolveJunctionTimeseriesResourcePolicy(resource),
-  );
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  const preferIntervalStart = usesJunctionTimeseriesIntervalStartOwnership(policy);
   return records.filter((record) => {
     const entry = readPlainObject(record);
     if (!entry) {
@@ -6294,9 +6293,17 @@ function filterJunctionTimeseriesRecordsToWindow(
 
     if (
       dateQueryFormat === "date"
-      && (resource === "steps" || resource === "distance")
-      && isJunctionFloatingCalendarTimestamp(rawTimestamp)
+      && policy?.normalizationMode === "daily_aggregate"
+      && (
+        isJunctionFloatingCalendarTimestamp(rawTimestamp)
+        || resolveJunctionExtendedTimeseriesBackfillPolicy(resource)?.completion
+          === "daily_aggregate"
+      )
     ) {
+      // Junction's date-mode response owns the provider calendar day. Keep
+      // every interval for extended daily aggregates together even when an
+      // explicit offset crosses UTC midnight. Bounded activity totals retain
+      // their established instant ownership for offset-bearing intervals.
       return rawTimestamp.slice(0, 10) === windowStart.slice(0, 10);
     }
 
