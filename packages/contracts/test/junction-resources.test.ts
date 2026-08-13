@@ -30,6 +30,11 @@ const EXPECTED_DEFAULTS = [
   "glucose",
   "blood_pressure",
   "note",
+  "steps",
+  "distance",
+  "calories_active",
+  "heartrate",
+  "weight",
 ];
 
 const EXPECTED_NEW_SPARSE_OPT_INS = [
@@ -85,11 +90,6 @@ const EXPECTED_DENSE_FEATURE_OPT_INS = [
 ];
 
 const EXPECTED_OPT_IN = [
-  "steps",
-  "distance",
-  "calories_active",
-  "heartrate",
-  "weight",
   ...EXPECTED_NEW_SPARSE_OPT_INS,
   ...EXPECTED_NEXT_OPT_INS,
   ...EXPECTED_DENSE_FEATURE_OPT_INS,
