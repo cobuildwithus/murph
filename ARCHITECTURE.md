@@ -139,7 +139,12 @@ controls, including the complete prompt-preset directory, exactly match trusted
 parent has refreshed `origin/main`, and at both finalization refreshes including
 immediately before merge. Review-control drift uses the existing exact-head
 review-findings handoff; superseded review evidence never retains unattended
-merge or issue-closure authority. Either review returning findings, a final
+merge or issue-closure authority. The primary head that loaded the Frog parent
+is also retained for the invocation. The existing loaded-runner path inventory
+is compared from that head to each freshly fetched `origin/main` at the same
+post-review and finalization fences. Unrelated main movement remains allowed;
+loaded authority drift uses the same handoff so an old in-memory parent cannot
+accept review evidence, merge, or close under superseded policy. Either review returning findings, a final
 review requiring a scope retrospective, or a candidate changing those controls creates the same
 durable human-review handoff; the automation does not ask another child to
 remediate review prose. After both reviews pass, it waits for required CI.

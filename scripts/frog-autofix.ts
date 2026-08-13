@@ -621,6 +621,25 @@ export function primaryAdvanceRequiresRestart(paths: string[]): boolean {
   return paths.some((filePath) => loadedRunnerPaths.includes(filePath));
 }
 
+export function loadedRunnerControlsMatch(
+  primary: string,
+  loadedRunnerHead: string,
+): boolean {
+  if (!/^[0-9a-f]{40}$/u.test(loadedRunnerHead)) return false;
+  return runCommand(
+    "git",
+    [
+      "diff",
+      "--quiet",
+      loadedRunnerHead,
+      "origin/main",
+      "--",
+      ...loadedRunnerPaths,
+    ],
+    primary,
+  ).status === 0;
+}
+
 function changedAuthorityPaths(root: string, from: string, to: string): string[] {
   const noRenames = runCommand(
     "git",
@@ -1883,6 +1902,7 @@ function runCanonicalPullRequestReview(options: {
   head: string;
   issueNumber: number;
   kind: "final" | "specialist";
+  loadedRunnerHead: string;
   primary: string;
   prompt: string;
   pullRequest: number;
@@ -1984,7 +2004,10 @@ function runCanonicalPullRequestReview(options: {
     removeTrustedReviewCheckout(options.primary, checkout);
   }
   if (postReviewDisposition === "operator-handoff") return "operator-handoff";
-  if (!trustedReviewControlsMatch(options.primary, options.worktree)) {
+  if (
+    !loadedRunnerControlsMatch(options.primary, options.loadedRunnerHead)
+    || !trustedReviewControlsMatch(options.primary, options.worktree)
+  ) {
     return "controls-changed";
   }
   const response = readBoundedParentFile(responsePath, 1024 * 1024);
@@ -3336,6 +3359,7 @@ function exactHeadIsLocalAgentOnly(
 function finalizeReviewedRepair(
   primary: string,
   worktree: string,
+  loadedRunnerHead: string,
   branch: string,
   issueNumber: number,
   pullRequest: number,
@@ -3431,6 +3455,10 @@ function finalizeReviewedRepair(
       primary,
       identity.pullRequest,
     ),
+    loadedRunnerMatches: () => loadedRunnerControlsMatch(
+      primary,
+      loadedRunnerHead,
+    ),
     reviewControlsMatch: () => trustedReviewControlsMatch(primary, worktree),
     taskAuthorityMatches: (identity) => committedFrictionTaskMatches(
       primary,
@@ -3443,6 +3471,7 @@ function finalizeReviewedRepair(
 async function reviewPublishAndFinalize(options: {
   branch: string;
   issueNumber: number;
+  loadedRunnerHead: string;
   primary: string;
   recoveredExistingBody: string | null;
   task: FrogTaskIdentity;
@@ -3575,6 +3604,7 @@ async function reviewPublishAndFinalize(options: {
       head,
       issueNumber: options.issueNumber,
       kind: "specialist",
+      loadedRunnerHead: options.loadedRunnerHead,
       primary: options.primary,
       prompt: `Review PR #${pullRequest} for the repair bound to Frog issue #${options.issueNumber} at exact head ${head}. Apply every preliminary lens declared in the PR body. Include #${options.issueNumber} and ${head.slice(0, 12)} in the response, then end with SPECIALIST_REVIEW_COMPLETE and exactly one SPECIALIST_OUTCOME marker.`,
       pullRequest,
@@ -3602,6 +3632,7 @@ async function reviewPublishAndFinalize(options: {
       head,
       issueNumber: options.issueNumber,
       kind: "final",
+      loadedRunnerHead: options.loadedRunnerHead,
       primary: options.primary,
       prompt: `Review PR #${pullRequest} for the repair bound to Frog issue #${options.issueNumber} at exact head ${head}. The preliminary specialist gate passed this same head. Perform final substantive round 1 from the canonical full snapshot. Include #${options.issueNumber} and ${head.slice(0, 12)} in the response, then end with REVIEW_COMPLETE and exactly one ROUND_OUTCOME marker.`,
       pullRequest,
@@ -3683,6 +3714,7 @@ async function reviewPublishAndFinalize(options: {
   const result = finalizeReviewedRepair(
     options.primary,
     options.worktree,
+    options.loadedRunnerHead,
     options.branch,
     options.issueNumber,
     pullRequest,
@@ -3750,6 +3782,7 @@ async function runOnce() {
       console.log("Primary advanced to origin/main; the next run will use the updated launcher.");
       return;
     }
+    const loadedRunnerHead = requireCommand("git", ["rev-parse", "HEAD"], primary);
     const eligible = discoverEligibleIssues(primary);
     const issue = eligible[0];
     if (!issue) {
@@ -3987,6 +4020,7 @@ async function runOnce() {
       const result = await reviewPublishAndFinalize({
         branch,
         issueNumber: issue.number,
+        loadedRunnerHead,
         primary,
         recoveredExistingBody,
         task: repairTask,

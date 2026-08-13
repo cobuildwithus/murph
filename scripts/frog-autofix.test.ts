@@ -61,6 +61,7 @@ import {
   materializeCommittedFrictionTask,
   mergedIssueClosureAction,
   mergedPullRequestForClosure,
+  loadedRunnerControlsMatch,
   primaryAdvanceRequiresRestart,
   recoverablePullRequestBody,
   recoveredReviewHandoffBody,
@@ -902,6 +903,10 @@ describe("Frog autofix guards", () => {
       .toBeGreaterThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
     expect(canonical.indexOf("refreshAndRequireCommittedFrictionTask("))
       .toBeGreaterThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
+    expect(canonical.indexOf("loadedRunnerControlsMatch("))
+      .toBeGreaterThan(canonical.indexOf("refreshAndRequireCommittedFrictionTask("));
+    expect(canonical.indexOf("loadedRunnerControlsMatch("))
+      .toBeLessThan(canonical.indexOf("const response = readBoundedParentFile("));
     expect(canonical.indexOf("trustedReviewControlsMatch("))
       .toBeGreaterThan(canonical.indexOf("refreshAndRequireCommittedFrictionTask("));
     expect(canonical.indexOf("trustedReviewControlsMatch("))
@@ -1881,6 +1886,10 @@ describe("Frog autofix guards", () => {
         events.push("checks");
         return true;
       },
+      loadedRunnerMatches: () => {
+        events.push("loaded-runner");
+        return true;
+      },
       reviewControlsMatch: () => {
         events.push("review-controls");
         return true;
@@ -1897,6 +1906,7 @@ describe("Frog autofix guards", () => {
       "checks",
       "verify-issue",
       "task",
+      "loaded-runner",
       "review-controls",
       "pr",
       "checks",
@@ -1907,6 +1917,7 @@ describe("Frog autofix guards", () => {
       "checks",
       "scope",
       "task",
+      "loaded-runner",
       "review-controls",
       "pr",
       "merge",
@@ -2036,6 +2047,7 @@ describe("Frog autofix guards", () => {
           if (failure === "authority") throw new Error("revoked Frog authority");
         },
         requiredChecksPass: () => failure !== "checks",
+        loadedRunnerMatches: () => true,
         reviewControlsMatch: () => true,
         taskAuthorityMatches: () => true,
       };
@@ -2061,6 +2073,7 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => false,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      loadedRunnerMatches: () => true,
       reviewControlsMatch: () => true,
       taskAuthorityMatches: () => true,
     })).toBe("awaiting-human-conflict");
@@ -2086,6 +2099,7 @@ describe("Frog autofix guards", () => {
         pullRequestIsMerged: () => false,
         refreshAndVerifyIssue: () => undefined,
         requiredChecksPass: () => true,
+        loadedRunnerMatches: () => true,
         reviewControlsMatch: () => true,
         taskAuthorityMatches: () => {
           taskChecks += 1;
@@ -2122,11 +2136,49 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => false,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      loadedRunnerMatches: () => true,
       reviewControlsMatch: () => true,
       taskAuthorityMatches: () => !taskRevokedByFinalScopeRefresh,
     })).toBe("awaiting-human-authority");
     expect(scopeChecks).toBe(2);
     expect(mergeCalls).toBe(0);
+
+    for (const driftAt of [1, 2]) {
+      let runnerChecks = 0;
+      let mergeCalls = 0;
+      let closeCalls = 0;
+      const result = finalizeReadyRepair(identity, {
+        autoMergeAllowed: () => true,
+        closeIssue: () => {
+          closeCalls += 1;
+        },
+        currentPullRequest: () => ({
+          bodyAuthoritative: true,
+          bodySha256: identity.bodySha256,
+          head: identity.head,
+          issueBound: true,
+          pullRequest: identity.pullRequest,
+        }),
+        issueIsClosed: () => false,
+        merge: () => {
+          mergeCalls += 1;
+        },
+        mergeTreePasses: () => true,
+        pullRequestIsMerged: () => false,
+        refreshAndVerifyIssue: () => undefined,
+        requiredChecksPass: () => true,
+        loadedRunnerMatches: () => {
+          runnerChecks += 1;
+          return runnerChecks !== driftAt;
+        },
+        reviewControlsMatch: () => true,
+        taskAuthorityMatches: () => true,
+      });
+      expect(result).toBe("awaiting-human-review");
+      expect(mergeCalls).toBe(0);
+      expect(closeCalls).toBe(0);
+      expect(runnerChecks).toBe(driftAt);
+    }
 
     for (const driftAt of [1, 2]) {
       let controlChecks = 0;
@@ -2149,6 +2201,7 @@ describe("Frog autofix guards", () => {
         pullRequestIsMerged: () => false,
         refreshAndVerifyIssue: () => undefined,
         requiredChecksPass: () => true,
+        loadedRunnerMatches: () => true,
         reviewControlsMatch: () => {
           controlChecks += 1;
           return controlChecks !== driftAt;
@@ -2204,6 +2257,7 @@ describe("Frog autofix guards", () => {
         pullRequestIsMerged: () => false,
         refreshAndVerifyIssue: () => undefined,
         requiredChecksPass: () => true,
+        loadedRunnerMatches: () => true,
         reviewControlsMatch: () => true,
         taskAuthorityMatches: () => true,
       });
@@ -2236,6 +2290,7 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => merged,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      loadedRunnerMatches: () => true,
       reviewControlsMatch: () => true,
       taskAuthorityMatches: () => true,
     })).toBe("merged");
@@ -2481,6 +2536,43 @@ describe("Frog autofix guards", () => {
     expect(primaryAdvanceRequiresRestart(["apps/web/app/page.tsx"])).toBe(false);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix.ts"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-parent.ts"])).toBe(true);
+
+    const root = mkdtempSync(path.join(tmpdir(), "frog-loaded-runner-"));
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    try {
+      mkdirSync(path.join(root, "scripts"), { recursive: true });
+      mkdirSync(path.join(root, "apps", "web"), { recursive: true });
+      writeFileSync(path.join(root, "scripts", "frog-autofix-finalize.ts"), "trusted\n");
+      writeFileSync(path.join(root, "apps", "web", "page.tsx"), "unrelated\n");
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "loaded runner");
+      const loadedHead = git("rev-parse", "HEAD");
+      git("update-ref", "refs/remotes/origin/main", loadedHead);
+      expect(loadedRunnerControlsMatch(root, loadedHead)).toBe(true);
+
+      writeFileSync(path.join(root, "apps", "web", "page.tsx"), "advanced\n");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "unrelated main advance");
+      const unrelatedMain = git("rev-parse", "HEAD");
+      git("update-ref", "refs/remotes/origin/main", unrelatedMain);
+      expect(loadedRunnerControlsMatch(root, loadedHead)).toBe(true);
+
+      writeFileSync(path.join(root, "scripts", "frog-autofix-finalize.ts"), "replaced\n");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "replace loaded authority");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      expect(loadedRunnerControlsMatch(root, loadedHead)).toBe(false);
+      expect(loadedRunnerControlsMatch(root, "not-a-commit")).toBe(false);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   it("reuses interrupted active plans and advances past completed phase names", () => {

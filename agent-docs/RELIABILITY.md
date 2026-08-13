@@ -320,7 +320,11 @@ Last verified: 2026-08-13
   inventory is likewise compared with freshly fetched `origin/main` after each
   long canonical review and after both finalization refreshes, including just
   before merge. Drift publishes the existing review-findings handoff instead of
-  accepting or merging superseded review evidence. The last scope
+  accepting or merging superseded review evidence. The invocation also retains
+  the primary head that loaded the parent and compares the existing loaded-runner
+  inventory from that head to the same fresh refs. Unrelated main changes remain
+  admissible, while a loaded authority-module change uses the same handoff and
+  cannot be accepted, merged, or followed by issue closure. The last scope
   evaluation cannot fetch past that fence: it uses the caller-fetched ref, then
   the parent performs the final task comparison. A local terminal marker is
   recovered before remote synchronization. Remote replacement is authorized

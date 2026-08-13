@@ -659,6 +659,9 @@ parent-local review-body archive binding with changed digest/editor/body/head
 rejection before and after each model wait and before metadata persistence,
 fresh trusted-review-control comparison after each canonical model wait and at
 both finalization refreshes with exact-head handoff on drift,
+loaded-runner-version comparison against each of those freshly fetched refs,
+with unrelated main movement allowed and exact-head handoff before response
+acceptance, merge, or issue closure on loaded authority drift,
 operator-handoff preservation during a blocked model review, non-closing exact
 issue binding across short and full-URL forms plus parent-only post-merge
 closure and never-closed retry that refuses deliberate reopen,

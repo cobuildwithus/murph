@@ -26,6 +26,7 @@ export interface ReadyRepairFinalizationDependencies {
   pullRequestIsMerged: (identity: ReadyRepairIdentity) => boolean;
   refreshAndVerifyIssue: () => void;
   requiredChecksPass: (identity: ReadyRepairIdentity) => boolean;
+  loadedRunnerMatches: (identity: ReadyRepairIdentity) => boolean;
   reviewControlsMatch: (identity: ReadyRepairIdentity) => boolean;
   taskAuthorityMatches: (identity: ReadyRepairIdentity) => boolean;
 }
@@ -65,6 +66,9 @@ export function finalizeReadyRepair(
   if (!dependencies.taskAuthorityMatches(identity)) {
     return "awaiting-human-authority";
   }
+  if (!dependencies.loadedRunnerMatches(identity)) {
+    return "awaiting-human-review";
+  }
   if (!dependencies.reviewControlsMatch(identity)) {
     return "awaiting-human-review";
   }
@@ -88,6 +92,9 @@ export function finalizeReadyRepair(
   if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
   if (!dependencies.taskAuthorityMatches(identity)) {
     return "awaiting-human-authority";
+  }
+  if (!dependencies.loadedRunnerMatches(identity)) {
+    return "awaiting-human-review";
   }
   if (!dependencies.reviewControlsMatch(identity)) {
     return "awaiting-human-review";

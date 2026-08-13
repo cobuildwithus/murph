@@ -13,6 +13,8 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
   handoff to the unchanged existing PR head, leaving the oldest issue pinned.
 - Trusted ReviewGPT controls could change during a long review or CI wait while
   the previously produced PASS still retained unattended merge authority.
+- Loaded Frog authority modules could change on `main` after invocation start
+  while the old in-memory parent still retained response and merge authority.
 
 ## Design
 
@@ -29,13 +31,18 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
 - Reuse the existing trusted-control comparison after every long canonical
   review and at both finalization refreshes. Any drift uses the existing exact-
   head review-findings handoff and never reaches merge or issue closure.
+- Snapshot the primary head that loaded the runner and compare the existing
+  loaded-runner inventory to freshly fetched `origin/main` at the same fences.
+  Unrelated default-branch movement remains allowed; loaded authority drift
+  uses the same exact-head handoff.
 
 ## Verification
 
 - Source-order proof for retryable post-worker authority infrastructure.
 - Real-Git descendant normalization and non-ancestor rejection.
 - Existing-PR projection, no-push, exact-body, and queue-handoff guards.
-- Post-review and pre-merge trusted-control drift handoff guards.
+- Post-review and pre-merge trusted-control and loaded-runner drift handoff
+  guards, with unrelated default-branch movement preserved.
 - Focused Frog suite, repo tooling, workspace typecheck, docs/shell/permission
   guards, privacy checks, current-base merge tree, and a fresh valid exact-head
   ReviewGPT round.
@@ -47,4 +54,5 @@ preserving the existing retry, task-authority, PR-body, and queue owners.
 - [x] Normalize proven unpushed descendants to the unchanged existing PR head.
 - [x] Add production-shaped proof and update owner documentation.
 - [x] Fence accepted review evidence and final merge on current trusted controls.
+- [x] Fence accepted review evidence and final merge on the loaded runner version.
 - [ ] Verify, commit, push, and continue exact-head review and CI.

@@ -1189,6 +1189,13 @@ Last verified: 2026-08-13
   other trusted-control drift produces the existing exact-head review-findings
   handoff, so review evidence generated under superseded controls grants no
   merge or issue-closure authority.
+  The invocation retains the exact primary head that loaded the Frog parent and
+  compares the existing loaded-runner inventory from that head to every fresh
+  post-review and finalization `origin/main`. Unrelated default-branch changes
+  remain allowed. A changed loaded launcher, orchestrator, command, finalizer,
+  guard, parent, or recovery module produces that same handoff before response
+  acceptance or merge, preventing old in-memory authority from closing the
+  issue under a newer trusted policy.
   Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
   controls produce the same exact-head human handoff; review prose is never
   delegated to another autonomous editing turn.
