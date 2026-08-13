@@ -6930,7 +6930,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
       timeseriesCursor: ownerWindowStart,
-      timeseriesResourceCursor: JSON.stringify({ v: 1, a: "stress_level", i: [] }),
+      timeseriesResourceCursor: "stress_level",
     });
 
     yieldRequested = false;
