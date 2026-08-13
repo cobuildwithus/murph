@@ -162,7 +162,8 @@ import {
 } from "./member-access";
 import {
   prepareHostedFamilyOwnerNotification,
-  resolveHostedFamilyInviteTokenForInbound,
+  resolveHostedFamilyPhoneInvitePreparation,
+  type HostedFamilyPhoneInvitePreparation,
   type PreparedHostedFamilyOwnerNotification,
 } from "./family-plan";
 import {
@@ -2017,7 +2018,7 @@ interface HostedThreadRoutingCryptoPreparation {
     memberId: string;
     preparedControlRoot: PreparedHostedDomainRootForWeb;
     preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
-    preparedFamilyInviteCode: string | null;
+    preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
     preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
     preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
     identityRecord: HostedMemberIdentityRecord | null;
@@ -2432,7 +2433,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   memberId: string;
   preparedControlRoot: PreparedHostedDomainRootForWeb;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
-  preparedFamilyInviteCode: string | null;
+  preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
   preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
   preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
   identityRecord: HostedMemberIdentityRecord | null;
@@ -2449,7 +2450,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   }
 
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
-  const [identityRecord, routingRecord, accessAllowed, preparedFamilyInviteCode] =
+  const [identityRecord, routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([
       readHostedMemberIdentityRecord({
         memberId,
@@ -2464,18 +2465,25 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
         prisma: input.prisma,
       }),
       context.participantContact?.kind === "phone"
-        ? resolveHostedFamilyInviteTokenForInbound({
+        ? resolveHostedFamilyPhoneInvitePreparation({
+            acceptedMemberId: memberId,
+            now: new Date(context.occurredAt),
+            phoneNumber: context.participantContact.value,
             prisma: input.prisma,
             text: context.summary.text,
           })
         : null,
     ]);
+  const shouldPrepareFamilyAcceptance =
+    preparedFamilyInvite?.kind === "pending_acceptance";
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
-      ...(preparedFamilyInviteCode
+      ...(shouldPrepareFamilyAcceptance
         ? {}
         : {
-            domains: accessAllowed
+            domains: preparedFamilyInvite?.kind === "accepted_replay"
+              ? (["control"] as const)
+              : accessAllowed
               ? (["control", "ingress"] as const)
               : (["control"] as const),
           }),
@@ -2490,7 +2498,8 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       userId: memberId,
     });
   const shouldPrepareIngress =
-    accessAllowed || preparedFamilyInviteCode !== null;
+    shouldPrepareFamilyAcceptance
+    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
 
   // Candidate signing finishes before unwrap preparation begins. Each phase is
   // bounded at two concurrent provider operations: ingress runs beside one
@@ -2573,9 +2582,9 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   const identityState = identityRecord
     ? await projectHostedMemberIdentityState(identityRecord, input.prisma)
     : null;
-  const preparedFamilyOwnerNotification = preparedFamilyInviteCode
+  const preparedFamilyOwnerNotification = shouldPrepareFamilyAcceptance
     ? await prepareHostedFamilyOwnerNotification({
-        inviteCode: preparedFamilyInviteCode,
+        inviteCode: preparedFamilyInvite.inviteCode,
         prisma: input.prisma,
       })
     : null;
@@ -2585,7 +2594,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     memberId,
     preparedControlRoot: controlRoutingResult.value.preparedControlRoot,
     preparedCryptoDomainRoots,
-    preparedFamilyInviteCode,
+    preparedFamilyInvite,
     preparedFamilyOwnerNotification,
     preparedIngressRoot: ingressRootResult.value,
     routingRecord,

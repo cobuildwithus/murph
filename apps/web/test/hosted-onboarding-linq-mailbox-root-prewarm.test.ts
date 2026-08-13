@@ -158,6 +158,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async (importOriginal) => {
   return {
     ...actual,
     prepareHostedFamilyOwnerNotification: vi.fn(async () => null),
+    resolveHostedFamilyPhoneInvitePreparation: vi.fn(async () => null),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(async () => null),
   };
 });
@@ -1230,7 +1231,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
                 userId: "member_direct_a",
               },
               preparedCryptoDomainRoots: new Map(),
-              preparedFamilyInviteCode: null,
+              preparedFamilyInvite: null,
               preparedFamilyOwnerNotification: null,
               preparedIngressRoot: {
                 domain: "ingress",
@@ -1263,7 +1264,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
                 userId: "member_direct_b",
               },
               preparedCryptoDomainRoots: new Map(),
-              preparedFamilyInviteCode: null,
+              preparedFamilyInvite: null,
               preparedFamilyOwnerNotification: null,
               preparedIngressRoot: {
                 domain: "ingress",

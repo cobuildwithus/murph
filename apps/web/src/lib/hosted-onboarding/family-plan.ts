@@ -4724,6 +4724,100 @@ export async function resolveHostedFamilyInviteTokenForInbound(input: {
   return invite ? inviteCode : null;
 }
 
+export type HostedFamilyPhoneInvitePreparation = {
+  inviteCode: string;
+  kind: "accepted_replay" | "pending_acceptance";
+};
+
+type HostedFamilyPhoneInvitePreparationSnapshot = {
+  acceptedByMemberId: string | null;
+  expiresAt: Date;
+  status: string;
+  targetEmailLookupKey: string | null;
+  targetPhoneLookupKey: string | null;
+  targetTelegramUsernameLookupKey: string | null;
+};
+
+function classifyHostedFamilyPhoneInvitePreparation(input: {
+  acceptedMemberId: string | null;
+  invite: HostedFamilyPhoneInvitePreparationSnapshot;
+  inviteCode: string;
+  now: Date;
+  phoneNumber: string;
+}): HostedFamilyPhoneInvitePreparation | null {
+  const phoneAccepted = hostedFamilyInviteIsFullyUnbound(input.invite)
+    || Boolean(
+      input.invite.targetPhoneLookupKey
+      && hostedPhoneLookupKeyMatchesValue(
+        input.phoneNumber,
+        input.invite.targetPhoneLookupKey,
+      ),
+    );
+  if (!phoneAccepted) {
+    return null;
+  }
+  if (
+    input.invite.status === "accepted"
+    && input.invite.acceptedByMemberId === input.acceptedMemberId
+  ) {
+    return {
+      inviteCode: input.inviteCode,
+      kind: "accepted_replay",
+    };
+  }
+  if (
+    input.invite.status === "pending"
+    && input.invite.expiresAt > input.now
+  ) {
+    return {
+      inviteCode: input.inviteCode,
+      kind: "pending_acceptance",
+    };
+  }
+  return null;
+}
+
+/**
+ * Classifies only the Family paths that can consume activation or replay
+ * authority for this exact direct-phone member. Existing but expired,
+ * wrong-channel, wrong-phone, or differently accepted codes remain ordinary
+ * direct preparation and are classified transactionally without provider work.
+ */
+export async function resolveHostedFamilyPhoneInvitePreparation(input: {
+  acceptedMemberId: string;
+  now: Date;
+  phoneNumber: string;
+  prisma: HostedOnboardingReadClient;
+  text: string | null | undefined;
+}): Promise<HostedFamilyPhoneInvitePreparation | null> {
+  const inviteCode = parseHostedFamilyInviteStartToken(input.text);
+  if (!inviteCode) {
+    return null;
+  }
+  const invite = await input.prisma.hostedAccountGroupInvite.findUnique({
+    select: {
+      acceptedByMemberId: true,
+      expiresAt: true,
+      status: true,
+      targetEmailLookupKey: true,
+      targetPhoneLookupKey: true,
+      targetTelegramUsernameLookupKey: true,
+    },
+    where: {
+      inviteCode,
+    },
+  });
+  return invite
+    ? classifyHostedFamilyPhoneInvitePreparation({
+        acceptedMemberId: input.acceptedMemberId,
+        invite,
+        inviteCode,
+        now: input.now,
+        phoneNumber: input.phoneNumber,
+      })
+    : null;
+}
+
 export interface PreparedHostedFamilyOwnerNotification {
   inviteCode: string;
   ownerIdentity: HostedMemberIdentityRecord | null;
@@ -5092,6 +5186,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber: string;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
+  preparedInvite?: HostedFamilyPhoneInvitePreparation | null;
   preparedOwnerNotification?: PreparedHostedFamilyOwnerNotification;
   text: string | null | undefined;
   tx: Prisma.TransactionClient;
@@ -5103,6 +5198,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   const now = input.now ?? new Date();
   const invite = await input.tx.hostedAccountGroupInvite.findUnique({
     select: {
+      acceptedByMemberId: true,
       expiresAt: true,
       status: true,
       targetEmailLookupKey: true,
@@ -5116,6 +5212,21 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   if (!invite) {
     return null;
   }
+  if (Object.prototype.hasOwnProperty.call(input, "preparedInvite")) {
+    const currentPreparation = classifyHostedFamilyPhoneInvitePreparation({
+      acceptedMemberId: input.acceptedMember?.member.id ?? null,
+      invite,
+      inviteCode,
+      now,
+      phoneNumber: input.phoneNumber,
+    });
+    if (
+      currentPreparation?.inviteCode !== input.preparedInvite?.inviteCode
+      || currentPreparation?.kind !== input.preparedInvite?.kind
+    ) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+  }
   const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
   if (!invite.targetPhoneLookupKey && !isFullyUnbound) {
     return null;
@@ -5123,6 +5234,13 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   if (
     invite.status !== "accepted" &&
     (invite.status !== "pending" || invite.expiresAt <= now)
+  ) {
+    return null;
+  }
+  if (
+    invite.status === "accepted"
+    && input.acceptedMember
+    && invite.acceptedByMemberId !== input.acceptedMember.member.id
   ) {
     return null;
   }

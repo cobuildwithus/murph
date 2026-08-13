@@ -30,6 +30,7 @@ import {
   buildHostedFamilyDraftCheckoutConflictReplyText,
   buildHostedFamilyInviteAcceptedReplyText,
   HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
+  type HostedFamilyPhoneInvitePreparation,
   type PreparedHostedFamilyOwnerNotification,
   resolveHostedFamilyInviteTokenForInbound,
 } from "./family-plan";
@@ -695,7 +696,7 @@ interface PreparedHostedLinqDirectMailboxPayloadRoot {
   memberId: string;
   preparedControlRoot: PreparedHostedDomainRootForWeb;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
-  preparedFamilyInviteCode: string | null;
+  preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
   preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
   preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
   routingRecord: HostedMemberRoutingRecord | null;
@@ -1728,6 +1729,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       if (
         exactMemberAccess.allowed
         && !preparedDirectMailboxControlAuthority.preparedIngressRoot
+        && preparedDirectMailboxControlAuthority.preparedFamilyInvite?.kind
+          !== "accepted_replay"
       ) {
         throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
       }
@@ -1843,11 +1846,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
   const familyInviteTokenPresent = familyInviteCode !== null;
   const preparedFamilyCryptoDomainRoots =
-    familyInviteCode && existingMember && directMailboxPreparationProvided
+    familyInviteCode
+      && existingMember
+      && directMailboxPreparationProvided
+      && preparedDirectRoutingAuthority?.preparedFamilyInvite?.kind
+        === "pending_acceptance"
       ? (() => {
           if (
-            !preparedDirectRoutingAuthority
-            || preparedDirectRoutingAuthority.preparedFamilyInviteCode
+            preparedDirectRoutingAuthority.preparedFamilyInvite.inviteCode
               !== familyInviteCode
             || !preparedDirectRoutingAuthority.preparedCryptoDomainRoots
             || !preparedDirectRoutingAuthority.preparedFamilyOwnerNotification
@@ -1865,7 +1871,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (participantContact.kind === "phone") {
     try {
       familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
-        ...(preparedFamilyCryptoDomainRoots && preparedDirectRoutingAuthority
+        ...(familyInviteCode && preparedDirectRoutingAuthority
           ? {
               acceptedMember: {
                 currentIdentity: preparedDirectRoutingAuthority.identityState,
@@ -1873,6 +1879,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
                 preparedControlRoot:
                   preparedDirectRoutingAuthority.preparedControlRoot,
               },
+              preparedInvite: preparedDirectRoutingAuthority.preparedFamilyInvite,
             }
           : {}),
         now: new Date(occurredAt),
@@ -2240,11 +2247,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       if (!preparedDirectMailbox) {
         throw hostedLinqDirectMailboxPreparationRequired("member");
       }
-      await revalidatePreparedHostedLinqDirectIngressRootTx({
-        memberId: existingMember.id,
-        prepared: preparedDirectMailbox,
-        prisma: input.prisma,
-      });
     }
 
     const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
@@ -2377,6 +2379,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
     const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
       summary.messageId,
     );
+    if (preparedDirectMailbox) {
+      await revalidatePreparedHostedLinqDirectIngressRootTx({
+        memberId: existingMember.id,
+        prepared: preparedDirectMailbox,
+        prisma: input.prisma,
+      });
+    }
     const mailboxAppend = preparedDirectMailbox?.preparedIngressRoot
       ? await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
           envelope: mailboxWake,

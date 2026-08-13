@@ -197,6 +197,7 @@ const mocks = vi.hoisted(() => {
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     prepareHostedFamilyOwnerNotification: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
+    resolveHostedFamilyPhoneInvitePreparation: vi.fn(),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       vi.fn<() => Promise<string | null>>(async () => null),
@@ -427,12 +428,22 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   mocks.resolveHostedFamilyInviteTokenForInbound.mockImplementation(async (input: {
     text: string | null | undefined;
   }) => actual.parseHostedFamilyInviteStartToken(input.text));
+  mocks.resolveHostedFamilyPhoneInvitePreparation.mockImplementation(async (input: {
+    text: string | null | undefined;
+  }) => {
+    const inviteCode = actual.parseHostedFamilyInviteStartToken(input.text);
+    return inviteCode
+      ? { inviteCode, kind: "pending_acceptance" as const }
+      : null;
+  });
 
   return {
     ...actual,
     acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
     buildHostedFamilyInviteAcceptedReplyText: mocks.buildHostedFamilyInviteAcceptedReplyText,
     prepareHostedFamilyOwnerNotification: mocks.prepareHostedFamilyOwnerNotification,
+    resolveHostedFamilyPhoneInvitePreparation:
+      mocks.resolveHostedFamilyPhoneInvitePreparation,
     resolveHostedFamilyInviteTokenForInbound: mocks.resolveHostedFamilyInviteTokenForInbound,
   };
 });
@@ -4573,18 +4584,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
     expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
       .toHaveBeenCalledTimes(4);
-    expect(lockOrder.slice(0, 10)).toEqual([
+    expect(lockOrder.filter((step) => step.endsWith("-root"))).toEqual([
       "control-root",
-      "member-row",
-      "home-route",
-      "chat-route",
       "ingress-root",
       "control-root",
-      "member-row",
-      "home-route",
-      "chat-route",
       "ingress-root",
     ]);
+    for (const ingressIndex of lockOrder
+      .map((step, index) => step === "ingress-root" ? index : -1)
+      .filter((index) => index >= 0)) {
+      expect(lockOrder.slice(0, ingressIndex)).toContain("chat-route");
+    }
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
@@ -5180,7 +5190,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
         .toHaveBeenCalledTimes(2);
       expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(2);
-      expect(mocks.resolveHostedFamilyInviteTokenForInbound).toHaveBeenCalledTimes(2);
+      expect(mocks.resolveHostedFamilyPhoneInvitePreparation)
+        .toHaveBeenCalledOnce();
+      expect(mocks.resolveHostedFamilyInviteTokenForInbound).toHaveBeenCalledOnce();
       expect(hostedLinqDeliveryFindMany).toHaveBeenCalledTimes(2);
       expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
       expect(hostedInviteCreate).toHaveBeenCalledTimes(1);
@@ -5376,6 +5388,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           }),
           phoneNumber: "+15551234567",
           preparedCryptoDomainRoots,
+          preparedInvite: {
+            inviteCode: "phone_token",
+            kind: "pending_acceptance",
+          },
           preparedOwnerNotification: expect.objectContaining({
             ownerMember: expect.objectContaining({
               id: "member_family_owner",
@@ -5415,6 +5431,159 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       if (defaultPrewarmPreparedRoot) {
         prewarmPreparedRoot.mockImplementation(defaultPrewarmPreparedRoot);
       }
+      mocks.acceptHostedFamilyInviteFromPhoneTx.mockReset();
+      mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
+      restoreRootMock();
+    }
+  });
+
+  it("keeps an unactionable Family code out of activation and owner preparation", async () => {
+    const {
+      prisma,
+      providerDomainsAfterTransactionStart,
+      restoreRootMock,
+    } = await createDirectPreparationTransitionFixture();
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    mocks.resolveHostedFamilyPhoneInvitePreparation.mockResolvedValueOnce(null);
+    const unusedFamilyProviderError = new Error("unused Family provider operation");
+    mocks.prepareHostedFamilyOwnerNotification.mockRejectedValueOnce(
+      unusedFamilyProviderError,
+    );
+    const prepareRootCandidates = vi.mocked(
+      prepareHostedCryptoDomainRootCandidates,
+    );
+    const defaultPrepareRootCandidates =
+      prepareRootCandidates.getMockImplementation();
+    if (!defaultPrepareRootCandidates) {
+      throw new Error("Expected the default root-candidate preparation mock.");
+    }
+    prepareRootCandidates.mockImplementation(async (input) => {
+      if (!input.domains) {
+        throw unusedFamilyProviderError;
+      }
+      return defaultPrepareRootCandidates(input);
+    });
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          data: {
+            parts: [{ type: "text", value: "family_phone_token" }],
+          },
+          eventId: "evt_unactionable_family_preparation",
+        }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "family-invite-not-accepted",
+      });
+
+      expect(prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+        domains: ["control", "ingress"],
+        maxConcurrency: 2,
+        prisma,
+        userId: "member_123",
+      });
+      expect(mocks.prepareHostedFamilyOwnerNotification).not.toHaveBeenCalled();
+      expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith(
+        expect.objectContaining({
+          acceptedMember: expect.objectContaining({
+            member: expect.objectContaining({ id: "member_123" }),
+          }),
+          preparedInvite: null,
+        }),
+      );
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+    } finally {
+      prepareRootCandidates.mockReset();
+      prepareRootCandidates.mockImplementation(defaultPrepareRootCandidates);
+      restoreRootMock();
+    }
+  });
+
+  it("uses control-only preparation for an exact Family acceptance replay", async () => {
+    const {
+      prisma,
+      providerDomainsAfterTransactionStart,
+      restoreRootMock,
+    } = await createDirectPreparationTransitionFixture();
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    mocks.resolveHostedFamilyPhoneInvitePreparation.mockResolvedValueOnce({
+      inviteCode: "phone_token",
+      kind: "accepted_replay",
+    });
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
+      groupId: "group_family_replay",
+      memberId: "member_123",
+      role: "member",
+      status: "active",
+    });
+    const unusedFamilyProviderError = new Error("unused Family provider operation");
+    mocks.prepareHostedFamilyOwnerNotification.mockRejectedValueOnce(
+      unusedFamilyProviderError,
+    );
+    const prepareRootCandidates = vi.mocked(
+      prepareHostedCryptoDomainRootCandidates,
+    );
+    const defaultPrepareRootCandidates =
+      prepareRootCandidates.getMockImplementation();
+    if (!defaultPrepareRootCandidates) {
+      throw new Error("Expected the default root-candidate preparation mock.");
+    }
+    prepareRootCandidates.mockImplementation(async (input) => {
+      if (!input.domains) {
+        throw unusedFamilyProviderError;
+      }
+      return defaultPrepareRootCandidates(input);
+    });
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          data: {
+            parts: [{ type: "text", value: "family_phone_token" }],
+          },
+          eventId: "evt_exact_family_replay_preparation",
+        }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "family-invite-accepted",
+      });
+
+      expect(prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+        domains: ["control"],
+        maxConcurrency: 2,
+        prisma,
+        userId: "member_123",
+      });
+      expect(mocks.prepareHostedFamilyOwnerNotification).not.toHaveBeenCalled();
+      const acceptanceInput = mocks.acceptHostedFamilyInviteFromPhoneTx.mock
+        .calls[0]?.[0];
+      expect(acceptanceInput).toEqual(expect.objectContaining({
+        acceptedMember: expect.objectContaining({
+          member: expect.objectContaining({ id: "member_123" }),
+        }),
+        preparedInvite: {
+          inviteCode: "phone_token",
+          kind: "accepted_replay",
+        },
+      }));
+      expect(acceptanceInput).not.toHaveProperty("preparedCryptoDomainRoots");
+      expect(acceptanceInput).not.toHaveProperty("preparedOwnerNotification");
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+    } finally {
+      prepareRootCandidates.mockReset();
+      prepareRootCandidates.mockImplementation(defaultPrepareRootCandidates);
       mocks.acceptHostedFamilyInviteFromPhoneTx.mockReset();
       mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
       restoreRootMock();
@@ -5790,7 +5959,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         // One bounded pre-transaction lookup decides whether missing Family
         // activation roots must be signed before BEGIN. The carried provider
         // failure still prevents every transactional Family owner below.
-        expect(mocks.resolveHostedFamilyInviteTokenForInbound)
+        expect(mocks.resolveHostedFamilyPhoneInvitePreparation)
           .toHaveBeenCalledTimes(1);
         expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
         expect(prisma.hostedLinqDelivery.findMany).not.toHaveBeenCalled();
@@ -13657,13 +13826,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         reason: "wake-appended-active-member",
       });
       expect(providerPhases.sort()).toEqual(["control", "ingress"]);
-      expect(lockOrder.slice(0, 5)).toEqual([
+      expect(lockOrder.filter((step) => step.endsWith("-root"))).toEqual([
         "control-root",
-        "member-row",
-        "home-route",
-        "chat-route",
         "ingress-root",
       ]);
+      expect(lockOrder.indexOf("ingress-root")).toBeGreaterThan(
+        lockOrder.lastIndexOf("chat-route"),
+      );
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
@@ -13764,6 +13933,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mock.calls.map(
+      ([input]) => input.domain,
+    )).toEqual(["control"]);
   });
 
   it("refuses to rebind a member's home chat when canonical chat classification is unavailable", async () => {
