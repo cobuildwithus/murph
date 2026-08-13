@@ -1,6 +1,6 @@
 # Automation timing verification telemetry and recovery UX
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-13
 
@@ -142,5 +142,21 @@ Updated: 2026-08-13
   continuation; unresolved copy must acknowledge the requested mutation; and
   persistent/mismatch/projection failure needed stronger production-boundary
   proof. The corrected implementation resolves those findings without a new
-  owner, queue, state machine, or retry path. The preliminary pass is not rerun;
-  final round 2 will review the behavior-bearing correction.
+  owner, queue, state machine, or retry path. The preliminary pass was not
+  rerun; final round 2 reviewed the behavior-bearing correction.
+- Corrected-head product-experience revalidation found no remaining finding or
+  material evidence gap: the smallest complete experience is the existing
+  write followed by one invisible host-owned readback only when needed, then
+  one calm confirmation in the initiating conversation. Persistent uncertainty
+  adds no choice, click, setup, provider continuation, or unsupported promise.
+- Final ReviewGPT round 2 reviewed the sensitive full snapshot at
+  `459a716f2ba57f852d14a29a5f6d79dd19d17b0e`, verified every accepted finding's
+  correction, and returned `ROUND_OUTCOME: PASS` with no qualifying findings.
+  The requested Pro model was verified as `gpt-5-6-pro`; its only notes were
+  corrected PR-body line-count arithmetic.
+- Exact-head GitHub checks are green, including assistant, CLI, platform, and
+  app coverage plus release build/typecheck. The final privacy/path scan and
+  `git diff --check` are clean. One local full assistant-engine attempt exceeded
+  the worker memory ceiling after 3,659 passing tests; all changed engine paths
+  passed locally and the exact-head assistant coverage lane passed in CI.
+Completed: 2026-08-13
