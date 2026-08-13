@@ -27,6 +27,9 @@ const DATABASE_HEALTH_RUN_LEASE_MS = 2 * 60 * 1_000;
 const DATABASE_HEALTH_SAMPLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const DATABASE_HEALTH_FETCH_TIMEOUT_MS = 10_000;
 const DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS = 1_000;
+const DIRECT_CONNECTION_ERROR_METRIC_NAME =
+  "planetscale_edge_postgres_connection_errors_total" satisfies
+    DatabaseHealthRequiredMetricName;
 const PLANETSCALE_DISCOVERY_BODY_LIMIT_BYTES = 256 * 1_024;
 const PLANETSCALE_METRICS_BODY_LIMIT_BYTES = 2 * 1_024 * 1_024;
 const LINQ_HEALTH_BODY_LIMIT_BYTES = 256 * 1_024;
@@ -406,16 +409,49 @@ export class DatabaseHealthMonitor {
   }
 
   private async collectMetricObservation(): Promise<DatabaseMetricObservation> {
+    let observation: DatabaseMetricObservation;
     try {
-      const observation = await this.collectMetricObservationOnce();
-      if (hasUsableDatabaseHealthMetric(observation)) {
+      observation = await this.collectMetricObservationOnce();
+    } catch {
+      await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
+      return await this.collectMetricObservationOnce();
+    }
+    if (!hasUsableDatabaseHealthMetric(observation)) {
+      await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
+      return await this.collectMetricObservationOnce();
+    }
+    if (!shouldConfirmMissingDirectConnectionErrors(observation)) {
+      return observation;
+    }
+
+    await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
+    try {
+      const confirmation = await this.collectMetricObservationOnce();
+      if (
+        evaluateDatabaseMetricSnapshot(confirmation.snapshot, null).length > 0
+      ) {
+        return confirmation;
+      }
+      const directConnectionErrorCounters =
+        confirmation.snapshot.directConnectionErrorCounters;
+      if (directConnectionErrorCounters === null) {
         return observation;
       }
+      if (confirmation.missingMetrics.length === 0) {
+        return confirmation;
+      }
+      return {
+        missingMetrics: observation.missingMetrics.filter(
+          (name) => name !== DIRECT_CONNECTION_ERROR_METRIC_NAME,
+        ),
+        snapshot: {
+          ...observation.snapshot,
+          directConnectionErrorCounters,
+        },
+      };
     } catch {
-      // Retry below when the first attempt produced no usable observation.
+      return observation;
     }
-    await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
-    return await this.collectMetricObservationOnce();
   }
 
   private async collectMetricObservationOnce(): Promise<
@@ -1451,6 +1487,14 @@ function hasUsableDatabaseHealthMetric(
 ): boolean {
   return observation.missingMetrics.length
     < DATABASE_HEALTH_REQUIRED_METRIC_NAMES.length;
+}
+
+function shouldConfirmMissingDirectConnectionErrors(
+  observation: DatabaseMetricObservation,
+): boolean {
+  return observation.missingMetrics.length === 1
+    && observation.missingMetrics[0] === DIRECT_CONNECTION_ERROR_METRIC_NAME
+    && evaluateDatabaseMetricSnapshot(observation.snapshot, null).length === 0;
 }
 
 async function readBoundedResponseText(

@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  hostedPhysicalNoteSendResponseSchema,
+} from '@murphai/hosted-execution/physical-notes'
 
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -36,6 +40,10 @@ const RECIPIENT = {
   postalCode: '30308',
   state: 'GA',
 }
+const PREVIOUS_HOSTED_PHYSICAL_NOTE_SEND_RESPONSE_SCHEMA =
+  hostedPhysicalNoteSendResponseSchema
+    .omit({ failureReason: true })
+    .strict()
 const tempRoots: string[] = []
 const authorizeApprovalInput: AssistantAcceptedMessageTargetAuthorizer =
   async (input) => input.messageRef === APPROVAL_INPUT_ID
@@ -71,6 +79,20 @@ describe('assistant physical notes', () => {
     expect(
       MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.properties.state,
     ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
+  })
+
+  it('keeps rejection recovery separate from feedback eligibility', async () => {
+    const skill = await readFile(
+      new URL('../skills/physical-notes/SKILL.md', import.meta.url),
+      'utf8',
+    )
+
+    expect(skill).toMatch(
+      /A physical-note rejection by itself is recovery evidence, not product-feedback\s+eligibility\./u,
+    )
+    expect(skill).toMatch(
+      /independently establishes eligible frustration or repeated\s+Murph-owned friction/u,
+    )
   })
 
   it('normalizes the bounded US recipient', () => {
@@ -310,6 +332,328 @@ describe('assistant physical notes', () => {
       'action is not available to the current participant right now',
     )
   })
+
+  it('does not present a recovered legacy acceptance as paid or complimentary', async () => {
+    const vaultRoot = await createPhysicalNoteVault()
+    const send = vi.fn(async () => ({
+      complimentary: false,
+      costUsdMicros: '250000',
+      failureReason: 'prior_note_accepted' as const,
+      physicalNoteId: 'hpn_legacy_accepted',
+      status: 'accepted' as const,
+    }))
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { send },
+        privateImageUrlPublisher: {
+          publishPrivateImageUrl: async () => ({
+            expiresAt: '2027-08-01T00:00:00.000Z',
+            url: 'https://private-media.example.test/note',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        imageRef: IMAGE_REF,
+        imageSha256: IMAGE_SHA256,
+        kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        recipient: RECIPIENT,
+      },
+      vaultRoot,
+    })
+
+    const toolText = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(toolText).toContain('"status":"accepted"')
+    expect(toolText).toContain('"failureReason":"prior_note_accepted"')
+    expect(toolText).toContain('This replay did not send another note')
+    expect(toolText).toContain('do not describe it as paid or complimentary')
+    expect(toolText).not.toContain('costUsdMicros')
+    expect(toolText).not.toMatch(/"complimentary":/u)
+  })
+
+  it('preserves the cost fields for an ordinary paid acceptance', async () => {
+    const vaultRoot = await createPhysicalNoteVault()
+    const send = vi.fn(async () => ({
+      complimentary: false,
+      costUsdMicros: '250000',
+      physicalNoteId: 'hpn_paid_accepted',
+      status: 'accepted' as const,
+    }))
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { send },
+        privateImageUrlPublisher: {
+          publishPrivateImageUrl: async () => ({
+            expiresAt: '2027-08-01T00:00:00.000Z',
+            url: 'https://private-media.example.test/note',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        imageRef: IMAGE_REF,
+        imageSha256: IMAGE_SHA256,
+        kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        recipient: RECIPIENT,
+      },
+      vaultRoot,
+    })
+
+    const toolText = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(toolText).toContain('"status":"accepted"')
+    expect(toolText).toContain('"complimentary":false')
+    expect(toolText).toContain('"costUsdMicros":"250000"')
+    expect(toolText).not.toContain('prior_note_accepted')
+  })
+
+  it.each([
+    ['categorized rejection', {
+      complimentary: true,
+      costUsdMicros: '0',
+      failureReason: 'recipient_address',
+      physicalNoteId: 'hpn_failed',
+      status: 'failed',
+    }],
+    ['recovered legacy acceptance', {
+      complimentary: false,
+      costUsdMicros: '250000',
+      failureReason: 'prior_note_accepted',
+      physicalNoteId: 'hpn_legacy_accepted',
+      status: 'accepted',
+    }],
+  ] as const)(
+    'keeps a %s pending through the previous strict runner',
+    async (_caseName, response) => {
+      const vaultRoot = await createPhysicalNoteVault()
+      const currentWebResponse = hostedPhysicalNoteSendResponseSchema.parse(
+        response,
+      )
+      const send = vi.fn(async () =>
+        PREVIOUS_HOSTED_PHYSICAL_NOTE_SEND_RESPONSE_SCHEMA.parse(
+          currentWebResponse,
+        )
+      )
+
+      const result = await executeMurphDynamicToolRequest({
+        authorizeAcceptedMessageTarget: authorizeApprovalInput,
+        deliveryContextOrdinal: 0,
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createHostedToolContext({
+          physicalNotes: { send },
+          privateImageUrlPublisher: {
+            publishPrivateImageUrl: async () => ({
+              expiresAt: '2027-08-01T00:00:00.000Z',
+              url: 'https://private-media.example.test/note',
+            }),
+          },
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: {
+          imageRef: IMAGE_REF,
+          imageSha256: IMAGE_SHA256,
+          kind: 'send-physical-note',
+          messageRef: APPROVAL_INPUT_ID,
+          recipient: RECIPIENT,
+        },
+        vaultRoot,
+      })
+
+      expect(send).toHaveBeenCalledOnce()
+      expect(result.rpcResult).toMatchObject({ success: false })
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        '"status":"pending"',
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'could not confirm whether this physical note was accepted',
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toMatch(
+        /do not .*retry it automatically/iu,
+      )
+      expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+        'new explicit send request',
+      )
+    },
+  )
+
+  it('keeps a transport-timeout result pending without inviting another request', async () => {
+    const vaultRoot = await createPhysicalNoteVault()
+    const send = vi.fn(async () => {
+      throw new Error('Hosted Web control plane returned HTTP 408.')
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { send },
+        privateImageUrlPublisher: {
+          publishPrivateImageUrl: async () => ({
+            expiresAt: '2027-08-01T00:00:00.000Z',
+            url: 'https://private-media.example.test/note',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        imageRef: IMAGE_REF,
+        imageSha256: IMAGE_SHA256,
+        kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        recipient: RECIPIENT,
+      },
+      vaultRoot,
+    })
+
+    const toolText = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(send).toHaveBeenCalledOnce()
+    expect(result.rpcResult).toMatchObject({ success: false })
+    expect(toolText).toContain('"status":"pending"')
+    expect(toolText).toContain(
+      'could not confirm whether this physical note was accepted',
+    )
+    expect(toolText).not.toContain('Nothing was sent')
+    expect(toolText).not.toContain('new explicit send request')
+  })
+
+  it.each([
+    ['recipient_address', 'check the street and unit'],
+    ['artwork', 'regenerate the image'],
+    ['service_unavailable', "on Murph's side, not the recipient address"],
+    ['request_invalid', 'correct the printing request'],
+    ['prior_note_unresolved', 'earlier physical-note submission is still unresolved'],
+    ['prior_note_accepted', 'earlier physical note was accepted'],
+    ['unknown', 'could not complete the physical-note request'],
+  ] as const)(
+    'returns actionable recovery for %s physical-note failures',
+    async (failureReason, expectedGuidance) => {
+      const vaultRoot = await createPhysicalNoteVault()
+      const send = vi.fn(async () => ({
+        complimentary: false,
+        costUsdMicros: '250000',
+        failureReason,
+        physicalNoteId: 'hpn_failed',
+        status: 'failed' as const,
+      }))
+
+      const result = await executeMurphDynamicToolRequest({
+        authorizeAcceptedMessageTarget: authorizeApprovalInput,
+        deliveryContextOrdinal: 0,
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createHostedToolContext({
+          physicalNotes: { send },
+          privateImageUrlPublisher: {
+            publishPrivateImageUrl: async () => ({
+              expiresAt: '2027-08-01T00:00:00.000Z',
+              url: 'https://private-media.example.test/note',
+            }),
+          },
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: {
+          imageRef: IMAGE_REF,
+          imageSha256: IMAGE_SHA256,
+          kind: 'send-physical-note',
+          messageRef: APPROVAL_INPUT_ID,
+          recipient: RECIPIENT,
+        },
+        vaultRoot,
+      })
+
+      expect(result.rpcResult).toMatchObject({ success: false })
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        `"failureReason":"${failureReason}"`,
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toContain(expectedGuidance)
+      expect(result.rpcResult.contentItems[0]?.text).toMatch(
+        /do not .*retry automatically/iu,
+      )
+      expect(result.rpcResult.contentItems[0]?.text).not.toMatch(
+        /product feedback|submit_product_feedback/iu,
+      )
+      if (
+        failureReason === 'service_unavailable'
+        || failureReason === 'request_invalid'
+        || failureReason === 'unknown'
+      ) {
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'No automatic retry or follow-up is running',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'new explicit send request later',
+        )
+      }
+      if (
+        failureReason === 'prior_note_unresolved'
+        || failureReason === 'prior_note_accepted'
+      ) {
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'current physical-note request was not sent',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'new explicit send request',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'for this person',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'while Murph investigates',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'without claiming the earlier and current requests share a recipient',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'No automatic',
+        )
+      }
+      if (failureReason === 'prior_note_unresolved') {
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'A later explicit physical-note request may recheck the earlier outcome',
+        )
+      }
+      if (failureReason === 'prior_note_accepted') {
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'is still unresolved',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'may recheck',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'Do not retry automatically; that applies only to this request',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'A separately authorized future request is distinct',
+        )
+      }
+      if (failureReason === 'unknown') {
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'is still unresolved',
+        )
+      }
+    },
+  )
 })
 
 async function createPhysicalNoteVault(): Promise<string> {

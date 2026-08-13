@@ -4723,7 +4723,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     let admissionCount = 0;
-    const liveSteerInputs: unknown[] = [];
+    const liveSteerInputs: Array<{
+      prompt: string;
+      relativeDateReferenceWindow: {
+        earliestAt: string;
+        latestAt: string;
+      } | null;
+      userMessageContent?: unknown;
+    }> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
@@ -4848,11 +4855,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             turnId: "turn-runner-active-turn",
           });
           items.push(createMailboxItem({
+            createdAt: "2026-04-26T00:00:02.000Z",
             id: "mailbox_item_runner_late",
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
           items.push(createMailboxItem({
+            createdAt: "2026-04-26T00:00:03.000Z",
             id: "mailbox_item_runner_late_second",
             laneSeq: "3",
             occurredAt: "2026-04-26T00:00:03.000Z",
@@ -4893,7 +4902,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(importedSeqs, ["1", "2", "3"]);
       assert.equal(admissionCount, 1);
       assert.equal(liveSteerInputs.length, 1);
-      assert.deepEqual(liveSteerInputs[0], {
+      const liveSteerInput = liveSteerInputs[0];
+      assert.ok(liveSteerInput);
+      assert.deepEqual(liveSteerInput.relativeDateReferenceWindow, {
+        earliestAt: "2026-04-26T00:00:02.000Z",
+        latestAt: "2026-04-26T00:00:03.000Z",
+      });
+      assert.deepEqual({
+        prompt: liveSteerInput.prompt,
+        userMessageContent: liveSteerInput.userMessageContent,
+      }, {
         prompt: "late same-conversation input 2\n\nlate same-conversation input 3",
         userMessageContent: [
           {
