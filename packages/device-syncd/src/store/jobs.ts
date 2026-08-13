@@ -568,16 +568,21 @@ export function failDeviceSyncJobIfOwned(
     now: string;
     retryAt: string | null;
     retryable: boolean;
+    replacementPayload?: Record<string, unknown>;
     retainUntilSuccess?: boolean;
     workerId: string;
   },
 ): boolean {
   if (input.retryable) {
+    const replacementPayloadJson = input.replacementPayload === undefined
+      ? null
+      : stringifyJson(input.replacementPayload);
     const retryResult = database.prepare(`
       update device_job
       set status = 'queued',
           available_at = ?,
           max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
+          payload_json = case when ? = 1 then ? else payload_json end,
           lease_owner = null,
           lease_expires_at = null,
           last_error_code = ?,
@@ -592,6 +597,8 @@ export function failDeviceSyncJobIfOwned(
     `).run(
       input.retryAt ?? input.now,
       input.retainUntilSuccess ? 1 : 0,
+      replacementPayloadJson === null ? 0 : 1,
+      replacementPayloadJson,
       input.code,
       input.message,
       input.now,

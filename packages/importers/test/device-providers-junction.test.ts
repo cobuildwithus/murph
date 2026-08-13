@@ -4951,6 +4951,8 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "workout_distance",
     "workout_duration",
     "workout_swimming_stroke",
+    "electrocardiogram_voltage",
+    "workout_stream",
   ]);
   assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
@@ -5811,7 +5813,7 @@ test("Junction partial profiles land height-only and reject non-boolean wheelcha
   assert.equal(demographics?.note, "Birth date: 1990-05-14.");
 });
 
-test("Junction normalizer ignores dense dedicated timeseries and workout stream resources", () => {
+test("Junction normalizer ignores unknown legacy dense-resource names", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -5822,7 +5824,7 @@ test("Junction normalizer ignores dense dedicated timeseries and workout stream 
       }],
     },
     timeseries: {
-      electrocardiogram_voltage: [{
+      electrocardiogram_waveform_legacy: [{
         timestamp: "2026-04-22T18:00:00Z",
         value: 0.2,
       }],
@@ -5838,7 +5840,7 @@ test("Junction normalizer ignores dense dedicated timeseries and workout stream 
   assert.deepEqual(payload.events, []);
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-workout-stream"), false);
-  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-electrocardiogram-voltage"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-electrocardiogram-waveform-legacy"), false);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-heartrate"), false);
 });
 
@@ -5857,7 +5859,7 @@ test("Junction import receipt does not retain unsupported-only clinical summarie
         }],
       },
       timeseries: {
-        electrocardiogram_voltage: [{
+        electrocardiogram_waveform_legacy: [{
           timestamp: "2026-04-22T18:00:00Z",
           value: 0.2,
         }],
@@ -5874,7 +5876,7 @@ test("Junction import receipt does not retain unsupported-only clinical summarie
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"), false);
   assert.ok(payload.ingestReceipt);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("wearable-raw-receipt:")), false);
-  assert.doesNotMatch(rawArtifactText, /unsupported_clinical_value|electrocardiogram_voltage/u);
+  assert.doesNotMatch(rawArtifactText, /unsupported_clinical_value|electrocardiogram_waveform_legacy/u);
 });
 
 test("Junction raw receipt hash ignores unsupported-only resources", async () => {
@@ -5899,7 +5901,7 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
         workout_stream: [{ cadence: 86 }],
       },
       timeseries: {
-        electrocardiogram_voltage: [{ timestamp: "2026-04-22T18:00:00Z", value: 0.2 }],
+        electrocardiogram_waveform_legacy: [{ timestamp: "2026-04-22T18:00:00Z", value: 0.2 }],
         workout_heartrate: [{ timestamp: "2026-04-22T18:00:00Z", value: 64 }],
         workout_power: [{ timestamp: "2026-04-22T18:00:00Z", value: 250 }],
       },
@@ -5918,7 +5920,7 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
   assertJsonOmits(unsupportedArtifactText, [
     "unsupported_clinical_value",
     "workout_stream",
-    "electrocardiogram_voltage",
+    "electrocardiogram_waveform_legacy",
     "workout_heartrate",
     "workout_power",
     "\"value\":64",

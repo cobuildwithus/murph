@@ -58,13 +58,44 @@ Current providers:
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
   per-reading evidence and the existing long summary-history backfill window.
-- Twelve additional sparse Junction timeseries are code-owned opt-ins and remain
-  off by default: BMI, carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
+- Twelve additional sparse Junction timeseries are code-owned opt-ins: BMI,
+  carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
   inhaler usage, insulin injections, lean body mass, peak expiratory flow,
-  sleep-apnea alerts, and waist circumference. Enabled resources use the same
+  sleep-apnea alerts, and waist circumference. The contract default remains off,
+  while the production provider assembly enables this exact audited resource set;
+  member overlays and environment variables cannot widen or narrow it. Enabled resources use the same
   extended-history horizon as summaries, fetched in bounded 30-day windows;
   dense/default timeseries retain their one-day windows. `fat` remains the
   public resource name while the client requests Junction's `body_fat` path.
+- `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
+  that same code-owned production set. ECG voltage uses one-day grouped windows capped at
+  100,000 admitted samples and 64 recordings, then reduces each recording to one
+  clinically neutral feature record before a sync snapshot exists. Workout stream
+  uses the ordinary workout index only to admit at most 32 stable workouts per
+  one-day window, then reads Junction's dedicated per-workout stream endpoint
+  serially and caps each stream at 100,000 points. The exact production assembly has
+  43 production timeseries resources: 13 wide and 30 dense, including 29 ordinary
+  dense resources plus `workout_stream`. At the current 100-page collection ceiling
+  and three-attempt GET policy, one closed dense day is bounded to 3,032 / 9,096
+  logical GETs / network attempts. The full timeseries ceilings are 50,248 / 150,744
+  per attempt and 251,240 / 753,720 across five attempts for the 14-day backfill
+  plus six 30-day wide windows, and 22,524 / 67,572 per attempt and 112,620 /
+  337,860 across five attempts for the seven-day reconcile plus one wide window.
+  Each reduced resource is imported before the existing job payload marks its exact
+  resource name complete. Retryable failures replace only that bounded payload on
+  the same leased row; cooperative preemption creates the existing immediate
+  successor only after strict window, resource, or workout progress. Within the
+  active coordinate, insertion and reordering cannot skip a newly configured
+  resource, while malformed or removed resource identities fail closed. Pagination
+  remains in memory, so a handled retry or cooperative continuation can replay at
+  most the single unfinished resource (up to 100 grouped GETs, or the
+  bounded workout index and remaining streams), never an earlier completed resource.
+  The current window/day coordinate and at-most-32 workout identities clear only
+  after every configured resource for that window/day completes. This adds no
+  control-database collection path, pooled transaction, or vault persistence.
+  Resource progress stores only versioned resource names; neither it nor any import
+  path retains waveform/stream points, provider envelopes, grouped rows, or evidence
+  whose size scales with sample count.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
