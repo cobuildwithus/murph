@@ -1,6 +1,6 @@
 # Teach Murph about expanded connected wearable data
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-13
 
@@ -141,3 +141,4 @@ Updated: 2026-08-13
 - The generic skill validator could not run because its optional Python YAML
   dependency is absent; repository-native skill asset and frontmatter tests are
   the fallback proof.
+Completed: 2026-08-13
