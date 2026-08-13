@@ -10,7 +10,7 @@ import {
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   getHostedDomainRootUnwrapCache,
@@ -53,6 +53,7 @@ import {
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
   planHostedOnboardingLinqWebhook,
+  resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import {
   runHostedOnboardingWebhookTransaction,
@@ -92,6 +93,32 @@ function createDeferred(): Deferred {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq activation PostgreSQL concurrency",
   () => {
+    const runtimeGlobals = globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    };
+    const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+    const previousHostedOnboardingEnvironment =
+      runtimeGlobals.__murphHostedOnboardingEnv;
+
+    beforeAll(() => {
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
+      delete runtimeGlobals.__murphHostedOnboardingEnv;
+    });
+
+    afterAll(() => {
+      if (previousPublicBaseUrl === undefined) {
+        delete process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+      } else {
+        process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
+      }
+      if (previousHostedOnboardingEnvironment === undefined) {
+        delete runtimeGlobals.__murphHostedOnboardingEnv;
+      } else {
+        runtimeGlobals.__murphHostedOnboardingEnv =
+          previousHostedOnboardingEnvironment;
+      }
+    });
+
     it("releases root authority and keeps an ordinary duplicate canonical after group eligibility changes", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_linq_activation_${fixtureId}`;
@@ -383,19 +410,21 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const dailyStateAfterAppend = await observer.hostedLinqDailyState.findMany({
           where: { memberId },
         });
+        const inviteCountAfterAppend = await observer.hostedInvite.count({
+          where: { memberId },
+        });
         const routingAfterAppend = await readHostedMemberRoutingRecord({
           memberId,
           prisma: observer,
         });
-        const recoveryError = new Error("prepared ingress root unavailable");
-        const recoveredPlan = await runHostedOnboardingWebhookTransaction(
-          inbound,
-          (transaction) => planHostedOnboardingLinqWebhook({
-            directMailboxPreparationFailure: recoveryError,
-            event,
-            prisma: transaction,
-          }),
-        );
+        const recoveredPlan = await runPreparedLinqPlanTransaction({
+          controlRootKeyId,
+          event,
+          ingressRootKeyId,
+          memberId,
+          preparedDirectMailboxPayloadRoot,
+          prisma: inbound,
+        });
         expect(recoveredPlan).toMatchObject({
           response: {
             duplicate: true,
@@ -420,31 +449,45 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(observer.hostedLinqDailyState.findMany({
           where: { memberId },
         })).resolves.toEqual(dailyStateAfterAppend);
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(inviteCountAfterAppend);
         await expect(readHostedMemberRoutingRecord({
           memberId,
           prisma: observer,
         })).resolves.toEqual(routingAfterAppend);
 
-        const missingRecoveryError = new Error(
-          "prepared ingress root still unavailable",
-        );
-        await expect(runHostedOnboardingWebhookTransaction(
-          inbound,
-          (transaction) => planHostedOnboardingLinqWebhook({
-            directMailboxPreparationFailure: missingRecoveryError,
-            event: missingEvent,
-            prisma: transaction,
-          }),
-        )).rejects.toBe(missingRecoveryError);
+        const newEventPlan = await runPreparedLinqPlanTransaction({
+          controlRootKeyId,
+          event: missingEvent,
+          ingressRootKeyId,
+          memberId,
+          preparedDirectMailboxPayloadRoot,
+          prisma: inbound,
+        });
+        expect(newEventPlan).toMatchObject({
+          response: {
+            ok: true,
+            reason: "sent-signup-link",
+          },
+        });
+        expect(newEventPlan.wakeHandoffs).toBeUndefined();
         await expect(observer.hostedMailboxItem.count({
           where: {
             kind: "conversation.message",
             userId: memberId,
           },
         })).resolves.toBe(mailboxCountAfterAppend);
-        await expect(observer.hostedLinqDailyState.findMany({
+        const dailyStateAfterNewEvent = await observer.hostedLinqDailyState.findMany({
           where: { memberId },
-        })).resolves.toEqual(dailyStateAfterAppend);
+        });
+        expect(dailyStateAfterNewEvent).toHaveLength(dailyStateAfterAppend.length);
+        expect(dailyStateAfterNewEvent[0]?.inboundCount).toBe(
+          (dailyStateAfterAppend[0]?.inboundCount ?? 0) + 1,
+        );
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(inviteCountAfterAppend + 1);
         await expect(readHostedMemberRoutingRecord({
           memberId,
           prisma: observer,
@@ -474,6 +517,281 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
         await disconnectClients([observer, activation, inbound]);
+      }
+    });
+
+    it("retries an explicit-null preflight when activation commits before planning", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_linq_null_transition_${fixtureId}`;
+      const groupOwnerMemberId = `member_linq_null_group_owner_${fixtureId}`;
+      const groupRuntimeMemberId = `member_linq_null_group_runtime_${fixtureId}`;
+      const groupId = `group_linq_null_transition_${fixtureId}`;
+      const groupOfferId = `group_offer_linq_null_transition_${fixtureId}`;
+      const memberPhone = buildFixturePhone(fixtureId, 7);
+      const recipientPhone = buildFixturePhone(fixtureId, 8);
+      const chatId = `chat_linq_null_transition_${fixtureId}`;
+      const controlRootKeyId = `control_null_${fixtureId}`;
+      const ingressRootKeyId = `ingress_null_${fixtureId}`;
+      const event = buildDirectLinqEvent({
+        chatId,
+        eventId: `event_linq_null_transition_${fixtureId}`,
+        memberPhone,
+        messageId: `message_linq_null_transition_${fixtureId}`,
+        recipientPhone,
+      });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const inbound = createPrismaClient({ databaseUrl, poolMax: 1 });
+
+      await observer.hostedMember.createMany({
+        data: [{
+          billingStatus: HostedBillingStatus.not_started,
+          id: memberId,
+        }, {
+          billingStatus: HostedBillingStatus.active,
+          id: groupOwnerMemberId,
+        }, {
+          billingStatus: HostedBillingStatus.active,
+          id: groupRuntimeMemberId,
+        }],
+      });
+
+      try {
+        await observer.$transaction(async (tx) => {
+          const identityPrivate = await buildHostedMemberIdentityPrivateColumns({
+            memberId,
+            phoneNumber: memberPhone,
+            prisma: tx,
+            privyUserId: null,
+            signupPhoneCodeSendAttemptId: null,
+            signupPhoneCodeSendAttemptStartedAt: null,
+            signupPhoneCodeSentAt: null,
+            signupPhoneNumber: null,
+          });
+          await tx.hostedMemberIdentity.create({
+            data: {
+              ...identityPrivate,
+              maskedPhoneNumberHint: "*** test",
+              memberId,
+              phoneLookupKey: requireValue(
+                createHostedPhoneLookupKey(memberPhone),
+                "member phone lookup key",
+              ),
+              phoneNumberVerifiedAt: new Date("2026-08-12T00:00:00.000Z"),
+            },
+          });
+          await upsertHostedMemberHomeLinqBindingTx({
+            clearPending: true,
+            homeLineAssignedAt: new Date("2026-08-12T00:00:00.000Z"),
+            linqChatId: chatId,
+            memberId,
+            participantContact: createHostedLinqParticipantContact({
+              kind: "phone",
+              value: memberPhone,
+            }),
+            prisma: tx,
+            recipientPhone,
+          });
+        }, transactionOptions);
+        await observer.hostedGroup.create({
+          data: {
+            displayName: "Linq null-preflight transition proof",
+            id: groupId,
+            joinCode: `join_null_${fixtureId}`,
+            joinCodeCreatedAt: new Date("2026-08-12T00:00:00.000Z"),
+            ownerMemberId: groupOwnerMemberId,
+            runtimeMemberId: groupRuntimeMemberId,
+          },
+        });
+        await observer.hostedGroupJoinOffer.create({
+          data: {
+            groupId,
+            id: groupOfferId,
+            messageLookupKey: `offer_message_null_${fixtureId}`,
+            postedAt: new Date("2026-08-12T00:00:00.000Z"),
+            projectionKindsJson: ["best_effort"],
+          },
+        });
+        const outreach = await observer.$transaction((tx) =>
+          enqueueHostedGroupJoinOutreachTx({
+            offerId: groupOfferId,
+            participantPhoneNumber: memberPhone,
+            requestedAt: new Date("2026-08-12T00:00:00.000Z"),
+            tx,
+          }),
+        transactionOptions);
+        await upsertHostedLinqLineForPhoneTx({
+          observedAt: new Date("2026-08-12T00:00:00.000Z"),
+          phoneNumber: recipientPhone,
+          prisma: observer,
+          source: "configured",
+        });
+        await observer.hostedLinqDelivery.create({
+          data: {
+            acceptedAt: new Date("2026-08-12T00:00:01.000Z"),
+            attemptedAt: new Date("2026-08-12T00:00:00.000Z"),
+            groupJoinOutreachId: outreach.outreachId,
+            id: `group_opener_linq_null_${fixtureId}`,
+            idempotencyKey: requireValue(
+              createHostedLinqDeliveryIdempotencyLookupKey(
+                buildHostedGroupJoinOutreachIdempotencyKey(outreach.outreachId),
+              ),
+              "outreach opener idempotency key",
+            ),
+            linqChatLookupKey: requireValue(
+              createHostedLinqChatLookupKey(chatId),
+              "outreach opener chat lookup key",
+            ),
+            messageLookupKey: requireValue(
+              createHostedLinqMessageLookupKey(`opener_null_${fixtureId}`),
+              "outreach opener message lookup key",
+            ),
+            phoneNumberLookupKey: requireValue(
+              createHostedPhoneLookupKey(recipientPhone),
+              "outreach recipient phone lookup key",
+            ),
+            source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+            sourceRef: outreach.outreachId,
+            status: "accepted",
+            targetKind: "participant",
+            template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+          },
+        });
+
+        await expect(resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
+          event,
+          prisma: observer,
+          threadRoute: null,
+        })).resolves.toBeNull();
+
+        await observer.$transaction(async (tx) => {
+          await Promise.all([
+            insertActiveRootEnvelope({
+              domain: "control",
+              prisma: tx,
+              rootKeyId: controlRootKeyId,
+              userId: memberId,
+            }),
+            insertActiveRootEnvelope({
+              domain: "ingress",
+              prisma: tx,
+              rootKeyId: ingressRootKeyId,
+              userId: memberId,
+            }),
+          ]);
+          await tx.hostedMember.update({
+            data: { billingStatus: HostedBillingStatus.active },
+            where: { id: memberId },
+          });
+        }, transactionOptions);
+
+        await expect(observer.$transaction((tx) =>
+          readHostedGroupJoinOutreachReplyContextTx({
+            linqChatId: chatId,
+            participantMemberId: memberId,
+            participantPhoneNumber: memberPhone,
+            recipientPhoneNumber: recipientPhone,
+            sourceEventId: event.event_id,
+            tx,
+          }),
+        transactionOptions)).resolves.toEqual({
+          joinCode: `join_null_${fixtureId}`,
+          outreachId: outreach.outreachId,
+        });
+        const routingBeforeNullAttempt = await readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        });
+        const runNullPreparedAttempt = () => runHostedOnboardingWebhookTransaction(
+          inbound,
+          (transaction) => planHostedOnboardingLinqWebhook({
+            event,
+            preparedDirectMailboxPayloadRoot: null,
+            prisma: transaction,
+          }),
+        );
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          await expect(runNullPreparedAttempt()).rejects.toMatchObject({
+            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+            details: {
+              preparationTarget: "direct_linq_mailbox",
+              reason: "member",
+            },
+            retryable: true,
+          });
+        }
+        await expect(observer.hostedLinqDailyState.count({
+          where: { memberId },
+        })).resolves.toBe(0);
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(0);
+        await expect(observer.hostedMailboxItem.count({
+          where: { userId: memberId },
+        })).resolves.toBe(0);
+        await expect(readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        })).resolves.toEqual(routingBeforeNullAttempt);
+
+        const routingRecord = await readHostedMemberRoutingRecord({
+          memberId,
+          prisma: observer,
+        });
+        const routingState = await readHostedMemberRoutingState({
+          memberId,
+          prisma: observer,
+        });
+        if (!routingRecord || !routingState) {
+          throw new Error("Expected routing after the activation transition.");
+        }
+        await expect(runPreparedLinqPlanTransaction({
+          controlRootKeyId,
+          event,
+          ingressRootKeyId,
+          memberId,
+          preparedDirectMailboxPayloadRoot: {
+            activeControlRootKeyId: controlRootKeyId,
+            memberId,
+            rootKeyId: ingressRootKeyId,
+            routingRecord,
+            routingState,
+          },
+          prisma: inbound,
+        })).resolves.toMatchObject({
+          response: {
+            ok: true,
+            reason: "sent-signup-link",
+          },
+        });
+        await expect(observer.hostedLinqDailyState.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+        await expect(observer.hostedInvite.count({
+          where: { memberId },
+        })).resolves.toBe(1);
+        await expect(observer.hostedMailboxItem.count({
+          where: { userId: memberId },
+        })).resolves.toBe(0);
+      } finally {
+        await observer.hostedGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [memberId, groupOwnerMemberId, groupRuntimeMemberId],
+            },
+          },
+        });
+        await observer.hostedLinqLine.deleteMany({
+          where: {
+            phoneNumberLookupKey: requireValue(
+              createHostedPhoneLookupKey(recipientPhone),
+              "outreach recipient phone lookup key",
+            ),
+          },
+        });
+        await disconnectClients([observer, inbound]);
       }
     });
   },
@@ -516,7 +834,7 @@ async function runPreparedLinqPlanTransaction(input: {
 
 async function insertActiveRootEnvelope(input: {
   domain: HostedCryptoDomain;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
   rootKeyId: string;
   userId: string;
 }): Promise<void> {

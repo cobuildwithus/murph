@@ -1621,22 +1621,22 @@ export async function planHostedOnboardingLinqWebhook(input: {
       now: new Date(occurredAt),
       prisma: input.prisma,
     });
-    if (directMailboxPreparationFailureProvided) {
-      // The exact mailbox row is already the durable classification for this
-      // event. Repair its wake before reclassifying current policy state, then
-      // defer the carried crypto error to the stable policy owners below.
-      const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
-        dedupeKey: input.event.event_id,
-        prisma: input.prisma,
-        userId: existingMember.id,
+    // The committed mailbox row is the canonical classification for this exact
+    // member/event pair. Repair its wake before mutable Family, group, quota, or
+    // routing state can reinterpret a provider redelivery.
+    const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+      dedupeKey: input.event.event_id,
+      prisma: input.prisma,
+      userId: existingMember.id,
+    });
+    if (existingMailboxItem) {
+      return buildExistingMemberDuplicatePlan({
+        existingMemberActive: existingMemberEffectiveActive,
+        mailboxItemId: existingMailboxItem.id,
+        memberId: existingMember.id,
       });
-      if (existingMailboxItem) {
-        return buildExistingMemberDuplicatePlan({
-          existingMemberActive: existingMemberEffectiveActive,
-          mailboxItemId: existingMailboxItem.id,
-          memberId: existingMember.id,
-        });
-      }
+    }
+    if (directMailboxPreparationFailureProvided) {
       if (
         !exactMemberAccess.allowed
         && exactMemberAccess.reason !== "health_data_consent_withdrawn"
@@ -1684,6 +1684,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
           routeStage: "health-data-consent-withdrawn",
         }),
       );
+    }
+
+    if (
+      directMailboxPreparationProvided
+      && input.preparedDirectMailboxPayloadRoot === null
+      && exactMemberAccess.allowed
+    ) {
+      // A null preflight is authoritative only while the member remains
+      // ineligible. Activation can commit between preflight and BEGIN; retry so
+      // the now-required roots are prepared before Family, group, or routing
+      // code can project private state under this transaction's member lock.
+      throw hostedLinqDirectMailboxPreparationRequired("member");
     }
 
     if (directMailboxPreparationFailureProvided) {
@@ -2124,22 +2136,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && existingMemberEffectiveActive) {
-    if (!groupJoinContext) {
-      const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
-        dedupeKey: input.event.event_id,
-        prisma: input.prisma,
-        userId: existingMember.id,
-      });
-
-      if (existingMailboxItem) {
-        return buildExistingMemberDuplicatePlan({
-          existingMemberActive: existingMemberEffectiveActive,
-          mailboxItemId: existingMailboxItem.id,
-          memberId: existingMember.id,
-        });
-      }
-    }
-
     const preparedDirectMailbox = directMailboxPreparationProvided
       ? await revalidatePreparedHostedLinqDirectMailboxTx({
         chatId: summary.chatId,
