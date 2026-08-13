@@ -1165,8 +1165,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   rather than maintaining an app-local provider list. Google Health-backed
   Fitbit migration is likewise runtime-driven but Web-authoritative: the pass
   publishes successor verification, then requests one exact-connection cutover;
-  Web rechecks its durable source rows and owns the fenced targeted provider
-  revoke. Device sync advances a per-resource legacy coverage boundary only
+  Web rechecks its durable source rows plus the existing dirty-revision/payload
+  predicate under the same connection lock that serializes webhook admission,
+  and owns the fenced targeted provider revoke. Pending dirty work keeps the
+  existing cutover claim and provider-terminal source projection pending until
+  canonical import, checkpoint-safe acknowledgement, and boundary publication
+  finish; a cutover claim that wins the lock makes later Fitbit-attributed
+  webhook admission retryable. Google Health-attributed webhook admission
+  likewise stays retryable while non-terminal Fitbit owns the canonical window,
+  matching the importer fence instead of acknowledging a no-op. Device sync
+  advances a per-resource legacy coverage boundary only
   after the corresponding canonical import is durably accepted. Every accepted
   daily fact immediately advances its overlap fence, but an active-provider
   cutover remains ineligible until a fresh Junction pull performed after that

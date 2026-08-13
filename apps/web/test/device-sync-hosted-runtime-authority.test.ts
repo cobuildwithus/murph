@@ -268,6 +268,7 @@ function createAuthorityHarness(input: {
     sources: ReturnType<typeof buildConnectionSource>[],
   ) => ReturnType<typeof buildConnectionSource>[];
   omitPreparedRecord?: boolean;
+  pendingDirtyConnection?: boolean | readonly boolean[];
   preparedTokenRootKeyId?: string | null;
   record?: ReturnType<typeof buildHostedRecord>;
   storedAccount?: ReturnType<typeof buildStoredAccount> | null;
@@ -438,6 +439,9 @@ function createAuthorityHarness(input: {
       tokenBundle,
     }] as const;
   })));
+  const pendingDirtyConnectionStates = Array.isArray(input.pendingDirtyConnection)
+    ? [...input.pendingDirtyConnection]
+    : [input.pendingDirtyConnection === true];
   const store = {
     getConnectionForUser: vi.fn(async () =>
       buildPublicConnection({
@@ -445,6 +449,9 @@ function createAuthorityHarness(input: {
         externalAccountId: currentRecord.externalAccountId ?? "acct_123",
       })),
     getStoredConnectionAccountForUser: vi.fn(async () => currentStoredAccount),
+    hasPendingDirtyConnection: vi.fn(async () =>
+      pendingDirtyConnectionStates.shift() ?? false
+    ),
     listConnectionSources: vi.fn(async () => connectionSources),
     listConnectionSourcesForConnections: vi.fn(async (connectionIds: readonly string[]) =>
       connectionSources.filter((source) => connectionIds.includes(source.connectionId))
@@ -2127,6 +2134,151 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     }));
     expect(harness.upsertConnectionSource).not.toHaveBeenCalledWith(expect.objectContaining({
       sourceInstanceKey: runtimeSourceInstanceKey,
+    }));
+  });
+
+  it("keeps a provider-terminal Fitbit source admitted while dirty work is pending", async () => {
+    const hostedConnectionId = "conn_junction_fitbit_dirty";
+    const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "fitbit",
+    });
+    const googleHealthSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "google_health",
+    });
+    if (!fitbitSourceInstanceKey || !googleHealthSourceInstanceKey) {
+      throw new Error("Expected canonical migration source keys.");
+    }
+    const fitbit = buildConnectionSource({
+      connectionId: hostedConnectionId,
+      sourceInstanceKey: fitbitSourceInstanceKey,
+      sourceProviderSlug: "fitbit",
+    });
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        fitbit,
+      ],
+      pendingDirtyConnection: [true, false],
+      record: buildHostedRecord({
+        id: hostedConnectionId,
+        provider: "junction",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId: hostedConnectionId,
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            sources: [
+              {
+                displayName: fitbit.displayName,
+                firstSeenAt: fitbit.firstSeenAt,
+                lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+                lastErrorMessage: null,
+                lastSeenAt: "2026-04-06T10:05:00.000Z",
+                observedLastSeenAt: fitbit.lastSeenAt,
+                resourceAvailabilitySummary: fitbit.resourceAvailabilitySummary,
+                sourceInstanceKey: fitbit.sourceInstanceKey,
+                sourceProviderSlug: fitbit.sourceProviderSlug,
+                status: "disconnected",
+              },
+              {
+                displayName: "Google Health",
+                firstSeenAt: "2026-04-06T10:01:00.000Z",
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSeenAt: "2026-04-06T10:05:00.000Z",
+                observedLastSeenAt: null,
+                resourceAvailabilitySummary: { activity: true },
+                sourceInstanceKey: googleHealthSourceInstanceKey,
+                sourceProviderSlug: "google_health",
+                status: "connected",
+              },
+            ],
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: hostedConnectionId,
+      writeUpdate: "applied",
+    });
+    expect(harness.store.hasPendingDirtyConnection).toHaveBeenCalledWith(
+      hostedConnectionId,
+      expect.any(Object),
+    );
+    expect(harness.upsertConnectionSource).toHaveBeenCalledOnce();
+    expect(harness.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
+      sourceProviderSlug: "google_health",
+      status: "connected",
+    }));
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalledWith(expect.objectContaining({
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
+    }));
+    harness.upsertConnectionSource.mockClear();
+
+    const cleanResponse = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId: hostedConnectionId,
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            sources: [
+              {
+                displayName: fitbit.displayName,
+                firstSeenAt: fitbit.firstSeenAt,
+                lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+                lastErrorMessage: null,
+                lastSeenAt: "2026-04-06T10:05:00.000Z",
+                observedLastSeenAt: fitbit.lastSeenAt,
+                resourceAvailabilitySummary: fitbit.resourceAvailabilitySummary,
+                sourceInstanceKey: fitbit.sourceInstanceKey,
+                sourceProviderSlug: fitbit.sourceProviderSlug,
+                status: "disconnected",
+              },
+              {
+                displayName: "Google Health",
+                firstSeenAt: "2026-04-06T10:01:00.000Z",
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSeenAt: "2026-04-06T10:05:00.000Z",
+                observedLastSeenAt: null,
+                resourceAvailabilitySummary: { activity: true },
+                sourceInstanceKey: googleHealthSourceInstanceKey,
+                sourceProviderSlug: "google_health",
+                status: "connected",
+              },
+            ],
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(cleanResponse.updates[0]).toMatchObject({
+      connectionId: hostedConnectionId,
+      writeUpdate: "applied",
+    });
+    expect(harness.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: hostedConnectionId,
+      lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
     }));
   });
 

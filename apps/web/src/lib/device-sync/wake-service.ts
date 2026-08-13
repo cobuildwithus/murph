@@ -142,6 +142,12 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
     ) {
       throw googleHealthFitbitMigrationNotReadyError();
     }
+    if (
+      input.requireGoogleHealthFitbitMigrationReady
+      && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
+    ) {
+      throw googleHealthFitbitMigrationNotReadyError();
+    }
 
     const source = await findHostedConnectionSource({
       connectionId: input.connectionId,
@@ -290,6 +296,12 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
         }
         return { complete: true as const, disconnectedAt: current.lastSeenAt };
       }
+      if (
+        input.requireGoogleHealthFitbitMigrationReady
+        && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
+      ) {
+        return { complete: false as const, pending: true as const };
+      }
       if (current.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE) {
         connectionChangedDuringDisconnectError();
       }
@@ -326,6 +338,9 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
     if (outcome.complete) {
       completedByConcurrentCleanup = true;
       break;
+    }
+    if ("pending" in outcome) {
+      throw googleHealthFitbitMigrationNotReadyError();
     }
 
     ownedClaimAt = outcome.claimAt;
@@ -421,6 +436,9 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
         && source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
       ) {
         return { state: "complete" as const };
+      }
+      if (await input.store.hasPendingDirtyConnection(input.connectionId, tx)) {
+        return { state: "pending" as const };
       }
       if (isGoogleHealthFitbitMigrationLegacyTerminal(source)) {
         if (!isHostedGoogleHealthFitbitMigrationCutoverReady(sources)) {
@@ -531,6 +549,9 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
       ) {
         return null;
       }
+      if (await input.store.hasPendingDirtyConnection(input.connectionId, tx)) {
+        return { state: "pending" as const };
+      }
 
       if (!isHostedGoogleHealthFitbitMigrationCutoverReady(sources, {
         claimAt: target.claimAt,
@@ -561,7 +582,7 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
       return { ...target, claimAt, source };
     },
   );
-  if (!renewedTarget || renewedTarget.state === "not_ready") {
+  if (!renewedTarget || renewedTarget.state !== "probe") {
     return "pending";
   }
 
@@ -681,6 +702,9 @@ async function finalizeRecoveredHostedGoogleHealthFitbitCutover(
       && source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
     ) {
       return "complete";
+    }
+    if (await input.store.hasPendingDirtyConnection(input.connectionId, tx)) {
+      return "pending";
     }
     if (
       source.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
@@ -1961,6 +1985,21 @@ function isHostedGoogleHealthFitbitMigrationCutoverReady(
   );
 }
 
+function isHostedGoogleHealthFitbitWebhookSourceAdmitted(
+  sources: readonly HostedDeviceConnectionSource[],
+  sourceProviderSlug: string,
+): boolean {
+  if (sourceProviderSlug !== JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG) {
+    return true;
+  }
+  const legacySources = sources.filter((source) =>
+    normalizeJunctionProviderSlug(source.sourceProviderSlug)
+      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+  );
+  return legacySources.length === 0
+    || legacySources.every(isGoogleHealthFitbitMigrationLegacyTerminal);
+}
+
 async function readCurrentSourceDisconnectTarget(input: {
   connection: PublicDeviceSyncAccount;
   connectionId: string;
@@ -2790,9 +2829,17 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       if (sourceProviderSlug) {
         const matchingSources = await input.store.listConnectionSources({
           connectionId: input.connectionId,
-          sourceProviderSlug,
+          ...(sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+            ? {}
+            : { sourceProviderSlug }),
         }, tx);
-        if (!isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
+        if (
+          !isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)
+          || !isHostedGoogleHealthFitbitWebhookSourceAdmitted(
+            matchingSources,
+            sourceProviderSlug,
+          )
+        ) {
           throw deviceSyncError({
             code: "WEBHOOK_SOURCE_NOT_READY",
             message: "Device source setup changed before webhook work could be committed.",

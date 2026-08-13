@@ -146,7 +146,7 @@ Updated: 2026-08-13
     require that instant to elapse for active-provider cutover, and attempt the
     cutover before the hosted scheduler can import the next legacy day. That
     correction was pushed and the explicitly authorized final-gate loop continued.
-19. In progress: final round 12 found that the readiness instant was stripped at
+19. Completed: final round 12 found that the readiness instant was stripped at
     both the real device-sync receipt bridge and Web source-summary sanitizer.
     More importantly, elapsed midnight did not prove the accepted current-day
     Fitbit aggregate was final because pre-scheduler cutover prevented a fresh
@@ -154,6 +154,17 @@ Updated: 2026-08-13
     proof that a fresh Junction pull performed after the provider-local day
     closed canonically accepted the day, run active cutover only after scheduled
     work is drained and published, then push and continue to a valid pass.
+20. Completed: final round 13 proved that one drained hosted pass was not
+    closed against Web's concurrent dirty-work owner. A source-attributed Fitbit
+    webhook could commit a dirty revision or inline payload immediately before
+    the cutover claim, after which terminal source admission could turn the
+    accepted payload into an acknowledged no-op. Reuse the existing pending
+    predicate under the connection lock for fresh claims, stale recovery,
+    finalization, and provider-terminal source projection. Pending work keeps
+    Fitbit admitted until canonical import, checkpoint-safe acknowledgement,
+    and boundary publication; a claim-first webhook remains retryable through
+    the existing source fence. Add no new state or process, prove the composed
+    owner boundary, push, and continue to a valid pass.
 
 ## Decisions
 
@@ -196,6 +207,16 @@ Updated: 2026-08-13
   The hosted pass schedules and drains provider work, publishes source authority,
   and then attempts cutover. Interval resources keep their accepted instant
   boundary and need no daily finalization marker.
+- Include the existing Web dirty revision/encrypted payload predicate in exact
+  migration cutover authority under the connection lock that already serializes
+  webhook admission. Pending Fitbit work blocks fresh claims, stale renewal,
+  local finalization, and provider-terminal source projection; an existing
+  claim remains fenced while independently detected dirty work keeps recovery
+  pending, then reuses provider-state recovery after the predicate clears,
+  avoiding a redundant revoke.
+  The clean retry reuses the same source summary and targeted revoke owner, and
+  claim-first webhook admission fails retryably through the existing source
+  fence. Do not add a new dirty state, queue, or reconciliation owner.
 
 ## Verification
 
@@ -280,6 +301,19 @@ Updated: 2026-08-13
   importer, 243 device-sync, 84 hosted-runtime maintenance,
   and 367 affected Web tests pass; all four affected typechecks and the three
   affected package builds pass.
+- Final round-thirteen remediation proof: 239 focused Web cutover,
+  runtime-source-authority, and dirty-store tests pass; Web typecheck, focused
+  ESLint, and `git diff --check` pass. Three real-PostgreSQL lock-ordering tests
+  also pass against the isolated worktree database. The composed regression
+  proves a Fitbit payload that commits under the connection lock blocks cutover
+  and provider revoke until its exact revision and payload are acknowledged;
+  after acknowledgement, retry cuts over exactly once. Unit regressions prove a
+  Fitbit payload that
+  becomes pending before the fresh claim blocks revoke, a claim-first source
+  fence makes later webhook admission retryable, pending work withholds
+  provider-terminal source projection, an incomplete post-revoke claim remains
+  fenced without a duplicate revoke, and the existing provider-absence recovery
+  plus terminal projection resume only after dirty work clears.
 - Final round-twelve finding was reproduced at both lossy authority boundaries
   and in hosted ordering. The correction carries canonical post-close
   provider-pull finalization through importer receipt, local source summary, and

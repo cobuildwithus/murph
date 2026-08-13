@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
+import type { DeviceSyncProvider } from "@murphai/device-syncd/types";
 import { describe, expect, it, vi } from "vitest";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
+import { completeHostedGoogleHealthFitbitMigration } from "@/src/lib/device-sync/wake-service";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -38,6 +42,16 @@ type Fixture = {
   observer: PrismaClient;
   reconnect: PrismaClient;
   reconnectStore: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+};
+
+type FitbitCutoverFixture = {
+  admission: PrismaClient;
+  admissionStore: PrismaDeviceSyncControlPlaneStore;
+  connectionId: string;
+  cutover: PrismaClient;
+  cutoverStore: PrismaDeviceSyncControlPlaneStore;
+  observer: PrismaClient;
   userId: string;
 };
 
@@ -95,6 +109,166 @@ function buildConnectionInput(input: {
       accessToken: `access-${input.connectedAt}`,
       refreshToken: `refresh-${input.connectedAt}`,
     },
+  };
+}
+
+function buildJunctionSourceInstanceKey(
+  connectionId: string,
+  sourceProviderSlug: string,
+): string {
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId,
+    sourceProviderSlug,
+  });
+  if (!sourceInstanceKey) {
+    throw new Error("Expected a canonical Junction source instance key.");
+  }
+  return sourceInstanceKey;
+}
+
+function createJunctionCutoverProvider(input: {
+  revokeSourceAccess: () => Promise<void>;
+}): DeviceSyncProvider {
+  return {
+    connectionHandler: {
+      async beginConnection() {
+        return { authorizationUrl: "https://provider.example/connect" };
+      },
+      async completeConnection() {
+        return {
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          externalAccountId: "junction-cutover-account",
+        };
+      },
+      async isSourceAccessActive() {
+        return true;
+      },
+      revokeSourceAccess: input.revokeSourceAccess,
+    },
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      connection: {
+        callbackPath: "/connect/junction/callback",
+        kind: "external_link",
+      },
+      displayName: "Junction",
+      normalization: {
+        metricFamilies: ["sleep"],
+        snapshotParser: "schema",
+      },
+      provider: "junction",
+      sourcePriorityHints: {
+        defaultPriority: 50,
+        metricFamilies: { sleep: 50 },
+      },
+      transportModes: ["external_link"],
+    },
+    provider: "junction",
+  };
+}
+
+async function createFitbitCutoverFixture(): Promise<FitbitCutoverFixture> {
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required for the PostgreSQL Fitbit cutover proof.");
+  }
+
+  const suffix = randomUUID().replaceAll("-", "");
+  const userId = `member_fitbit_cutover_${suffix}`;
+  const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+  const admission = createPrismaClient({ databaseUrl, poolMax: 1 });
+  const cutover = createPrismaClient({ databaseUrl, poolMax: 1 });
+  const admissionStore = new PrismaDeviceSyncControlPlaneStore({
+    codec: connectionCodec,
+    prisma: admission,
+    providerAccountBlindIndexKey: Buffer.alloc(32, 11),
+  });
+  const cutoverStore = new PrismaDeviceSyncControlPlaneStore({
+    codec: connectionCodec,
+    prisma: cutover,
+    providerAccountBlindIndexKey: Buffer.alloc(32, 11),
+  });
+  const now = new Date("2026-08-11T10:00:00.000Z");
+
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt: (input) => input.value,
+    encrypt: (input) => input.value,
+  });
+  await observer.hostedMember.create({ data: { id: userId } });
+  await observer.hostedConsentGrant.create({
+    data: {
+      createdAt: now,
+      documentVersionsJson: {},
+      grantedAt: now,
+      memberId: userId,
+      scope: "launch.health-data",
+      source: "device-sync-fitbit-cutover-lock-test",
+      status: "granted",
+      updatedAt: now,
+    },
+  });
+  const connection = await admissionStore.upsertConnection({
+    connectedAt: now.toISOString(),
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    displayName: "Junction",
+    existingAccountPolicy: "replace",
+    externalAccountId: `junction_fitbit_cutover_${suffix}`,
+    metadata: {},
+    nextReconcileAt: null,
+    ownerId: userId,
+    provider: "junction",
+    scopes: ["sleep"],
+    setupPhase: "source_confirmed",
+    status: "active",
+  });
+  await admissionStore.upsertConnectionSource({
+    connectionId: connection.id,
+    firstSeenAt: "2026-08-11T09:00:00.000Z",
+    lastDataAt: "2026-08-11T09:55:00.000Z",
+    lastSeenAt: "2026-08-11T10:00:00.000Z",
+    now: "2026-08-11T10:00:00.000Z",
+    resourceAvailabilitySummary: {
+      canonicalCoverageBoundary_sleep: "2026-08-11T09:55:00.000Z",
+      sleep: true,
+    },
+    sourceInstanceKey: buildJunctionSourceInstanceKey(connection.id, "fitbit"),
+    sourceProviderSlug: "fitbit",
+    status: "connected",
+  });
+  await admissionStore.upsertConnectionSource({
+    connectionId: connection.id,
+    firstSeenAt: "2026-08-11T10:01:00.000Z",
+    lastDataAt: "2026-08-11T10:05:00.000Z",
+    lastSeenAt: "2026-08-11T10:05:00.000Z",
+    now: "2026-08-11T10:05:00.000Z",
+    resourceAvailabilitySummary: {
+      historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+      sleep: true,
+    },
+    sourceInstanceKey: buildJunctionSourceInstanceKey(
+      connection.id,
+      "google_health",
+    ),
+    sourceProviderSlug: "google_health",
+    status: "connected",
+  });
+
+  return {
+    admission,
+    admissionStore,
+    connectionId: connection.id,
+    cutover,
+    cutoverStore,
+    observer,
+    userId,
   };
 }
 
@@ -243,8 +417,22 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
   setHostedSecureBoxStringTestCodecForTests(null);
 }
 
+async function cleanupFitbitCutoverFixture(
+  fixture: FitbitCutoverFixture,
+): Promise<void> {
+  await fixture.observer.hostedMember.deleteMany({
+    where: { id: fixture.userId },
+  });
+  await Promise.all([
+    fixture.admission.$disconnect(),
+    fixture.cutover.$disconnect(),
+    fixture.observer.$disconnect(),
+  ]);
+  setHostedSecureBoxStringTestCodecForTests(null);
+}
+
 describe.skipIf(!runPostgresProof)(
-  "device-sync reconnect and acknowledgement PostgreSQL lock ordering",
+  "device-sync connection mutation and acknowledgement PostgreSQL lock ordering",
   () => {
     it("waits behind acknowledgement's dirty marker before classifying nullable rows", async () => {
       const fixture = await createFixture();
@@ -400,5 +588,125 @@ describe.skipIf(!runPostgresProof)(
         await cleanupFixture(fixture);
       }
     });
+
+    it("commits accepted Fitbit work before cutover can claim the source", async () => {
+      const fixture = await createFitbitCutoverFixture();
+      const dirtyWritten = createDeferred();
+      const allowDirtyCommit = createDeferred();
+      const revokeSourceAccess = vi.fn(async () => undefined);
+      const registry = createDeviceSyncRegistry([
+        createJunctionCutoverProvider({ revokeSourceAccess }),
+      ]);
+      let admissionOutcome: Promise<unknown> | null = null;
+      let cutoverOutcome: Promise<unknown> | null = null;
+
+      try {
+        admissionOutcome = fixture.admissionStore.withConnectionMutationLock(
+          fixture.connectionId,
+          async (tx) => {
+            const dirty = await fixture.admissionStore.upsertDirtyConnection({
+              connectionId: fixture.connectionId,
+              dirtyAt: "2026-08-11T10:06:00.000Z",
+              eventType: "sleep.updated",
+              provider: "junction",
+              resourceCategory: "sleep",
+              resources: [{
+                count: 1,
+                jobKind: "resource",
+                payload: { objectId: "fitbit-sleep-cutover-lock" },
+                resource: "sleep",
+                resourceCategory: "sleep",
+                sourceProviderSlug: "fitbit",
+                windowEnd: "2026-08-11T10:00:00.000Z",
+                windowStart: "2026-08-10T10:00:00.000Z",
+              }],
+              traceId: "trace_fitbit_cutover_lock",
+              tx,
+              userId: fixture.userId,
+            });
+            dirtyWritten.resolve();
+            await allowDirtyCommit.promise;
+            return dirty;
+          },
+        );
+        await dirtyWritten.promise;
+
+        const cutoverPid = await readBackendPid(fixture.cutover);
+        cutoverOutcome = completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.cutoverStore,
+          userId: fixture.userId,
+        });
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: cutoverPid,
+        });
+        expect(revokeSourceAccess).not.toHaveBeenCalled();
+
+        allowDirtyCommit.resolve();
+        await expect(admissionOutcome).resolves.toMatchObject({
+          dirty: { dirtyRevision: 1n },
+        });
+        await expect(cutoverOutcome).resolves.toEqual({
+          connectionId: fixture.connectionId,
+          status: "pending",
+        });
+        expect(revokeSourceAccess).not.toHaveBeenCalled();
+        await expect(fixture.observer.deviceConnectionSource.findFirstOrThrow({
+          select: { lastErrorCode: true, status: true },
+          where: {
+            connectionId: fixture.connectionId,
+            sourceProviderSlug: "fitbit",
+          },
+        })).resolves.toEqual({
+          lastErrorCode: null,
+          status: "connected",
+        });
+
+        const dirty = await fixture.observer.deviceSyncDirtyConnection.findUniqueOrThrow({
+          select: { dirtyRevision: true },
+          where: { connectionId: fixture.connectionId },
+        });
+        const payloads = await fixture.observer.deviceSyncDirtyPayload.findMany({
+          select: { id: true },
+          where: { connectionId: fixture.connectionId },
+        });
+        await expect(fixture.admissionStore.markDirtyConnectionProcessed({
+          connectionId: fixture.connectionId,
+          processedDirtyPayloadIds: payloads.map(({ id }) => id),
+          processedRevision: dirty.dirtyRevision,
+          userId: fixture.userId,
+        })).resolves.toMatchObject({ stillDirty: false });
+
+        await expect(completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.cutoverStore,
+          userId: fixture.userId,
+        })).resolves.toEqual({
+          connectionId: fixture.connectionId,
+          status: "complete",
+        });
+        expect(revokeSourceAccess).toHaveBeenCalledOnce();
+        await expect(fixture.observer.deviceConnectionSource.findFirstOrThrow({
+          select: { lastErrorCode: true, status: true },
+          where: {
+            connectionId: fixture.connectionId,
+            sourceProviderSlug: "fitbit",
+          },
+        })).resolves.toEqual({
+          lastErrorCode: "SOURCE_USER_DISCONNECTED",
+          status: "disconnected",
+        });
+      } finally {
+        allowDirtyCommit.resolve();
+        await Promise.allSettled([
+          ...(admissionOutcome ? [admissionOutcome] : []),
+          ...(cutoverOutcome ? [cutoverOutcome] : []),
+        ]);
+        await cleanupFitbitCutoverFixture(fixture);
+      }
+    }, 60_000);
   },
 );

@@ -2127,6 +2127,22 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
     );
 
+    mocks.hasPendingDirtyConnection
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).resolves.toEqual({
+      connectionId: connection.id,
+      status: "pending",
+    });
+    expect(revokeSourceAccess).not.toHaveBeenCalled();
+    expect(sources.find((source) => source.sourceProviderSlug === "fitbit")).toMatchObject({
+      lastErrorCode: null,
+      status: "connected",
+    });
+
     await expect(controlPlane.completeGoogleHealthFitbitMigration(
       "user-123",
       connection.id,
@@ -2146,6 +2162,10 @@ describe("hosted device-sync wakes", () => {
     expect(sources.find((source) => source.sourceProviderSlug === "google_health")).toMatchObject({
       status: "connected",
     });
+    expect(mocks.hasPendingDirtyConnection).toHaveBeenCalledWith(
+      connection.id,
+      mocks.prismaTx,
+    );
   });
 
   it("converges provider-confirmed Fitbit disconnection without revoking again", async () => {
@@ -2529,6 +2549,82 @@ describe("hosted device-sync wakes", () => {
     }
   });
 
+  it("holds a stale Fitbit claim when dirty work arrives during its provider probe", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_stale_dirty_claim",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(connection);
+    const state = installMutableHostedConnectionSources([
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+        lastSeenAt: "2026-03-26T11:58:00.000Z",
+        resourceAvailabilitySummary: {
+          canonicalCoverageBoundary_sleep: "2026-03-25T08:00:00.000Z",
+          sleep: true,
+        },
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-03-26T11:00:00.000Z",
+        lastDataAt: "2026-03-26T11:30:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-03-26T11:15:00.000Z",
+          sleep: true,
+        },
+      }),
+    ]);
+    const isSourceAccessActive = vi.fn(async () => true);
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.hasPendingDirtyConnection
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { isSourceAccessActive, revokeSourceAccess },
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
+    );
+
+    try {
+      await expect(controlPlane.completeGoogleHealthFitbitMigration(
+        "user-123",
+        connection.id,
+      )).resolves.toEqual({
+        connectionId: connection.id,
+        status: "pending",
+      });
+
+      expect(isSourceAccessActive).toHaveBeenCalledOnce();
+      expect(revokeSourceAccess).not.toHaveBeenCalled();
+      expect(state.sources[0]).toMatchObject({
+        lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+        status: "connected",
+      });
+
+      await expect(controlPlane.completeGoogleHealthFitbitMigration(
+        "user-123",
+        connection.id,
+      )).resolves.toEqual({
+        connectionId: connection.id,
+        status: "complete",
+      });
+      expect(isSourceAccessActive).toHaveBeenCalledTimes(2);
+      expect(revokeSourceAccess).toHaveBeenCalledOnce();
+      expect(state.sources[0]).toMatchObject({
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        status: "disconnected",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("allows only one provider revoke while concurrent retries observe a renewed claim", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
@@ -2773,6 +2869,10 @@ describe("hosted device-sync wakes", () => {
     mocks.registryGet.mockReturnValue({
       connectionHandler: { isSourceAccessActive, revokeSourceAccess },
     });
+    mocks.hasPendingDirtyConnection
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
     mocks.upsertConnectionSource.mockImplementation(async (input) => {
       const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
       if (!existing) {
@@ -2807,6 +2907,20 @@ describe("hosted device-sync wakes", () => {
       "user-123",
       connection.id,
     )).rejects.toThrow("simulated finalization write failure");
+    expect(sources[0]).toMatchObject({
+      lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+      status: "connected",
+    });
+
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).resolves.toEqual({
+      connectionId: connection.id,
+      status: "pending",
+    });
+    expect(revokeSourceAccess).toHaveBeenCalledOnce();
+    expect(isSourceAccessActive).not.toHaveBeenCalled();
     expect(sources[0]).toMatchObject({
       lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
       status: "connected",
@@ -5390,7 +5504,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("retries source-attributed webhook work when the target disconnects before dirty-state commit", async () => {
+  it("retries source-attributed webhook work when the cutover claim wins admission", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
       buildWebhookAdmissionRecord({
         provider: "junction",
@@ -5399,8 +5513,9 @@ describe("hosted device-sync wakes", () => {
     );
     mocks.listConnectionSources.mockResolvedValueOnce([{
       connectionId: "dsc_123",
+      lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
       sourceProviderSlug: "fitbit",
-      status: "disconnected",
+      status: "connected",
     }]);
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: getPrisma(),
@@ -5444,6 +5559,63 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("retries Google Health webhook work while legacy Fitbit owns canonical admission", async () => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+    );
+    mocks.listConnectionSources.mockResolvedValueOnce([
+      {
+        connectionId: "dsc_123",
+        sourceProviderSlug: "fitbit",
+        status: "connected",
+      },
+      {
+        connectionId: "dsc_123",
+        sourceProviderSlug: "google_health",
+        status: "connected",
+      },
+    ]);
+    const store = new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
+
+    await expect(handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      store,
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "activity.updated",
+        jobs: [{
+          kind: "resource",
+          payload: {
+            resource: "activity",
+            sourceProviderSlug: "google_health",
+          },
+        }],
+        sourceProviderSlug: "google_health",
+      },
+    })).rejects.toMatchObject({
+      code: "WEBHOOK_SOURCE_NOT_READY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+    }, mocks.prismaTx);
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
   });
 
   it("resolves the companion lane, stages a compact RMSSD job, and wakes the runtime", async () => {

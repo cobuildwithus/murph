@@ -633,7 +633,23 @@ Last verified: 2026-08-11
 - Automatic Google Health Fitbit cutover runs only after the hosted pass has
   published successor history/resource/freshness evidence and each overlapping
   temporal resource has a durable canonical legacy-coverage boundary. Web
-  rechecks those durable rows before the targeted provider revoke. Boundary
+  rechecks those durable rows and the existing pending dirty-revision/payload
+  predicate under the connection lock before the targeted provider revoke.
+  Runtime source publication uses the same predicate, so provider-terminal
+  Fitbit state cannot overtake an already accepted payload. If dirty work wins
+  the lock, it must reach canonical import, checkpoint-safe acknowledgement,
+  and boundary publication before cutover; if the cutover claim wins, later
+  Fitbit-attributed webhook admission is retryable rather than accepted. A
+  claim that is already in progress stays fenced while any independently
+  detected dirty work keeps recovery pending; the shared admission lock prevents
+  new Fitbit work from entering behind that claim, and provider-absence recovery
+  can finalize after the dirty predicate clears without another revoke.
+  Google Health-attributed webhook work remains retryable while non-terminal
+  Fitbit owns canonical admission, so the importer fence cannot turn a durable
+  acceptance into an acknowledged no-op. The
+  check adds one bounded indexed `exists` query to cutover/recovery and only to
+  a terminal Fitbit source projection during migration; ordinary provider
+  scheduling and ingestion fanout are unchanged. Boundary
   markers advance only after accepted canonical delivery. An active daily
   boundary becomes cutover-final only when a fresh Junction provider pull made
   after the provider-local day closed canonically accepts that day again;
