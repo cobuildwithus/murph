@@ -127,3 +127,6 @@ Updated: 2026-08-13
   guidance and other included fields are unchanged. The deferred automation
   description, when loaded, grows from 1,174 tokens / 6,129 bytes to 1,339 /
   7,055 (+165 tokens / +926 bytes). Temporary capture code was removed.
+- Draft PR #1763 is open. Its public changelog item validates with all seven
+  focused fragment tests and describes the self-checking reminder update
+  without exposing incident or conversation details.
