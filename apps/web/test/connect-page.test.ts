@@ -6628,6 +6628,90 @@ test("ConnectSourcesGrid refreshes while Fitbit migration verification is pendin
   }
 });
 
+test("ConnectSourcesGrid refreshes through automatic Fitbit cutover and stops on a terminal state", async () => {
+  vi.useFakeTimers();
+
+  try {
+    const { ConnectSourcesGrid } = await import(
+      "../app/(dashboard)/connect/connect-page-client"
+    );
+    const logo = {
+      className: "size-11 object-contain",
+      height: 44,
+      src: "/brand-logos/connect/fitbit.svg",
+      width: 44,
+    };
+    const rendered = await renderClientComponent(
+      createElement(ConnectSourcesGrid, {
+        sources: [{
+          description: "Fitbit data through Google authorization.",
+          id: "fitbit",
+          logo,
+          migrationState: "verifying_successor",
+          name: "Fitbit",
+        }],
+      }),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.rerender(createElement(ConnectSourcesGrid, {
+      sources: [{
+        description: "Fitbit data through Google authorization.",
+        disconnectConnectionId: "dsc_fitbit",
+        disconnectSourceProviderSlug: "fitbit",
+        id: "fitbit",
+        logo,
+        migrationState: "cutover_ready",
+        name: "Fitbit",
+      }],
+    }));
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 2);
+
+    await rendered.rerender(createElement(ConnectSourcesGrid, {
+      sources: [{
+        connected: true,
+        description: "Fitbit data through Google authorization.",
+        id: "fitbit",
+        logo,
+        name: "Fitbit",
+      }],
+    }));
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 2);
+
+    await rendered.rerender(createElement(ConnectSourcesGrid, {
+      sources: [{
+        description: "Fitbit data through Google authorization.",
+        disconnectConnectionId: "dsc_fitbit",
+        disconnectSourceProviderSlug: "fitbit",
+        id: "fitbit",
+        logo,
+        migrationRetryRequired: true,
+        migrationState: "cutover_ready",
+        name: "Fitbit",
+      }],
+    }));
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 2);
+
+    await rendered.cleanup();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("ConnectSourcesGrid pauses Fitbit verification refreshes while hidden", async () => {
   vi.useFakeTimers();
 

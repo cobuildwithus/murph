@@ -166,6 +166,11 @@ export interface JunctionCanonicalCoverageEvidence {
   readonly sourceProviderSlug: string;
 }
 
+export interface JunctionCanonicalCoverageDerivationOptions {
+  readonly defaultTimeZone?: string;
+  readonly importedAt?: string;
+}
+
 export interface JunctionCanonicalCoverageEvent {
   readonly dataOrigin?: { readonly sourceProviderSlug?: string };
   readonly dayKey?: string;
@@ -1045,15 +1050,28 @@ export function normalizeJunctionSnapshot(
  * Derives provider cutover coverage only from the canonical events returned by
  * the committed vault import. This deliberately does not replay raw Junction
  * normalization: the stored event owns the canonical provider day or interval.
+ * Import receipts pass their provider-local clock so daily coverage excludes
+ * the still-open day; interval coverage remains anchored to its accepted end.
  */
 export function deriveJunctionCanonicalCoverageEvidence(
   events: readonly JunctionCanonicalCoverageEvent[],
+  options?: JunctionCanonicalCoverageDerivationOptions,
 ): readonly JunctionCanonicalCoverageEvidence[] {
   const coverageBySourceAndResource = new Map<string, JunctionCanonicalCoverageEvidence>();
+  const openProviderDay = options
+    ? resolveVaultLocalDayKey(options.importedAt ?? "", options.defaultTimeZone)
+    : undefined;
 
   for (const event of events) {
     const evidence = resolveJunctionCanonicalCoverageEvidence(event);
     if (!evidence) {
+      continue;
+    }
+    if (
+      options
+      && isJunctionDailyCanonicalCoverageResource(evidence.resource)
+      && (!openProviderDay || evidence.coverageBoundary >= openProviderDay)
+    ) {
       continue;
     }
 

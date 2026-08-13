@@ -3182,7 +3182,20 @@ test("Junction importer reports date-only Fitbit activity coverage without rewri
 
     assert.equal(activity?.dayKey, "2026-08-11");
     assert.equal(activity?.timeZone, undefined);
-    assert.deepEqual(first.junctionCanonicalCoverage, [{
+    assert.deepEqual(first.junctionCanonicalCoverage, []);
+
+    input.snapshot.importedAt = "2026-08-12T05:00:00.000Z";
+    const closedDayImport = await importDeviceProviderSnapshot<JunctionImportResult>(input, {
+      corePort: coreRuntime,
+    });
+    const replayedActivity = closedDayImport.events.find((event) =>
+      event.kind === "observation" && event.metric === "daily-steps"
+    );
+
+    assert.equal(replayedActivity?.id, activity?.id);
+    assert.equal(replayedActivity?.dayKey, "2026-08-11");
+    assert.equal(replayedActivity?.timeZone, undefined);
+    assert.deepEqual(closedDayImport.junctionCanonicalCoverage, [{
       coverageBoundary: "2026-08-11",
       resource: "activity",
       sourceProviderSlug: "fitbit",
@@ -3192,15 +3205,14 @@ test("Junction importer reports date-only Fitbit activity coverage without rewri
     const replay = await importDeviceProviderSnapshot<JunctionImportResult>(input, {
       corePort: coreRuntime,
     });
-    const replayedActivity = replay.events.find((event) =>
+    const replayedAfterTimezoneChange = replay.events.find((event) =>
       event.kind === "observation" && event.metric === "daily-steps"
     );
 
     assert.equal(replay.applied, false);
-    assert.equal(replayedActivity?.id, activity?.id);
-    assert.equal(replayedActivity?.dayKey, "2026-08-11");
-    assert.equal(replayedActivity?.timeZone, undefined);
-    assert.deepEqual(replay.junctionCanonicalCoverage, first.junctionCanonicalCoverage);
+    assert.equal(replayedAfterTimezoneChange?.id, activity?.id);
+    assert.equal(replayedAfterTimezoneChange?.dayKey, "2026-08-11");
+    assert.equal(replayedAfterTimezoneChange?.timeZone, undefined);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
@@ -3242,6 +3254,92 @@ test("Junction canonical fence suppresses same-day Google Health facts east of U
   );
 });
 
+test("Junction cutover coverage closes daily provider days across timezones and DST", () => {
+  const activityEvent = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+  };
+  const activityCoverage = [{
+    coverageBoundary: "2026-08-11",
+    resource: "activity",
+    sourceProviderSlug: "fitbit",
+  }];
+
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([activityEvent], {
+      defaultTimeZone: "America/New_York",
+      importedAt: "2026-08-12T01:00:00.000Z",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([activityEvent], {
+      defaultTimeZone: "America/New_York",
+      importedAt: "2026-08-12T05:00:00.000Z",
+    }),
+    activityCoverage,
+  );
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([activityEvent], {
+      importedAt: "2026-08-12T05:00:00.000Z",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([activityEvent], {
+      defaultTimeZone: "Asia/Tokyo",
+      importedAt: "2026-08-11T14:59:59.000Z",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([activityEvent], {
+      defaultTimeZone: "Asia/Tokyo",
+      importedAt: "2026-08-11T15:00:00.000Z",
+    }),
+    activityCoverage,
+  );
+
+  const dstDayEvent = { ...activityEvent, dayKey: "2026-11-01" };
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([dstDayEvent], {
+      defaultTimeZone: "America/New_York",
+      importedAt: "2026-11-02T04:59:59.000Z",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([dstDayEvent], {
+      defaultTimeZone: "America/New_York",
+      importedAt: "2026-11-02T05:00:00.000Z",
+    }),
+    [{ ...activityCoverage[0], coverageBoundary: "2026-11-01" }],
+  );
+});
+
+test("Junction cutover coverage keeps accepted interval ends independent of day closure", () => {
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([{
+      dataOrigin: { sourceProviderSlug: "fitbit" },
+      endAt: "2026-08-12T10:00:00.000Z",
+      externalRef: { resourceType: "junction-fitbit-sleep" },
+      kind: "sleep_session",
+      occurredAt: "2026-08-12T02:00:00.000Z",
+    }], {
+      defaultTimeZone: "America/New_York",
+      importedAt: "2026-08-12T09:00:00.000Z",
+    }),
+    [{
+      coverageBoundary: "2026-08-12T10:00:00.000Z",
+      resource: "sleep",
+      sourceProviderSlug: "fitbit",
+    }],
+  );
+});
+
 test("Junction importer applies the canonical fence before the vault writer", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-google-health-canonical-fence");
   try {
@@ -3265,7 +3363,7 @@ test("Junction importer applies the canonical fence before the vault writer", as
           },
           sourceProviderSlug: "google_health",
         },
-        importedAt: "2026-08-12T12:00:00.000Z",
+        importedAt: "2026-08-13T12:00:00.000Z",
         timeseries: {
           hrv: {
             groups: {

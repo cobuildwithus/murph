@@ -126,10 +126,19 @@ Updated: 2026-08-12
     UTC fallback, prove floating date-only event identity plus monotonic durable
     coverage and mixed daily/interval obligations, then run round 7 at the
     ReviewGPT hard cap.
-15. In progress: final ReviewGPT round 7 required the hard-cap retrospective.
+15. Completed: final ReviewGPT round 7 required the hard-cap retrospective.
     Replace timezone-derived daily timestamps with stable canonical day keys,
     converge provider-confirmed Fitbit disconnection through the existing Web
     cutover owner, and obtain the user's explicit decision before any round 8.
+16. Completed: the user authorized continued review beyond the hard cap. Final
+    rounds 8 and 9 found incomplete legacy-provider status aggregation and
+    stale successor/provider authority checks; both were remediated with
+    complete-set status semantics and live provider-list revalidation.
+17. In progress: final round 10 found two review-induced edges. Daily facts must
+    not advance cutover coverage while their provider-local day is still open,
+    and browser polling must span automatic `cutover_ready` processing without
+    continuing after completion or a retry-required failure. Remediate, push,
+    and continue the explicitly authorized final-gate loop to a valid pass.
 
 ## Decisions
 
@@ -162,6 +171,10 @@ Updated: 2026-08-12
   existing list-before-revoke operation resumes. Provider absence finalizes the
   fence, active failure restores the existing retry marker, and an unprobeable
   outcome retains the renewed bounded claim. Do not add a lease table or worker.
+- Treat the Junction snapshot's explicit import timestamp as the day-closure
+  clock for cutover receipts. Import canonical daily facts immediately, but do
+  not publish their day as legacy coverage until the provider-local calendar
+  advances; interval resources keep their accepted instant boundary.
 
 ## Verification
 
@@ -228,12 +241,19 @@ Updated: 2026-08-12
   coverage is now stable across vault-timezone changes, interval coverage stays
   instant-based, provider-confirmed Fitbit absence admits only post-boundary
   Google Health facts, and Web converges that state without another revoke.
+- Final round-ten remediation proof: all 160 focused Junction importer tests,
+  all 235 Junction device-sync tests, and all 121 Connect-page tests pass.
+  Importer, device-sync, and Web typechecks pass, and importer/device-sync builds
+  pass. Daily closure is covered west and east of UTC plus a DST boundary;
+  accepted sleep intervals remain instant-based; Connect polling spans
+  verification and automatic cutover, then stops on success or retry-required
+  failure.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Commit and push the round-seven retrospective correction. Do not start
-  ReviewGPT round 8 without the user's explicit continuation decision.
+- Commit and push the round-ten remediation, then continue the user-authorized
+  ReviewGPT loop against that exact head until it reaches a valid pass.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict
   if the reviewed patch no longer merges cleanly.

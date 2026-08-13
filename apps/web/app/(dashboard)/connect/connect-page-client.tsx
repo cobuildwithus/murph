@@ -208,6 +208,17 @@ export function ConnectSourcesGrid({
       ),
     [displaySources],
   );
+  const hasAutomaticallyProgressingFitbitMigration = useMemo(
+    () =>
+      displaySources.some(
+        (source) =>
+          source.id === "fitbit" &&
+          (source.migrationState === "verifying_successor" ||
+            (source.migrationState === "cutover_ready" &&
+              source.migrationRetryRequired !== true)),
+      ),
+    [displaySources],
+  );
   const disconnectUnavailableSourceNames = useMemo(() => {
     if (
       disconnectSource?.disconnectScope !== "junction_account"
@@ -283,7 +294,7 @@ export function ConnectSourcesGrid({
   }, [hasInitialCallback]);
 
   useEffect(() => {
-    if (!hasVerifyingFitbitMigration) {
+    if (!hasAutomaticallyProgressingFitbitMigration) {
       fitbitMigrationRefreshAttemptsRef.current = 0;
       return;
     }
@@ -317,7 +328,10 @@ export function ConnectSourcesGrid({
       fitbitMigrationRefreshAttemptsRef.current = nextAttempt;
       router.refresh();
 
-      if (nextAttempt === FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT) {
+      if (
+        hasVerifyingFitbitMigration &&
+        nextAttempt === FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT
+      ) {
         setNotice((current) =>
           current === null ||
           (current.kind === FITBIT_MIGRATION_AUTHORIZED_NOTICE.kind &&
@@ -348,7 +362,11 @@ export function ConnectSourcesGrid({
       window.removeEventListener("online", handleRefreshAvailabilityChange);
       window.removeEventListener("offline", handleRefreshAvailabilityChange);
     };
-  }, [hasVerifyingFitbitMigration, router]);
+  }, [
+    hasAutomaticallyProgressingFitbitMigration,
+    hasVerifyingFitbitMigration,
+    router,
+  ]);
 
   useEffect(() => {
     if (

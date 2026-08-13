@@ -38,6 +38,7 @@ export {
   type JunctionCanonicalCoverageFence,
   type JunctionCanonicalCoverageEvidence,
   type JunctionCanonicalCoverageEvent,
+  type JunctionCanonicalCoverageDerivationOptions,
   type JunctionSummaryNormalizationEvidence,
   type JunctionSummaryNormalizationEvidenceWindow,
   type JunctionSummaryResource,

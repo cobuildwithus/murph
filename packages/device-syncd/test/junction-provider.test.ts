@@ -297,8 +297,23 @@ function createCanonicalImportReceipt(
         ...event.fields,
         dayKey: event.dayKey ?? event.occurredAt?.slice(0, 10) ?? "2000-01-01",
       })),
+      {
+        defaultTimeZone,
+        importedAt: normalizeTestImportedAt(snapshot.importedAt),
+      },
     ),
   };
+}
+
+function normalizeTestImportedAt(value: JunctionSnapshotInput["importedAt"]): string | undefined {
+  const timestampMs = value instanceof Date
+    ? value.getTime()
+    : typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Date.parse(value)
+        : Number.NaN;
+  return Number.isFinite(timestampMs) ? new Date(timestampMs).toISOString() : undefined;
 }
 
 function assertJunctionSnapshotInput(
@@ -12111,7 +12126,7 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
     Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]
   > = [];
   let acceptCanonicalEvents = false;
-  const context = createJunctionJobContext({
+  const createContext = (now: string) => createJunctionJobContext({
       account: createAccount({ sources: sourceSummaries }),
       importSnapshot: async (snapshot) => acceptCanonicalEvents
         ? createCanonicalImportReceipt(snapshot, true, "America/New_York")
@@ -12121,7 +12136,7 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
             durableDeliveryAccepted: true,
           },
       listConnectionSources: async () => sourceSummaries,
-      now: "2026-08-12T01:00:00.000Z",
+      now,
       upsertConnectionSource: (input) => {
         upserts.push(input);
         return createConnectionSource(input);
@@ -12144,7 +12159,7 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
     windowEnd: "2026-08-12T00:00:00.000Z",
   });
 
-  await executeJunctionJob(provider, context, job);
+  await executeJunctionJob(provider, createContext("2026-08-12T01:00:00.000Z"), job);
   assert.equal(
     upserts.some((source) =>
       source.resourceAvailabilitySummary?.canonicalCoverageBoundary_activity
@@ -12155,7 +12170,11 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
 
   upserts.length = 0;
   acceptCanonicalEvents = true;
-  await executeJunctionJob(provider, context, job);
+  await executeJunctionJob(provider, createContext("2026-08-12T01:00:00.000Z"), job);
+
+  assert.equal(upserts.length, 0);
+
+  await executeJunctionJob(provider, createContext("2026-08-12T05:00:00.000Z"), job);
 
   assert.equal(
     upserts.at(-1)?.resourceAvailabilitySummary?.activity,
