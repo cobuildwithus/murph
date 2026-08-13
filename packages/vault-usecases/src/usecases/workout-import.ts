@@ -752,6 +752,11 @@ function resolvePriorSnapshotMatches(input: {
   )
   const alignedMatches = new Array<WorkoutRawRefMatch | undefined>(input.plan.sessions.length)
   let exactPartialEvidence = false
+  const admittedCandidates: Array<{
+    candidate: PriorRawWorkoutFile
+    priorPlan: WorkoutCsvImportPlan
+    matches: WorkoutRawRefMatch[]
+  }> = []
 
   for (const [candidateIndex, candidate] of input.evidence.files.entries()) {
     const matches = input.evidence.matchesByFile[candidateIndex] ?? []
@@ -802,7 +807,84 @@ function resolvePriorSnapshotMatches(input: {
         'A prior workout source session is missing or changed in the refreshed export; nothing was imported.',
       )
     }
-    const fullMapping = mappingFromAttachedEvents(priorPlan, matches)
+    const directMapping = mappingFromAttachedEvents(priorPlan, matches)
+    const partialMatchesByIndex = new Map<number, WorkoutRawRefMatch>()
+    if (directMapping) {
+      directMapping.matches.forEach((match, index) => partialMatchesByIndex.set(index, match))
+    } else {
+      const indexesBySourceId = new Map(
+        priorPlan.sessions.map((session, index) => [session.sourceWorkoutId, index]),
+      )
+      const indexesByTitleAndTime = new Map(
+        priorPlan.sessions.map((session, index) => [`${session.title}\0${session.occurredAt}`, index]),
+      )
+      for (const match of matches) {
+        const record = match.attachment
+        const matchingIndexes = new Set<number>()
+        const nestedSourceId = record.kind === 'activity_session'
+          ? record.workout.sourceWorkoutId
+          : undefined
+        const nestedIndex = nestedSourceId
+          ? indexesBySourceId.get(nestedSourceId)
+          : undefined
+        const externalIndex = record.externalRef
+          ? indexesBySourceId.get(record.externalRef.resourceId)
+          : undefined
+        const titleTimeIndex = indexesByTitleAndTime.get(`${record.title}\0${record.occurredAt}`)
+        if (nestedIndex !== undefined) matchingIndexes.add(nestedIndex)
+        if (externalIndex !== undefined) matchingIndexes.add(externalIndex)
+        if (titleTimeIndex !== undefined) matchingIndexes.add(titleTimeIndex)
+        const matchingIndex = matchingIndexes.size === 1 ? [...matchingIndexes][0] : undefined
+        if (matchingIndex === undefined || partialMatchesByIndex.has(matchingIndex)) {
+          throw new VaultCliError(
+            'conflict',
+            'Prior workout evidence has partial or ambiguous session attachments; nothing was imported.',
+          )
+        }
+        partialMatchesByIndex.set(matchingIndex, match)
+      }
+    }
+    priorPlan.sessions.forEach((session, priorIndex) => {
+      const currentIndex = currentIndexesByKey.get(session.sourceSessionKey)
+      if (currentIndex === undefined) return
+      const match = partialMatchesByIndex.get(priorIndex)
+      if (!match) return
+      const record = match.latest
+      if (
+        record.lifecycle?.state !== 'deleted'
+        && (
+          record.kind !== 'activity_session'
+          || !record.workout.sourceApp
+          || !allowedRecordSources.has(record.workout.sourceApp)
+        )
+      ) {
+        throw new VaultCliError(
+          'conflict',
+          'Prior workout sessions use a different provider dialect; correct the exact prior file first. Nothing was imported.',
+        )
+      }
+      const selected = alignedMatches[currentIndex]
+      if (selected && selected.latest.id !== record.id) {
+        throw new VaultCliError(
+          'conflict',
+          'Prior workout snapshots map one source session to conflicting event identities; nothing was imported.',
+        )
+      }
+      alignedMatches[currentIndex] = selected ?? match
+    })
+    admittedCandidates.push({ candidate, priorPlan, matches })
+  }
+
+  for (const { candidate, priorPlan, matches } of admittedCandidates) {
+    const assembledMatches = priorPlan.sessions.map((session) => {
+      const currentIndex = currentIndexesByKey.get(session.sourceSessionKey)
+      return currentIndex === undefined ? undefined : alignedMatches[currentIndex]
+    })
+    const fullMapping = assembledMatches.every(
+      (match): match is WorkoutRawRefMatch => match !== undefined,
+    )
+      ? mappingFromAttachedEvents(priorPlan, assembledMatches)
+      : mappingFromAttachedEvents(priorPlan, matches)
     const hasPostMappingCorrection = fullMapping?.records.every((record) => {
       if (record.lifecycle?.state === 'deleted') return true
       const revision = Date.parse(record.externalRef?.version ?? '')
@@ -910,70 +992,6 @@ function resolvePriorSnapshotMatches(input: {
         )
       }
     }
-    const partialMatchesByIndex = new Map<number, WorkoutRawRefMatch>()
-    if (fullMapping) {
-      fullMapping.matches.forEach((match, index) => partialMatchesByIndex.set(index, match))
-    } else {
-      const indexesBySourceId = new Map(
-        priorPlan.sessions.map((session, index) => [session.sourceWorkoutId, index]),
-      )
-      const indexesByTitleAndTime = new Map(
-        priorPlan.sessions.map((session, index) => [`${session.title}\0${session.occurredAt}`, index]),
-      )
-      for (const match of matches) {
-        const record = match.attachment
-        const matchingIndexes = new Set<number>()
-        const nestedSourceId = record.kind === 'activity_session'
-          ? record.workout.sourceWorkoutId
-          : undefined
-        const nestedIndex = nestedSourceId
-          ? indexesBySourceId.get(nestedSourceId)
-          : undefined
-        const externalIndex = record.externalRef
-          ? indexesBySourceId.get(record.externalRef.resourceId)
-          : undefined
-        const titleTimeIndex = indexesByTitleAndTime.get(`${record.title}\0${record.occurredAt}`)
-        if (nestedIndex !== undefined) matchingIndexes.add(nestedIndex)
-        if (externalIndex !== undefined) matchingIndexes.add(externalIndex)
-        if (titleTimeIndex !== undefined) matchingIndexes.add(titleTimeIndex)
-        const matchingIndex = matchingIndexes.size === 1 ? [...matchingIndexes][0] : undefined
-        if (matchingIndex === undefined || partialMatchesByIndex.has(matchingIndex)) {
-          throw new VaultCliError(
-            'conflict',
-            'Prior workout evidence has partial or ambiguous session attachments; nothing was imported.',
-          )
-        }
-        partialMatchesByIndex.set(matchingIndex, match)
-      }
-    }
-    priorPlan.sessions.forEach((session, priorIndex) => {
-      const currentIndex = currentIndexesByKey.get(session.sourceSessionKey)
-      if (currentIndex === undefined) return
-      const match = partialMatchesByIndex.get(priorIndex)
-      if (!match) return
-      const record = match.latest
-      if (
-        record.lifecycle?.state !== 'deleted'
-        && (
-          record.kind !== 'activity_session'
-          || !record.workout.sourceApp
-          || !allowedRecordSources.has(record.workout.sourceApp)
-        )
-      ) {
-        throw new VaultCliError(
-          'conflict',
-          'Prior workout sessions use a different provider dialect; correct the exact prior file first. Nothing was imported.',
-        )
-      }
-      const selected = alignedMatches[currentIndex]
-      if (selected && selected.latest.id !== record.id) {
-        throw new VaultCliError(
-          'conflict',
-          'Prior workout snapshots map one source session to conflicting event identities; nothing was imported.',
-        )
-      }
-      alignedMatches[currentIndex] = selected ?? match
-    })
   }
 
   if (exactPartialEvidence && alignedMatches.some((match) => match === undefined)) {
@@ -1561,7 +1579,8 @@ export async function importWorkoutCsv(input: {
     text,
     plan,
   })
-  const sourceDialectCorrection = existingEvidence.records !== undefined
+  const sourceDialectCorrection = plan.detectedSource !== null
+    && existingEvidence.records !== undefined
     && existingEvidence.canonicalSourceMatches === false
   if (!sourceDialectCorrection) {
     assertStructuredPlanImportable(plan)

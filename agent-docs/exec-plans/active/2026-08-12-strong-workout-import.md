@@ -268,6 +268,15 @@ Updated: 2026-08-12
   existing correction ownership and expected-latest fences to the complete
   ordered session set. It neither creates replacement identities nor adds the
   expanded raw ref to unchanged overlapping events.
+- Final ReviewGPT round 15 found two continuation failures. First, omitting an
+  explicit provider on an exact shared-header replay could turn the planner's
+  internal Strong fallback into an unintended provider correction; dialect
+  correction now requires a non-null detected or explicitly selected provider.
+  Second, a corrected expanded snapshot could block the next complete refresh
+  because its stale manifest units were evaluated before its split attachments
+  were assembled across prior raws. The existing bounded reconciler now aligns
+  every admitted candidate first, then uses that complete attachment-plus-latest
+  mapping to prove corrected unit interpretation before comparing snapshots.
 
 ## Round 13 renewed retrospective
 
@@ -365,3 +374,11 @@ Updated: 2026-08-12
   preserves all three canonical identities and the tombstone, stores no new
   raw evidence, replays as a no-op, and rejects an expected-latest race. The
   complete focused workout-import file passes 21 tests.
+- Round 15 remediation proof: a shared-header Hevy import followed by a
+  source-omitted exact replay rejects without a raw or canonical revision;
+  exercise notes, set type, provider, identity, and member context remain
+  unchanged, while explicit provider correction still succeeds in place. The
+  expanded-snapshot regression now continues through a third complete snapshot:
+  a preview/apply race stores reusable immutable raw evidence but creates no
+  event, retry creates only the new session, all earlier identities and the
+  tombstone remain authoritative, and exact replay is a no-op.

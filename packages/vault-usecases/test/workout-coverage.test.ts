@@ -1657,6 +1657,103 @@ describe("workout-import", () => {
         /supported structured workout export/u,
       );
       assert.deepEqual(await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"), []);
+
+      const imported = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        source: "hevy",
+      });
+      assert.equal(imported.createdCount, 1);
+      const hevyPlan = importersRuntime.planWorkoutCsvImport({
+        text: await readFile(csvPath, "utf8"),
+        timeZone: "UTC",
+        source: "hevy",
+      });
+      const importedEvent = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: hevyPlan.sessions[0]!.sourceWorkoutId,
+      });
+      assert.ok(importedEvent);
+      await editEventRecord({
+        vault: tempDir,
+        lookup: importedEvent.id,
+        entityLabel: "workout session",
+        expectedKinds: ["activity_session"],
+        set: ['tags=["member-edit"]'],
+      });
+      const beforeAmbiguousReplay = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: hevyPlan.sessions[0]!.sourceWorkoutId,
+      });
+      const rawFilesBeforeAmbiguousReplay = await coreRuntime.walkVaultFiles(
+        tempDir,
+        "raw/workouts",
+      );
+      await assert.rejects(
+        workoutImportModule.importWorkoutCsv({ vault: tempDir, file: csvPath }),
+        /supported structured workout export/u,
+      );
+      const afterAmbiguousReplay = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: hevyPlan.sessions[0]!.sourceWorkoutId,
+      });
+      assert.equal(afterAmbiguousReplay?.id, beforeAmbiguousReplay?.id);
+      assert.equal(afterAmbiguousReplay?.lifecycle?.revision, beforeAmbiguousReplay?.lifecycle?.revision);
+      assert.equal(
+        afterAmbiguousReplay?.kind === "activity_session"
+          ? afterAmbiguousReplay.workout.sourceApp
+          : undefined,
+        "hevy",
+      );
+      assert.deepEqual(afterAmbiguousReplay?.tags, ["member-edit"]);
+      assert.equal(
+        afterAmbiguousReplay?.kind === "activity_session"
+          ? afterAmbiguousReplay.workout.exercises[0]?.note
+          : undefined,
+        "Controlled",
+      );
+      assert.equal(
+        afterAmbiguousReplay?.kind === "activity_session"
+          ? afterAmbiguousReplay.workout.exercises[0]?.sets[0]?.type
+          : undefined,
+        "warmup",
+      );
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesBeforeAmbiguousReplay,
+      );
+
+      const explicitlyCorrected = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        source: "strong",
+      });
+      assert.equal(explicitlyCorrected.createdCount, 0);
+      assert.equal(explicitlyCorrected.supersededCount, 1);
+      const afterExplicitCorrection = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: hevyPlan.sessions[0]!.sourceWorkoutId,
+      });
+      assert.equal(afterExplicitCorrection?.id, importedEvent.id);
+      assert.equal(
+        afterExplicitCorrection?.kind === "activity_session"
+          ? afterExplicitCorrection.workout.sourceApp
+          : undefined,
+        "strong",
+      );
+      assert.deepEqual(afterExplicitCorrection?.tags, ["member-edit"]);
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesBeforeAmbiguousReplay,
+      );
     });
   });
 
@@ -1686,6 +1783,10 @@ describe("workout-import", () => {
         "01ARZ3NDEKTSV4RRFFQ69G5FB3",
         "01ARZ3NDEKTSV4RRFFQ69G5FB4",
         "01ARZ3NDEKTSV4RRFFQ69G5FB5",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB6",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB7",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB8",
+        "01ARZ3NDEKTSV4RRFFQ69G5FB9",
       ];
       let afterNextPreview: (() => Promise<void>) | undefined;
       const fencedCoreRuntime = {
@@ -2020,6 +2121,121 @@ describe("workout-import", () => {
       assert.deepEqual(
         await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
         rawFilesBeforeCorrection,
+      );
+
+      const furtherExpandedText = [
+        expandedText,
+        "Latest Session,2026-04-11,08:00:00,08:30:00,30,Deadlift,1,80,5",
+      ].join("\n");
+      const furtherExpandedPath = path.join(tempDir, "further-expanded.csv");
+      await writeFile(furtherExpandedPath, furtherExpandedText, "utf8");
+      const furtherExpandedPlan = importersRuntime.planWorkoutCsvImport({
+        text: furtherExpandedText,
+        timeZone: "America/Los_Angeles",
+        source: "hevy",
+        weightUnit: "kg",
+      });
+      afterNextPreview = async () => {
+        await editEventRecord({
+          vault: tempDir,
+          lookup: unitCorrectedAdded.id,
+          entityLabel: "workout session",
+          expectedKinds: ["activity_session"],
+          set: ['tags=["expanded-race-edit"]'],
+        });
+      };
+      await assert.rejects(
+        workoutImportModule.importWorkoutCsv({
+          vault: tempDir,
+          file: furtherExpandedPath,
+          source: "hevy",
+          weightUnit: "kg",
+        }),
+        /changed after it was inspected/u,
+      );
+      assert.equal(await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: furtherExpandedPlan.sessions[3]!.sourceWorkoutId,
+      }), null);
+      const rawFilesAfterFurtherExpansionRace = await coreRuntime.walkVaultFiles(
+        tempDir,
+        "raw/workouts",
+      );
+      assert.equal(
+        rawFilesAfterFurtherExpansionRace.length,
+        rawFilesBeforeCorrection.length + 2,
+      );
+      const furtherExpanded = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: furtherExpandedPath,
+        source: "hevy",
+        weightUnit: "kg",
+      });
+      assert.equal(furtherExpanded.createdCount, 1);
+      assert.equal(furtherExpanded.supersededCount, 0);
+      assert.equal(furtherExpanded.skippedExistingCount, 3);
+      assert.equal(furtherExpanded.rawStored, false);
+      const rawFilesAfterFurtherExpansion = await coreRuntime.walkVaultFiles(
+        tempDir,
+        "raw/workouts",
+      );
+      assert.deepEqual(rawFilesAfterFurtherExpansion, rawFilesAfterFurtherExpansionRace);
+      const retainedAfterFurtherExpansion = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[0]!.sourceWorkoutId,
+      });
+      const addedAfterFurtherExpansion = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: expandedPlan.sessions[2]!.sourceWorkoutId,
+      });
+      assert.equal(retainedAfterFurtherExpansion?.id, edited.id);
+      assert.equal(retainedAfterFurtherExpansion?.title, "Member-edited title");
+      assert.deepEqual(retainedAfterFurtherExpansion?.tags, ["member-edit"]);
+      assert.equal(addedAfterFurtherExpansion?.id, addedBeforeCorrection.id);
+      assert.equal(
+        addedAfterFurtherExpansion?.kind === "activity_session"
+          ? addedAfterFurtherExpansion.workout.exercises[0]?.sets[0]?.weightUnit
+          : undefined,
+        "kg",
+      );
+      assert.equal(
+        addedAfterFurtherExpansion?.kind === "activity_session"
+          ? addedAfterFurtherExpansion.activityType
+          : undefined,
+        "mobility",
+      );
+      assert.deepEqual(addedAfterFurtherExpansion?.tags, ["expanded-race-edit"]);
+      assert.equal(await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[1]!.sourceWorkoutId,
+      }), null);
+      const latest = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "hevy",
+        resourceType: "workout-session",
+        resourceId: furtherExpandedPlan.sessions[3]!.sourceWorkoutId,
+      });
+      assert.ok(latest);
+      const furtherExpandedReplay = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: furtherExpandedPath,
+        source: "hevy",
+        weightUnit: "kg",
+      });
+      assert.equal(furtherExpandedReplay.importedCount, 0);
+      assert.equal(furtherExpandedReplay.skippedExistingCount, 4);
+      assert.equal(furtherExpandedReplay.rawStored, false);
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesAfterFurtherExpansion,
       );
     });
   });
