@@ -17,10 +17,8 @@ const beginRequestSchema = z.object({
 
 const captureRequestSchema = z.object({
   action: z.literal("capture"),
-  applicationRootSelector: selectorSchema,
   clientIdSelector: selectorSchema,
   clientSecretSelector: selectorSchema,
-  ownershipMarkerSelector: selectorSchema,
   provider: providerSchema,
   revealSecretSelector: selectorSchema.nullable().default(null),
   runId: runIdSchema,
@@ -35,19 +33,8 @@ const prepareDeleteRequestSchema = z.object({
 
 const deleteRequestSchema = z.object({
   action: z.literal("delete"),
-  applicationRootSelector: selectorSchema,
-  completionSelector: selectorSchema.nullable().default(null),
   confirmSelector: selectorSchema.nullable().default(null),
   deleteSelector: selectorSchema,
-  ownershipMarkerSelector: selectorSchema,
-  provider: providerSchema,
-  runId: runIdSchema,
-  setupId: setupIdSchema,
-}).strict();
-
-const confirmMissingRequestSchema = z.object({
-  action: z.literal("confirm_missing"),
-  applicationsRootSelector: selectorSchema,
   provider: providerSchema,
   runId: runIdSchema,
   setupId: setupIdSchema,
@@ -60,7 +47,6 @@ export const hostedRuntimeProviderSetupToolRequestSchema = z.discriminatedUnion(
     captureRequestSchema,
     prepareDeleteRequestSchema,
     deleteRequestSchema,
-    confirmMissingRequestSchema,
   ],
 );
 

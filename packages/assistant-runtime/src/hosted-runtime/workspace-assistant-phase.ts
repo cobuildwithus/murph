@@ -2228,6 +2228,8 @@ export async function runHostedWorkspaceAssistantPhase(
         shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
         timeoutMs: HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS,
       });
+      const providerSetupPrompt =
+        options.systemMailboxMaintenance.providerSetupContinuationPrompt ?? null;
 
       try {
         const deviceSyncStatusPrompt = await buildHostedDeviceSyncStatusPrompt({
@@ -2237,12 +2239,13 @@ export async function runHostedWorkspaceAssistantPhase(
         });
         if (
           input.shouldYieldBackgroundMaintenance?.() === true
-          || !deviceSyncStatusPrompt
         ) {
           return null;
         }
 
-        return deviceSyncStatusPrompt;
+        return [providerSetupPrompt, deviceSyncStatusPrompt]
+          .filter((value): value is string => Boolean(value))
+          .join("\n\n") || null;
       } finally {
         cancellation.dispose();
       }
@@ -3978,7 +3981,32 @@ function shouldContinueAssistantLaneAfterSystemMailboxPreparation(
   return "item" in systemMailboxPreparation
     && systemMailboxPreparation.status === "processed"
     && systemMailboxPreparation.item.routeAction === "apply-runtime-control-request"
-    && systemMailboxPreparation.item.wake.kind === "runtime.manual-requested";
+    && (
+      systemMailboxPreparation.item.wake.kind === "runtime.manual-requested"
+      || systemMailboxPreparation.item.wake.kind
+        === "runtime.provider-setup-continuation-requested"
+    );
+}
+
+function buildProviderSetupContinuationPrompt(
+  systemMailboxPreparation: HostedSystemMailboxPreparation,
+): string | null {
+  if (
+    !("item" in systemMailboxPreparation)
+    || systemMailboxPreparation.status !== "processed"
+    || systemMailboxPreparation.item.routeAction !== "apply-runtime-control-request"
+    || systemMailboxPreparation.item.wake.kind
+      !== "runtime.provider-setup-continuation-requested"
+  ) {
+    return null;
+  }
+  const continuation = systemMailboxPreparation.item.wake.providerSetup;
+  return [
+    "Private provider setup continuation accepted:",
+    `- Continue the exact ${continuation.provider} setup with \`murph.provider_setup\` using provider \`${continuation.provider}\`.`,
+    "- Read the current durable setup first; resume its exact owned browser run and do not create a duplicate application.",
+    "- Credentials remain inside the trusted capture boundary and must never enter model context.",
+  ].join("\n");
 }
 
 function isCausalPendingEffectsReconciliation(
@@ -4995,6 +5023,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   deviceSyncMaintenanceRan: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   pendingAssistantInputWakeAt: string | null;
+  providerSetupContinuationPrompt?: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   const phaseInput = input.input;
@@ -5555,6 +5584,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         ),
     initialProviderCleanupCheckpoint,
     pendingAssistantInputWakeAt,
+    providerSetupContinuationPrompt:
+      buildProviderSetupContinuationPrompt(systemMailboxPreparation),
     result: mergeMemberPreferencesPrePlanningResult({
       ...(browserVaultReplicaRefreshRequested
         ? { browserVaultReplicaRefreshRequested: true }

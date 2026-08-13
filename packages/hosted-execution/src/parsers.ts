@@ -67,6 +67,7 @@ import type {
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
   HostedExecutionPlainRuntimeControlWakeKind,
+  HostedExecutionProviderSetupContinuationPayload,
   HostedCodexAuthAction,
 } from "./contracts.ts";
 import {
@@ -98,6 +99,7 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
+  buildHostedExecutionProviderSetupContinuationRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -480,6 +482,23 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         occurredAt,
         userId: wireUserId,
       });
+    case "runtime.provider-setup-continuation-requested": {
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "providerSetup",
+        "userId",
+      ], "Hosted execution runtime.provider-setup-continuation-requested wake");
+      return buildHostedExecutionProviderSetupContinuationRequestedWake({
+        eventId,
+        occurredAt,
+        providerSetup: parseHostedExecutionProviderSetupContinuationPayload(
+          record.providerSetup,
+        ),
+        userId: wireUserId,
+      });
+    }
     case "runtime.codex-auth-requested":
       assertExactHostedExecutionKeys(record, [
         "action",
@@ -1448,6 +1467,19 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind: kind as HostedExecutionPlainRuntimeControlWakeKind,
         userId,
       };
+    case "runtime.provider-setup-continuation-requested":
+      assertExactHostedExecutionKeys(record, [
+        "kind",
+        "providerSetup",
+        "userId",
+      ], "Hosted execution runtime.provider-setup-continuation-requested event");
+      return {
+        kind,
+        providerSetup: parseHostedExecutionProviderSetupContinuationPayload(
+          record.providerSetup,
+        ),
+        userId,
+      };
     case "runtime.codex-auth-requested":
       assertExactHostedExecutionKeys(record, [
         "action",
@@ -1464,6 +1496,54 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
+}
+
+function parseHostedExecutionProviderSetupContinuationPayload(
+  value: unknown,
+): HostedExecutionProviderSetupContinuationPayload {
+  const record = requireObject(
+    value,
+    "Hosted execution provider setup continuation payload",
+  );
+  assertExactHostedExecutionKeys(record, [
+    "handoffId",
+    "provider",
+    "runId",
+    "setupId",
+    "setupVersion",
+  ], "Hosted execution provider setup continuation payload");
+  const handoffId = readNullableString(
+    record.handoffId,
+    "Hosted execution provider setup continuation handoffId",
+  );
+  const runId = readNullableString(
+    record.runId,
+    "Hosted execution provider setup continuation runId",
+  );
+  const setupVersion = requireNumber(
+    record.setupVersion,
+    "Hosted execution provider setup continuation setupVersion",
+  );
+  if (
+    !Number.isSafeInteger(setupVersion)
+    || setupVersion < 1
+    || (handoffId === null) !== (runId === null)
+  ) {
+    throw new TypeError("Hosted execution provider setup continuation is invalid.");
+  }
+  return {
+    handoffId,
+    provider: requireString(
+      record.provider,
+      "Hosted execution provider setup continuation provider",
+    ),
+    runId,
+    setupId: requireString(
+      record.setupId,
+      "Hosted execution provider setup continuation setupId",
+    ),
+    setupVersion,
+  };
 }
 
 function parseHostedExecutionAssistantNotificationRequestedPayload(

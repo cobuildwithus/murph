@@ -1,9 +1,10 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedOnboardingError } from "../../hosted-onboarding/errors";
 import {
+  isMemberOwnedDeviceProviderApplicationProvider,
   readDeviceProviderApplicationView,
   type DeviceProviderApplicationView,
 } from "../provider-applications";
@@ -29,24 +30,59 @@ type ReadProviderApplicationView = (input: {
  * Provider dashboards need an authenticated member-driven browser. Account
  * deletion therefore starts only after every Murph-owned provider application
  * has been removed through the ordinary /connect assistant flow. This check is
- * intentionally before the account suspension fence; no model or browser
- * session is started after suspension.
+ * runs while the account-deletion transaction owns the member suspension
+ * lock, so no setup run or credential binding can start between proof and the
+ * suspension write.
  */
 export async function assertMemberOwnedProviderSetupsReadyForAccountDeletion(input: {
   memberId: string;
-  prisma?: PrismaClient;
+  prisma?: PrismaClient | Prisma.TransactionClient;
   readApplicationView?: ReadProviderApplicationView;
   store?: Pick<ProviderSetupDeletionStore, "listMemberSetups">;
 }): Promise<void> {
-  const store = input.store
-    ?? new PrismaDeviceProviderSetupStore(requireDeletionPrisma(input.prisma));
+  const store = input.store ?? null;
   const readApplication = input.readApplicationView
     ?? ((query) => readDeviceProviderApplicationView({
       ...query,
       prisma: requireDeletionPrisma(input.prisma),
     }));
-  const setups = (await store.listMemberSetups(input.memberId))
-    .filter((setup) => setup.active && setup.status !== "deleted");
+  const setups = store
+    ? (await store.listMemberSetups(input.memberId))
+      .filter((setup) => setup.active && setup.status !== "deleted")
+    : await requireDeletionPrisma(input.prisma).deviceProviderSetup.findMany({
+        select: {
+          active: true,
+          browserRunId: true,
+          id: true,
+          memberId: true,
+          provider: true,
+          providerApplicationId: true,
+          providerApplicationRevision: true,
+          status: true,
+        },
+        where: {
+          active: true,
+          memberId: input.memberId,
+          status: { not: "deleted" },
+        },
+      });
+
+  if (input.prisma) {
+    const activeOwnedRun = setups.length === 0
+      ? null
+      : await input.prisma.hostedComputerRun.findFirst({
+          select: { id: true },
+          where: {
+            memberId: input.memberId,
+            ownerKey: { in: setups.map((setup) => setup.id) },
+            ownerPurpose: "member_owned_provider_setup",
+            status: { in: ["running", "awaiting_user", "cleanup_pending"] },
+          },
+        });
+    if (activeOwnedRun) {
+      throw providerSetupCleanupRequired("provider");
+    }
+  }
 
   const providerNames = new Map(
     listMemberOwnedProviderSetupRegistrations().map((registration) => [
@@ -54,10 +90,17 @@ export async function assertMemberOwnedProviderSetupsReadyForAccountDeletion(inp
       registration.presentation.providerName,
     ]),
   );
-  const providers = new Set([
-    ...providerNames.keys(),
-    ...setups.map((setup) => setup.provider),
-  ]);
+  const providers = new Set<MemberOwnedProviderSetupRecord["provider"]>();
+  for (const registration of listMemberOwnedProviderSetupRegistrations()) {
+    if (isMemberOwnedDeviceProviderApplicationProvider(registration.coordinates.provider)) {
+      providers.add(registration.coordinates.provider);
+    }
+  }
+  for (const setup of setups) {
+    if (isMemberOwnedDeviceProviderApplicationProvider(setup.provider)) {
+      providers.add(setup.provider);
+    }
+  }
 
   for (const provider of providers) {
     const setup = setups.find((candidate) => candidate.provider === provider) ?? null;
@@ -94,7 +137,7 @@ export async function deleteMemberOwnedProviderSetupExternalStateForAccountDelet
   store?: ProviderSetupDeletionStore;
 }): Promise<void> {
   const store = input.store
-    ?? new PrismaDeviceProviderSetupStore(requireDeletionPrisma(input.prisma));
+    ?? new PrismaDeviceProviderSetupStore(requireDeletionClient(input.prisma));
   const readApplication = input.readApplicationView
     ?? ((query) => readDeviceProviderApplicationView({
       ...query,
@@ -143,7 +186,16 @@ function providerSetupCleanupRequired(providerName: string) {
   });
 }
 
-function requireDeletionPrisma(prisma: PrismaClient | undefined): PrismaClient {
+function requireDeletionPrisma(
+  prisma: PrismaClient | Prisma.TransactionClient | undefined,
+): PrismaClient | Prisma.TransactionClient {
+  if (!prisma) {
+    throw new TypeError("Provider setup account deletion requires Prisma unless all owners are injected.");
+  }
+  return prisma;
+}
+
+function requireDeletionClient(prisma: PrismaClient | undefined): PrismaClient {
   if (!prisma) {
     throw new TypeError("Provider setup account deletion requires Prisma unless all owners are injected.");
   }

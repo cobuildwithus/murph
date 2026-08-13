@@ -359,6 +359,7 @@ async function executeHostedSystemWake(input: {
       });
     }
     case "runtime.manual-requested":
+    case "runtime.provider-setup-continuation-requested":
     case "runtime.pending-effects-reconcile-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":

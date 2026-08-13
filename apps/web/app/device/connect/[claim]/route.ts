@@ -137,7 +137,10 @@ export async function POST(
           prisma: getPrisma(),
         });
         const setupService = createMemberOwnedProviderSetupService(target.provider);
-        const setup = await setupService.authorize(session.member.id, setupId);
+        const setup = await setupService.authorizeAndContinue(
+          session.member.id,
+          setupId,
+        );
         if (setup.action !== "continue_oauth") {
           await releaseHostedDeviceConnectIntentStart({
             claim,

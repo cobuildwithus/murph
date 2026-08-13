@@ -120,7 +120,7 @@ describe("hosted device connect intent route", () => {
       updatedAt: "2026-08-11T12:00:00.000Z",
     });
     mocks.createMemberOwnedProviderSetupService.mockReturnValue({
-      authorize: mocks.authorizeMemberOwnedProviderSetup,
+      authorizeAndContinue: mocks.authorizeMemberOwnedProviderSetup,
       startOAuth: mocks.startMemberOwnedProviderSetupOAuth,
     });
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);

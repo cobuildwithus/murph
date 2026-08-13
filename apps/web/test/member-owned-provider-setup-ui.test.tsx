@@ -47,12 +47,15 @@ describe("member-owned provider setup UI", () => {
     expect(markup).toMatch(/<button[^>]*>Continue<\/button>/u);
   });
 
-  it("keeps durable in-progress setup cancelable without exposing browser internals", () => {
-    for (const status of ["authorized", "browser_setup", "capturing", "canceling"] as const) {
+  it("keeps only reversible setup states cancelable without exposing browser internals", () => {
+    for (const status of ["authorized", "browser_setup"] as const) {
       const markup = renderSetup(setupView(status, "none"));
       expect(markup).toContain("Cancel setup");
       expect(markup).not.toMatch(/handoff|runId|selector|playwright/iu);
       expect(markup).not.toMatch(/<input\b/iu);
+    }
+    for (const status of ["capturing", "canceling"] as const) {
+      expect(renderSetup(setupView(status, "none"))).not.toContain("Cancel setup");
     }
   });
 

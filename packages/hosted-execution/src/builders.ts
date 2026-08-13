@@ -28,6 +28,8 @@ import type {
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
   HostedExecutionPendingEffectsReconcileRequestedWake,
+  HostedExecutionProviderSetupContinuationPayload,
+  HostedExecutionProviderSetupContinuationRequestedWake,
   HostedExecutionCodexAuthRequestedWake,
   HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
@@ -767,6 +769,21 @@ export function buildHostedExecutionPendingEffectsReconcileRequestedWake(input: 
     eventId: input.eventId,
     kind: "runtime.pending-effects-reconcile-requested",
     occurredAt: input.occurredAt,
+    userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionProviderSetupContinuationRequestedWake(input: {
+  eventId: string;
+  occurredAt: string;
+  providerSetup: HostedExecutionProviderSetupContinuationPayload;
+  userId: string;
+}): HostedExecutionProviderSetupContinuationRequestedWake {
+  return {
+    eventId: input.eventId,
+    kind: "runtime.provider-setup-continuation-requested",
+    occurredAt: input.occurredAt,
+    providerSetup: { ...input.providerSetup },
     userId: input.userId,
   };
 }

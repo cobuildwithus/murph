@@ -83,6 +83,7 @@ const ACTION_BY_KIND = {
   "runtime.mailbox-lag-observed": "apply-runtime-control-request",
   "runtime.maintenance-requested": "apply-runtime-control-request",
   "runtime.manual-requested": "apply-runtime-control-request",
+  "runtime.provider-setup-continuation-requested": "apply-runtime-control-request",
   "runtime.pending-effects-reconcile-requested": "apply-runtime-control-request",
   "vault-share.delivery": "import-vault-share-delivery",
   "vault-share.revoke": "import-vault-share-revoke",

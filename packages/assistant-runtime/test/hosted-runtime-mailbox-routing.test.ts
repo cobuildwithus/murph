@@ -89,6 +89,11 @@ describe("hosted mailbox routing", () => {
       },
       {
         action: "apply-runtime-control-request",
+        kind: "runtime.provider-setup-continuation-requested",
+        lane: "system",
+      },
+      {
+        action: "apply-runtime-control-request",
         kind: "runtime.pending-effects-reconcile-requested",
         lane: "system",
       },
@@ -151,6 +156,12 @@ describe("hosted mailbox routing", () => {
       "system",
     );
     assert.equal(resolveExpectedLaneForHostedMailboxKind("runtime.manual-requested"), "system");
+    assert.equal(
+      resolveExpectedLaneForHostedMailboxKind(
+        "runtime.provider-setup-continuation-requested",
+      ),
+      "system",
+    );
     assert.equal(
       resolveExpectedLaneForHostedMailboxKind("runtime.pending-effects-reconcile-requested"),
       "system",

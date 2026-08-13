@@ -6,6 +6,7 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
+  buildHostedExecutionProviderSetupContinuationRequestedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "../src/builders.ts";
 import {
@@ -30,9 +31,30 @@ describe("hosted execution wake guards", () => {
       isHostedExecutionWakeKind("runtime.pending-effects-reconcile-requested"),
     ).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.maintenance-requested")).toBe(true);
+    expect(
+      isHostedExecutionWakeKind("runtime.provider-setup-continuation-requested"),
+    ).toBe(true);
     expect(isHostedExecutionWakeKind("unsupported.kind")).toBe(false);
     expect(isHostedExecutionWakeKind("linq.message.received")).toBe(false);
     expect(isHostedExecutionWakeKind("email.message.received")).toBe(false);
+  });
+
+  it("round-trips one typed provider setup continuation without credentials", () => {
+    const wake = buildHostedExecutionProviderSetupContinuationRequestedWake({
+      eventId: "runtime-control:provider-setup-continuation:fixture",
+      occurredAt: "1970-01-01T00:00:00.000Z",
+      providerSetup: {
+        handoffId: "hch_fixture",
+        provider: "strava",
+        runId: "hcr_fixture",
+        setupId: "dps_fixture",
+        setupVersion: 2,
+      },
+      userId: "member_fixture",
+    });
+
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(JSON.stringify(wake)).not.toMatch(/clientId|clientSecret|credential/iu);
   });
 
   it("narrows hosted wakes by conversation channel versus system wake", () => {

@@ -10,6 +10,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  authorizeMemberOwnedProviderSetup: vi.fn(),
   cancelMemberOwnedProviderSetup: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
 
 vi.mock("@/src/lib/device-sync/provider-setup", () => ({
   createMemberOwnedProviderSetupService: () => ({
+    authorizeAndContinue: mocks.authorizeMemberOwnedProviderSetup,
     cancel: mocks.cancelMemberOwnedProviderSetup,
     markDisconnected: mocks.markMemberOwnedSetupDisconnected,
   }),

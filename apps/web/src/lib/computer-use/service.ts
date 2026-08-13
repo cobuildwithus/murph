@@ -37,6 +37,7 @@ import {
   type MemberOwnedProviderSetupRunRecord,
   type PersistedComputerHandoffPurpose,
 } from "./store";
+import { requestMemberOwnedProviderSetupContinuation } from "../device-sync/provider-setup/continuation";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
@@ -198,18 +199,23 @@ export class ComputerUseService {
   private kernel: ComputerKernelClient | null;
   private readonly now: () => Date;
   private readonly store: ComputerUseStore;
+  private readonly requestProviderSetupContinuation:
+    typeof requestMemberOwnedProviderSetupContinuation;
 
   constructor(input: {
     crypto?: ComputerUseCrypto;
     env?: EnvSource;
     kernel?: ComputerKernelClient;
     now?: () => Date;
+    requestProviderSetupContinuation?: typeof requestMemberOwnedProviderSetupContinuation;
     store?: ComputerUseStore;
   } = {}) {
     this.crypto = input.crypto ?? hostedComputerUseCrypto;
     this.env = input.env ?? process.env;
     this.kernel = input.kernel ?? null;
     this.now = input.now ?? (() => new Date());
+    this.requestProviderSetupContinuation = input.requestProviderSetupContinuation
+      ?? requestMemberOwnedProviderSetupContinuation;
     this.store = input.store ?? new PrismaComputerUseStore();
   }
 
@@ -2074,7 +2080,20 @@ export class ComputerUseService {
       return null;
     }
     const returnPath = MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH;
+    const ownerKey = owned.ownerKey;
+    if (!ownerKey) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        message: "Computer run ownership could not be verified.",
+      });
+    }
     if (owned.status === "running") {
+      await this.requestProviderSetupContinuation({
+        handoffId: input.handoff.id,
+        memberId: owned.memberId,
+        runId: owned.id,
+        setupId: ownerKey,
+      });
       return returnPath;
     }
     if (
@@ -2087,14 +2106,6 @@ export class ComputerUseService {
         code: "HOSTED_COMPUTER_RUN_NOT_RUNNING",
         message: "Private provider setup could not resume from this handoff.",
         retryable: true,
-      });
-    }
-
-    const ownerKey = owned.ownerKey;
-    if (!ownerKey) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
-        message: "Computer run ownership could not be verified.",
       });
     }
 
@@ -2121,6 +2132,12 @@ export class ComputerUseService {
         throw error;
       }
     }
+    await this.requestProviderSetupContinuation({
+      handoffId: input.handoff.id,
+      memberId: owned.memberId,
+      runId: owned.id,
+      setupId: ownerKey,
+    });
     return returnPath;
   }
 

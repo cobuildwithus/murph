@@ -42,7 +42,7 @@ export const POST = withJsonError(async (
     prisma: getPrisma(),
   });
   const setup = await createMemberOwnedProviderSetupService(provider)
-    .authorize(auth.member.id);
+    .authorizeAndContinue(auth.member.id);
 
   return jsonOk({
     presentation: registration.presentation,

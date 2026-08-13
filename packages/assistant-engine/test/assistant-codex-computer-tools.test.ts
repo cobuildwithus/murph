@@ -66,7 +66,8 @@ describe("murph computer dynamic tools", () => {
     expect(providerSchema).toContain('"begin"');
     expect(providerSchema).toContain('"capture"');
     expect(providerSchema).toContain('"prepare_delete"');
-    expect(providerSchema).toContain('"confirm_missing"');
+    expect(providerSchema).toContain('"delete"');
+    expect(providerSchema).not.toContain('"confirm_missing"');
     expect(providerSchema).toContain('"clientSecretSelector"');
     expect(providerSchema).not.toContain('"clientSecret"');
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");

@@ -10,10 +10,10 @@ export const STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION = {
   developerAccessDisclosure:
     "Strava may require developer access or another provider prerequisite before setup can finish.",
   messages: {
-    authorized: "Setup is authorized. Return to your Murph conversation and ask Murph to continue this exact Strava setup.",
+    authorized: "Setup is authorized. Murph is continuing this exact Strava setup now.",
     browser_setup: "Murph is continuing this Strava setup in its secure browser. Progress survives sign-in, MFA, CAPTCHA, and provider prerequisites.",
     canceled: "Strava setup was canceled. You can authorize a new attempt.",
-    canceling: "Murph is safely canceling this Strava setup. Late browser work cannot save credentials.",
+    canceling: "Murph is safely canceling this Strava setup.",
     capturing: "Murph is securely capturing and sealing the private application credentials. They are never shown to the assistant.",
     connected: "Strava is connected through your private provider application.",
     deletion_pending: "Murph is removing only the private Strava application it can prove it owns.",

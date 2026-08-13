@@ -37,6 +37,7 @@ export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
   "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
+  "runtime.provider-setup-continuation-requested",
   "runtime.codex-auth-requested",
   "runtime.device-sync-recovery-requested",
   "runtime.mailbox-lag-observed",
@@ -55,7 +56,9 @@ export type HostedCodexAuthAction =
 
 export type HostedExecutionPlainRuntimeControlWakeKind = Exclude<
   HostedExecutionRuntimeControlWakeKind,
-  "runtime.codex-auth-requested" | "runtime.pending-effects-reconcile-requested"
+  | "runtime.codex-auth-requested"
+  | "runtime.pending-effects-reconcile-requested"
+  | "runtime.provider-setup-continuation-requested"
 >;
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
@@ -513,9 +516,24 @@ export interface HostedExecutionCodexAuthRequestedEvent
   kind: "runtime.codex-auth-requested";
 }
 
+export interface HostedExecutionProviderSetupContinuationPayload {
+  handoffId: string | null;
+  provider: string;
+  runId: string | null;
+  setupId: string;
+  setupVersion: number;
+}
+
+export interface HostedExecutionProviderSetupContinuationRequestedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "runtime.provider-setup-continuation-requested";
+  providerSetup: HostedExecutionProviderSetupContinuationPayload;
+}
+
 export type HostedExecutionRuntimeControlRequestedEvent =
   | HostedExecutionPlainRuntimeControlRequestedEvent
   | HostedExecutionPendingEffectsReconcileRequestedEvent
+  | HostedExecutionProviderSetupContinuationRequestedEvent
   | HostedExecutionCodexAuthRequestedEvent;
 
 export type HostedExecutionEvent =
@@ -837,9 +855,16 @@ export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBa
   kind: "runtime.codex-auth-requested";
 }
 
+export interface HostedExecutionProviderSetupContinuationRequestedWake
+  extends HostedExecutionBaseWake {
+  kind: "runtime.provider-setup-continuation-requested";
+  providerSetup: HostedExecutionProviderSetupContinuationPayload;
+}
+
 export type HostedExecutionRuntimeControlWake =
   | HostedExecutionPlainRuntimeControlWake
   | HostedExecutionPendingEffectsReconcileRequestedWake
+  | HostedExecutionProviderSetupContinuationRequestedWake
   | HostedExecutionCodexAuthRequestedWake;
 
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {

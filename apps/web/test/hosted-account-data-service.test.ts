@@ -1303,6 +1303,7 @@ describe("deleteHostedAccountData", () => {
 
   it("commits the suspension fence before member-owned provider cleanup and terminates around local and Cloudflare cleanup", async () => {
     const order: string[] = [];
+    const databaseOrder: string[] = [];
     serviceMocks.deleteMemberOwnedProviderSetupExternalStateForAccountDeletion.mockImplementation(
       async () => {
         order.push("provider-setup");
@@ -1323,6 +1324,7 @@ describe("deleteHostedAccountData", () => {
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => order.push("prisma"),
+      operationOrder: databaseOrder,
     });
 
     const result = await deleteHostedAccountData({
@@ -1340,6 +1342,9 @@ describe("deleteHostedAccountData", () => {
       "cloudflare",
       "temporal",
     ]);
+    expect(databaseOrder.indexOf("findUnique:deviceProviderApplication")).toBeLessThan(
+      databaseOrder.indexOf("update:hostedMember"),
+    );
     expect(result.cloudflare.deleted).toBe(true);
     expect(
       serviceMocks.deleteMemberOwnedProviderSetupExternalStateForAccountDeletion,
@@ -3882,6 +3887,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
                 : input.groupJoinDeliveryRows ?? []
             : []
     ),
+    findUnique: async () => {
+      input.operationOrder?.push(`findUnique:${model}`);
+      return null;
+    },
     updateMany: async (args) => {
       input.operationOrder?.push(`update:${model}`);
       input.updateCalls?.push({
@@ -3921,6 +3930,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
       },
     },
     deviceProviderApplication: makeDeleteDelegate("deviceProviderApplication"),
+    deviceProviderSetup: {
+      ...makeDeleteDelegate("deviceProviderSetup"),
+      findMany: async () => [],
+    },
     hostedComputerRun: {
       ...makeDeleteDelegate("hostedComputerRun"),
       findMany: async () => {
@@ -4257,6 +4270,7 @@ type HostedAccountDeletionPrismaDeleteDelegate = {
   // pre-member outreach from the member's phone blind index. Reading empty keeps
   // those paths inert unless a test supplies rows.
   findMany(args: { where?: unknown; select?: unknown }): Promise<readonly unknown[]>;
+  findUnique(args: { where?: unknown; select?: unknown }): Promise<unknown>;
   updateMany(args: { data?: unknown; where?: unknown }): Promise<{ count: number }>;
 };
 
@@ -4272,6 +4286,7 @@ type HostedAccountDeletionPrismaTransactionFake = {
     }>>;
   };
   deviceProviderApplication: HostedAccountDeletionPrismaDeleteDelegate;
+  deviceProviderSetup: HostedAccountDeletionPrismaDeleteDelegate;
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };

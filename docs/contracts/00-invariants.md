@@ -291,8 +291,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   handoff; completing that handoff resumes only that run and returns to `/connect`
   without conversation routing. Prerequisite cancellation is permitted only when
   durable state proves no provider submission, application binding, or connection.
-  Account deletion commits its suspension fence before external setup cleanup and
-  retains local retry ownership when that cleanup fails.
+  Once `capturing` records possible submission, ambiguous failure preserves that
+  fence and exact-run recovery cannot submit again. Continue and setup-owned
+  handoff completion append exact typed continuation work to the existing system
+  mailbox before waking the runtime. Account deletion checks setup, application,
+  and run ownership under its member suspension lock; provider application save
+  rejects suspension, and local retry ownership survives later cleanup failure.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate

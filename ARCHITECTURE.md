@@ -979,19 +979,33 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   returns to `/connect`.
 
   Final submission and credential capture remain trusted Web operations. The
-  model supplies only restricted selectors identified from the live page; Web
-  scopes them to the exact application root, verifies the deterministic
-  ownership marker, reads the client id and secret inside the browser boundary,
+  model supplies only restricted control selectors identified from the live page;
+  trusted code locates the deterministic ownership marker first and derives the
+  only application/form container from finite provider metadata before it proves
+  submit, credential, delete, and confirmation controls belong to that object.
+  It reads the client id and secret inside the browser boundary,
   seals them directly into `DeviceProviderApplication`, navigates away, scrubs
   transient values, and returns no credential-bearing result. Owned deletion
-  uses the same marker-scoped boundary. A persisted `canceling` transition and
-  exact setup-version/run fence prevent late browser capture from saving
-  credentials after cancellation begins. Once an exact application binding is
+  uses the same marker-derived boundary; ambiguous absence retains the local
+  binding. `capturing` is the irreversible submission fence, so it cannot be
+  canceled or reset after an ambiguous failure and recovery of the exact run
+  never submits again. A persisted `canceling` transition remains the reversible
+  pre-submission fence. Once an exact application binding is
   durable, setup finishes that exact browser run and compare-and-set clears its
   run binding before OAuth can continue; an interrupted finish or clear remains
   explicit and retryable. Account deletion requires the external provider
-  application and resumable run to be removed before suspension, then closes
-  only the local durable setup row after the suspension fence.
+  application and resumable run to be removed in the member-lock transaction
+  immediately before suspension, including a setup-owned run not yet copied to
+  the setup row. Application save rechecks the suspension fence. The suspension
+  transaction then closes only the local durable setup row.
+
+  Continue and setup-owned handoff completion append one idempotent typed
+  `runtime.provider-setup-continuation-requested` item to the existing hosted
+  system mailbox, keyed by the exact setup/version or run/handoff, before the
+  existing droppable runtime wake. Mailbox handoff recovery covers a lost wake.
+  The runtime supplies only provider-level continuation guidance to the next
+  background assistant turn; setup, run, and credentials remain behind their
+  existing trusted tools and never enter model context.
 
   `DeviceProviderApplication` owns encrypted credentials, while device-sync owns
   OAuth, authoritative connection activation, initial backfill, polling, revoke,

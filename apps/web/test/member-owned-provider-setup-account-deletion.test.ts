@@ -80,6 +80,38 @@ describe("member-owned provider setup account deletion", () => {
     },
   );
 
+  it("blocks an active setup-owned run before its id is copied onto the setup", async () => {
+    const setup = buildSetup({ browserRunId: null, status: "authorized" });
+    const prisma = {
+      deviceProviderApplication: {
+        findUnique: vi.fn(async () => null),
+      },
+      deviceProviderSetup: {
+        findMany: vi.fn(async () => [setup]),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => ({ id: "hcr_unbound" })),
+      },
+    };
+
+    await expect(assertMemberOwnedProviderSetupsReadyForAccountDeletion({
+      memberId: setup.memberId,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_SETUP_REQUIRES_CLEANUP",
+      httpStatus: 409,
+    });
+    expect(prisma.hostedComputerRun.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        memberId: setup.memberId,
+        ownerKey: { in: [setup.id] },
+        ownerPurpose: "member_owned_provider_setup",
+        status: { in: ["running", "awaiting_user", "cleanup_pending"] },
+      },
+    });
+  });
+
   it("closes only the local durable row after suspension", async () => {
     const store = new MemoryDeletionStore();
     const readApplicationView = vi.fn(async () => null);

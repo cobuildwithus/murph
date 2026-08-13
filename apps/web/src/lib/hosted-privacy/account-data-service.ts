@@ -828,11 +828,6 @@ async function deleteHostedAccountDataInternal(input: {
     });
   }
 
-  await assertMemberOwnedProviderSetupsReadyForAccountDeletion({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-
   const deletionStartedAt = new Date();
   const deletionMemberIds = await markHostedMembersSuspendedForAccountDeletion({
     now: deletionStartedAt,
@@ -906,9 +901,9 @@ async function deleteHostedAccountDataInternal(input: {
     ...connectedAppRevocations,
   ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
-  // Provider-dashboard cleanup was proven complete before suspension. Close the
-  // remaining local setup rows now; no browser or model authority is available
-  // after the account-deletion fence.
+  // Provider-dashboard cleanup was proven complete inside the suspension-lock
+  // transaction. Close the remaining local setup rows now; no browser or model
+  // authority is available after the account-deletion fence.
   await deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -1375,6 +1370,10 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         prisma: tx,
       });
     }
+    await assertMemberOwnedProviderSetupsReadyForAccountDeletion({
+      memberId: input.ownerMemberId,
+      prisma: tx,
+    });
     await tx.hostedMember.updateMany({
       data: {
         suspendedAt: input.now,

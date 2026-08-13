@@ -42,8 +42,6 @@ export function MemberOwnedProviderSetup({
     && (
       effective.status === "authorized"
       || effective.status === "browser_setup"
-      || effective.status === "capturing"
-      || effective.status === "canceling"
     )
     && Boolean(onCancel);
   const showActions = showSetupAction || showCancel;

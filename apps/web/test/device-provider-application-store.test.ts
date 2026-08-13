@@ -87,6 +87,7 @@ describe("member-owned device provider application store", () => {
         findUnique: vi.fn(async () => ({
           hostedGroupRuntime: null,
           id: "member_123",
+          suspendedAt: null,
           threadContainer: null,
         })),
       },
@@ -143,6 +144,7 @@ describe("member-owned device provider application store", () => {
         findUnique: vi.fn(async () => ({
           hostedGroupRuntime: null,
           id: "member_123",
+          suspendedAt: null,
           threadContainer: null,
         })),
       },
@@ -178,6 +180,7 @@ describe("member-owned device provider application store", () => {
         findUnique: vi.fn(async () => ({
           hostedGroupRuntime: null,
           id: "member_123",
+          suspendedAt: null,
           threadContainer: null,
         })),
       },
@@ -215,6 +218,7 @@ describe("member-owned device provider application store", () => {
       findUnique: vi.fn(async () => ({
         hostedGroupRuntime: null,
         id: "member_123",
+        suspendedAt: null,
         threadContainer: null,
       })),
     };
@@ -311,6 +315,7 @@ describe("member-owned device provider application store", () => {
       findUnique: vi.fn(async () => ({
         hostedGroupRuntime: null,
         id: "member_123",
+        suspendedAt: null,
         threadContainer: null,
       })),
     };
@@ -375,6 +380,7 @@ describe("member-owned device provider application store", () => {
       findUnique: vi.fn(async () => ({
         hostedGroupRuntime: null,
         id: "member_123",
+        suspendedAt: null,
         threadContainer: null,
       })),
     };
@@ -415,6 +421,7 @@ describe("member-owned device provider application store", () => {
       findUnique: vi.fn(async () => ({
         hostedGroupRuntime: null,
         id: "member_123",
+        suspendedAt: null,
         threadContainer: null,
       })),
     };
@@ -464,6 +471,7 @@ describe("member-owned device provider application store", () => {
       findUnique: vi.fn(async () => ({
         hostedGroupRuntime: null,
         id: "member_123",
+        suspendedAt: null,
         threadContainer: null,
       })),
     };
@@ -517,6 +525,32 @@ describe("member-owned device provider application store", () => {
     })).rejects.toMatchObject({
       code: "DEVICE_PROVIDER_APPLICATION_MEMBER_NOT_FOUND",
       httpStatus: 404,
+    });
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+  });
+
+  it("rejects a suspended member before any encryption or application save", async () => {
+    const prisma = {
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          hostedGroupRuntime: null,
+          id: "member_suspended",
+          suspendedAt: new Date("2026-08-13T00:00:00.000Z"),
+          threadContainer: null,
+        })),
+      },
+    };
+
+    await expect(saveDeviceProviderApplication({
+      clientId: "member-client",
+      clientSecret: "member-secret",
+      expectedRevision: null,
+      memberId: "member_suspended",
+      prisma: prisma as never,
+      provider: "strava",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_MEMBER_SUSPENDED",
+      httpStatus: 409,
     });
     expect(mocks.encrypt).not.toHaveBeenCalled();
   });

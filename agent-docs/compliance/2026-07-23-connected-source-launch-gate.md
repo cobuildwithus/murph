@@ -50,12 +50,19 @@ another source's launch requirements.
   verification, CAPTCHA, and the current developer-subscription prerequisite pause
   the exact run for a recoverable member handoff that returns to `/connect`.
 - Final submission and raw client credential capture cross only the narrow trusted
-  browser-result-to-sealing boundary. The boundary verifies Murph's deterministic
-  member marker, immediately seals the credentials, scrubs browser values and the
-  raw result, and returns non-secret application metadata. Ambiguous or unrelated
-  applications fail closed.
-- Cancellation persists a `canceling` compare-and-set fence before browser cleanup,
-  so a late capture callback cannot save credentials or resurrect canceled work.
+  browser-result-to-sealing boundary. Trusted code locates Murph's deterministic
+  member marker first, derives one provider-declared application/form container,
+  and admits only controls belonging to that object. It immediately seals the
+  credentials, scrubs browser values and the raw result, and returns non-secret
+  application metadata. Ambiguous or unrelated applications fail closed.
+- `capturing` is the persisted irreversible-attempt fence: Cancel disappears and
+  is rejected once submission may have begun, ambiguous failure never resets the
+  fence, and exact-run recovery captures without submitting again. `canceling`
+  remains the pre-submission cleanup fence.
+- Continue and setup-owned handoff Done persist one exact typed continuation in
+  the existing system mailbox before the droppable runtime wake. Duplicate actions
+  converge, and mailbox handoff recovery resumes work after a lost wake without a
+  new member message or any credential material in assistant context.
 - OAuth uses the exact application id/revision and the read-only `activity:read`
   request. Connection rows are authoritative after callback. Initial backfill and
   scheduled polling remain enabled; member-owned Strava webhooks are not enabled.
@@ -64,7 +71,9 @@ another source's launch requirements.
   authorization headers are excluded from diagnostics.
 - Account deletion requires the member to disconnect the exact connection and
   remove the deterministically marked provider application through the ordinary
-  authenticated `/connect` flow before the suspension fence. Post-suspension cleanup
+  authenticated `/connect` flow. The member-lock transaction checks every active
+  setup, application, and exact setup-owned run immediately before suspension;
+  application save rejects the suspended member. Post-suspension cleanup
   is local-only and fails closed if that preflight is invalidated, so no provider
   browser handoff depends on suspended-member access.
 - Hermetic route, service, tool, prompt, browser-boundary, OAuth/token, device-sync,

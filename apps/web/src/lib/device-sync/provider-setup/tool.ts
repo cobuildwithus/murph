@@ -34,7 +34,5 @@ export async function handleHostedRuntimeProviderSetupTool(input: {
       return service.prepareDeletion(input.memberId);
     case "delete":
       return service.deleteOwnedApplication(input.memberId, input.request);
-    case "confirm_missing":
-      return service.confirmOwnedApplicationMissing(input.memberId, input.request);
   }
 }

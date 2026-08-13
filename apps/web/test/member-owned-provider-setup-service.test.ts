@@ -60,6 +60,10 @@ const CUSTOM_REGISTRATION: MemberOwnedProviderSetupRegistration<"strava"> = {
       "Use trusted capture for final submission and credential sealing.",
     ],
     safeLandingUrl: "https://provider.example.test/developer/apps",
+    trustedAuthority: {
+      applicationContainerSelector: "form[data-owned-application]",
+      creationFormSelector: "form[data-owned-application]",
+    },
   },
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
   presentation: {
@@ -258,7 +262,10 @@ class FakeProviderComputer implements ProviderSetupComputer {
     url: CUSTOM_REGISTRATION.browser.safeLandingUrl,
   }));
   captureStarted: (() => void) | null = null;
+  ambiguousCaptureErrorOnce: Error | null = null;
   releaseCapture: Promise<void> | null = null;
+
+  readonly captureCodes: string[] = [];
 
   async captureAndSealProviderCredentialsInOwnedRun<T>(input: {
     code: string;
@@ -272,9 +279,15 @@ class FakeProviderComputer implements ProviderSetupComputer {
     runId: string;
     timeoutMs: number;
   }): Promise<{ title: string; url: string; value: T }> {
+    this.captureCodes.push(input.code);
     this.captureStarted?.();
     if (this.releaseCapture) {
       await this.releaseCapture;
+    }
+    if (this.ambiguousCaptureErrorOnce) {
+      const error = this.ambiguousCaptureErrorOnce;
+      this.ambiguousCaptureErrorOnce = null;
+      throw error;
     }
     return {
       title: "Provider applications",
@@ -333,6 +346,38 @@ describe("member-owned provider setup service", () => {
     expect(store.setup).toMatchObject({ browserRunId: RUN_ID, status: "browser_setup" });
   });
 
+  it("persists one exact continuation for duplicate Continue actions", async () => {
+    const store = new MemorySetupStore();
+    const computer = new FakeProviderComputer();
+    const requestContinuation = vi.fn(async () => undefined);
+    const service = createService({ computer, requestContinuation, store });
+
+    await expect(service.authorizeAndContinue(MEMBER_ID)).resolves.toMatchObject({
+      status: "authorized",
+    });
+    await expect(service.authorizeAndContinue(MEMBER_ID)).resolves.toMatchObject({
+      status: "authorized",
+    });
+
+    expect(requestContinuation).toHaveBeenCalledTimes(2);
+    expect(requestContinuation).toHaveBeenNthCalledWith(1, {
+      handoffId: null,
+      memberId: MEMBER_ID,
+      provider: "strava",
+      runId: null,
+      setupId: SETUP_ID,
+      setupVersion: 2,
+    });
+    expect(requestContinuation).toHaveBeenNthCalledWith(2, {
+      handoffId: null,
+      memberId: MEMBER_ID,
+      provider: "strava",
+      runId: null,
+      setupId: SETUP_ID,
+      setupVersion: 2,
+    });
+  });
+
   it("hands credentials directly to the sealed application owner without returning them", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup" });
@@ -374,7 +419,7 @@ describe("member-owned provider setup service", () => {
     }));
   });
 
-  it("lets durable cancellation win against a late credential capture", async () => {
+  it("keeps the irreversible capture fence after submission and rejects Cancel", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup" });
     const computer = new FakeProviderComputer();
@@ -393,20 +438,47 @@ describe("member-owned provider setup service", () => {
 
     const capture = service.captureAndSeal(MEMBER_ID, captureRequest());
     await captureStartedPromise;
-    const canceled = await service.cancel(MEMBER_ID, SETUP_ID);
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_STATE_CONFLICT",
+    });
     releaseCapture();
 
-    await expect(capture).rejects.toMatchObject({
-      code: "DEVICE_PROVIDER_APPLICATION_CONFLICT",
-    });
-    expect(canceled.status).toBe("canceled");
+    await expect(capture).resolves.toMatchObject({ status: "oauth_ready" });
     expect(store.setup).toMatchObject({
       browserRunId: null,
-      providerApplicationId: null,
-      providerApplicationRevision: null,
-      status: "canceled",
+      providerApplicationId: APPLICATION_ID,
+      providerApplicationRevision: 3,
+      status: "oauth_ready",
     });
     expect(saveApplication).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers an ambiguous submitted capture without clicking submit twice", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
+    const computer = new FakeProviderComputer();
+    computer.ambiguousCaptureErrorOnce = new Error("browser result was ambiguous");
+    const service = createService({ computer, store });
+
+    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).rejects.toThrow(
+      "browser result was ambiguous",
+    );
+    expect(store.setup).toMatchObject({
+      browserRunId: RUN_ID,
+      status: "capturing",
+      version: 4,
+    });
+    expect(computer.captureCodes[0]).toContain("button.create-application");
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_STATE_CONFLICT",
+    });
+
+    const result = await service.captureAndSeal(MEMBER_ID, captureRequest());
+
+    expect(result.status).toBe("oauth_ready");
+    const code = computer.captureCodes[1] ?? "";
+    expect(code).not.toContain("button.create-application");
+    expect(code).toContain("provider application ownership marker mismatch");
   });
 
   it("verifies the ownership marker in the trusted browser operation before exact deletion", async () => {
@@ -425,11 +497,8 @@ describe("member-owned provider setup service", () => {
     const prepared = await service.prepareDeletion(MEMBER_ID);
     const result = await service.deleteOwnedApplication(MEMBER_ID, {
       action: "delete",
-      applicationRootSelector: "form[data-owned-application]",
-      completionSelector: "[data-delete-complete]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
-      ownershipMarkerSelector: "input[name=application_name]",
       provider: "strava",
       runId: prepared.run.runId,
       setupId: prepared.setup.setupId,
@@ -511,6 +580,7 @@ function createService(input: {
   createIngress?: ServiceOptions["createIngress"];
   deleteApplication?: ServiceOptions["deleteApplication"];
   resolveApplication?: ServiceOptions["resolveApplication"];
+  requestContinuation?: ServiceOptions["requestContinuation"];
   saveApplication?: ServiceOptions["saveApplication"];
   store: MemorySetupStore;
 }): MemberOwnedProviderSetupService {
@@ -521,6 +591,7 @@ function createService(input: {
     now: () => NOW,
     readApplicationView: async () => null,
     registration: CUSTOM_REGISTRATION,
+    requestContinuation: input.requestContinuation,
     resolveApplication: input.resolveApplication ?? (async () => RESOLVED_APPLICATION),
     saveApplication: input.saveApplication ?? (async (saveInput) =>
       input.store.bindCapturedApplication(saveInput)),
@@ -531,10 +602,8 @@ function createService(input: {
 function captureRequest() {
   return {
     action: "capture" as const,
-    applicationRootSelector: "form[data-owned-application]",
     clientIdSelector: "[data-client-id]",
     clientSecretSelector: "[data-client-secret]",
-    ownershipMarkerSelector: "input[name=application_name]",
     provider: "strava",
     revealSecretSelector: "button.reveal-secret",
     runId: RUN_ID,

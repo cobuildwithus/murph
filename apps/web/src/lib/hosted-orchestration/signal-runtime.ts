@@ -5,11 +5,13 @@ import type { PrismaClient } from "@prisma/client";
 
 import {
   buildHostedExecutionRuntimeControlWake,
+  buildHostedExecutionProviderSetupContinuationRequestedWake,
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
   type HostedRuntimeSignal,
   type HostedExecutionPlainRuntimeControlWakeKind,
+  type HostedExecutionProviderSetupContinuationPayload,
 } from "@murphai/hosted-execution";
 import {
   parseHostedRuntimeSignal,
@@ -35,6 +37,9 @@ import {
 import {
   getPrisma,
 } from "../prisma";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 import {
   readHostedRuntimeTemporalEnvironment,
   readHostedRuntimeTemporalWorkflowOptions,
@@ -102,7 +107,17 @@ export interface SignalHostedRuntimeMaintenanceInput {
 export interface SignalHostedManualRunInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
+  eventId?: string;
   prisma?: PrismaClient;
+  userId: string;
+}
+
+export interface SignalHostedProviderSetupContinuationInput {
+  client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
+  eventId: string;
+  prisma?: PrismaClient;
+  providerSetup: HostedExecutionProviderSetupContinuationPayload;
   userId: string;
 }
 
@@ -225,8 +240,31 @@ export async function signalHostedManualRunRuntime(
   return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
     environment: input.environment,
+    eventId: input.eventId,
     kind: "runtime.manual-requested",
     prisma,
+    userId: input.userId,
+  });
+}
+
+export async function signalHostedProviderSetupContinuationRuntime(
+  input: SignalHostedProviderSetupContinuationInput,
+): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  await assertHostedManualRunAiUsageAllowed({
+    prisma,
+    userId: input.userId,
+  });
+
+  return signalHostedRuntimeControlMailboxRequest({
+    client: input.client,
+    environment: input.environment,
+    eventId: input.eventId,
+    kind: "runtime.provider-setup-continuation-requested",
+    prisma,
+    providerSetup: input.providerSetup,
+    resignalDuplicate: false,
+    signalFailureMode: "best_effort",
     userId: input.userId,
   });
 }
@@ -341,31 +379,53 @@ async function assertHostedManualRunAiUsageAllowed(input: {
   });
 }
 
-async function signalHostedRuntimeControlMailboxRequest(input: {
+type HostedRuntimeControlMailboxRequest = {
   abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   eventId?: string | null;
-  kind: HostedExecutionPlainRuntimeControlWakeKind;
   occurredAt?: string | null;
   prisma?: PrismaClient;
   resignalDuplicate?: boolean;
+  signalFailureMode?: "best_effort" | "throw";
   userId: string;
-}): Promise<HostedRuntimeSignalResult> {
+} & (
+  | {
+      kind: HostedExecutionPlainRuntimeControlWakeKind;
+      providerSetup?: never;
+    }
+  | {
+      kind: "runtime.provider-setup-continuation-requested";
+      providerSetup: HostedExecutionProviderSetupContinuationPayload;
+    }
+);
+
+async function signalHostedRuntimeControlMailboxRequest(
+  input: HostedRuntimeControlMailboxRequest,
+): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
   await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
   const deterministicEventId = normalizeHostedRuntimeControlEventId(input.eventId);
   const occurredAt = normalizeHostedRuntimeControlOccurredAt(input.occurredAt)
     ?? (deterministicEventId ? HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT : new Date().toISOString());
-  const mailboxAppend = await prisma.$transaction((tx) =>
-    appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedExecutionRuntimeControlWake({
+  const envelope = input.kind === "runtime.provider-setup-continuation-requested"
+    ? buildHostedExecutionProviderSetupContinuationRequestedWake({
+        eventId: deterministicEventId
+          ?? `runtime-control:${input.kind}:${randomUUID()}`,
+        occurredAt,
+        providerSetup: input.providerSetup,
+        userId: input.userId,
+      })
+    : buildHostedExecutionRuntimeControlWake({
         eventId: deterministicEventId
           ?? `runtime-control:${input.kind}:${randomUUID()}`,
         kind: input.kind,
         occurredAt,
         userId: input.userId,
-      }),
+      });
+  const mailboxAppend = await prisma.$transaction((tx) =>
+    appendHostedMailboxEnvelopeTx({
+      envelope,
       tx,
     })
   );
@@ -385,20 +445,37 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
     };
   }
 
-  return signalHostedUserRuntimeWorkflow({
-    abortSignal: input.abortSignal,
-    client: input.client,
-    environment: input.environment,
-    ensureWorkspace: false,
-    prisma,
-    signal: parseHostedRuntimeSignal({
-      kind: "mailbox_appended",
-      lane: mailboxItem.lane,
-      laneSeq: mailboxItem.laneSeq,
-      mailboxItemId: mailboxItem.id,
-    }),
-    userId: input.userId,
-  });
+  try {
+    return await signalHostedUserRuntimeWorkflow({
+      abortSignal: input.abortSignal,
+      client: input.client,
+      environment: input.environment,
+      ensureWorkspace: false,
+      prisma,
+      signal: parseHostedRuntimeSignal({
+        kind: "mailbox_appended",
+        lane: mailboxItem.lane,
+        laneSeq: mailboxItem.laneSeq,
+        mailboxItemId: mailboxItem.id,
+      }),
+      userId: input.userId,
+    });
+  } catch (error) {
+    if (input.signalFailureMode !== "best_effort") {
+      throw error;
+    }
+
+    console.warn(
+      "Hosted provider-setup continuation remains durable after Temporal signaling failed.",
+      formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_PROVIDER_SETUP_CONTINUATION_SIGNAL_FAILED",
+      }),
+    );
+    return {
+      signalAccepted: true,
+      workflowId: hostedUserRuntimeWorkflowId(input.userId),
+    };
+  }
 }
 
 const HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT = "1970-01-01T00:00:00.000Z";

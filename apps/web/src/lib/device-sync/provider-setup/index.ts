@@ -4,6 +4,10 @@ export {
 } from "./account-deletion";
 export { readMemberOwnedProviderSetupProjections } from "./projection";
 export {
+  buildMemberOwnedProviderSetupContinuationEventId,
+  requestMemberOwnedProviderSetupContinuation,
+} from "./continuation";
+export {
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
   buildMemberOwnedProviderApplicationMarker,
@@ -43,7 +47,6 @@ export {
 export {
   MemberOwnedProviderSetupService,
   buildBlindOwnedApplicationDeleteCode,
-  buildBlindOwnedApplicationMissingProofCode,
   buildBlindProviderCredentialCaptureCode,
   createMemberOwnedProviderSetupService,
   type MemberOwnedProviderSetupBrowserResult,

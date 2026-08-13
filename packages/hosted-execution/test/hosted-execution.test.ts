@@ -551,6 +551,7 @@ describe("hosted execution coverage gaps", () => {
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
+      "runtime.provider-setup-continuation-requested",
       "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
@@ -912,10 +913,8 @@ describe("hosted execution coverage gaps", () => {
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
-      applicationRootSelector: "form#provider-app",
       clientIdSelector: 'input[value^="secret-prefix"]',
       clientSecretSelector: 'input[name="client_secret"]',
-      ownershipMarkerSelector: 'input[name="app_name"]',
       provider: "strava",
       revealSecretSelector: null,
       runId: "hcr_setup",

@@ -71,6 +71,7 @@ import {
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
+  signalHostedProviderSetupContinuationRuntime,
   signalHostedRetentionRuntimeRecheck,
   signalHostedRuntimeRecheckRuntime,
   signalHostedRuntimeMaintenanceRuntime,
@@ -754,6 +755,105 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+  });
+
+  it("persists an exact typed provider-setup continuation before signaling", async () => {
+    await signalHostedProviderSetupContinuationRuntime({
+      client: buildClient(),
+      eventId: "runtime-control:provider-setup-continuation:fixture",
+      providerSetup: {
+        handoffId: null,
+        provider: "strava",
+        runId: null,
+        setupId: "dps_fixture",
+        setupVersion: 2,
+      },
+      userId: "member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "runtime-control:provider-setup-continuation:fixture",
+        kind: "runtime.provider-setup-continuation-requested",
+        occurredAt: "1970-01-01T00:00:00.000Z",
+        providerSetup: {
+          handoffId: null,
+          provider: "strava",
+          runId: null,
+          setupId: "dps_fixture",
+          setupVersion: 2,
+        },
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a durable provider-setup continuation when its immediate Temporal wake fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.signalWithStart.mockRejectedValueOnce(new Error("temporal unavailable"));
+
+    await expect(signalHostedProviderSetupContinuationRuntime({
+      client: buildClient(),
+      eventId: "runtime-control:provider-setup-continuation:fixture",
+      providerSetup: {
+        handoffId: null,
+        provider: "strava",
+        runId: null,
+        setupId: "dps_fixture",
+        setupVersion: 2,
+      },
+      userId: "member_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted provider-setup continuation remains durable after Temporal signaling failed.",
+      expect.objectContaining({
+        errorCode: "HOSTED_PROVIDER_SETUP_CONTINUATION_SIGNAL_FAILED",
+        errorMessage: "temporal unavailable",
+      }),
+    );
+    warn.mockRestore();
+  });
+
+  it("converges duplicate exact provider-setup continuations without another immediate wake", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox_runtime.provider-setup-continuation-requested",
+        kind: "runtime.provider-setup-continuation-requested",
+        lane: "system",
+        laneSeq: "77",
+        userId: "member_123",
+      },
+    });
+
+    await expect(signalHostedProviderSetupContinuationRuntime({
+      client: buildClient(),
+      eventId: "runtime-control:provider-setup-continuation:fixture",
+      providerSetup: {
+        handoffId: "hch_fixture",
+        provider: "strava",
+        runId: "hcr_fixture",
+        setupId: "dps_fixture",
+        setupVersion: 2,
+      },
+      userId: "member_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
   it("does not append or signal manual runs when monthly AI usage is exhausted", async () => {

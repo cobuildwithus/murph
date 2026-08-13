@@ -162,8 +162,10 @@ credential-redacted observation. Do not use `computer_os_control` or
 
 Never submit the developer-app form with `computer_act`. Once the exact form is
 ready, call `provider_setup` with `action: "capture"` and runtime selectors for
-the owned application root, final submit, ownership marker, client ID, and client secret fields. That
-trusted operation submits, reads the values inside the browser boundary, seals
+the final submit, client ID, and client secret fields. Trusted provider metadata
+locates the deterministic ownership marker and derives the exclusive application
+container; model-selected roots never authorize submission or credential reads.
+That trusted operation submits, reads the values inside the browser boundary, seals
 them directly, navigates away, and returns no credential value. Never ask for,
 read, copy, quote, log, screenshot, or preserve client IDs, client secrets, OAuth
 tokens, or other credentials.
@@ -172,8 +174,9 @@ For sign-in, MFA, CAPTCHA, or a provider prerequisite, pause the same run with a
 secure handoff. The member completes only the interruption and returns to
 `/connect`; call `provider_setup begin` again to resume the exact persisted run.
 For deletion, disconnect the provider first, call `prepare_delete`, navigate to
-the application, then use `delete` or `confirm_missing`; the trusted operation
-verifies the exact ownership marker before local credentials are removed.
+the application, then use `delete`; the trusted operation derives the exact
+marked application and a confirmation dialog opened by that application before
+local credentials are removed. Ambiguous absence retains the local binding.
 
 ## Act primitive
 

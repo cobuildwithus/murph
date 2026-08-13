@@ -14201,6 +14201,59 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("continues an exact provider setup with non-secret dynamic context", async () => {
+    const providerSetupItem = {
+      ...createSystemMailboxItem(),
+      itemId: "system_mailbox_item_provider_setup",
+      mailboxDedupeKey: "dedupe_system_mailbox_item_provider_setup",
+      routeAction: "apply-runtime-control-request" as const,
+      wake: {
+        eventId: "runtime-control:provider-setup-continuation:fixture",
+        kind: "runtime.provider-setup-continuation-requested" as const,
+        occurredAt: "1970-01-01T00:00:00.000Z",
+        providerSetup: {
+          handoffId: null,
+          provider: "strava",
+          runId: null,
+          setupId: "dps_fixture",
+          setupVersion: 2,
+        },
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: providerSetupItem,
+      itemId: providerSetupItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    let prompt: string | null | undefined;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (input) => {
+      prompt = await input.buildBackgroundDynamicContextPrompt?.({});
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(prompt).toContain("Continue the exact strava setup");
+    expect(prompt).toContain("murph.provider_setup");
+    expect(prompt).not.toMatch(/clientId|clientSecret|credential value/iu);
+    expect(prompt).not.toContain("dps_fixture");
+  });
+
   it("does not continue non-manual runtime-control receipts into assistant automation", async () => {
     const browserVaultRefreshItem = createBrowserVaultRefreshSystemMailboxItem();
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({

@@ -248,6 +248,7 @@ describe("hosted runtime control contracts", () => {
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
+      "runtime.provider-setup-continuation-requested",
       "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
@@ -305,6 +306,9 @@ describe("hosted runtime control contracts", () => {
       isHostedMailboxKind("runtime.pending-effects-reconcile-requested"),
     ).toBe(true);
     expect(isHostedMailboxKind("runtime.maintenance-requested")).toBe(true);
+    expect(
+      isHostedMailboxKind("runtime.provider-setup-continuation-requested"),
+    ).toBe(true);
     expect(isHostedMailboxKind("runtime.codex-auth-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
   });

@@ -50,6 +50,7 @@ export type DeviceProviderApplicationErrorCode =
   | "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH"
   | "DEVICE_PROVIDER_APPLICATION_PROVIDER_MISMATCH"
   | "DEVICE_PROVIDER_APPLICATION_MEMBER_NOT_FOUND"
+  | "DEVICE_PROVIDER_APPLICATION_MEMBER_SUSPENDED"
   | "DEVICE_PROVIDER_APPLICATION_CONNECTION_CONFLICT";
 
 export class DeviceProviderApplicationError extends DeviceSyncError {
@@ -73,6 +74,7 @@ function deviceProviderApplicationErrorHttpStatus(
       return 404;
     case "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED":
       return 403;
+    case "DEVICE_PROVIDER_APPLICATION_MEMBER_SUSPENDED":
     case "DEVICE_PROVIDER_APPLICATION_CONFLICT":
     case "DEVICE_PROVIDER_APPLICATION_INVALID":
     case "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH":
@@ -143,7 +145,11 @@ export async function saveDeviceProviderApplication(input: {
   const prisma = input.prisma ?? getPrisma();
   // Reject missing and synthetic-room members, stale setup captures, and
   // revision conflicts before KMS work. The transaction repeats every check.
-  await requirePersonalMember({ memberId: input.memberId, prisma });
+  await requirePersonalMember({
+    memberId: input.memberId,
+    prisma,
+    rejectSuspended: true,
+  });
   const initial = await prisma.deviceProviderApplication.findUnique({
     select: DEVICE_PROVIDER_APPLICATION_SELECT,
     where: {
@@ -208,7 +214,11 @@ export async function saveDeviceProviderApplication(input: {
 
   const row = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    await requirePersonalMember({ memberId: input.memberId, prisma: tx });
+    await requirePersonalMember({
+      memberId: input.memberId,
+      prisma: tx,
+      rejectSuspended: true,
+    });
 
     const current = await tx.deviceProviderApplication.findUnique({
       select: DEVICE_PROVIDER_APPLICATION_SELECT,
@@ -582,11 +592,13 @@ export async function resolveDeviceProviderApplicationForConnection(input: {
 async function requirePersonalMember(input: {
   memberId: string;
   prisma: DeviceProviderApplicationReadClient;
+  rejectSuspended?: boolean;
 }): Promise<void> {
   const member = await input.prisma.hostedMember.findUnique({
     select: {
       hostedGroupRuntime: { select: { id: true } },
       id: true,
+      suspendedAt: true,
       threadContainer: { select: { memberId: true } },
     },
     where: { id: input.memberId },
@@ -601,6 +613,12 @@ async function requirePersonalMember(input: {
     throw new DeviceProviderApplicationError(
       "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED",
       "Private provider applications are available only for personal Murph members.",
+    );
+  }
+  if (input.rejectSuspended === true && member.suspendedAt !== null) {
+    throw new DeviceProviderApplicationError(
+      "DEVICE_PROVIDER_APPLICATION_MEMBER_SUSPENDED",
+      "Private provider applications cannot change while account deletion is in progress.",
     );
   }
 }

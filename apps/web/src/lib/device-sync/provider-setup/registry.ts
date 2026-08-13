@@ -34,6 +34,10 @@ export interface MemberOwnedProviderSetupBrowserMetadata {
   developerPortalUrl: string;
   guidance: readonly string[];
   safeLandingUrl: string;
+  trustedAuthority: {
+    applicationContainerSelector: string;
+    creationFormSelector: string;
+  };
 }
 
 export interface MemberOwnedProviderSetupRegistration<
@@ -81,6 +85,12 @@ const STRAVA_REGISTRATION = Object.freeze({
       "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption, not to create the application or copy credentials.",
     ]),
     safeLandingUrl: "https://www.strava.com/settings/api",
+    trustedAuthority: Object.freeze({
+      applicationContainerSelector:
+        '[data-strava-application], form[action*="/settings/api"]',
+      creationFormSelector:
+        'form[data-strava-application-form], form[action*="/settings/api"]',
+    }),
   }),
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
   presentation: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,

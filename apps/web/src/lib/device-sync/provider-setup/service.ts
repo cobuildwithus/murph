@@ -30,6 +30,7 @@ import {
   type MemberOwnedProviderSetupRegistration,
 } from "./registry";
 import { PrismaDeviceProviderSetupStore } from "./store";
+import { requestMemberOwnedProviderSetupContinuation } from "./continuation";
 import {
   readMemberOwnedProviderSetupBinding,
   toMemberOwnedProviderSetupView,
@@ -51,11 +52,6 @@ type DeleteRequest = Extract<
   HostedRuntimeProviderSetupToolRequest,
   { action: "delete" }
 >;
-type ConfirmMissingRequest = Extract<
-  HostedRuntimeProviderSetupToolRequest,
-  { action: "confirm_missing" }
->;
-
 interface ProviderSetupStore {
   ensureActive(input: {
     connectSourceId: string;
@@ -178,6 +174,7 @@ export class MemberOwnedProviderSetupService {
   private readonly resolveApplication: ResolveApplication;
   private readonly saveApplication: SaveApplication;
   private readonly store: ProviderSetupStore;
+  private readonly requestContinuation: typeof requestMemberOwnedProviderSetupContinuation;
 
   constructor(
     provider: MemberOwnedDeviceProviderApplicationProvider,
@@ -188,6 +185,7 @@ export class MemberOwnedProviderSetupService {
       now?: () => Date;
       readApplicationView?: ReadApplicationView;
       registration?: MemberOwnedProviderSetupRegistration;
+      requestContinuation?: typeof requestMemberOwnedProviderSetupContinuation;
       resolveApplication?: ResolveApplication;
       saveApplication?: SaveApplication;
       store?: ProviderSetupStore;
@@ -208,6 +206,8 @@ export class MemberOwnedProviderSetupService {
       ?? readDeviceProviderApplicationView;
     this.resolveApplication = input.resolveApplication
       ?? resolveDeviceProviderApplication;
+    this.requestContinuation = input.requestContinuation
+      ?? requestMemberOwnedProviderSetupContinuation;
     this.saveApplication = input.saveApplication ?? saveDeviceProviderApplication;
     this.store = input.store ?? new PrismaDeviceProviderSetupStore();
   }
@@ -241,7 +241,8 @@ export class MemberOwnedProviderSetupService {
     let setup = await this.requireSetup(memberId, expectedSetupId);
     setup = await this.reconcile(setup, true);
     if (
-      setup.status === "connected"
+      setup.status === "authorized"
+      || setup.status === "connected"
       || setup.status === "disconnect_first"
       || setup.status === "oauth_ready"
       || setup.status === "oauth_in_progress"
@@ -259,6 +260,33 @@ export class MemberOwnedProviderSetupService {
       completedAt: null,
       status: "authorized",
     });
+    return this.toView(setup);
+  }
+
+  async authorizeAndContinue(
+    memberId: string,
+    expectedSetupId?: string,
+  ): Promise<MemberOwnedProviderSetupView> {
+    const view = await this.authorize(memberId, expectedSetupId);
+    const setup = await this.store.readOwned({
+      memberId,
+      provider: this.registration.coordinates.provider,
+      setupId: view.setupId,
+    });
+    if (
+      setup.status === "authorized"
+      || setup.status === "browser_setup"
+      || setup.status === "capturing"
+    ) {
+      await this.requestContinuation({
+        handoffId: null,
+        memberId,
+        provider: setup.provider,
+        runId: null,
+        setupId: setup.id,
+        setupVersion: setup.version,
+      });
+    }
     return this.toView(setup);
   }
 
@@ -284,9 +312,22 @@ export class MemberOwnedProviderSetupService {
         retryable: false,
       });
     }
+    if (setup.status === "capturing") {
+      const contract = this.browserContract(setup.memberId);
+      const run = await this.computer.acquireOwnedRun({
+        expectedRunId: setup.browserRunId,
+        memberId: setup.memberId,
+        ownerKey: setup.id,
+        ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+        startUrl: contract.developerPortalUrl,
+      });
+      if (run.runId !== setup.browserRunId) {
+        throw setupBusyError(setup.status);
+      }
+      return { contract, run, setup: this.toView(setup) };
+    }
     if (
-      setup.status === "capturing"
-      || setup.status === "canceling"
+      setup.status === "canceling"
       || setup.status === "deletion_pending"
       || setup.status === "deleted"
     ) {
@@ -320,10 +361,8 @@ export class MemberOwnedProviderSetupService {
     request: CaptureRequest,
   ): Promise<MemberOwnedProviderSetupView> {
     assertDistinctRuntimeSelectors([
-      request.applicationRootSelector,
       request.clientIdSelector,
       request.clientSecretSelector,
-      request.ownershipMarkerSelector,
       request.revealSecretSelector,
       request.submitSelector,
     ]);
@@ -334,22 +373,26 @@ export class MemberOwnedProviderSetupService {
         throw disconnectFirstError(this.registration.presentation.providerName);
       }
     }
-    setup = await this.transition(setup, { status: "capturing" });
+    const recovery = setup.status === "capturing";
+    if (!recovery) {
+      setup = await this.transition(setup, { status: "capturing" });
+    }
     const captureVersion = setup.version;
     const binding = readMemberOwnedProviderSetupBinding(setup);
     const contract = this.browserContract(memberId);
 
-    try {
-      await this.computer.captureAndSealProviderCredentialsInOwnedRun({
+    await this.computer.captureAndSealProviderCredentialsInOwnedRun({
         code: buildBlindProviderCredentialCaptureCode({
-          applicationRootSelector: request.applicationRootSelector,
+          applicationContainerSelector:
+            this.registration.browser.trustedAuthority.applicationContainerSelector,
           clientIdSelector: request.clientIdSelector,
           clientSecretSelector: request.clientSecretSelector,
+          creationFormSelector:
+            this.registration.browser.trustedAuthority.creationFormSelector,
           marker: contract.application.marker,
-          ownershipMarkerSelector: request.ownershipMarkerSelector,
           revealSecretSelector: request.revealSecretSelector,
           safeLandingUrl: contract.safeLandingUrl,
-          submitSelector: request.submitSelector,
+          submitSelector: recovery ? null : request.submitSelector,
         }),
         consume: async (credentials) => {
           await this.saveApplication({
@@ -372,10 +415,6 @@ export class MemberOwnedProviderSetupService {
         runId: request.runId,
         timeoutMs: PROVIDER_SETUP_BROWSER_TIMEOUT_MS,
       });
-    } catch (error) {
-      await this.restoreBrowserSetupAfterCaptureFailure(setup).catch(() => undefined);
-      throw error;
-    }
 
     const saved = await this.store.readOwned({
       memberId,
@@ -433,22 +472,18 @@ export class MemberOwnedProviderSetupService {
     request: DeleteRequest,
   ): Promise<MemberOwnedProviderSetupView> {
     assertDistinctRuntimeSelectors([
-      request.applicationRootSelector,
-      request.completionSelector,
       request.confirmSelector,
       request.deleteSelector,
-      request.ownershipMarkerSelector,
     ]);
     const setup = await this.requireExactDeletionSetup(memberId, request);
     const contract = this.browserContract(memberId);
     const result = await this.computer.actOwnedRun({
       code: buildBlindOwnedApplicationDeleteCode({
-        applicationRootSelector: request.applicationRootSelector,
-        completionSelector: request.completionSelector,
+        applicationContainerSelector:
+          this.registration.browser.trustedAuthority.applicationContainerSelector,
         confirmSelector: request.confirmSelector,
         deleteSelector: request.deleteSelector,
         marker: contract.application.marker,
-        ownershipMarkerSelector: request.ownershipMarkerSelector,
         safeLandingUrl: contract.safeLandingUrl,
       }),
       memberId,
@@ -458,28 +493,6 @@ export class MemberOwnedProviderSetupService {
       timeoutMs: PROVIDER_SETUP_BROWSER_TIMEOUT_MS,
     });
     requireBrowserMutationResult(result.result, "deleted");
-    return this.finishApplicationDeletion(setup, request.runId);
-  }
-
-  async confirmOwnedApplicationMissing(
-    memberId: string,
-    request: ConfirmMissingRequest,
-  ): Promise<MemberOwnedProviderSetupView> {
-    const setup = await this.requireExactDeletionSetup(memberId, request);
-    const contract = this.browserContract(memberId);
-    const result = await this.computer.actOwnedRun({
-      code: buildBlindOwnedApplicationMissingProofCode({
-        applicationsRootSelector: request.applicationsRootSelector,
-        marker: contract.application.marker,
-        safeLandingUrl: contract.safeLandingUrl,
-      }),
-      memberId,
-      ownerKey: setup.id,
-      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
-      runId: request.runId,
-      timeoutMs: PROVIDER_SETUP_BROWSER_TIMEOUT_MS,
-    });
-    requireBrowserMutationResult(result.result, "missing");
     return this.finishApplicationDeletion(setup, request.runId);
   }
 
@@ -504,6 +517,8 @@ export class MemberOwnedProviderSetupService {
       });
     }
     if (
+      setup.status === "capturing"
+      ||
       setup.status === "oauth_ready"
       || setup.status === "oauth_in_progress"
       || setup.status === "connected"
@@ -707,20 +722,6 @@ export class MemberOwnedProviderSetupService {
     throw setupBusyError(latest.status);
   }
 
-  private async restoreBrowserSetupAfterCaptureFailure(
-    capturing: MemberOwnedProviderSetupRecord,
-  ): Promise<void> {
-    const latest = await this.store.readOwned({
-      memberId: capturing.memberId,
-      provider: capturing.provider,
-      setupId: capturing.id,
-    });
-    if (latest.status !== "capturing") {
-      return;
-    }
-    await this.transition(latest, { status: "browser_setup" });
-  }
-
   private async requireExactBrowserSetup(
     memberId: string,
     request: Pick<CaptureRequest, "provider" | "runId" | "setupId">,
@@ -731,7 +732,7 @@ export class MemberOwnedProviderSetupService {
     }
     const setup = await this.store.readOwned({ memberId, provider, setupId: request.setupId });
     if (
-      setup.status !== "browser_setup"
+      (setup.status !== "browser_setup" && setup.status !== "capturing")
       || setup.browserRunId !== request.runId
     ) {
       throw setupBusyError(setup.status);
@@ -924,27 +925,77 @@ export function createMemberOwnedProviderSetupService(
 }
 
 export function buildBlindProviderCredentialCaptureCode(input: {
-  applicationRootSelector: string;
+  applicationContainerSelector: string;
   clientIdSelector: string;
   clientSecretSelector: string;
+  creationFormSelector: string;
   marker: string;
-  ownershipMarkerSelector: string;
   revealSecretSelector: string | null;
   safeLandingUrl: string;
   submitSelector: string | null;
 }): string {
   return `
-const exactVisible = async (selector, label) => {
-  const locator = page.locator(selector);
-  await locator.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
-  const count = await locator.count();
-  if (count !== 1 || !await locator.isVisible().catch(() => false)) {
-    throw new Error(label + " must resolve to one visible element");
+const authorityAttribute = "data-murph-provider-authority";
+const markerAttribute = "data-murph-provider-marker";
+const formAttribute = "data-murph-provider-creation-form";
+const readField = async (locator) => {
+  const tag = await locator.evaluate((element) => element.tagName.toLowerCase());
+  if (tag === "input" || tag === "textarea") {
+    return (await locator.inputValue()).trim();
   }
-  return locator;
+  return ((await locator.textContent()) ?? "").trim();
 };
-const root = await exactVisible(${JSON.stringify(input.applicationRootSelector)}, "application root selector");
-const exactVisibleInRoot = async (selector, label) => {
+const deriveAuthority = async (requireCreationForm) => {
+  const result = await page.evaluate(({ authorityAttribute, containerSelector, creationFormSelector, expectedMarker, formAttribute, markerAttribute, requireCreationForm }) => {
+    const readExact = (element) => {
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        return element.value.trim();
+      }
+      return (element.textContent || "").trim();
+    };
+    const candidates = Array.from(document.querySelectorAll(
+      'input, textarea, [data-application-name], [data-app-name], h1, h2, h3, h4, dt, dd, p, span, a'
+    ));
+    const markers = candidates.filter((element) => readExact(element) === expectedMarker);
+    document.querySelectorAll('[' + authorityAttribute + '],[' + markerAttribute + '],[' + formAttribute + ']').forEach((element) => {
+      element.removeAttribute(authorityAttribute);
+      element.removeAttribute(markerAttribute);
+      element.removeAttribute(formAttribute);
+    });
+    const roots = Array.from(new Set(markers.map((marker) => marker.closest(containerSelector))));
+    if (markers.length === 0 || roots.length !== 1) return { kind: "marker_ambiguous" };
+    const marker = markers[0];
+    const root = roots[0];
+    if (!root || root === document.body || root === document.documentElement) {
+      return { kind: "container_ambiguous" };
+    }
+    const form = marker.closest(creationFormSelector);
+    if (requireCreationForm && (!form || form !== root)) {
+      return { kind: "creation_form_mismatch" };
+    }
+    root.setAttribute(authorityAttribute, "owned");
+    marker.setAttribute(markerAttribute, "owned");
+    if (form) form.setAttribute(formAttribute, "owned");
+    return { kind: "ok" };
+  }, {
+    authorityAttribute,
+    containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
+    creationFormSelector: ${JSON.stringify(input.creationFormSelector)},
+    expectedMarker: ${JSON.stringify(input.marker)},
+    formAttribute,
+    markerAttribute,
+    requireCreationForm,
+  });
+  if (result.kind !== "ok") {
+    throw new Error("provider application ownership marker mismatch: " + result.kind);
+  }
+  const root = page.locator('[' + authorityAttribute + '="owned"]');
+  if (await root.count() !== 1 || !await root.isVisible().catch(() => false)) {
+    throw new Error("provider application authority is unavailable");
+  }
+  return root;
+};
+const exactVisibleIn = async (root, selector, label) => {
   const locator = root.locator(selector);
   await locator.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
   const count = await locator.count();
@@ -953,22 +1004,17 @@ const exactVisibleInRoot = async (selector, label) => {
   }
   return locator;
 };
-const readField = async (locator) => {
-  const tag = await locator.evaluate((element) => element.tagName.toLowerCase());
-  if (tag === "input" || tag === "textarea") {
-    return (await locator.inputValue()).trim();
-  }
-  return ((await locator.textContent()) ?? "").trim();
-};
-${input.submitSelector ? `await (await exactVisibleInRoot(${JSON.stringify(input.submitSelector)}, "submit selector")).click();` : ""}
-const marker = await exactVisibleInRoot(${JSON.stringify(input.ownershipMarkerSelector)}, "ownership marker selector");
-await marker.waitFor({ state: "visible", timeout: 15000 });
-if (await readField(marker) !== ${JSON.stringify(input.marker)}) {
-  throw new Error("provider application ownership marker mismatch");
+${input.submitSelector ? `const creationForm = await deriveAuthority(true);
+if (await creationForm.locator(${JSON.stringify(input.clientIdSelector)}).count() !== 0
+  || await creationForm.locator(${JSON.stringify(input.clientSecretSelector)}).count() !== 0) {
+  throw new Error("provider creation form already exposes credentials");
 }
-${input.revealSecretSelector ? `await (await exactVisibleInRoot(${JSON.stringify(input.revealSecretSelector)}, "secret reveal selector")).click();` : ""}
-const clientId = await readField(await exactVisibleInRoot(${JSON.stringify(input.clientIdSelector)}, "client id selector"));
-const clientSecret = await readField(await exactVisibleInRoot(${JSON.stringify(input.clientSecretSelector)}, "client secret selector"));
+await (await exactVisibleIn(creationForm, ${JSON.stringify(input.submitSelector)}, "submit selector")).click();
+await page.waitForLoadState("domcontentloaded").catch(() => undefined);` : ""}
+const root = await deriveAuthority(false);
+${input.revealSecretSelector ? `await (await exactVisibleIn(root, ${JSON.stringify(input.revealSecretSelector)}, "secret reveal selector")).click();` : ""}
+const clientId = await readField(await exactVisibleIn(root, ${JSON.stringify(input.clientIdSelector)}, "client id selector"));
+const clientSecret = await readField(await exactVisibleIn(root, ${JSON.stringify(input.clientSecretSelector)}, "client secret selector"));
 if (!clientId || !clientSecret) {
   throw new Error("provider credentials are unavailable");
 }
@@ -978,32 +1024,44 @@ return { clientId, clientSecret };
 }
 
 export function buildBlindOwnedApplicationDeleteCode(input: {
-  applicationRootSelector: string;
-  completionSelector: string | null;
+  applicationContainerSelector: string;
   confirmSelector: string | null;
   deleteSelector: string;
   marker: string;
-  ownershipMarkerSelector: string;
   safeLandingUrl: string;
 }): string {
   return `
-const exactVisible = async (selector, label) => {
-  const locator = page.locator(selector);
-  await locator.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
-  const count = await locator.count();
-  if (count !== 1 || !await locator.isVisible().catch(() => false)) {
-    throw new Error(label + " must resolve to one visible element");
+const authorityAttribute = "data-murph-provider-delete-authority";
+const existingDialogAttribute = "data-murph-provider-existing-dialog";
+const authority = await page.evaluate(({ authorityAttribute, containerSelector, expectedMarker }) => {
+  const readExact = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+    ? element.value.trim()
+    : (element.textContent || "").trim();
+  const candidates = Array.from(document.querySelectorAll(
+    'input, textarea, [data-application-name], [data-app-name], h1, h2, h3, h4, dt, dd, p, span, a'
+  ));
+  const markers = candidates.filter((element) => readExact(element) === expectedMarker);
+  document.querySelectorAll('[' + authorityAttribute + ']').forEach((element) => element.removeAttribute(authorityAttribute));
+  const roots = Array.from(new Set(markers.map((marker) => marker.closest(containerSelector))));
+  if (markers.length === 0 || roots.length !== 1) return { kind: "marker_ambiguous" };
+  const root = roots[0];
+  if (!root || root === document.body || root === document.documentElement) {
+    return { kind: "container_ambiguous" };
   }
-  return locator;
-};
-const readField = async (locator) => {
-  const tag = await locator.evaluate((element) => element.tagName.toLowerCase());
-  if (tag === "input" || tag === "textarea") {
-    return (await locator.inputValue()).trim();
-  }
-  return ((await locator.textContent()) ?? "").trim();
-};
-const root = await exactVisible(${JSON.stringify(input.applicationRootSelector)}, "application root selector");
+  root.setAttribute(authorityAttribute, "owned");
+  return { kind: "ok" };
+}, {
+  authorityAttribute,
+  containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
+  expectedMarker: ${JSON.stringify(input.marker)},
+});
+if (authority.kind !== "ok") {
+  throw new Error("provider application ownership marker mismatch: " + authority.kind);
+}
+const root = page.locator('[' + authorityAttribute + '="owned"]');
+if (await root.count() !== 1 || !await root.isVisible().catch(() => false)) {
+  throw new Error("provider application authority is unavailable");
+}
 const exactVisibleInRoot = async (selector, label) => {
   const locator = root.locator(selector);
   await locator.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
@@ -1013,51 +1071,41 @@ const exactVisibleInRoot = async (selector, label) => {
   }
   return locator;
 };
-const marker = await exactVisibleInRoot(${JSON.stringify(input.ownershipMarkerSelector)}, "ownership marker selector");
-const markerText = await readField(marker);
-if (markerText !== ${JSON.stringify(input.marker)}) {
-  throw new Error("provider application ownership marker mismatch");
-}
+await page.locator('[role="dialog"], dialog, [aria-modal="true"]').evaluateAll((dialogs, attribute) => {
+  dialogs.forEach((dialog) => dialog.setAttribute(attribute, "existing"));
+}, existingDialogAttribute);
 await (await exactVisibleInRoot(${JSON.stringify(input.deleteSelector)}, "delete selector")).click();
-${input.confirmSelector ? `await (await exactVisible(${JSON.stringify(input.confirmSelector)}, "delete confirmation selector")).click();` : ""}
-${input.completionSelector
-    ? `await (await exactVisible(${JSON.stringify(input.completionSelector)}, "deletion completion selector")).waitFor({ state: "visible", timeout: 15000 });`
-    : `await marker.waitFor({ state: "detached", timeout: 15000 });`}
+${input.confirmSelector ? `const openedDialog = page.locator('[role="dialog"]:not([' + existingDialogAttribute + ']), dialog:not([' + existingDialogAttribute + ']), [aria-modal="true"]:not([' + existingDialogAttribute + '])');
+await openedDialog.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
+if (await openedDialog.count() !== 1 || !await openedDialog.isVisible().catch(() => false)) {
+  throw new Error("delete confirmation must belong to the one dialog opened by the owned application");
+}
+const confirmation = openedDialog.locator(${JSON.stringify(input.confirmSelector)});
+if (await confirmation.count() !== 1 || !await confirmation.isVisible().catch(() => false)) {
+  throw new Error("delete confirmation selector must resolve inside the opened dialog");
+}
+await confirmation.click();` : ""}
+await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+await page.waitForFunction(({ expectedMarker, expectedUrl }) => {
+  const current = new URL(window.location.href);
+  const safe = new URL(expectedUrl);
+  if (current.origin !== safe.origin || current.pathname !== safe.pathname) return false;
+  const readExact = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+    ? element.value.trim()
+    : (element.textContent || "").trim();
+  const candidates = Array.from(document.querySelectorAll(
+    'input, textarea, [data-application-name], [data-app-name], h1, h2, h3, h4, dt, dd, p, span, a'
+  ));
+  return !candidates.some((element) => readExact(element) === expectedMarker);
+}, { expectedMarker: ${JSON.stringify(input.marker)}, expectedUrl: ${JSON.stringify(input.safeLandingUrl)} }, { timeout: 15000 });
 await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });
 return { kind: "deleted" };
 `;
 }
 
-export function buildBlindOwnedApplicationMissingProofCode(input: {
-  applicationsRootSelector: string;
-  marker: string;
-  safeLandingUrl: string;
-}): string {
-  return `
-const root = page.locator(${JSON.stringify(input.applicationsRootSelector)});
-if (await root.count() !== 1 || !await root.isVisible().catch(() => false)) {
-  throw new Error("applications root selector must resolve to one visible element");
-}
-const markerPresent = await root.evaluate((element, expectedMarker) => {
-  const values = [element.textContent || ""];
-  for (const field of element.querySelectorAll("input, textarea")) {
-    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-      values.push(field.value);
-    }
-  }
-  return values.some((value) => value.trim() === expectedMarker);
-}, ${JSON.stringify(input.marker)});
-if (markerPresent) {
-  throw new Error("owned provider application is still present");
-}
-await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });
-return { kind: "missing" };
-`;
-}
-
 function requireBrowserMutationResult(
   value: unknown,
-  expectedKind: "deleted" | "missing",
+  expectedKind: "deleted",
 ): void {
   if (
     !value

@@ -319,6 +319,7 @@ describe("ComputerUseService", () => {
         updatedAt: now,
       }),
     });
+    const requestProviderSetupContinuation = vi.fn(async () => undefined);
     const service = new ComputerUseService({
       crypto: createFakeCrypto({
         decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
@@ -326,6 +327,7 @@ describe("ComputerUseService", () => {
       env: { HOSTED_WEB_BASE_URL: "https://web.example.test" },
       kernel: fakeKernel,
       now: () => now,
+      requestProviderSetupContinuation,
       store,
     });
     const pause = () => service.pauseOwnedRunForUser({
@@ -389,6 +391,12 @@ describe("ComputerUseService", () => {
       status: "completed",
       suggestedReply: null,
     });
+    expect(requestProviderSetupContinuation).toHaveBeenCalledWith({
+      handoffId: "hch_handoff125",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      setupId: "dps_setup123",
+    });
     expect(store.run).toMatchObject({
       ownerKey: "dps_setup123",
       ownerPurpose: "member_owned_provider_setup",
@@ -404,6 +412,13 @@ describe("ComputerUseService", () => {
       returnContactKind: null,
       status: "completed",
       suggestedReply: null,
+    });
+    expect(requestProviderSetupContinuation).toHaveBeenCalledTimes(2);
+    expect(requestProviderSetupContinuation).toHaveBeenNthCalledWith(2, {
+      handoffId: "hch_handoff125",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      setupId: "dps_setup123",
     });
     await expect(service.readHandoffPageState({
       memberId: "member_123",
