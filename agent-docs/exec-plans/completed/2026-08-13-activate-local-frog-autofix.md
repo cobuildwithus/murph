@@ -78,12 +78,14 @@ Updated: 2026-08-13
 
 ## Scope-anomaly retrospective
 
-Decision: continue unchanged as one indivisible target-embedded feature. The
+Decision: continue as one indivisible target-embedded feature with one bounded
+archive-evidence correction at an existing owner. The
 immutable first-reviewed head is
 `745591dc912bbf2ed32cfd6aa7c2acd1a4180c57`. ReviewGPT round 1 found no code
 defect and required this retrospective because that head contains 6,544
 authored-source additions. Review-driven runtime growth is limited to the
-smallest correction at the existing archive-materialization boundary after the
+smallest correction at the existing archive-materialization boundary: 32
+source additions and 1 source deletion after the
 preliminary specialist gate proved the prompt's required Frog skill was absent
 from both parent-built ReviewGPT archives.
 
