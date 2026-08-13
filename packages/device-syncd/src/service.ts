@@ -6,6 +6,7 @@ import {
 } from "./provider-job-definitions.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -1122,9 +1123,21 @@ class DeviceSyncServiceController {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
         nextReconcileAt?: string | null;
+        preserveLastSyncCompletedAt?: boolean;
       } = {
         localConnectionRevision,
       };
+
+      if (
+        provider.provider === "junction"
+        && shouldPreserveJunctionLastSyncCompletedAt({
+          activeJobs,
+          scheduledJobs: result.scheduledJobs ?? [],
+          syncSucceededAt: now,
+        })
+      ) {
+        successOptions.preserveLastSyncCompletedAt = true;
+      }
 
       if (Object.prototype.hasOwnProperty.call(result, "metadataPatch")) {
         successOptions.metadataPatch = result.metadataPatch;
@@ -1178,7 +1191,39 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
-      const failure = normalizeExecutionError(error);
+      const timeseriesProgress = error instanceof JunctionTimeseriesProgressError
+        ? error
+        : null;
+      const failure = normalizeExecutionError(timeseriesProgress?.failure ?? error);
+      const replacementPayload = timeseriesProgress
+        ? normalizeConfiguredDeviceSyncJobRecord(
+            provider.provider,
+            {
+              ...job,
+              payload: {
+                ...job.payload,
+                ...(job.kind === "backfill"
+                  ? {
+                      timeseriesCursor: timeseriesProgress.windowStart,
+                      timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                      timeseriesResourceCursor:
+                        timeseriesProgress.timeseriesResourceCursor ?? undefined,
+                    }
+                  : job.kind === "reconcile"
+                    ? {
+                        timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                        timeseriesResourceCursor:
+                          timeseriesProgress.timeseriesResourceCursor ?? undefined,
+                        windowStart: timeseriesProgress.windowStart,
+                      }
+                    : { windowStart: timeseriesProgress.windowStart }),
+                workoutStreamCursor:
+                  timeseriesProgress.workoutStreamCursor ?? undefined,
+              },
+            },
+            "retry progress",
+          ).payload
+        : undefined;
       const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
         && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
       const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
@@ -1209,6 +1254,7 @@ class DeviceSyncServiceController {
             retryAt,
             retainedFailureRetryable,
             retainsAcceptedCompanionHrvUntilSuccess,
+            activeJob.id === job.id ? replacementPayload : undefined,
           );
         })
         .some(Boolean);
@@ -2142,6 +2188,44 @@ function toPlainRecord(value: unknown): Record<string, unknown> | null {
 function readCanonicalDeviceImportEventCount(value: unknown): number {
   const record = toPlainRecord(value);
   return record && Array.isArray(record.events) ? record.events.length : 0;
+}
+
+function shouldPreserveJunctionLastSyncCompletedAt(input: {
+  activeJobs: readonly DeviceSyncJobRecord[];
+  scheduledJobs: readonly DeviceSyncJobInput[];
+  syncSucceededAt: string;
+}): boolean {
+  if (input.scheduledJobs.some(isFullDeviceSyncJob)) {
+    return true;
+  }
+
+  const currentClosedDayEnd = floorUtcDayTimestampIfValid(input.syncSucceededAt);
+  if (!currentClosedDayEnd) {
+    return true;
+  }
+
+  return !input.activeJobs.some((job) =>
+    isFullDeviceSyncJob(job)
+    && normalizeIsoTimestamp(job.payload.windowEnd) === currentClosedDayEnd
+  );
+}
+
+function isFullDeviceSyncJob(job: Pick<DeviceSyncJobInput, "kind">): boolean {
+  return job.kind === "backfill" || job.kind === "reconcile";
+}
+
+function floorUtcDayTimestampIfValid(value: string): string | null {
+  const normalized = normalizeIsoTimestamp(value);
+  return normalized ? `${normalized.slice(0, 10)}T00:00:00.000Z` : null;
+}
+
+function normalizeIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
 function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): string[] {

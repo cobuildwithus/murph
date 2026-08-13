@@ -12,6 +12,7 @@ import {
   mergeHostedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
+  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "../src/junction-historical-backfill-progress.ts";
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-sources.ts";
 import {
@@ -21,6 +22,80 @@ import {
 
 const WINDOW_START = "2025-12-20T00:00:00.000Z";
 const WINDOW_END = "2026-03-20T00:00:00.000Z";
+
+describe("Junction extended-history coverage reset", () => {
+  it("removes only the selected source and resource matrix bit", () => {
+    const metadata = addCoverage(
+      addCoverage(
+        addCoverage({}, "apple_health_kit", "weight"),
+        "withings",
+        "weight",
+      ),
+      "apple_health_kit",
+      "caffeine",
+    );
+
+    const reset = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata,
+      providerSlug: "apple_health_kit",
+      resource: "weight",
+      version: 1,
+    });
+
+    expect(reset).not.toBeNull();
+    if (!reset) {
+      throw new TypeError("Expected current matrix coverage to be resettable.");
+    }
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      reset,
+      "apple_health_kit",
+      "weight",
+      1,
+    )).toBe(false);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      reset,
+      "withings",
+      "weight",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      reset,
+      "apple_health_kit",
+      "caffeine",
+      1,
+    )).toBe(true);
+  });
+
+  it("leaves malformed and future matrix encodings unchanged", () => {
+    const current = addCoverage({}, "apple_health_kit", "weight");
+    const matrixKey = Object.keys(current)[0];
+    const matrixValue = matrixKey ? current[matrixKey] : null;
+    expect(typeof matrixValue).toBe("string");
+    if (!matrixKey || typeof matrixValue !== "string") {
+      throw new TypeError("Expected current matrix coverage.");
+    }
+    const future = {
+      ...current,
+      [matrixKey]: matrixValue.replace(/^m1\|/u, "m2|"),
+    };
+    const malformed = { [matrixKey]: "not-a-coverage-matrix" };
+
+    expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: future,
+      providerSlug: "apple_health_kit",
+      resource: "weight",
+      version: 1,
+    })).toBeNull();
+    expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: malformed,
+      providerSlug: "apple_health_kit",
+      resource: "weight",
+      version: 1,
+    })).toBeNull();
+    expect(future[matrixKey]).toBe(matrixValue.replace(/^m1\|/u, "m2|"));
+    expect(malformed[matrixKey]).toBe("not-a-coverage-matrix");
+  });
+});
 
 describe("Junction historical backfill progress versions", () => {
   it("writes coverage v3 while continuing to read legacy v2 progress", () => {
@@ -131,7 +206,7 @@ describe("Junction extended timeseries history coverage", () => {
     if (typeof encoded !== "string") {
       throw new TypeError("Expected encoded Junction extended-history coverage.");
     }
-    expect(encoded).toHaveLength(195);
+    expect(encoded).toHaveLength(211);
     expect(encoded.length).toBeLessThanOrEqual(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       coverage,
@@ -219,7 +294,7 @@ describe("Junction extended timeseries history coverage", () => {
     expect(Object.keys(metadata)).toEqual([
       "junctionBloodPressureHistoryBackfillCoverage",
     ]);
-    expect(metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(195);
+    expect(metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(211);
     for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
       for (const resource of resources) {
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -266,7 +341,7 @@ describe("Junction extended timeseries history coverage", () => {
       localMetadata,
     });
     expect(result.preservedLocalProgress).toBe(true);
-    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(195);
+    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(211);
     for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
       for (const resource of resources) {
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(

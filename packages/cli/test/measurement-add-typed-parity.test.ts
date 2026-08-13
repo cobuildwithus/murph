@@ -735,6 +735,116 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   assert.equal(events.items.some((item) => item.id === junctionWeight.eventId), false)
 })
 
+test('measurement entry list resolves every expanded assistant metric alias without confusing absence with an unsupported route', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-expanded-assistant-metrics-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const cases = [
+    ['daylight_exposure', 'daylight-exposure-minutes', 45, 'minutes'],
+    ['fall', 'fall-count', 1, 'count'],
+    ['floors_climbed', 'floors-climbed', 8, 'count'],
+    ['handwashing', 'handwashing-count', 3, 'count'],
+    ['stand_duration', 'stand-duration-minutes', 75, 'minutes'],
+    ['stand_hour', 'stand-hours', 2, 'count'],
+    ['uv_exposure', 'uv-exposure-index', 5, 'index'],
+    ['wheelchair_push', 'wheelchair-push-count', 300, 'count'],
+    ['workout_distance', 'workout-distance-km', 2, 'km'],
+    ['workout_duration', 'workout-minutes', 48, 'minutes'],
+    ['workout_swimming_stroke', 'swimming-stroke-count', 37, 'count'],
+    ['body_mass_index', 'bmi', 23.4, 'kg_m2'],
+    ['fat', 'body-fat-percentage', 18.5, '%'],
+    ['lean_body_mass', 'lean-body-mass', 61.2, 'kg'],
+    ['waist_circumference', 'waist-circumference', 82.4, 'cm'],
+  ] as const
+
+  const imported = new Map<string, string>()
+  for (const [publicMetric, metric, value, unit] of cases) {
+    const resourceSlug = publicMetric.replaceAll('_', '-')
+    const result = await importEventPayload({
+      cli,
+      parentRoot,
+      vaultRoot,
+      fileName: `${publicMetric}.json`,
+      payload: {
+        kind: 'observation',
+        occurredAt: '2026-07-12T12:00:00.000Z',
+        source: 'device',
+        title: `Connected observation ${metric}`,
+        metric,
+        value,
+        unit,
+        observationGrain: metric === 'fall-count' ? 'sample' : 'summary',
+        externalRef: {
+          system: 'junction',
+          resourceType: `junction-${resourceSlug}`,
+          resourceId: `connected-${resourceSlug}`,
+          facet: metric,
+        },
+      },
+    })
+    imported.set(publicMetric, result.eventId)
+  }
+
+  for (const [publicMetric, canonicalMetric, value, unit] of cases) {
+    const result = requireData(
+      (
+        await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+          'measurement',
+          'entry',
+          'list',
+          '--vault',
+          vaultRoot,
+          '--metric',
+          publicMetric,
+          '--from',
+          '2026-07-12',
+          '--to',
+          '2026-07-12',
+          '--limit',
+          '50',
+        ])
+      ).envelope,
+    )
+
+    assert.equal(result.count, 1, publicMetric)
+    assert.deepEqual(result.items[0], {
+      eventId: imported.get(publicMetric),
+      measurementIndex: null,
+      metric: canonicalMetric,
+      occurredAt: '2026-07-12T12:00:00.000Z',
+      recordKind: 'observation',
+      source: 'device',
+      unit,
+      value,
+    }, publicMetric)
+  }
+
+  const absent = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'daylight_exposure',
+        '--from',
+        '2026-07-13',
+        '--to',
+        '2026-07-13',
+        '--limit',
+        '50',
+      ])
+    ).envelope,
+  )
+  assert.equal(absent.count, 0)
+  assert.deepEqual(absent.items, [])
+
+})
+
 test('normalized Junction categorical facts survive canonical import and query', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-junction-categorical-query-')
   cleanupPaths.push(parentRoot)

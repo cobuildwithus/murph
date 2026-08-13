@@ -11220,12 +11220,11 @@ describe("hosted runtime callbacks", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       component: "outbox",
-      errorCode: "syntax_error",
+      errorCode: "LINQ_API_REQUEST_FAILED",
       eventCode: "outbox.linq_app_card_fallback_error",
       level: "warn",
       phase: "outbox",
       redactedJson: {
-        errorName: "SyntaxError",
         fallbackKind: "text",
         reason: "capability_check_failed",
       },

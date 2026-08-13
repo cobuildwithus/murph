@@ -845,6 +845,16 @@ Last verified: 2026-08-12
   late generation-1 completion cannot downgrade newer coverage. This keeps the
   rollout fence in the existing queue, scheduler, and account-metadata owners
   without another repair loop or lifecycle manager.
+- Junction full reconcile and backfill jobs finish inventory, summary, profile,
+  and historical scheduling once, then advance timeseries-only work through the
+  existing job payload. Each attempt owns one canonical resource and one
+  complete UTC day. A collection may use at most two sequential pages with one
+  bounded request attempt per page. Page-heavy active-calorie and heart-rate
+  days deterministically retry as complete UTC hours; no partial aggregate or
+  vendor cursor is persisted. `timeseriesCursor` and
+  `timeseriesResourceCursor` identify the next complete unit without changing
+  job dedupe identity. Every partial continuation preserves
+  `lastSyncCompletedAt`; only terminal current full work may advance it.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

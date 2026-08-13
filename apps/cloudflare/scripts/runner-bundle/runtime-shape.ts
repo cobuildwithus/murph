@@ -3,7 +3,6 @@ import path from "node:path";
 
 const ZOD_BUILD_ONLY_PATHS = [
   "src",
-  "v3",
   "mini",
   "v4-mini",
   "v4/mini",
@@ -110,6 +109,8 @@ async function packageDeclaresDependency(
 
 function isRetainedZodRuntimeSpecifier(specifier: string): boolean {
   return specifier === "zod"
+    || specifier === "zod/v3"
+    || specifier.startsWith("zod/v3/")
     || specifier === "zod/v4"
     || (specifier.startsWith("zod/v4/")
       && !specifier.startsWith("zod/v4/mini"));

@@ -295,8 +295,19 @@ Last verified: 2026-08-12
   field explicitly; this preserves excess-property checking that TypeScript
   otherwise loses across composed objects. `pnpm provider-requests:guard`
   enforces the registered Composio, Stripe, Kernel, Linq, Retell, Temporal,
-  OpenAI, and Junction boundaries across production apps, packages, and
-  scripts. Register each new official SDK boundary when it is introduced. The opt-in
+  OpenAI, Resend, Junction, ElevenLabs, Exa, Lob, and Google Cloud client
+  boundaries across production apps, packages, and JavaScript/TypeScript
+  scripts. It also rejects direct `fetch`/`Request` construction when a known
+  provider origin is statically visible through local literals, templates,
+  URL objects, or variables. A detected official-SDK transport adapter may use
+  `provider-request-boundary-allow-next-line: sdk-transport-adapter` only when
+  the matching SDK is imported; a Linq SDK owner may use the
+  `linq-presigned-bytes` reason only for an `uploadUrl` or `downloadUrl` byte
+  transfer. The guard cannot prove the destination of imported or otherwise
+  runtime-computed URLs, and it does not inspect every possible HTTP library,
+  so it remains a focused boundary check rather than blanket proof that raw
+  provider HTTP is absent. Register each new official SDK and provider origin
+  when it is introduced. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode secret key and calls the real resume endpoint with a synthetic
   missing Subscription, so parameter drift fails without creating, charging,
