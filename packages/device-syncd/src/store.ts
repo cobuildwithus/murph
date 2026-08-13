@@ -43,6 +43,7 @@ import {
   failDeviceSyncJobIfOwned,
   getDeviceSyncJobById,
   listDueDeviceSyncJobBatchCandidates,
+  listPendingDeviceSyncJobsForAccount,
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
@@ -475,6 +476,14 @@ export class SqliteDeviceSyncStore {
     return getDeviceSyncJobById(this.database, jobId);
   }
 
+  listPendingJobsForAccount(accountId: string, limit: number): DeviceSyncJobRecord[] {
+    return listPendingDeviceSyncJobsForAccount({
+      accountId,
+      database: this.database,
+      limit,
+    });
+  }
+
   readNextActiveReconcileAt(): string | null {
     return readNextStoredActiveReconcileAt(this.database);
   }
@@ -487,8 +496,13 @@ export class SqliteDeviceSyncStore {
     return readNextDeviceSyncJobWakeAtForAccount(this.database, accountId);
   }
 
-  claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {
-    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs);
+  claimDueJob(
+    workerId: string,
+    now: string,
+    leaseMs: number,
+    accountId?: string,
+  ): DeviceSyncJobRecord | null {
+    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs, accountId);
   }
 
   listDueJobBatchCandidates(input: {

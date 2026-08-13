@@ -624,6 +624,7 @@ export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
 }
 
 export interface HostedExecutionDeviceSyncDirtyPendingRequest {
+  connectionId?: string | null;
   limit?: number | null;
   stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
@@ -1013,6 +1014,14 @@ export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
     );
 
   return {
+    ...(record.connectionId === undefined
+      ? {}
+      : {
+          connectionId: readNullableStringValue(
+            record.connectionId,
+            "Hosted device-sync dirty pending request connectionId",
+          ),
+        }),
     ...(record.limit === undefined
       ? {}
       : {

@@ -940,6 +940,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   the app-local Vercel OIDC adapter remains for browser/session/status/deletion
   calls into Cloudflare.
 
+  Hosted device-sync scheduling keeps one canonical connection timestamp:
+  Web's `nextReconcileAt` is the provider cadence and the only timestamp the
+  global due-reconcile sweep may consume. The encrypted system-mailbox item
+  remains the exact owner of connection-specific and scheduled wake work while
+  any job created by that wake is retryable. Before checkpoint publication the
+  item is narrowed to unfinished job hints with their original kind, payload,
+  dedupe identity, next retry time, and remaining attempt limit; after terminal
+  success or failure it advances normally. Web dirty rows independently remain
+  authoritative for dirty resource/deletion work until terminal acknowledgement.
+  Hosted snapshots intentionally exclude the device-sync SQLite execution cache,
+  so a cold runner reconstructs unfinished work from those existing durable
+  owners. Mailbox ordering is per connection, preventing one connection's future
+  retry from blocking due work for another. This adds no scheduler or queue.
+
   Member-owned device provider applications are also Web-owned control facts.
   Web stores one encrypted, revisioned application per personal member and
   provider, binds OAuth state and each resulting connection to the exact

@@ -7,6 +7,16 @@ Last verified: 2026-08-13
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Hosted device-sync wake ownership keeps provider cadence in Web's canonical
+`nextReconcileAt`, while the encrypted system-mailbox item retains exact
+connection-specific retry work and Web dirty rows retain dirty resource/deletion
+work across cold replacement. The machine-local SQLite store is an execution
+cache; hosted provider scheduling is mailbox-connection scoped, retained wakes
+come from actual manifest-shaped queued/running rows, and a terminal checkpoint
+fences cadence publication. The contract is jointly specified by
+`agent-docs/RELIABILITY.md` and
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
 authoritative Web-response ownership, typed destination-failure isolation,

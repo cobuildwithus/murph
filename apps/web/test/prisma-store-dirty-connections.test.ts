@@ -1754,6 +1754,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     const store = new PrismaHostedDirtyConnectionStore(prisma as never);
 
     const result = await store.listPendingDirtyConnectionsForUser({
+      connectionId: "dsc_junction_revision_ack",
       limit: 10,
       userId: "member_123",
     });
@@ -1771,6 +1772,10 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     };
     expect(query.text).toMatch(
       /and\s*\(\s*"dirty_revision"\s*>\s*"processed_revision"\s*or\s+exists\s*\(/su,
+    );
+    expect(query.text).toContain('and "connection_id" =');
+    expect((queryCalls[0] as { values: unknown[] }).values).toContain(
+      "dsc_junction_revision_ack",
     );
     expect(query.text).toContain(
       '"payload"."connection_id" = "device_sync_dirty_connection"."connection_id"',
