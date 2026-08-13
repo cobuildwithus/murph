@@ -47,12 +47,12 @@ Updated: 2026-08-13
 - The full hosted device-sync runtime suite passed: 99 tests.
 - The hosted runtime maintenance suite passed: 82 tests.
 - The assistant-runtime typecheck passed.
-- Preliminary ReviewGPT found that an expired, exhausted generic running job
-  could be relinked and acknowledged after dead-lettering instead of being
-  replaced. The device-sync store now retires those rows through its canonical
-  lease policy before admission reads pending jobs; the Junction companion
-  exception remains reusable.
-- A focused regression proves the stale job is replaced, cannot acknowledge its
-  dirty row, and only the successfully executed replacement can acknowledge it.
+- Preliminary ReviewGPT questioned relinking an expired, exhausted generic
+  running job. A final-gate review proved replacement would reset retry
+  authority and could replay an ambiguous provider effect, so the replacement
+  machinery was deleted. The existing job identity remains the terminal owner.
+- A focused regression proves the stale identity and exhausted attempt count
+  remain intact, the provider executor is not invoked again, and the existing
+  claim/dead-letter owner terminally acknowledges the linked dirty row.
 - Post-remediation proof passed: 100 assistant-runtime tests, 82 maintenance
   tests, 47 device-sync store tests, and both package typechecks.

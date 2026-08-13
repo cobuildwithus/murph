@@ -3908,7 +3908,7 @@ describe("hosted device-sync runtime", () => {
           provider: "strava",
         });
         const store = getStore(service);
-        const listAdmissibleJobsForAccount = vi.spyOn(store, "listAdmissibleJobsForAccount");
+        const listPendingJobsForAccount = vi.spyOn(store, "listPendingJobsForAccount");
         const wake = buildDirtyDeviceSyncWake(
           connectionId,
           `2026-04-04T10:0${pass}:00.000Z`,
@@ -3961,12 +3961,12 @@ describe("hosted device-sync runtime", () => {
         assert.equal(state.pendingDirtyPayloadJobs.length, 100);
         assert.equal(readJobsForAccount(service, localAccountId).length, 100);
         assert.equal(state.dirtyWorkRemaining, pass < 4);
-        assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
+        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
 
         assert.equal(await service.drainWorker(100, localAccountId), 100);
         promoteHostedCompletedDirtyPayloadAcks({ service, state });
         assert.equal(state.pendingDirtyPayloadJobs.length, 0);
-        assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
+        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
         const [ack] = state.pendingDirtyAcks;
         assert.ok(ack);
         assert.equal(ack.processedDirtyPayloadIds?.length, 100);
@@ -3978,7 +3978,7 @@ describe("hosted device-sync runtime", () => {
         }
 
         const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
-        assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
+        assert.equal(listPendingJobsForAccount.mock.calls.length, 2);
         assert.equal(recovery?.wake.hint?.jobs?.length ?? 0, 0);
         assert.equal(
           recovery?.wake.hint?.reason ?? null,
@@ -4105,7 +4105,7 @@ describe("hosted device-sync runtime", () => {
 
       const restoredStore = getStore(restoredService);
       const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
-      const listAdmissibleJobsForAccount = vi.spyOn(restoredStore, "listAdmissibleJobsForAccount");
+      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: port,
         secret: DEVICE_SYNC_SECRET,
@@ -4117,7 +4117,7 @@ describe("hosted device-sync runtime", () => {
       const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
       assert.equal(restoredJobs.length, 100);
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 100);
-      assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
+      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
       assert.equal(enqueueJob.mock.calls.length, 100);
       assert.equal(
         new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
@@ -4259,7 +4259,7 @@ describe("hosted device-sync runtime", () => {
 
       const restoredStore = getStore(restoredService);
       const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
-      const listAdmissibleJobsForAccount = vi.spyOn(restoredStore, "listAdmissibleJobsForAccount");
+      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: port,
         secret: DEVICE_SYNC_SECRET,
@@ -4272,7 +4272,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(restoredJobs.length, 100);
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 101);
       assert.equal(restoredState.dirtyWorkRemaining, true);
-      assert.equal(listAdmissibleJobsForAccount.mock.calls.length, 1);
+      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
       assert.equal(enqueueJob.mock.calls.length, 100);
       assert.equal(
         new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
@@ -4316,7 +4316,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("expired final-attempt dirty work is replaced before acknowledgement", async () => {
+  test("expired final-attempt dirty work preserves identity without re-execution", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-04T10:00:00.000Z"));
     const firstWorkspace = await createHostedRuntimeWorkspace(
@@ -4455,10 +4455,10 @@ describe("hosted device-sync runtime", () => {
           "2026-04-04T10:02:01.000Z",
         ),
       });
-      const [replacement] = replacementState.pendingDirtyPayloadJobs;
-      assert.ok(replacement);
-      assert.notEqual(replacement.jobId, retainedJob.id);
-      assert.equal(restoredStore.getJobById(retainedJob.id)?.status, "dead");
+      const [retained] = replacementState.pendingDirtyPayloadJobs;
+      assert.ok(retained);
+      assert.equal(retained.jobId, retainedJob.id);
+      assert.equal(readJobsForAccount(restoredService, restoredAccountId).length, 1);
 
       promoteHostedCompletedDirtyPayloadAcks({
         service: restoredService,
@@ -4470,8 +4470,12 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(executeJob.mock.calls.length, 0);
 
-      assert.equal(await restoredService.drainWorker(1, restoredAccountId), 1);
-      assert.equal(executeJob.mock.calls.length, 1);
+      assert.equal(await restoredService.drainWorker(1, restoredAccountId), 0);
+      const terminal = restoredStore.getJobById(retainedJob.id);
+      assert.equal(terminal?.status, "dead");
+      assert.equal(terminal?.attempts, 1);
+      assert.equal(terminal?.maxAttempts, 1);
+      assert.equal(executeJob.mock.calls.length, 0);
       promoteHostedCompletedDirtyPayloadAcks({
         service: restoredService,
         state: replacementState,

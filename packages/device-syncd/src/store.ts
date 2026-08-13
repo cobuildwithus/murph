@@ -42,7 +42,6 @@ import {
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
   getDeviceSyncJobById,
-  listAdmissibleDeviceSyncJobsForAccount,
   listDueDeviceSyncJobBatchCandidates,
   listPendingDeviceSyncJobsForAccount,
   markPendingDeviceSyncJobsDeadForAccount,
@@ -479,17 +478,6 @@ export class SqliteDeviceSyncStore {
 
   listPendingJobsForAccount(accountId: string, limit: number): DeviceSyncJobRecord[] {
     return listPendingDeviceSyncJobsForAccount({
-      accountId,
-      database: this.database,
-      limit,
-    });
-  }
-
-  listAdmissibleJobsForAccount(
-    accountId: string,
-    limit: number,
-  ): DeviceSyncJobRecord[] {
-    return listAdmissibleDeviceSyncJobsForAccount({
       accountId,
       database: this.database,
       limit,
