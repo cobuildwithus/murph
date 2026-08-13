@@ -261,8 +261,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // already installed in the runner payload. Its lazy device-sync provider graph
 // measured 10,053,341B on macOS; preserve the boot-path ratchets and the
 // established 32KB total allowance. Exhaustive Junction activation then
-// measured 10,136,931B on macOS, so ratchet the combined integrated baseline.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_136_931 + 32_768;
+// measured 10,136,931B on macOS. The subsequent merged-main hosted runtime
+// graph measured 10,170,323B on Linux CI and 10,204,553B on macOS without
+// adding a forbidden boot input, so ratchet the combined integrated baseline
+// to the larger measurement and retain the 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_204_553 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
