@@ -89,8 +89,10 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
     expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
-    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "1"');
-    expect(workflow).toContain("run: pnpm hosted-local e2e device-connect");
+    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
+    expect(workflow).toContain(
+      "run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect",
+    );
     expect(workflow).toContain("image: public.ecr.aws/docker/library/postgres:17");
 
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];
@@ -117,6 +119,16 @@ describe("live Junction wearable canary workflow", () => {
     expect(browserRunner).toContain(
       'disclosureSourceName: source === "oura" ? "Oura" : "Whoop"',
     );
+  });
+
+  it("keeps headed CI authorization automated and fail-closed", () => {
+    expect(browserRunner).toContain(
+      'const manualAuthorizationAllowed = !headless && environment.CI !== "true";',
+    );
+    expect(browserRunner).toContain(
+      "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",
+    );
+    expect(browserRunner).toContain("if (!clicked && config.manualAuthorizationAllowed)");
   });
 
   it("keeps Playwright's closing quote out of redacted navigation URLs", () => {

@@ -11,6 +11,7 @@ import {
   readHostedLocalBrowserEnvironmentValue,
   readHostedLocalBrowserTimeout,
 } from "./hosted-local-browser-process.ts";
+import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-challenge.ts";
 
 interface BrowserConfig {
   disclosureSourceName: "Oura" | "Whoop";
@@ -18,6 +19,7 @@ interface BrowserConfig {
   headless: boolean;
   hostedSessionCookie: string;
   label: "Oura" | "WHOOP";
+  manualAuthorizationAllowed: boolean;
   otp: string | null;
   password: string | null;
   source: "oura" | "whoop";
@@ -56,6 +58,7 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
+const PROVIDER_CHALLENGE_GRACE_MS = 15_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -178,6 +181,7 @@ async function completeExternalAuthorization(
   config: BrowserConfig,
 ): Promise<void> {
   const deadline = Date.now() + config.timeoutMs;
+  let providerChallengeObservedAt: number | null = null;
 
   while (Date.now() < deadline) {
     if (readOrigin(page.url()) === config.webOrigin) {
@@ -185,6 +189,22 @@ async function completeExternalAuthorization(
     }
 
     assertTrustedAuthorizationUrl(page.url(), config);
+    const providerChallenge = isHostedLocalProviderChallengeSurface({
+      frameUrls: page.frames().map((frame) => frame.url()),
+      title: await page.title().catch(() => ""),
+    });
+    if (providerChallenge) {
+      providerChallengeObservedAt ??= Date.now();
+      if (Date.now() - providerChallengeObservedAt >= PROVIDER_CHALLENGE_GRACE_MS) {
+        throw new Error(
+          `${config.label} authorization was blocked by an external provider challenge.`,
+        );
+      }
+      await page.waitForTimeout(1_000);
+      continue;
+    }
+    providerChallengeObservedAt = null;
+
     await fillVisible(page, [
       'input[type="email"]',
       'input[autocomplete="email"]',
@@ -210,9 +230,9 @@ async function completeExternalAuthorization(
         if (currentOtp !== config.otp) {
           await otpInput.fill(config.otp);
         }
-      } else if (config.headless) {
+      } else if (!config.manualAuthorizationAllowed) {
         throw new Error(
-          `${config.label} requested a one-time code. Set MURPH_E2E_PROVIDER_OTP or run headfully for manual entry.`,
+          `${config.label} requested a one-time code. Set MURPH_E2E_PROVIDER_OTP; manual entry is available only in a headed non-CI run.`,
         );
       } else if (!currentOtp.trim()) {
         await page.waitForTimeout(1_000);
@@ -222,7 +242,7 @@ async function completeExternalAuthorization(
 
     await checkRequiredConsentCheckboxes(page);
     const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
-    if (!clicked && !config.headless) {
+    if (!clicked && config.manualAuthorizationAllowed) {
       // Headful runs permit manual CAPTCHA or one-time-code completion while
       // the test continues watching for the proof-bound Murph callback.
       await page.waitForTimeout(1_000);
@@ -354,6 +374,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
   const label = source === "oura" ? "Oura" : "WHOOP";
   const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
+  const manualAuthorizationAllowed = !headless && environment.CI !== "true";
   const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
   const password = environment.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
   if (source === "whoop" && !password) {
@@ -361,9 +382,9 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction WHOOP browser runner requires MURPH_E2E_PROVIDER_PASSWORD.",
     );
   }
-  if (source === "oura" && headless && !otp) {
+  if (source === "oura" && !manualAuthorizationAllowed && !otp) {
     throw new Error(
-      "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP or MURPH_E2E_PROVIDER_HEADLESS=0 for manual code entry.",
+      "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP unless it is a headed non-CI run with manual code entry.",
     );
   }
   const webBaseUrl = readHostedLocalBrowserEnvironmentValue(
@@ -403,6 +424,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       RUNNER_NAME,
     ),
     label,
+    manualAuthorizationAllowed,
     otp,
     password,
     source,

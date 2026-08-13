@@ -164,7 +164,7 @@ describe("hosted billing live browser support", () => {
     expect(subscriptionWaitFor).not.toHaveBeenCalled();
   });
 
-  it("waits for the enrolled home document before opening settings", async () => {
+  it("waits for the enrolled Home tree to commit before opening settings", async () => {
     const enrollmentResponse = createApiResponse({
       method: "POST",
       ok: true,
@@ -177,10 +177,15 @@ describe("hosted billing live browser support", () => {
     ) => {
       expect(predicate(new URL("https://app.example.test/home"))).toBe(true);
     });
-    const waitForLoadState = vi.fn(async () => undefined);
+    const homeWaitFor = vi.fn(async () => undefined);
+    const getByRole = vi.fn((role: string, options: unknown) => {
+      expect(role).toBe("heading");
+      expect(options).toEqual({ exact: true, name: "Welcome to Murph" });
+      return { waitFor: homeWaitFor };
+    });
     const page = {
+      getByRole,
       goto: vi.fn(async () => navigation),
-      waitForLoadState,
       waitForResponse: vi.fn(async (
         predicate: (response: ReturnType<typeof createApiResponse>) => boolean,
       ) => {
@@ -206,8 +211,8 @@ describe("hosted billing live browser support", () => {
       { waitUntil: "commit" },
     );
     expect(waitForURL).toHaveBeenCalledOnce();
-    expect(waitForLoadState).toHaveBeenCalledWith("domcontentloaded");
-    expect(waitForLoadState.mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect(homeWaitFor).toHaveBeenCalledOnce();
+    expect(homeWaitFor.mock.invocationCallOrder[0]).toBeGreaterThan(
       waitForURL.mock.invocationCallOrder[0] ?? 0,
     );
   });
