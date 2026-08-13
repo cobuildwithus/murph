@@ -1,6 +1,6 @@
 # Connected-source launch gate
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 This is an internal release gate, not a user-facing legal notice. Public legal copy does not cure a data path that violates a source-provider agreement. User consent is necessary but does not override provider API, license, branding, retention, or data-use restrictions.
 
@@ -43,25 +43,34 @@ another source's launch requirements.
 - One durable setup per member/provider binds connect coordinates, a setup-owned
   hosted browser run, and the exact encrypted provider application id/revision.
   Generic active browser work cannot be reused or navigated by setup.
-- The Strava adapter recognizes only Murph's deterministic member marker, models
-  sign-in, verification, and the current developer-subscription prerequisite as
-  recoverable pauses, and fails closed on ambiguous or unrelated applications.
-- Raw client credentials cross only the narrow trusted browser-result-to-sealing
-  boundary. The boundary immediately seals the credentials, scrubs the raw result,
-  and returns non-secret application metadata.
+- The model drives the live provider page through the ordinary computer-use
+  understanding and one provider-neutral setup tool. Setup-owned runs expose only
+  sanitized origin/control observations and typed actions; they do not accept
+  provider-specific Playwright or arbitrary browser code. Provider sign-in,
+  verification, CAPTCHA, and the current developer-subscription prerequisite pause
+  the exact run for a recoverable member handoff that returns to `/connect`.
+- Final submission and raw client credential capture cross only the narrow trusted
+  browser-result-to-sealing boundary. The boundary verifies Murph's deterministic
+  member marker, immediately seals the credentials, scrubs browser values and the
+  raw result, and returns non-secret application metadata. Ambiguous or unrelated
+  applications fail closed.
+- Cancellation persists a `canceling` compare-and-set fence before browser cleanup,
+  so a late capture callback cannot save credentials or resurrect canceled work.
 - OAuth uses the exact application id/revision and the read-only `activity:read`
   request. Connection rows are authoritative after callback. Initial backfill and
   scheduled polling remain enabled; member-owned Strava webhooks are not enabled.
 - Strava disconnect uses `POST /oauth/revoke` with exact application Basic
   authentication and the access token in the form body. Credential values and
   authorization headers are excluded from diagnostics.
-- Account deletion commits the member suspension fence before provider work,
-  revokes the exact connection, deletes only the exact Murph-marked provider app,
-  and preserves local setup/application ownership when external cleanup must be
-  retried.
-- Hermetic tests serve a deterministic fake developer dashboard and OAuth/token
-  surface, execute the checked-in browser programs against its DOM, and cover the
-  setup, sealing, exact binding, backfill/polling, disconnect, and deletion paths.
+- Account deletion requires the member to disconnect the exact connection and
+  remove the deterministically marked provider application through the ordinary
+  authenticated `/connect` flow before the suspension fence. Post-suspension cleanup
+  is local-only and fails closed if that preflight is invalidated, so no provider
+  browser handoff depends on suspended-member access.
+- Hermetic route, service, tool, prompt, browser-boundary, OAuth/token, device-sync,
+  and concurrency tests cover setup, handoff resume, sealing, exact binding,
+  backfill/polling, reconnect, disconnect, cancellation, and deletion without a
+  checked-in provider-specific browser program.
 
 ### Remaining live launch proof
 
