@@ -30,6 +30,9 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   persistHostedDeviceSyncCompanionMetadata: vi.fn(),
   prismaClient: {
+    hostedMailboxItem: {
+      findUnique: vi.fn(),
+    },
     hostedMember: {
       findUnique: vi.fn(),
     },
@@ -236,6 +239,7 @@ describe("device sync companion routes", () => {
     vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue(null);
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.createSdkSignInSession.mockResolvedValue({
       account: {
