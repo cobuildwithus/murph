@@ -141,6 +141,9 @@
       "@murphai/hosted-execution/physical-notes": [
         "../../packages/hosted-execution/src/physical-notes.ts"
       ],
+      "@murphai/hosted-execution/provider-setup": [
+        "../../packages/hosted-execution/src/provider-setup.ts"
+      ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
       ],
