@@ -7,6 +7,7 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -62,6 +63,7 @@ import type {
 import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+  HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "./hosted-device-sync-limits.ts";
 import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
@@ -132,6 +134,9 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "provider_not_registered"
   | "reauthorization_required";
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
+
+const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON = "retained_completion_fence";
+const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS = 30_000;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -385,6 +390,7 @@ function laterIsoTimestamp(left: string | null, right: string | null): string | 
 }
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
+  deferNextReconcileAtForLocalAccountId?: string | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   signal?: AbortSignal | null;
@@ -420,13 +426,16 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       continue;
     }
 
+    const baseline = snapshotByConnectionId.get(hostedConnectionId) ?? null;
     const update = buildHostedDeviceSyncRuntimeConnectionUpdate({
       account,
-      baseline: snapshotByConnectionId.get(hostedConnectionId) ?? null,
+      baseline,
       codec,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
-      nextReconcileAt: account.nextReconcileAt ?? null,
+      nextReconcileAt: input.deferNextReconcileAtForLocalAccountId === localAccountId
+        ? baseline?.localState.nextReconcileAt ?? null
+        : account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -615,8 +624,38 @@ async function applyHostedDeviceSyncWakeHint(input: {
   return false;
 }
 
+export function resolveHostedDeviceSyncWakeLocalAccountId(input: {
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  if (input.wake.kind !== "device-sync.wake") {
+    return null;
+  }
+  const connectionId = resolveHostedDeviceSyncWakeContext(input.wake).connectionId;
+  return connectionId
+    ? input.state.hostedToLocalAccountIds.get(connectionId) ?? null
+    : null;
+}
+
+export function resolveHostedDeviceSyncSchedulerAccountId(input: {
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  const localAccountId = resolveHostedDeviceSyncWakeLocalAccountId(input);
+  if (!localAccountId || input.wake.kind !== "device-sync.wake") {
+    return null;
+  }
+  const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
+  if (
+    wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
+  ) {
+    return null;
+  }
+  return localAccountId;
+}
+
 export function resolveHostedDeviceSyncWakeRecovery(input: {
-  scheduledJobs: readonly DeviceSyncJobRecord[];
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
@@ -628,9 +667,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
   const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
-  const localAccountId = wakeContext.connectionId
-    ? input.state.hostedToLocalAccountIds.get(wakeContext.connectionId) ?? null
-    : null;
+  const localAccountId = resolveHostedDeviceSyncWakeLocalAccountId(input);
   if (!localAccountId) {
     return null;
   }
@@ -640,66 +677,80 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
-  const originalHints = normalizeHostedDeviceSyncJobHints(wakeContext.hint);
-  const sourceHints = originalHints.length > 0
-    ? originalHints
-    : input.scheduledJobs
-      .filter((job) => job.accountId === localAccountId)
-      .map((job) => ({
-        availableAt: job.availableAt,
-        dedupeKey: job.dedupeKey,
+  const pendingJobs = store.listPendingJobsForAccount(
+    localAccountId,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+  );
+  if (pendingJobs.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT) {
+    throw new Error(
+      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
+    );
+  }
+  if (pendingJobs.length > 0) {
+    let retryAt: string | null = null;
+    const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
+    for (const job of pendingJobs) {
+      const dedupeKey = job.dedupeKey
+        ?? `hosted-device-sync-job:${createHash("sha256").update(job.id).digest("hex")}`;
+      const payload = shapeHostedDeviceSyncJobHintPayload(account.provider, job);
+      const jobRetryAt = job.status === "running"
+        ? job.leaseExpiresAt ?? job.availableAt
+        : job.availableAt;
+      const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
+      retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
+        ? jobRetryAt
+        : retryAt;
+      retryHints.push({
+        availableAt: jobRetryAt,
+        dedupeKey,
         kind: job.kind,
-        maxAttempts: job.maxAttempts,
-        payload: { ...job.payload },
+        maxAttempts: remainingAttempts,
+        ...(Object.keys(payload).length > 0 ? { payload } : {}),
         priority: job.priority,
-      } satisfies HostedExecutionDeviceSyncJobHint));
-  if (sourceHints.length === 0) {
-    return null;
+      });
+    }
+    if (!retryAt) {
+      return null;
+    }
+
+    return {
+      retryAt,
+      wake: {
+        ...input.wake,
+        hint: {
+          ...(input.wake.hint ?? {}),
+          jobs: retryHints,
+          nextReconcileAt: account.nextReconcileAt ?? null,
+        },
+      },
+    };
   }
 
-  let retryAt: string | null = null;
-  const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
-  for (const [index, hint] of sourceHints.entries()) {
-    const dedupeKey = resolveHostedDeviceSyncWakeJobDedupeKey({
-      hint,
-      index,
-      wake: input.wake,
-    });
-    const job = store.getLatestJobByDedupeKey({
-      accountId: localAccountId,
-      dedupeKey,
-      provider: account.provider,
-    });
-    if (!job || (job.status !== "queued" && job.status !== "running")) {
-      continue;
-    }
-    const jobRetryAt = job.status === "running"
-      ? job.leaseExpiresAt ?? job.availableAt
-      : job.availableAt;
-    const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
-    retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
-      ? jobRetryAt
-      : retryAt;
-    retryHints.push({
-      availableAt: jobRetryAt,
-      dedupeKey,
-      kind: hint.kind,
-      maxAttempts: remainingAttempts,
-      ...(hint.payload ? { payload: { ...hint.payload } } : {}),
-      ...(typeof hint.priority === "number" ? { priority: hint.priority } : {}),
-    });
+  if (wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON) {
+    return null;
   }
-  if (!retryAt || retryHints.length === 0) {
+  const hostedConnectionId = input.state.localToHostedAccountIds.get(localAccountId) ?? null;
+  const baselineNextReconcileAt = hostedConnectionId
+    ? input.state.snapshot?.connections.find(
+        (entry) => entry.connection.id === hostedConnectionId,
+      )?.localState.nextReconcileAt ?? null
+    : null;
+  const nextReconcileAt = account.nextReconcileAt ?? null;
+  if (nextReconcileAt === baselineNextReconcileAt) {
     return null;
   }
 
   return {
-    retryAt,
+    retryAt: new Date(
+      Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
+    ).toISOString(),
     wake: {
       ...input.wake,
       hint: {
         ...(input.wake.hint ?? {}),
-        jobs: retryHints,
+        jobs: [],
+        nextReconcileAt,
+        reason: HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON,
       },
     },
   };
@@ -1029,6 +1080,9 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
   >();
   const completedByAck = new Map<string, Set<string>>();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
+  const trackedDirtyJobIds = new Set(
+    input.state.pendingDirtyPayloadJobs.map((pending) => pending.jobId),
+  );
   for (const pending of input.state.pendingDirtyPayloadJobs) {
     const job = store.getJobById(pending.jobId);
     const isCompanionHrv = job ? isJunctionCompanionHrvRmssdJob(job) : false;
@@ -1039,7 +1093,17 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
         isCompanionHrv
         || store.getAccountById(job.accountId)?.status === "active"
       );
-    if (!completed) {
+    // Provider execution may atomically finish a dirty seed and enqueue
+    // follow-up jobs. Other pending dirty seeds already have their own Web
+    // owners, but an untracked child does not, so retain this seed until every
+    // such child is terminal and a cold replacement can safely replay it.
+    const hasUntrackedPendingAccountWork = job
+      ? store.listPendingJobsForAccount(
+          job.accountId,
+          HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+        ).some((candidate) => !trackedDirtyJobIds.has(candidate.id))
+      : false;
+    if (!completed || hasUntrackedPendingAccountWork) {
       remaining.push(pending);
       continue;
     }

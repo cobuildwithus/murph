@@ -86,7 +86,10 @@ Updated: 2026-08-12
 7. [completed] Update durable runtime/reliability documentation for the ownership rule.
 8. [completed] Add bounded, redacted R2 error code, message, and request-id
    diagnostics without retaining response bodies or presigned URL material.
-9. [in progress] Run focused tests, typecheck, parent diff review, PR CI, and ReviewGPT gates.
+9. [completed] Scope hosted provider scheduling to the mailbox connection, derive
+   retained work from actual queued/running rows including worker children, and
+   fence provider-cadence publication behind a durable terminal checkpoint.
+10. [in progress] Run focused tests, typecheck, parent diff review, PR CI, and ReviewGPT gates.
 
 ## Decisions
 
@@ -100,10 +103,17 @@ Updated: 2026-08-12
   and scheduled wake authority, and retain Web dirty rows for dirty resource
   work until their terminal acknowledgements. Local SQLite remains the bounded
   execution cache.
-- Before checkpoint publication, narrow the retained mailbox wake to unfinished
-  job hints and replace each attempt limit with the exact remaining count from
-  the local execution cache. The retained mailbox remains the only durable
-  source; this transition does not introduce a second job owner.
+- Before checkpoint publication, query the owned account's actual queued and
+  running rows, shape every payload through the provider manifest, and replace
+  each attempt limit with the exact remaining count. This captures
+  worker-created children and excludes local-only fields. The retained mailbox
+  remains the only durable source; this transition does not introduce a second
+  job owner.
+- Admit provider cadence only from a connection mailbox wake and only for its
+  mapped local account. A retained job wake and a generic runtime timer never
+  run the provider scheduler. Carry the advanced provider cadence in the
+  retained wake, withhold it from Web while work remains, and use one empty-job
+  completion-fence checkpoint before publishing the terminal cadence.
 - Order retained device-sync work by connection id so one connection's retry
   delay cannot block due work for another while same-connection FIFO remains
   intact.

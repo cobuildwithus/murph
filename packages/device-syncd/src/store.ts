@@ -42,8 +42,8 @@ import {
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
   getDeviceSyncJobById,
-  getLatestDeviceSyncJobByDedupeKey,
   listDueDeviceSyncJobBatchCandidates,
+  listPendingDeviceSyncJobsForAccount,
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
@@ -476,14 +476,11 @@ export class SqliteDeviceSyncStore {
     return getDeviceSyncJobById(this.database, jobId);
   }
 
-  getLatestJobByDedupeKey(input: {
-    accountId: string;
-    dedupeKey: string;
-    provider: string;
-  }): DeviceSyncJobRecord | null {
-    return getLatestDeviceSyncJobByDedupeKey({
-      ...input,
+  listPendingJobsForAccount(accountId: string, limit: number): DeviceSyncJobRecord[] {
+    return listPendingDeviceSyncJobsForAccount({
+      accountId,
       database: this.database,
+      limit,
     });
   }
 

@@ -11,8 +11,10 @@ Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
 connection-specific retry work and Web dirty rows retain dirty resource/deletion
 work across cold replacement. The machine-local SQLite store is an execution
-cache, and mailbox ordering remains per connection. The contract is jointly
-specified by `agent-docs/RELIABILITY.md` and
+cache; hosted provider scheduling is mailbox-connection scoped, retained wakes
+come from actual manifest-shaped queued/running rows, and a terminal checkpoint
+fences cadence publication. The contract is jointly specified by
+`agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 The lower-level hosted browser assertion first-invalid boundary, single-use

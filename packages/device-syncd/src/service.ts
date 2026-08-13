@@ -76,6 +76,21 @@ import type {
 
 export { SqliteDeviceSyncStore } from "./store.ts";
 
+export function resolveDeviceSyncStoreNextJobWakeAt(input: {
+  stateDatabasePath?: string | null;
+  vaultRoot: string;
+}): string | null {
+  const store = new SqliteDeviceSyncStore(
+    input.stateDatabasePath ?? defaultStateDatabasePath(input.vaultRoot),
+  );
+
+  try {
+    return store.readNextJobWakeAt();
+  } finally {
+    store.close();
+  }
+}
+
 export function resolveDeviceSyncStoreNextWakeAt(input: {
   stateDatabasePath?: string | null;
   vaultRoot: string;
@@ -187,8 +202,9 @@ export interface DeviceSyncService {
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
   queueManualReconcile(accountId: string): QueueManualReconcileResult;
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
+  getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
-  runSchedulerOnce(): Promise<DeviceSyncJobRecord[]>;
+  runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
@@ -668,7 +684,11 @@ class DeviceSyncServiceController {
     return nextWakeAt;
   }
 
-  async runSchedulerOnce(): Promise<DeviceSyncJobRecord[]> {
+  getNextJobWakeAt(): string | null {
+    return this.store.readNextJobWakeAt();
+  }
+
+  async runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]> {
     return await this.schedulerMutex.runIfIdle(async () => {
       const now = this.nowIso();
       const queuedJobs: DeviceSyncJobRecord[] = [];
@@ -676,7 +696,8 @@ class DeviceSyncServiceController {
       try {
         for (const account of this.store.listAccounts()) {
           if (
-            account.status !== "active"
+            (accountId !== undefined && account.id !== accountId)
+            || account.status !== "active"
             || isDeviceSyncConnectionSetupPending(account)
             || !account.nextReconcileAt
             || Date.parse(account.nextReconcileAt) > Date.parse(now)
@@ -1659,8 +1680,9 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
     disconnectAccount: (accountId, expectedConnectedAt) =>
       controller.disconnectAccount(accountId, expectedConnectedAt),
+    getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
-    runSchedulerOnce: () => controller.runSchedulerOnce(),
+    runSchedulerOnce: (accountId) => controller.runSchedulerOnce(accountId),
     runWorkerOnce: () => controller.runWorkerOnce(),
     drainWorker: (limit) => controller.drainWorker(limit),
   } satisfies DeviceSyncService);

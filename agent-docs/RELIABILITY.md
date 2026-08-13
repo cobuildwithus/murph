@@ -680,17 +680,27 @@ Last verified: 2026-08-12
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
   schedule consumed by the global due-reconcile sweep. While a runner is warm,
   an earlier queued-job wake reaches Temporal through the existing workspace
-  `nextWakeAt`. The connection-specific encrypted system-mailbox item stays
-  pending while work admitted from that wake remains retryable and is narrowed
-  before checkpoint publication to the unfinished job kind, payload/window,
-  dedupe identity, next retry time, and remaining attempt limit. Terminal
-  success or terminal failure clears that source. Web dirty rows separately
-  remain authoritative until dirty resource/deletion jobs are terminally
-  acknowledged. Because the device-sync SQLite store is intentionally excluded
-  from hosted snapshots, a replacement runner rebuilds from those owners; it
-  never projects local retry timing into `nextReconcileAt`. Per-connection
-  mailbox ordering prevents a future retry for one connection from blocking
-  due device-sync work for another.
+  `nextWakeAt`. Hosted provider scheduling runs only for the account named by a
+  connection mailbox wake; a generic runtime timer may drain Web-owned dirty
+  work but cannot admit provider cadence. The connection-specific encrypted
+  mailbox item stays pending while that account has queued or running work and
+  is narrowed before checkpoint publication from the actual job rows to each
+  manifest-safe payload/window, dedupe identity, priority, next retry time, and
+  remaining attempt limit, including worker-created child jobs. The same wake
+  carries the provider's advanced cadence, but Web does not receive that
+  cadence until a terminal completion-fence checkpoint has made the exact
+  retained state durable. Terminal success or terminal failure then clears the
+  source. Web dirty rows separately remain authoritative until dirty
+  resource/deletion jobs are terminally acknowledged. Because the device-sync
+  SQLite store is intentionally excluded from hosted snapshots, a replacement
+  runner rebuilds from those owners; it never projects local retry timing into
+  `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
+  prevent a future retry for one connection from blocking or advancing due work
+  for another.
+  Future provider cadence remains projected as the workspace follow-up wake and
+  is recorded with a system-mailbox checkpoint handoff; once that cadence is
+  due, only a connection mailbox wake may admit it, so a generic runtime timer
+  cannot self-rearm from stale local cadence.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

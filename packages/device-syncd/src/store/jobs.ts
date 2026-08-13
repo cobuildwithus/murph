@@ -50,6 +50,73 @@ interface StoredJobRow {
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
 
+function requireJobRowString(
+  row: Record<string, unknown>,
+  field: keyof StoredJobRow,
+): string {
+  const value = row[field];
+  if (typeof value !== "string") {
+    throw new TypeError(`Expected device_job.${field} to be a string.`);
+  }
+  return value;
+}
+
+function requireJobRowNumber(
+  row: Record<string, unknown>,
+  field: keyof StoredJobRow,
+): number {
+  const value = row[field];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`Expected device_job.${field} to be a number.`);
+  }
+  return value;
+}
+
+function readJobRowNullableString(
+  row: Record<string, unknown>,
+  field: keyof StoredJobRow,
+): string | null {
+  const value = row[field];
+  if (value !== null && typeof value !== "string") {
+    throw new TypeError(`Expected device_job.${field} to be a string or null.`);
+  }
+  return value;
+}
+
+function decodeStoredJobRow(row: Record<string, unknown>): StoredJobRow {
+  const status = requireJobRowString(row, "status");
+  if (
+    status !== "queued"
+    && status !== "running"
+    && status !== "succeeded"
+    && status !== "dead"
+  ) {
+    throw new TypeError("Expected device_job.status to be a supported job status.");
+  }
+
+  return {
+    account_id: requireJobRowString(row, "account_id"),
+    attempts: requireJobRowNumber(row, "attempts"),
+    available_at: requireJobRowString(row, "available_at"),
+    created_at: requireJobRowString(row, "created_at"),
+    dedupe_key: readJobRowNullableString(row, "dedupe_key"),
+    finished_at: readJobRowNullableString(row, "finished_at"),
+    id: requireJobRowString(row, "id"),
+    kind: requireJobRowString(row, "kind"),
+    last_error_code: readJobRowNullableString(row, "last_error_code"),
+    last_error_message: readJobRowNullableString(row, "last_error_message"),
+    lease_expires_at: readJobRowNullableString(row, "lease_expires_at"),
+    lease_owner: readJobRowNullableString(row, "lease_owner"),
+    max_attempts: requireJobRowNumber(row, "max_attempts"),
+    payload_json: readJobRowNullableString(row, "payload_json"),
+    priority: requireJobRowNumber(row, "priority"),
+    provider: requireJobRowString(row, "provider"),
+    started_at: readJobRowNullableString(row, "started_at"),
+    status,
+    updated_at: requireJobRowString(row, "updated_at"),
+  };
+}
+
 function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: string): void {
   database.prepare(`
     update device_job
@@ -112,26 +179,26 @@ export function getDeviceSyncJobById(database: DatabaseSync, jobId: string): Dev
   return mapJobRow(row);
 }
 
-export function getLatestDeviceSyncJobByDedupeKey(input: {
+export function listPendingDeviceSyncJobsForAccount(input: {
   accountId: string;
   database: DatabaseSync;
-  dedupeKey: string;
-  provider: string;
-}): DeviceSyncJobRecord | null {
-  const row = input.database.prepare(`
+  limit: number;
+}): DeviceSyncJobRecord[] {
+  const rows = input.database.prepare(`
     select *
     from device_job
     where account_id = ?
-      and provider = ?
-      and dedupe_key = ?
-    order by created_at desc, id desc
-    limit 1
-  `).get(
+      and status in ('queued', 'running')
+    order by created_at asc, id asc
+    limit ?
+  `).all(
     input.accountId,
-    input.provider,
-    input.dedupeKey,
-  ) as StoredJobRow | undefined;
-  return mapJobRow(row);
+    input.limit,
+  ).map((row) => decodeStoredJobRow(row));
+  return rows.flatMap((row) => {
+    const job = mapJobRow(row);
+    return job ? [job] : [];
+  });
 }
 
 export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | null {
