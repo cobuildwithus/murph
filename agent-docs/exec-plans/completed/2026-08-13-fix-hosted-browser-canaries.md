@@ -1,6 +1,6 @@
 # Fix hosted browser canaries
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-13
 
@@ -54,6 +54,10 @@ Updated: 2026-08-13
 
 - Keep production application code unchanged: both failures are stale browser
   automation assumptions, while the current member-facing contracts are valid.
+- Keep distinct Junction display values for the disclosure button (`Whoop`) and
+  the post-connect heading (`WHOOP`) because both are real UI contracts.
+- Replace implementation-text billing checks with behavioral Page/Response
+  doubles so branch and ordering regressions fail before the live lane.
 
 ## Verification
 
@@ -61,3 +65,15 @@ Updated: 2026-08-13
   Web and Cloudflare typechecks; exact-head required GitHub checks; protected-
   main Junction and Stripe canaries after merge.
 - Expected outcomes: deterministic local checks and both live canaries pass.
+- Completed focused proof:
+  - Connect page: 100/100 passed.
+  - Hosted billing support: 13/13 passed.
+  - Junction workflow: 6/6 passed.
+  - Web, hosted-local harness, and Cloudflare typechecks passed.
+  - Exact-head GitHub required checks passed.
+- Review outcome:
+  - Preliminary specialists found the WHOOP/Whoop selector mismatch and weak
+    source-scan billing proof; both were accepted and corrected.
+  - Final ReviewGPT round 2 performed a fresh full-patch audit and passed with
+    no findings.
+Completed: 2026-08-13
