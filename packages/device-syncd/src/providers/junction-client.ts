@@ -1158,7 +1158,6 @@ function extractStructurallyCompleteTimeseriesRecords(
   requestedSourceProviderSlug: string | null,
 ): unknown[] {
   const groupedRecords = flattenGroupedTimeseries(resource, payload, {
-    requestedSourceProviderSlug,
     strict: true,
   });
   const records = groupedRecords ?? extractCollectionRecords(payload, resource);
@@ -1185,7 +1184,6 @@ function flattenGroupedTimeseries(
   resource: string,
   payload: unknown,
   options: {
-    requestedSourceProviderSlug?: string | null;
     strict?: boolean;
   } = {},
 ): unknown[] | null {
@@ -1204,13 +1202,6 @@ function flattenGroupedTimeseries(
     const normalizedGroupedSourceSlug = normalizeSourceSlug(sourceSlug);
     if (options.strict && !normalizedGroupedSourceSlug) {
       throw incompleteJunctionCalendarCollectionError();
-    }
-    if (
-      options.strict
-      && options.requestedSourceProviderSlug
-      && normalizedGroupedSourceSlug !== options.requestedSourceProviderSlug
-    ) {
-      continue;
     }
     if (options.strict && (rawGroups === undefined || rawGroups === null)) {
       throw incompleteJunctionCalendarCollectionError();

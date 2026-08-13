@@ -65,7 +65,8 @@ Updated: 2026-08-13
 16. [x] Resolve round fourteen's strict complete-set and reconnect-wake
     complexity findings.
 17. [x] Resolve round fifteen's lossy production-parser calendar finding.
-18. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+18. [x] Resolve round sixteen's grouped-source alias finding.
+19. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
     the task worktree.
 
 ## Decisions
@@ -182,6 +183,11 @@ Updated: 2026-08-13
   failure; genuinely empty exact-source results retain the existing zero path.
   The correction reuses the existing bounded client/provider call tree and
   adds no state owner, queue, worker, schema, cursor, watermark, or dependency.
+- Round sixteen's alias finding is accepted. Strict parsing no longer filters
+  an outer grouped key before the existing row-origin and source-admission path
+  normalizes it. This deletes a second comparison rule, so supported Apple
+  Health separator aliases reach the established exact-source filter while
+  malformed groups remain retryable.
 
 ## Verification
 
@@ -301,5 +307,10 @@ Updated: 2026-08-13
   grouped mixed-validity, grouped all-invalid, and ungrouped mixed-validity
   responses before canonical import; the service-level retry uses the same row
   and a later complete response applies the full daily value.
+- Round sixteen found that strict parsing compared the outer grouped key before
+  established source normalization, so a supported hyphenated Apple Health key
+  could be dropped and replaced with an authoritative zero. Focused
+  production-fetch proof now covers all three admitted spellings plus an
+  unrelated valid group, imports the real value, and emits no zero marker.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

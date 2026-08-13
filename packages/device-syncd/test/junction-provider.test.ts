@@ -2510,6 +2510,95 @@ test("Junction sparse calendar refresh rejects lossy collection parsing before c
   }
 });
 
+test("Junction sparse calendar refresh admits supported Apple Health group spellings", async () => {
+  for (const source of [{
+    groupedSourceSlug: "apple_health_kit",
+    jobSourceProviderSlug: "apple_health_kit",
+  }, {
+    groupedSourceSlug: "apple_health",
+    jobSourceProviderSlug: "apple_health",
+  }, {
+    groupedSourceSlug: "apple-healthkit",
+    jobSourceProviderSlug: "apple_healthkit",
+  }]) {
+    const provider = createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-apple-health-1",
+            name: "Apple Health",
+            resource_availability: { water: true },
+            slug: source.jobSourceProviderSlug,
+            status: "connected",
+          }],
+        });
+      }
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+        return createJsonResponse({
+          groups: {
+            fitbit: [{
+              data: [{
+                calendarDate: "2026-04-02",
+                end: "2026-04-02T07:01:00.000Z",
+                id: "unrelated-water",
+                start: "2026-04-02T07:00:00.000Z",
+                value: 999,
+              }],
+              source: { provider: "fitbit", type: "watch" },
+            }],
+            [source.groupedSourceSlug]: [{
+              data: [{
+                calendarDate: "2026-04-02",
+                end: "2026-04-02T08:01:00.000Z",
+                id: "apple-health-water",
+                start: "2026-04-02T08:00:00.000Z",
+                value: 250,
+              }],
+              source: { provider: source.groupedSourceSlug, type: "phone" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }, { timeseriesResources: ["water"] });
+    const importedSnapshots: unknown[] = [];
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        now: "2026-04-03T12:00:00.000Z",
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          const normalized = normalizeJunctionSnapshot(
+            snapshot as Parameters<typeof normalizeJunctionSnapshot>[0],
+          );
+          return {
+            canonicalEventExternalRefResourceIds: (normalized.events ?? []).flatMap(
+              (event) => event.externalRef ? [event.externalRef.resourceId] : [],
+            ),
+            durableDeliveryAccepted: true,
+          };
+        },
+      }),
+      createJob("resource", {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: source.jobSourceProviderSlug,
+        sourceType: "phone",
+      }),
+    );
+
+    const records = (importedSnapshots[0] as {
+      timeseries?: { water?: Array<Record<string, unknown>> };
+    }).timeseries?.water;
+    assert.equal(records?.length, 1, source.groupedSourceSlug);
+    assert.equal(records?.[0]?.value, 250, source.groupedSourceSlug);
+    assert.equal(records?.[0]?.authoritativeEmptyCalendarSet, undefined);
+  }
+});
+
 const usefulHistoricalSummaryRecordByResource = {
   sleep: {
     id: "sleep-1",
