@@ -139,6 +139,24 @@ Updated: 2026-08-12
   skip setup. It preserves Telegram, Linq, custom channels, and hosted email;
   real-file setup, idempotency, direct pending-input/no-provider-turn, mocked
   scan-order, and hosted non-regression tests cover the correction.
+- Final ReviewGPT round 4 found that the retired credential could still reach
+  setup provisioning subprocesses through the persisted environment path.
+  Setup now scrubs that credential alongside active provider credentials before
+  spawning tools, while retaining the negative trust-boundary tombstones.
+- Final ReviewGPT round 5 found a second local automation store used by the
+  live version-1 cron runtime. The pre-claim cleanup now pauses matching jobs in
+  both canonical automation state and that locked local cron store, combines
+  the transition count, preserves Telegram and Linq jobs, and remains
+  idempotent. Production-path runtime and setup tests cover the correction.
+- Final ReviewGPT round 6 found that strict inbox readiness could throw after
+  cleanup but before the one-time recovery guidance was constructed, and also
+  identified obsolete single-provider indirection. Strict readiness now belongs
+  to setup after cleanup reporting is derived; the same error code carries the
+  completed cleanup guidance through terminal and structured output, and a
+  corrected rerun is byte-stable without a duplicate announcement. The
+  one-provider setup and doctor registries and the unused channel setup hook
+  have been deleted in favor of direct Telegram paths, removing more production
+  code than the correction adds.
 
 ## Change-shape retrospective
 
@@ -190,8 +208,14 @@ Updated: 2026-08-12
   bytes. No selected provider field besides `input` changed. Paths and volatile
   identifiers were normalized, and the temporary capture harness and artifacts
   were removed after measurement.
-- Exact corrected-head GitHub Actions and subsequent ReviewGPT rounds remain
+- The round-6 corrected head passes all four touched-package typechecks, full
+  setup-cli and inbox-services suites, the full CLI setup/channel slice, and the
+  assistant channel suite. Final ReviewGPT and exact-head GitHub Actions remain
   required before closure.
+- The base branch advanced again after the single permitted refresh and now
+  conflicts in the generated skill hash and plan index. Per the repository
+  moving-base rule, no second refresh is attempted; closure remains blocked on
+  that race even if the final audit passes.
 - Expected outcomes: retained providers work through their existing owners,
   active AgentMail code/config/current-doc references are absent, no new
   compatibility mechanism exists, and all routed ReviewGPT and CI gates pass.

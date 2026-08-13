@@ -16,8 +16,6 @@ import {
 } from '../inbox-services/shared.js'
 
 type DoctorCheckResult = InboxDoctorCheck | InboxDoctorCheck[]
-type DoctorSource = InboxConnectorConfig['source']
-type SupportedDoctorSource = 'telegram'
 
 export interface DoctorCheckRunner {
   <TResult>(
@@ -30,22 +28,15 @@ export interface DoctorCheckRunner {
   ): Promise<TResult | null>
 }
 
-export interface DoctorStrategyDeps {
-  env: InboxAppEnvironment
-  runDoctorCheck: DoctorCheckRunner
-}
-
-export type DoctorStrategy = (
+export async function runTelegramDoctorChecks(
   context: DoctorContext,
   connector: InboxConnectorConfig,
-  deps: DoctorStrategyDeps,
-) => Promise<void>
-
-const runTelegramDoctorChecks: DoctorStrategy = async (
-  context,
-  connector,
-  { env, runDoctorCheck },
-) => {
+  input: {
+    env: InboxAppEnvironment
+    runDoctorCheck: DoctorCheckRunner
+  },
+): Promise<void> {
+  const { env, runDoctorCheck } = input
   context.checks.push(
     passCheck('platform', 'Telegram long polling is platform-agnostic.'),
   )
@@ -142,8 +133,4 @@ const runTelegramDoctorChecks: DoctorStrategy = async (
         { error: errorMessage(error) },
       ),
   })
-}
-
-export const DOCTOR_STRATEGIES: Record<SupportedDoctorSource, DoctorStrategy> = {
-  telegram: runTelegramDoctorChecks,
 }

@@ -5,8 +5,6 @@ import {
   isLinqChatNotFoundSendMessageError,
   type LinqFetch,
   probeLinqApi,
-  resolveLinqApiToken,
-  resolveLinqWebhookSecret,
 } from '@murphai/operator-config/linq-runtime'
 import {
   type AssistantBindingDelivery,
@@ -14,10 +12,7 @@ import {
   type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  resolveTelegramBotToken,
-  setTelegramMessageReaction,
-} from '@murphai/operator-config/telegram-runtime'
+import { setTelegramMessageReaction } from '@murphai/operator-config/telegram-runtime'
 import {
   buildTelegramRichMessage,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -68,9 +63,6 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       )
       ? null
       : 'Telegram auto-reply only runs for direct chats or validated hosted group routes'
-  },
-  isReadyForSetup(env) {
-    return resolveTelegramBotToken(env) !== null
   },
   supportsIdempotencyKey: false,
   resolveDeliveryTransportIdempotent() {
@@ -506,9 +498,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       eligibility.externalThreadRouteAuthorityPresent === true
       ? null
       : 'iMessage auto-reply only runs for direct chats'
-  },
-  isReadyForSetup(env) {
-    return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
   supportsIdempotencyKey: true,
   resolveDeliveryTransportIdempotent({ media }) {

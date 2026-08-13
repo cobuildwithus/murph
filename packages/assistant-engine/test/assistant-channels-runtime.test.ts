@@ -262,21 +262,7 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
   })
 
-  it('reports retained setup readiness and auto-reply support from descriptors', () => {
-    expect(
-      ASSISTANT_CHANNEL_ADAPTERS.telegram.isReadyForSetup?.({
-        TELEGRAM_BOT_TOKEN: 'bot-token',
-      }),
-    ).toBe(true)
-    expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.isReadyForSetup?.({})).toBe(false)
-    expect(
-      ASSISTANT_CHANNEL_ADAPTERS.linq.isReadyForSetup?.({
-        LINQ_API_TOKEN: 'linq-token',
-        LINQ_WEBHOOK_SECRET: 'linq-secret',
-      }),
-    ).toBe(true)
-    expect(ASSISTANT_CHANNEL_ADAPTERS.email.isReadyForSetup).toBeUndefined()
-
+  it('reports retained auto-reply support from descriptors', () => {
     const directCapture = createInboxCapture(true)
     const groupCapture = createInboxCapture(false)
     expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.canAutoReply(directCapture)).toBeNull()

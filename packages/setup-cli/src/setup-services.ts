@@ -2,6 +2,7 @@ import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/pr
 import os from 'node:os'
 import path from 'node:path'
 import {
+  assertBootstrapStrictReady,
   createIntegratedInboxServices,
   type InboxServices,
 } from '@murphai/inbox-services'
@@ -225,6 +226,7 @@ export function createSetupServices(
     const tools = provisioning.tools
 
     let bootstrap: InboxBootstrapResult | null = null
+    let localEmailCleanupSummary: string | null = null
     let pausedLocalEmailAutomationCount = 0
     let removedLocalEmailAutoReply = false
     const vaultMetadataPath = path.join(vault, 'vault.json')
@@ -282,7 +284,6 @@ export function createSetupServices(
         ffmpegCommand: tools.ffmpegCommand ?? undefined,
         rebuild: input.rebuild,
         requestId,
-        strict,
         vault,
         whisperCommand: tools.whisperCommand ?? undefined,
         whisperModelPath: tools.whisperModelPath,
@@ -310,9 +311,37 @@ export function createSetupServices(
         removedLocalEmailAutoReply ||
         pausedLocalEmailAutomationCount > 0
       ) {
-        notes.push(
-          `Removed ${removedLocalEmailConnectorCount} retired local email inbox source${removedLocalEmailConnectorCount === 1 ? '' : 's'} and ${removedLocalEmailAutoReply ? 1 : 0} retired local email auto-reply setting${removedLocalEmailAutoReply ? '' : 's'}, and paused ${pausedLocalEmailAutomationCount} local email automation${pausedLocalEmailAutomationCount === 1 ? '' : 's'}. Use Telegram for local inbox messaging, and retarget paused automations to Telegram or Linq before reactivating them.`,
-        )
+        localEmailCleanupSummary =
+          `Removed ${removedLocalEmailConnectorCount} retired local email inbox source${removedLocalEmailConnectorCount === 1 ? '' : 's'} and ${removedLocalEmailAutoReply ? 1 : 0} retired local email auto-reply setting${removedLocalEmailAutoReply ? '' : 's'}, and paused ${pausedLocalEmailAutomationCount} local email automation${pausedLocalEmailAutomationCount === 1 ? '' : 's'}. Use Telegram for local inbox messaging, and retarget paused automations to Telegram or Linq before reactivating them.`
+        notes.push(localEmailCleanupSummary)
+      }
+
+      if (strict) {
+        try {
+          assertBootstrapStrictReady({
+            ...bootstrap.doctor,
+            vault: bootstrap.vault,
+          })
+        } catch (error) {
+          if (localEmailCleanupSummary) {
+            log(localEmailCleanupSummary)
+          }
+          if (
+            localEmailCleanupSummary &&
+            error instanceof VaultCliError &&
+            error.code === 'INBOX_BOOTSTRAP_STRICT_FAILED'
+          ) {
+            throw new VaultCliError(
+              error.code,
+              `${error.message}\n\n${localEmailCleanupSummary}`,
+              {
+                ...(error.context ?? {}),
+                completedCleanupSummary: localEmailCleanupSummary,
+              },
+            )
+          }
+          throw error
+        }
       }
     }
 
@@ -359,7 +388,6 @@ export function createSetupServices(
             dryRun,
             env: toolchainEnv,
             inboxServices,
-            platform,
             requestId,
             steps,
             vault,

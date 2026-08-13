@@ -267,7 +267,6 @@ export interface AssistantChannelAdapter {
     deliveryKind?: AssistantBindingDeliveryKind | null
     deliveryTarget?: string | null
   }) => AssistantBindingDelivery | null
-  isReadyForSetup?: (env: NodeJS.ProcessEnv) => boolean
   startTypingIndicator?: (
     input: {
       bindingDelivery: AssistantBindingDelivery | null
@@ -320,7 +319,6 @@ export interface AssistantChannelAdapterSpec {
   canAutoReply: AssistantChannelAdapter['canAutoReply']
   channel: AssistantChannelName
   inferBindingDelivery?: AssistantChannelAdapter['inferBindingDelivery']
-  isReadyForSetup?: NonNullable<AssistantChannelAdapter['isReadyForSetup']>
   startTypingIndicator?: (input: {
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies

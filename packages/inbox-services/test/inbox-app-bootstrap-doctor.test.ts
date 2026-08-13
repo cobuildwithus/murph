@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 
 const {
-  assertBootstrapStrictReadyMock,
   ensureConfigFileMock,
   ensureDirectoryMock,
   fileExistsMock,
@@ -14,7 +13,6 @@ const {
   toCliParserToolchainMock,
   toParserToolChecksMock,
 } = vi.hoisted(() => ({
-  assertBootstrapStrictReadyMock: vi.fn(),
   ensureConfigFileMock: vi.fn(),
   ensureDirectoryMock: vi.fn(),
   fileExistsMock: vi.fn(),
@@ -44,7 +42,6 @@ vi.mock('../src/inbox-services/state.ts', () => ({
 }))
 
 vi.mock('../src/inbox-services/parser.ts', () => ({
-  assertBootstrapStrictReady: assertBootstrapStrictReadyMock,
   toCliParserToolchain: toCliParserToolchainMock,
   toParserToolChecks: toParserToolChecksMock,
 }))
@@ -63,7 +60,7 @@ import {
   warnCheck,
 } from '../src/inbox-services/shared.ts'
 import { createInboxBootstrapDoctorOps } from '../src/inbox-app/bootstrap-doctor.ts'
-import { DOCTOR_STRATEGIES } from '../src/inbox-app/bootstrap-doctor-strategies.ts'
+import { runTelegramDoctorChecks } from '../src/inbox-app/bootstrap-doctor-strategies.ts'
 import type {
   DoctorContext,
   InboxAppEnvironment,
@@ -404,7 +401,6 @@ beforeEach(() => {
         ? false
         : false,
   )
-  assertBootstrapStrictReadyMock.mockImplementation(() => undefined)
   toCliParserToolchainMock.mockImplementation(() => createParserToolchain())
   toParserToolChecksMock.mockImplementation(() => [
     passCheck('parser-ffmpeg', 'ffmpeg configured'),
@@ -412,7 +408,7 @@ beforeEach(() => {
   ])
 })
 
-test('bootstrap initializes runtime, writes parser config, and optionally enforces strict readiness', async () => {
+test('bootstrap initializes runtime, writes parser config, and returns doctor readiness', async () => {
   readConfigMock.mockResolvedValue({
     connectors: [createConnector('telegram', 'telegram:bot')],
   })
@@ -480,7 +476,6 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
     vault: '/vault',
     whisperModelPath: '/models/base.bin',
   })
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 0)
   assert.deepEqual(nonStrict.init.createdPaths, [
     '.runtime',
     '.runtime/operations/inbox',
@@ -517,30 +512,18 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
   assert.equal(nonStrict.doctor.ok, true)
   assert.equal(nonStrict.doctor.target, null)
 
-  const strict = await ops.bootstrap({
+  const repeated = await ops.bootstrap({
     requestId: null,
-    strict: true,
     vault: '/vault',
   })
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 1)
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.ok, strict.doctor.ok)
-  assert.deepEqual(
-    assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.checks,
-    strict.doctor.checks,
-  )
+  assert.equal(repeated.doctor.ok, true)
   assert.equal(openInboxRuntime.mock.calls.length > 0, true)
   assert.equal(discoverParserToolchain.mock.calls.length > 0, true)
 })
 
-test('bootstrap reports unhealthy configured connectors in doctor output and strict mode rejects them', async () => {
+test('bootstrap reports unhealthy configured connectors in doctor output', async () => {
   readConfigMock.mockResolvedValue({
     connectors: [createConnector('telegram', 'telegram:bot')],
-  })
-
-  assertBootstrapStrictReadyMock.mockImplementation((result: { ok: boolean }) => {
-    if (!result.ok) {
-      throw new Error('strict bootstrap failed')
-    }
   })
 
   const ops = createInboxBootstrapDoctorOps(createEnvironment())
@@ -556,18 +539,6 @@ test('bootstrap reports unhealthy configured connectors in doctor output and str
     ),
     true,
   )
-
-  await assert.rejects(
-    () =>
-      ops.bootstrap({
-        requestId: null,
-        strict: true,
-        vault: '/vault',
-      }),
-    /strict bootstrap failed/u,
-  )
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 1)
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.ok, false)
 })
 
 test('doctor stops after a vault failure and keeps missing config and database paths null', async () => {
@@ -867,7 +838,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const missingTokenContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(missingTokenContext, telegramConnector, {
+  await runTelegramDoctorChecks(missingTokenContext, telegramConnector, {
     env: createEnvironment(),
     runDoctorCheck,
   })
@@ -878,7 +849,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const delegatedContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(delegatedContext, telegramConnector, {
+  await runTelegramDoctorChecks(delegatedContext, telegramConnector, {
     env: createEnvironment({
       loadConfiguredTelegramDriver: async () => ({
         async deleteWebhook() {},
@@ -909,7 +880,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const webhookPassContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(webhookPassContext, telegramConnector, {
+  await runTelegramDoctorChecks(webhookPassContext, telegramConnector, {
     env: createEnvironment({
       getEnvironment: () => ({
         TELEGRAM_BOT_TOKEN: 'telegram-token',
@@ -943,7 +914,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const webhookWarnContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(webhookWarnContext, telegramConnector, {
+  await runTelegramDoctorChecks(webhookWarnContext, telegramConnector, {
     env: createEnvironment({
       getEnvironment: () => ({
         TELEGRAM_BOT_TOKEN: 'telegram-token',
@@ -977,7 +948,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const probeFailureContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(probeFailureContext, telegramConnector, {
+  await runTelegramDoctorChecks(probeFailureContext, telegramConnector, {
     env: createEnvironment({
       getEnvironment: () => ({
         TELEGRAM_BOT_TOKEN: 'telegram-token',

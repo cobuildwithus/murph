@@ -541,7 +541,6 @@ export interface SetupInput extends CommandContext {
 
 export interface BootstrapInput extends SetupInput {
   rebuild?: boolean
-  strict?: boolean
 }
 
 export interface ParseInput extends CommandContext {

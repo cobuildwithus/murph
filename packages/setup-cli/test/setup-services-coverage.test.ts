@@ -247,6 +247,25 @@ function makeInboxBootstrapResult(
       connectors: [],
       databasePath,
       ok: true,
+      parserToolchain: {
+        configPath,
+        discoveredAt: TEST_TIMESTAMP,
+        tools: {
+          ffmpeg: {
+            available: true,
+            command: '/usr/bin/ffmpeg',
+            reason: 'configured for tests',
+            source: 'config',
+          },
+          whisper: {
+            available: true,
+            command: '/usr/bin/whisper-cli',
+            modelPath: '/tmp/whisper.bin',
+            reason: 'configured for tests',
+            source: 'config',
+          },
+        },
+      },
       target: null,
     },
   }
@@ -323,7 +342,6 @@ test('configureSetupChannels describes Telegram-only dry-run readiness', async (
         throw new Error('bootstrap should not run in this test')
       },
     },
-    platform: 'linux',
     requestId: 'req-dry-run-missing',
     steps: missingSteps,
     vault: '/tmp/vault',
@@ -347,7 +365,6 @@ test('configureSetupChannels describes Telegram-only dry-run readiness', async (
         throw new Error('bootstrap should not run in this test')
       },
     },
-    platform: 'linux',
     requestId: 'req-dry-run-ready',
     steps: readySteps,
     vault: '/tmp/vault',
@@ -425,7 +442,6 @@ test('configureSetupChannels reuses and enables the Telegram connector while pre
           )
         },
       },
-      platform: 'linux',
       requestId: 'req-reuse',
       steps,
       vault: vaultRoot,
@@ -496,7 +512,6 @@ test('configureSetupChannels adds Telegram without provider-specific stubs', asy
           return makeInboxSourceListResult(vaultRoot, [])
         },
       },
-      platform: 'linux',
       requestId: 'req-add',
       steps: [],
       vault: vaultRoot,
@@ -528,7 +543,6 @@ test('configureSetupChannels fails clearly when Telegram source management is un
             throw new Error('bootstrap should not run in this test')
           },
         },
-        platform: 'linux',
         requestId: null,
         steps: [],
         vault: '/tmp/vault',
@@ -1429,6 +1443,8 @@ test('createSetupServices reconciles the prior local email state through real se
     'parsers',
     'toolchain.json',
   )
+  const logs: string[] = []
+  let telegramProbeFailuresRemaining = 1
 
   await mkdir(cwd, { recursive: true })
   await mkdir(homeDirectory, { recursive: true })
@@ -1649,6 +1665,10 @@ test('createSetupServices reconciles the prior local email state through real se
       async loadTelegramDriver() {
         return {
           async getMe() {
+            if (telegramProbeFailuresRemaining > 0) {
+              telegramProbeFailuresRemaining -= 1
+              throw new Error('Telegram probe unavailable for setup test')
+            }
             return { username: 'test-bot' }
           },
           async getWebhookInfo() {
@@ -1663,6 +1683,9 @@ test('createSetupServices reconciles the prior local email state through real se
       getCwd: () => cwd,
       getHomeDirectory: () => homeDirectory,
       inboxServices,
+      log(message) {
+        logs.push(message)
+      },
       platform: () => 'linux',
       resolveCliBinPath: () => cliBinPath,
     })
@@ -1680,25 +1703,23 @@ test('createSetupServices reconciles the prior local email state through real se
       detail: 'Skipped',
     }
 
-    const first = await services.setupHost({
-      assistant,
-      strict: true,
-      toolchainRoot,
-      vault: './vault',
-    })
-    assert.match(
-      first.notes.join('\n'),
-      /Removed 2 retired local email inbox sources and 1 retired local email auto-reply setting, and paused 2 local email automations/u,
+    const cleanupSummaryPattern =
+      /Removed 2 retired local email inbox sources and 1 retired local email auto-reply setting, and paused 2 local email automations/u
+    await assert.rejects(
+      () => services.setupHost({
+        assistant,
+        strict: true,
+        toolchainRoot,
+        vault: './vault',
+      }),
+      (error: unknown) =>
+        error instanceof VaultCliError &&
+        error.code === 'INBOX_BOOTSTRAP_STRICT_FAILED' &&
+        cleanupSummaryPattern.test(error.message) &&
+        typeof error.context?.completedCleanupSummary === 'string' &&
+        cleanupSummaryPattern.test(error.context.completedCleanupSummary),
     )
-    assert.deepEqual(first.bootstrap?.doctor.connectors, [
-      {
-        id: 'telegram:bot',
-        source: 'telegram',
-        enabled: true,
-        accountId: 'bot',
-        options: { backfillLimit: 25 },
-      },
-    ])
+    assert.equal(logs.some((message) => cleanupSummaryPattern.test(message)), true)
     assert.equal(
       (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
       'paused',
@@ -1722,8 +1743,8 @@ test('createSetupServices reconciles the prior local email state through real se
       ['custom', 'linq', 'telegram'],
     )
 
-    const afterFirstSetup = await readFile(paths.inboxConfigPath, 'utf8')
-    assert.equal(JSON.parse(afterFirstSetup).schemaVersion, 2)
+    const afterFailedSetup = await readFile(paths.inboxConfigPath, 'utf8')
+    assert.equal(JSON.parse(afterFailedSetup).schemaVersion, 2)
     const second = await services.setupHost({
       assistant,
       strict: true,
@@ -1731,12 +1752,25 @@ test('createSetupServices reconciles the prior local email state through real se
       vault: './vault',
     })
     assert.equal(second.notes.some((note) => note.includes('retired local email')), false)
-    assert.equal(await readFile(paths.inboxConfigPath, 'utf8'), afterFirstSetup)
+    assert.deepEqual(second.bootstrap?.doctor.connectors, [
+      {
+        id: 'telegram:bot',
+        source: 'telegram',
+        enabled: true,
+        accountId: 'bot',
+        options: { backfillLimit: 25 },
+      },
+    ])
+    assert.equal(await readFile(paths.inboxConfigPath, 'utf8'), afterFailedSetup)
     assert.equal(await readFile(automationStatePath, 'utf8'), afterFirstAutomationState)
     assert.equal(await readFile(cronPaths.cronJobsPath, 'utf8'), afterFirstCronStore)
     assert.equal(
       (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
       'paused',
+    )
+    assert.equal(
+      logs.filter((message) => cleanupSummaryPattern.test(message)).length,
+      1,
     )
   } finally {
     await rm(root, { recursive: true, force: true })

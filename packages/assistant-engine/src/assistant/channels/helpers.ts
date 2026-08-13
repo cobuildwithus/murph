@@ -45,9 +45,6 @@ export function createAssistantChannelAdapter(
     channel: spec.channel,
     canAutoReply: spec.canAutoReply,
     inferBindingDelivery,
-    ...(spec.isReadyForSetup
-      ? { isReadyForSetup: spec.isReadyForSetup }
-      : {}),
     ...(spec.startTypingIndicator
       ? {
           async startTypingIndicator(input, dependencies) {

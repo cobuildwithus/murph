@@ -68,6 +68,15 @@ async function runJsonCli(args: string[]): Promise<{
       )
     },
   })
+  cli.command('fail-after-cleanup', {
+    args: z.object({}),
+    async run() {
+      throw new VaultCliError(
+        'INBOX_BOOTSTRAP_STRICT_FAILED',
+        'Inbox bootstrap strict readiness checks failed.\n\nRemoved retired local email state and paused affected automations. Retarget them to Telegram or Linq before reactivating them.',
+      )
+    },
+  })
 
   const output: string[] = []
   let exitCode: number | null = null
@@ -158,6 +167,21 @@ test('setup bridge omits invalid retryable and exitCode context types', async ()
   assert.equal(result.envelope.error?.code, 'SETUP_BRIDGE_INVALID')
   assert.equal(result.envelope.error?.retryable, false)
   assert.equal(result.exitCode, 1)
+})
+
+test('structured setup errors retain completed cleanup guidance', async () => {
+  const result = await runJsonCli(['fail-after-cleanup'])
+
+  assert.equal(result.envelope.ok, false)
+  assert.equal(result.envelope.error?.code, 'INBOX_BOOTSTRAP_STRICT_FAILED')
+  assert.match(
+    result.envelope.error?.message ?? '',
+    /Removed retired local email state and paused affected automations/u,
+  )
+  assert.match(
+    result.envelope.error?.message ?? '',
+    /Retarget them to Telegram or Linq/u,
+  )
 })
 
 test('onboard CLI builds setup CTAs from configured channels, updates, wearables, and missing env', async () => {

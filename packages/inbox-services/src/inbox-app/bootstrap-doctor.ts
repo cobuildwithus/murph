@@ -10,7 +10,6 @@ import type {
   InboxServices,
 } from './types.js'
 import {
-  assertBootstrapStrictReady,
   toCliParserToolchain,
   toParserToolChecks,
 } from '../inbox-services/parser.js'
@@ -29,7 +28,7 @@ import {
   relativeToVault,
   warnCheck,
 } from '../inbox-services/shared.js'
-import { DOCTOR_STRATEGIES } from './bootstrap-doctor-strategies.js'
+import { runTelegramDoctorChecks } from './bootstrap-doctor-strategies.js'
 
 export function createInboxBootstrapDoctorOps(
   env: InboxAppEnvironment,
@@ -357,16 +356,6 @@ export function createInboxBootstrapDoctorOps(
     }
   }
 
-  const hasDoctorStrategy = (
-    source: string,
-  ): source is keyof typeof DOCTOR_STRATEGIES => source in DOCTOR_STRATEGIES
-
-  const hasSupportedDoctorStrategy = (
-    connector: InboxConnectorConfig,
-  ): connector is InboxConnectorConfig & {
-    source: keyof typeof DOCTOR_STRATEGIES
-  } => hasDoctorStrategy(connector.source)
-
   const describeConnector = (
     connector: InboxConnectorConfig,
   ) =>
@@ -447,10 +436,8 @@ export function createInboxBootstrapDoctorOps(
     await runRuntimeRebuildDoctorCheck(context)
 
     if (target.kind === 'all') {
-      const supportedConnectors =
-        target.connectors.filter(hasSupportedDoctorStrategy)
       const unsupportedConnectors = target.connectors.filter(
-        (connector) => !hasDoctorStrategy(connector.source),
+        (connector) => connector.source !== 'telegram',
       )
 
       if (unsupportedConnectors.length > 0) {
@@ -462,10 +449,12 @@ export function createInboxBootstrapDoctorOps(
         )
       }
 
-      for (const connector of supportedConnectors) {
+      for (const connector of target.connectors) {
+        if (connector.source !== 'telegram') {
+          continue
+        }
         context.checks.push(describeConnector(connector))
-        const strategy = DOCTOR_STRATEGIES[connector.source]
-        await strategy(context, connector, {
+        await runTelegramDoctorChecks(context, connector, {
           env,
           runDoctorCheck,
         })
@@ -474,7 +463,7 @@ export function createInboxBootstrapDoctorOps(
       return finalizeDoctorResult(context)
     }
 
-    if (!hasDoctorStrategy(target.connector.source)) {
+    if (target.connector.source !== 'telegram') {
       context.checks.push(
         failCheck(
           'source-unsupported',
@@ -483,8 +472,7 @@ export function createInboxBootstrapDoctorOps(
       )
       return finalizeDoctorResult(context, target.connector)
     }
-    const strategy = DOCTOR_STRATEGIES[target.connector.source]
-    await strategy(context, target.connector, {
+    await runTelegramDoctorChecks(context, target.connector, {
       env,
       runDoctorCheck,
     })
@@ -507,10 +495,6 @@ export function createInboxBootstrapDoctorOps(
             initResult.removedLegacyEmailConnectorCount,
         },
       )
-
-      if (input.strict) {
-        assertBootstrapStrictReady(doctorResult)
-      }
 
       return {
         vault: initResult.vault,
