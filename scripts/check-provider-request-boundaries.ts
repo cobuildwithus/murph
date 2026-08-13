@@ -27,6 +27,7 @@ import {
   isTSTypeAliasDeclaration,
   isVariableDeclarator,
   traverseFast,
+  VISITOR_KEYS,
   type CallExpression,
   type Expression,
   type Node,
@@ -3981,58 +3982,64 @@ function collectVariableBindings(
 
 function collectConditionalAssignmentStarts(sourceFile: Node): Set<number> {
   const starts = new Set<number>();
-  const collectFrom = (root: Node): void => {
-    if (isFunction(root)) {
-      return;
+  const visit = (node: Node, conditional: boolean): void => {
+    if (conditional && isAssignmentExpression(node)) {
+      starts.add(node.start ?? 0);
     }
-    traverseFast(root, (node) => {
-      if (node !== root && isFunction(node)) {
-        return traverseFast.skip;
+    for (const key of VISITOR_KEYS[node.type] ?? []) {
+      const value: unknown = Reflect.get(node, key);
+      const childConditional = isConditionallyExecutedChild(node, key);
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (!isBabelNode(child)) {
+          continue;
+        }
+        visit(
+          child,
+          isFunction(node) && key === "body"
+            ? false
+            : conditional || childConditional,
+        );
       }
-      if (isAssignmentExpression(node)) {
-        starts.add(node.start ?? 0);
-      }
-    });
+    }
   };
 
-  traverseFast(sourceFile, (node) => {
-    switch (node.type) {
-      case "ConditionalExpression":
-        collectFrom(node.consequent);
-        collectFrom(node.alternate);
-        break;
-      case "DoWhileStatement":
-      case "WhileStatement":
-        collectFrom(node.body);
-        break;
-      case "ForInStatement":
-      case "ForOfStatement":
-        collectFrom(node.body);
-        break;
-      case "ForStatement":
-        collectFrom(node.body);
-        if (node.update) {
-          collectFrom(node.update);
-        }
-        break;
-      case "IfStatement":
-        collectFrom(node.consequent);
-        if (node.alternate) {
-          collectFrom(node.alternate);
-        }
-        break;
-      case "LogicalExpression":
-        collectFrom(node.right);
-        break;
-      case "SwitchCase":
-        for (const statement of node.consequent) {
-          collectFrom(statement);
-        }
-        break;
-    }
-  });
+  visit(sourceFile, false);
 
   return starts;
+}
+
+function isBabelNode(value: unknown): value is Node {
+  return value !== null &&
+    typeof value === "object" &&
+    "type" in value &&
+    typeof value.type === "string";
+}
+
+function isConditionallyExecutedChild(node: Node, key: string): boolean {
+  switch (node.type) {
+    case "ConditionalExpression":
+      return key === "consequent" || key === "alternate";
+    case "DoWhileStatement":
+    case "WhileStatement":
+      return key === "body";
+    case "ForInStatement":
+    case "ForOfStatement":
+      return key === "left" || key === "body";
+    case "ForStatement":
+      return key === "test" || key === "update" || key === "body";
+    case "IfStatement":
+      return key === "consequent" || key === "alternate";
+    case "LogicalExpression":
+      return key === "right";
+    case "SwitchCase":
+      return key === "test" || key === "consequent";
+    case "CatchClause":
+      return key === "body";
+    case "TryStatement":
+      return key === "block" || key === "handler";
+    default:
+      return false;
+  }
 }
 
 function collectLexicalScopes(sourceFile: Node): LexicalScope[] {
