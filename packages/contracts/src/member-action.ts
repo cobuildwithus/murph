@@ -4,6 +4,7 @@ export const memberActionV1Bounds = {
   actionId: 36,
   exerciseName: 60,
   exercises: 8,
+  expectedFreeformResult: 400,
   freeformResult: 200,
   mutations: 72,
   setsPerExercise: 8,
@@ -35,6 +36,12 @@ const workoutSetPositionSchema = z
   .int()
   .min(1)
   .max(memberActionV1Bounds.setsPerExercise);
+
+const canonicalNonnegativeIntegerSchema = z
+  .number()
+  .finite()
+  .min(0)
+  .refine((value) => Number.isInteger(value), "Expected an integer.");
 
 export const workoutMemberActionSetResultV1Schema = z.discriminatedUnion(
   "kind",
@@ -72,20 +79,22 @@ export const workoutMemberActionExpectedSetResultV1Schema = z.discriminatedUnion
     z
       .object({
         kind: z.literal("note"),
-        note: singleLineText(memberActionV1Bounds.freeformResult).nullable(),
+        note: singleLineText(
+          memberActionV1Bounds.expectedFreeformResult,
+        ).nullable(),
       })
       .strict(),
     z
       .object({
         kind: z.literal("reps"),
-        reps: z.number().int().min(1).max(999).nullable(),
+        reps: canonicalNonnegativeIntegerSchema.nullable(),
       })
       .strict(),
     z
       .object({
         kind: z.literal("weight_reps"),
-        reps: z.number().int().min(1).max(999).nullable(),
-        weight: z.number().finite().positive().max(9_999).nullable(),
+        reps: canonicalNonnegativeIntegerSchema.nullable(),
+        weight: z.number().finite().min(0).nullable(),
         weightUnit: z.enum(["lb", "kg"]).nullable(),
       })
       .strict(),

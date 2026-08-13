@@ -406,6 +406,63 @@ describe("live workout member action", () => {
     }]);
   });
 
+  it("corrects canonical zero values with an inherited unit precondition", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1, reps: 0, weight: 0 }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 185, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 0,
+            weight: 0,
+            weightUnit: null,
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+  });
+
+  it("rejects an inherited-unit precondition after a set unit is explicit", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1, reps: 8, weight: 185, weightUnit: "lb" }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction(
+        { kind: "weight_reps", reps: 8, weight: 190, weightUnit: "lb" },
+        {
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 8,
+            weight: 185,
+            weightUnit: null,
+          },
+          logged: true,
+        },
+      ),
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+  });
+
   it("rejects a stale add-weight action after the reps-only value changed", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,

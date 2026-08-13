@@ -42,18 +42,29 @@ Workout state and progress summaries are derived from the structured exercise/se
 
 Tracked workout detail requires a canonical tracking marker in durable transcript context. The native URL strips the event id and snapshot time.
 
+The model never authors edit preconditions. At card attachment, runtime re-reads
+that exact active workout and may add one internal editor projection only when
+ordered exercise names, set counts, and logged states match the presentation.
+The projection preserves the closed result family, canonical zero values,
+nullable reps/weight, the raw optional set unit, and separate exercise unit
+context. A read failure, mismatch, completed workout, or oversized V6 leaves the
+card as the existing readable V4 snapshot.
+
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
-installed native editor uses schema version 6, which adds only an opaque
-64-character action binding and still stays under the existing 2,048-character
-URL ceiling.
+installed native editor uses schema version 6, which adds that compact typed
+projection and one opaque 64-character action binding while still staying under
+the existing 2,048-character URL ceiling.
 
 The readable response-card contract remains object-shaped for authoring and
-runtime validation. Only the immutable V4/V6 workout wires use positional
-exercise tuples `[name, sets]` and set tuples `[status, target, actual]`;
-removing repeated wire keys keeps realistic six-exercise, four-set initial,
-late-active, and completed snapshots below the same URL ceiling without adding
-another projection owner.
+runtime validation. V4 uses positional exercise tuples `[name, sets]` and set
+tuples `[status, target, actual]`. V6 uses `[name, exerciseUnit, sets]`; a
+completed set replaces the actual display string with a closed compact
+note/reps/weight-reps tuple, while a pending set carries `null`. Native derives
+display and optimistic preconditions from that typed tuple. Removing repeated
+wire keys keeps realistic six-exercise, four-set initial and late-active
+snapshots below the same URL ceiling without adding another projection owner;
+completed cards remain V4/read-only.
 
 ## Static fallback
 
@@ -124,8 +135,8 @@ workout id. Its one-way action binding is a stale-card
 precondition, not authentication: the server derives the member from the scoped
 credential and the workout owner requires exactly one active workout whose
 binding, ordered exercise names, set counts, and logged states still match. Each
-edit to an existing set also carries the bounded previous result visible in the
-card; the canonical owner rejects the batch when that target changed instead of
+edit to an existing set also carries the bounded previous result from the typed
+card projection; the canonical owner rejects the batch when that target changed instead of
 overwriting a newer correction.
 
 Web validates the whole envelope, re-checks active access and historical launch

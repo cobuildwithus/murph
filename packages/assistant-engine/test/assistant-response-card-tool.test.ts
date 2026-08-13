@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import { addStructuredWorkoutRecord } from '@murphai/vault-usecases/workouts'
 
 import {
   executeMurphDynamicToolRequest,
@@ -277,6 +278,71 @@ async function createChallengeVault(input: {
   return root
 }
 
+async function createLiveWorkoutCardVault(): Promise<{
+  card: AssistantResponseCard
+  root: string
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-workout-card-tool-'))
+  cleanupPaths.push(root)
+  await createIntegratedVaultServices().core.init({
+    requestId: 'workout-card-tool-test',
+    timezone: 'UTC',
+    vault: root,
+  })
+  const shown = await addStructuredWorkoutRecord({
+    vault: root,
+    draft: {
+      activityType: 'strength-training',
+      durationMinutes: 1,
+      occurredAt: '2026-08-12T14:00:00.000Z',
+      recordedAt: '2026-08-12T14:00:00.000Z',
+      title: 'Strength',
+      workout: {
+        sourceApp: 'murph-live',
+        startedAt: '2026-08-12T14:00:00.000Z',
+        exercises: [{
+          mode: 'weight_reps',
+          name: 'Leg press',
+          order: 1,
+          unitOverride: 'lb',
+          sets: [
+            { order: 1, reps: 0, weight: 0 },
+            { order: 2, reps: 8, weight: 185, weightUnit: 'lb' },
+            { order: 3 },
+          ],
+        }],
+      },
+    },
+  })
+  return {
+    root,
+    card: {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Strength',
+      subtitle: null,
+      footer: null,
+      tracking: {
+        kind: 'workout',
+        entityId: shown.eventId,
+        snapshotAt: '2026-08-12T14:00:00.000Z',
+      },
+      workout: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Leg press',
+          sets: [
+            { status: 'completed', target: '185 lb × 8', actual: '0 lb × 0' },
+            { status: 'completed', target: '185 lb × 8', actual: '185 lb × 8' },
+            { status: 'pending', target: '185 lb × 8', actual: null },
+          ],
+        }],
+      },
+    },
+  }
+}
+
 function readCardToolRequest(
   argumentsValue: unknown,
   tool = 'attach_response_card',
@@ -469,6 +535,7 @@ describe('murph.attach_response_card', () => {
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).toContain('fiberGrams')
+    expect(privateSchema).not.toContain('editor')
     expect(privateSchema).not.toContain('challenge_standings')
     expect(groupSchema).toContain('participantObservations')
     expect(groupSchema).toContain('challengeSlug')
@@ -484,6 +551,15 @@ describe('murph.attach_response_card', () => {
     expect(groupSchema).not.toContain('coverageCounts')
     expect(groupSchema).not.toContain('daily_nutrition')
     expect(groupSchema).not.toContain('compact_table')
+    expect(readCardToolRequest({
+      card: {
+        ...REALISTIC_LATE_WORKOUT_CARD,
+        editor: {
+          exercises: [],
+          version: 1,
+        },
+      },
+    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
     expect(readCardToolRequest({
       ...CHALLENGE_CARD_AUTHORING_INPUT,
       scoreInput: {
@@ -978,6 +1054,50 @@ describe('murph.attach_response_card', () => {
         type: 'inputText',
       }],
       success: false,
+    })
+  })
+
+  it('hydrates active workout cards with trusted exact editor state', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    const result = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+
+    expect(result.responseCardPatch?.card).toMatchObject({
+      editor: {
+        version: 1,
+        exercises: [{
+          unitOverride: 'lb',
+          sets: [
+            {
+              logged: true,
+              result: {
+                kind: 'weight_reps',
+                reps: 0,
+                weight: 0,
+                weightUnit: null,
+              },
+            },
+            {
+              logged: true,
+              result: {
+                kind: 'weight_reps',
+                reps: 8,
+                weight: 185,
+                weightUnit: 'lb',
+              },
+            },
+            {
+              logged: false,
+              result: null,
+            },
+          ],
+        }],
+      },
     })
   })
 

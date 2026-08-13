@@ -1,5 +1,9 @@
 import {
+  renderWorkoutSessionEditorResultV1,
   type WorkoutLiveApplyMemberActionV1,
+  type WorkoutMemberActionExpectedSetResultV1,
+  type WorkoutSessionDetailV1,
+  type WorkoutSessionEditorProjectionV1,
   type WorkoutExercise,
   type WorkoutSession,
   type WorkoutSet,
@@ -110,6 +114,145 @@ export function hasLoggedWorkoutSet(set: WorkoutSet): boolean {
     typeof set.assistanceKg === 'number' ||
     typeof set.addedWeightKg === 'number'
   )
+}
+
+export function buildLiveWorkoutCardEditor(input: {
+  presentation: WorkoutSessionDetailV1
+  workout: WorkoutSession
+}): {
+  editor: WorkoutSessionEditorProjectionV1
+  workout: WorkoutSessionDetailV1
+} | null {
+  if (!isActiveLiveWorkout(input.workout) || input.presentation.state !== 'active') {
+    return null
+  }
+  const exercises = input.workout.exercises
+    .slice()
+    .sort((left, right) => left.order - right.order)
+  if (exercises.length !== input.presentation.exercises.length) {
+    return null
+  }
+
+  const editorExercises: WorkoutSessionEditorProjectionV1['exercises'] = []
+  const presentationExercises: WorkoutSessionDetailV1['exercises'] = []
+  for (const [exerciseIndex, exercise] of exercises.entries()) {
+    const presentationExercise = input.presentation.exercises[exerciseIndex]
+    const sets = exercise.sets
+      .slice()
+      .sort((left, right) => left.order - right.order)
+    if (
+      !presentationExercise
+      || presentationExercise.name !== exercise.name
+      || presentationExercise.sets.length !== sets.length
+    ) {
+      return null
+    }
+
+    const editorSets: WorkoutSessionEditorProjectionV1['exercises'][number]['sets'] = []
+    const presentationSets: WorkoutSessionDetailV1['exercises'][number]['sets'] = []
+    for (const [setIndex, set] of sets.entries()) {
+      const cardSet = presentationExercise.sets[setIndex]
+      const logged = hasLoggedWorkoutSet(set)
+      if (!cardSet || logged !== (cardSet.status === 'completed')) {
+        return null
+      }
+      const result = logged
+        ? projectWorkoutSessionEditorResult(exercise, set)
+        : null
+      const actual = result === null
+        ? null
+        : renderWorkoutSessionEditorResultV1(
+            encodeWorkoutSessionEditorResult(result),
+            exercise.unitOverride ?? null,
+          )
+      if (logged && (actual === null || actual === undefined)) {
+        return null
+      }
+      editorSets.push({ logged, result })
+      presentationSets.push({
+        status: logged ? 'completed' : 'pending',
+        target: cardSet.target,
+        actual: logged ? actual ?? 'Logged' : null,
+      })
+    }
+    editorExercises.push({
+      sets: editorSets,
+      unitOverride: exercise.unitOverride ?? null,
+    })
+    presentationExercises.push({
+      name: exercise.name,
+      sets: presentationSets,
+    })
+  }
+
+  return {
+    editor: { exercises: editorExercises, version: 1 },
+    workout: {
+      exercises: presentationExercises,
+      state: 'active',
+      version: 1,
+    },
+  }
+}
+
+function projectWorkoutSessionEditorResult(
+  exercise: WorkoutExercise,
+  set: WorkoutSet,
+): WorkoutMemberActionExpectedSetResultV1 {
+  const isWeightOriented = exercise.mode === 'weight_reps'
+    || typeof set.weight === 'number'
+    || exercise.unitOverride !== undefined
+    || set.weightUnit !== undefined
+  if (
+    typeof set.weight === 'number'
+    || (typeof set.reps === 'number' && isWeightOriented)
+  ) {
+    return {
+      kind: 'weight_reps',
+      reps: set.reps ?? null,
+      weight: set.weight ?? null,
+      weightUnit: set.weightUnit ?? null,
+    }
+  }
+  if (typeof set.reps === 'number') {
+    return { kind: 'reps', reps: set.reps ?? null }
+  }
+  if (typeof set.note === 'string') {
+    return { kind: 'note', note: set.note }
+  }
+  if (isWeightOriented) {
+    return {
+      kind: 'weight_reps',
+      reps: null,
+      weight: null,
+      weightUnit: set.weightUnit ?? null,
+    }
+  }
+  return exercise.mode === 'bodyweight'
+    ? { kind: 'reps', reps: null }
+    : { kind: 'note', note: null }
+}
+
+function encodeWorkoutSessionEditorResult(
+  result: WorkoutMemberActionExpectedSetResultV1,
+): unknown {
+  switch (result.kind) {
+    case 'note':
+      return ['n', result.note]
+    case 'reps':
+      return ['r', result.reps]
+    case 'weight_reps':
+      return [
+        'w',
+        result.reps,
+        result.weight,
+        result.weightUnit === 'lb'
+          ? 'l'
+          : result.weightUnit === 'kg'
+            ? 'k'
+            : null,
+      ]
+  }
 }
 
 export function buildLiveWorkoutSessionFromTemplate(input: {

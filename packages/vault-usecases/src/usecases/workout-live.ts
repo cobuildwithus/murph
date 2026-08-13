@@ -4,6 +4,7 @@ import {
   type WorkoutMemberActionExpectedSetResultV1,
   type WorkoutMemberActionSetResultV1,
   type WorkoutSession,
+  type WorkoutSessionDetailV1,
   type WorkoutSet,
   workoutSessionSchema,
   workoutTemplateSchema,
@@ -23,6 +24,7 @@ import {
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
   type StartLiveWorkoutInput,
+  buildLiveWorkoutCardEditor,
   buildLiveWorkoutSessionFromTemplate,
   elapsedDurationMinutes,
   hasLoggedWorkoutSet,
@@ -46,6 +48,23 @@ import {
 } from './workout-live-state.js'
 
 export * from './workout-live-model.js'
+
+export async function readLiveWorkoutCardEditor(input: {
+  presentation: WorkoutSessionDetailV1
+  vault: string
+  workoutId: string
+}) {
+  const shown = await resolveLiveWorkout({
+    vault: input.vault,
+    workoutId: input.workoutId,
+  }, { requireActive: true })
+  const workout = parseShownWorkout(shown)
+  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  return buildLiveWorkoutCardEditor({
+    presentation: input.presentation,
+    workout,
+  })
+}
 
 const MAX_LIVE_WORKOUT_EXERCISES = 100
 const MAX_LIVE_WORKOUT_SETS_PER_EXERCISE = 150

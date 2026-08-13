@@ -95,6 +95,12 @@ Messages extension as the first action family.
 - Expected set state is a separate closed projection whose fields may be null,
   while the result stays strict. This distinguishes partial canonical values
   such as reps-only from a truly empty set without introducing generic patches.
+- The assistant may author only the readable workout presentation. At response
+  attachment, runtime re-reads the exact canonical workout and adds a private
+  typed editor projection when names, counts, and logged states match. V6
+  carries that projection, including zero and explicit-versus-inherited units;
+  V4 remains the read-only fallback for mismatches, read failures, completed
+  workouts, and payloads that exceed the existing inline ceiling.
 
 ## Verification
 

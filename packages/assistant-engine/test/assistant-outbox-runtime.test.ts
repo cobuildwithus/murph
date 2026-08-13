@@ -193,6 +193,24 @@ const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
       ],
     }],
   },
+  editor: {
+    version: 1,
+    exercises: [{
+      unitOverride: 'lb',
+      sets: [
+        {
+          logged: true,
+          result: {
+            kind: 'weight_reps',
+            reps: 8,
+            weight: 185,
+            weightUnit: null,
+          },
+        },
+        { logged: false, result: null },
+      ],
+    }],
+  },
 }
 
 const tempRoots: string[] = []

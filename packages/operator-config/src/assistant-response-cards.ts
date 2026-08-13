@@ -13,6 +13,7 @@ import {
   buildWorkoutSessionAppCardEnvelopeV6,
   challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
+  compactTableResponseCardAuthoringV1Schema,
   compactTableResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
@@ -159,7 +160,7 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
   AssistantResponseCard
 > = z.union([
   dailyNutritionResponseCardV2AuthoringSchema,
-  compactTableResponseCardV1Schema,
+  compactTableResponseCardAuthoringV1Schema,
 ])
 
 export const assistantResponseCardJsonSchema =
@@ -461,8 +462,10 @@ function encodeWorkoutSessionAppCardPayload(
 ): string {
   return encodeAppCardEnvelopePayload(
     includeActionBinding
+      && card.editor !== undefined
       ? buildWorkoutSessionAppCardEnvelopeV6({
           actionBinding: deriveWorkoutActionBinding(card.tracking.entityId),
+          editor: card.editor,
           title: card.title,
           subtitle: card.subtitle,
           footer: card.footer,

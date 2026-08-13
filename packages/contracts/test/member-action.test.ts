@@ -102,6 +102,43 @@ describe("member action contract", () => {
       ...request,
       action: {
         ...request.action,
+        expectedWorkout: {
+          ...request.action.expectedWorkout,
+          exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
+        },
+        mutations: [{
+          ...request.action.mutations[0],
+          expectedResult: {
+            kind: "note",
+            note: "n".repeat(400),
+          },
+          result: { kind: "note", note: "corrected" },
+        }],
+      },
+    }).success).toBe(true);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        expectedWorkout: {
+          ...request.action.expectedWorkout,
+          exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
+        },
+        mutations: [{
+          ...request.action.mutations[0],
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 1e100,
+            weight: 1e100,
+            weightUnit: null,
+          },
+        }],
+      },
+    }).success).toBe(true);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
         mutations: Array.from(
           { length: 73 },
           () => request.action.mutations[0],
@@ -170,6 +207,40 @@ describe("member action contract", () => {
         }],
       },
     }).success).toBe(true);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        expectedWorkout: {
+          ...request.action.expectedWorkout,
+          exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
+        },
+        mutations: [{
+          ...request.action.mutations[0],
+          expectedResult: {
+            kind: "weight_reps",
+            reps: 0,
+            weight: 0,
+            weightUnit: null,
+          },
+        }],
+      },
+    }).success).toBe(true);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          ...request.action.mutations[0],
+          result: {
+            kind: "weight_reps",
+            reps: 0,
+            weight: 0,
+            weightUnit: "lb",
+          },
+        }],
+      },
+    }).success).toBe(false);
   });
 
   it("rejects duplicate mutation targets so exact replay has one postcondition", () => {

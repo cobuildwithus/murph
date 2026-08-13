@@ -9,6 +9,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   buildLiveWorkoutSessionFromTemplate,
+  buildLiveWorkoutCardEditor,
   hasLoggedWorkoutSet,
   isActiveLiveWorkout,
   LIVE_WORKOUT_SOURCE_APP,
@@ -21,6 +22,107 @@ import {
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
+  test('projects exact editable field families from canonical set state', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [
+        {
+          name: 'Bench press',
+          order: 1,
+          mode: 'weight_reps',
+          unitOverride: 'lb',
+          sets: [
+            { order: 1, reps: 8 },
+            { order: 2, weight: 0, weightUnit: 'kg' },
+            { order: 3 },
+          ],
+        },
+        {
+          name: 'Push-up',
+          order: 2,
+          mode: 'bodyweight',
+          sets: [{ note: 'Slow tempo', order: 1 }],
+        },
+      ],
+    })
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [
+        {
+          name: 'Bench press',
+          sets: [
+            { status: 'completed' as const, target: null, actual: 'old' },
+            { status: 'completed' as const, target: null, actual: 'old' },
+            { status: 'pending' as const, target: '185 lb × 8', actual: null },
+          ],
+        },
+        {
+          name: 'Push-up',
+          sets: [{ status: 'completed' as const, target: null, actual: 'old' }],
+        },
+      ],
+    }
+
+    assert.deepEqual(buildLiveWorkoutCardEditor({ presentation, workout }), {
+      editor: {
+        version: 1,
+        exercises: [
+          {
+            unitOverride: 'lb',
+            sets: [
+              {
+                logged: true,
+                result: {
+                  kind: 'weight_reps',
+                  reps: 8,
+                  weight: null,
+                  weightUnit: null,
+                },
+              },
+              {
+                logged: true,
+                result: {
+                  kind: 'weight_reps',
+                  reps: null,
+                  weight: 0,
+                  weightUnit: 'kg',
+                },
+              },
+              { logged: false, result: null },
+            ],
+          },
+          {
+            unitOverride: null,
+            sets: [{
+              logged: true,
+              result: { kind: 'note', note: 'Slow tempo' },
+            }],
+          },
+        ],
+      },
+      workout: {
+        version: 1,
+        state: 'active',
+        exercises: [
+          {
+            name: 'Bench press',
+            sets: [
+              { status: 'completed', target: null, actual: '8 reps' },
+              { status: 'completed', target: null, actual: '0 kg' },
+              { status: 'pending', target: '185 lb × 8', actual: null },
+            ],
+          },
+          {
+            name: 'Push-up',
+            sets: [{ status: 'completed', target: null, actual: 'Slow tempo' }],
+          },
+        ],
+      },
+    })
+  })
+
   test('starts saved routines as active sessions with unlogged placeholders', () => {
     const template = workoutTemplateSchema.parse({
       routineNote: 'Push day',

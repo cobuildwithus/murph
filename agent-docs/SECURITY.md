@@ -659,8 +659,10 @@ Last verified: 2026-08-11
 - The same narrow capability-less presentation exception includes V4/V6 workout
   envelopes and V5 challenge-standings envelopes. V3, V4, and V5 carry no
   tracking, identity, canonical references, credentials, tokens, or write
-  authority. V6 adds only a 64-character lowercase SHA-256 action binding
-  derived from the canonical workout id. It reveals no canonical id or member,
+  authority. V6 adds a 64-character lowercase SHA-256 action binding derived
+  from the canonical workout id plus a bounded typed projection of the same
+  completed-set values already visible in that private-direct card. It reveals
+  no canonical id or member,
   is never accepted as authentication, and can authorize nothing without the
   separately enrolled scoped bearer; the workout owner uses it only as an exact
   stale-card precondition under the canonical mutation lock. V1-V5 presentation

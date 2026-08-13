@@ -2157,10 +2157,14 @@ The Messages bridge submits one generic, versioned `MemberActionRequestV1`
 envelope whose `action` is a closed discriminated union. The first action family,
 `workout.live.apply`, contains only bounded workout snapshot preconditions and
 typed exercise/set mutations; it is not an arbitrary path, patch, database, or
-tool-call surface. The native V6 card adds one opaque SHA-256 action binding;
-it contains no canonical id and grants no authority, but lets the workout owner
-prove under its existing lock that an old card still names the exact active
-workout. Web authenticates and validates the request, locks and
+tool-call surface. At the existing response-card attachment boundary, runtime
+re-reads the exact canonical workout and may add one trusted typed editor
+projection to an active card. The native V6 wire carries that projection plus
+one opaque SHA-256 action binding; it contains no canonical id and grants no
+authority, but preserves exact nullable prior fields while letting the workout
+owner prove under its existing lock that an old card still names the exact
+active workout. A failed read, presentation mismatch, completed workout, or
+oversized V6 stays V4/read-only instead of guessing. Web authenticates and validates the request, locks and
 re-checks member access and consent, then appends one encrypted
 `member.action.requested:<actionId>` item to the existing system mailbox before
 signaling the existing Temporal runtime. Runtime dispatches the action directly
@@ -2977,7 +2981,8 @@ table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain only the bounded values permitted by its
 versioned delivery contract. V1-V4 carry private-direct presentation values;
 V5 uses the identity-free public challenge projection, and native-only V6 adds
-the opaque exact-workout binding. None may
+the opaque exact-workout binding plus a bounded typed editable-set projection
+derived from values already visible in that private-direct workout card. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
 Generic V3 tables choose their one shared-header grid solely from the exact

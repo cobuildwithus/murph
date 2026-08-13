@@ -72,6 +72,60 @@ const ACTIVE_WORKOUT_CARD = {
       },
     ],
   },
+  editor: {
+    version: 1,
+    exercises: [
+      {
+        unitOverride: 'lb',
+        sets: [
+          {
+            logged: true,
+            result: {
+              kind: 'weight_reps',
+              reps: 8,
+              weight: 185,
+              weightUnit: null,
+            },
+          },
+          {
+            logged: true,
+            result: {
+              kind: 'weight_reps',
+              reps: 7,
+              weight: 185,
+              weightUnit: 'lb',
+            },
+          },
+          {
+            logged: false,
+            result: null,
+          },
+        ],
+      },
+      {
+        unitOverride: 'lb',
+        sets: [
+          {
+            logged: true,
+            result: {
+              kind: 'weight_reps',
+              reps: 10,
+              weight: 55,
+              weightUnit: null,
+            },
+          },
+          {
+            logged: false,
+            result: null,
+          },
+          {
+            logged: false,
+            result: null,
+          },
+        ],
+      },
+    ],
+  },
 } satisfies AssistantResponseCard
 
 const ORDINARY_TABLE = {
@@ -120,16 +174,18 @@ describe('workout session response cards', () => {
         e: [
           [
             'Bench press',
+            'l',
             [
-              ['c', '185 lb × 8', '185 lb × 8'],
-              ['c', '185 lb × 8', '185 lb × 7'],
+              ['c', '185 lb × 8', ['w', 8, 185, null]],
+              ['c', '185 lb × 8', ['w', 7, 185, 'l']],
               ['p', '185 lb × 6–8', null],
             ],
           ],
           [
             'Incline dumbbell press',
+            'l',
             [
-              ['c', '55 lb × 10', '55 lb × 10'],
+              ['c', '55 lb × 10', ['w', 10, 55, null]],
               ['p', '55 lb × 8–10', null],
               ['p', null, null],
             ],
@@ -185,14 +241,10 @@ describe('workout session response cards', () => {
     const buildCard = (
       state: 'active' | 'completed',
       completedSetCount: number,
-    ): CompactTableResponseCardV1 => ({
-      ...ACTIVE_WORKOUT_CARD,
-      title: 'Lower body strength',
-      footer: state === 'active'
-        ? 'Reply with the exercise, set, and result to log or correct it.'
-        : 'Workout completed.',
-      workout: {
-        version: 1,
+    ): CompactTableResponseCardV1 => {
+      const { editor: _editor, ...base } = ACTIVE_WORKOUT_CARD
+      const workout = {
+        version: 1 as const,
         state,
         exercises: exerciseNames.map((name, exerciseIndex) => ({
           name,
@@ -200,14 +252,41 @@ describe('workout session response cards', () => {
             const isCompleted =
               exerciseIndex * targets.length + setIndex < completedSetCount
             return {
-              status: isCompleted ? 'completed' : 'pending',
+              status: isCompleted ? 'completed' as const : 'pending' as const,
               target,
               actual: isCompleted ? actuals[setIndex] ?? target : null,
             }
           }),
         })),
-      },
-    })
+      }
+      return {
+        ...base,
+        title: 'Lower body strength',
+        footer: state === 'active'
+          ? 'Reply with the exercise, set, and result to log or correct it.'
+          : 'Workout completed.',
+        workout,
+        ...(state === 'active'
+          ? {
+              editor: {
+                version: 1 as const,
+                exercises: workout.exercises.map((exercise) => ({
+                  unitOverride: 'lb' as const,
+                  sets: exercise.sets.map((set, setIndex) => ({
+                    logged: set.status === 'completed',
+                    result: set.status === 'completed' ? {
+                      kind: 'weight_reps' as const,
+                      reps: [9, 10, 11, 12][setIndex]!,
+                      weight: [55, 55, 65, 65][setIndex]!,
+                      weightUnit: null,
+                    } : null,
+                  })),
+                })),
+              },
+            }
+          : {}),
+      }
+    }
 
     const urls = [
       buildCard('active', 0),
@@ -218,7 +297,7 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1497, 1707, 1719])
+    expect(urls.map((url) => url.length)).toEqual([1529, 1811, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 
@@ -242,8 +321,9 @@ describe('workout session response cards', () => {
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-09T19:45:00.000Z]',
     )
 
+    const { editor: _editor, ...activePresentation } = ACTIVE_WORKOUT_CARD
     const legacyCard = {
-      ...ACTIVE_WORKOUT_CARD,
+      ...activePresentation,
       subtitle: '3/6 sets complete',
     } satisfies AssistantResponseCard
     expect(assistantResponseCardSchema.parse(legacyCard)).toEqual(legacyCard)
@@ -253,14 +333,15 @@ describe('workout session response cards', () => {
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(legacyCard),
     )).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 4,
       card: { u: '3/6 sets complete' },
     })
   })
 
   it('preserves a completed extra set without inventing a target', () => {
+    const { editor: _editor, ...activePresentation } = ACTIVE_WORKOUT_CARD
     const completedExtraSetCard = {
-      ...ACTIVE_WORKOUT_CARD,
+      ...activePresentation,
       subtitle: '4 of 7 sets complete',
       workout: {
         ...ACTIVE_WORKOUT_CARD.workout,
@@ -312,8 +393,9 @@ describe('workout session response cards', () => {
   })
 
   it('rejects impossible completion states before encoding', () => {
+    const { editor: _editor, ...activePresentation } = ACTIVE_WORKOUT_CARD
     expect(assistantResponseCardSchema.safeParse({
-      ...ACTIVE_WORKOUT_CARD,
+      ...activePresentation,
       workout: {
         ...ACTIVE_WORKOUT_CARD.workout,
         state: 'completed',
@@ -321,7 +403,7 @@ describe('workout session response cards', () => {
     }).success).toBe(false)
 
     expect(assistantResponseCardSchema.safeParse({
-      ...ACTIVE_WORKOUT_CARD,
+      ...activePresentation,
       workout: {
         ...ACTIVE_WORKOUT_CARD.workout,
         exercises: [
@@ -395,8 +477,9 @@ describe('workout session response cards', () => {
   })
 
   it('renders a completed workout and both skipped-set variants', () => {
+    const { editor: _editor, ...activePresentation } = ACTIVE_WORKOUT_CARD
     const completedCard = {
-      ...ACTIVE_WORKOUT_CARD,
+      ...activePresentation,
       subtitle: null,
       footer: null,
       workout: {
@@ -467,7 +550,7 @@ describe('workout session response cards', () => {
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(completedCard),
     )).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 4,
       card: {
         s: 'c',
         u: null,
