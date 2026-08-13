@@ -51,8 +51,11 @@ Updated: 2026-08-12
    round eight against the exact pushed head.
 9. [x] Resolve round eight's sparse-correction and hourly-fanout findings, then
    run round nine against the exact pushed head.
-10. [ ] Resolve round nine's provider-day correction finding, obtain exact-head
-    green CI and a ReviewGPT PASS, then merge and retire the task worktree.
+10. [x] Resolve round nine's provider-day correction finding and recover the
+    interrupted round-ten result.
+11. [ ] Resolve the recovered ledger gap by making sparse stable-ID equality
+    include provider-day metadata, obtain exact-head green CI and a ReviewGPT
+    PASS, then merge and retire the task worktree.
 
 ## Decisions
 
@@ -110,6 +113,12 @@ Updated: 2026-08-12
   instead of UTC execution-window dates. The existing import receipt and
   calendar importer carry the evidence and perform the refresh, so the fix adds
   no persisted state, queue, cursor, watermark, dependency, or service.
+- The interrupted round-ten response was recovered as `INVALID`, so it does not
+  advance the review counter. Its prior-ledger gap exposed an unresolved earlier
+  accepted finding: sparse stable-ID equality omitted persisted day, timezone,
+  offset, and timestamp-semantics metadata. The importer now reuses its existing
+  full fidelity record key as the content fingerprint, deleting the narrower
+  duplicate fingerprint without adding an identity owner or state.
 
 ## Verification
 
@@ -157,5 +166,11 @@ Updated: 2026-08-12
   service tests, the device-sync typecheck, docs drift, scenario integrity, and
   production runner assembly. The runner bundle is 9,956,920B against the
   9,985,718B budget.
-- Pending: commit/push, exact-head CI, ReviewGPT PASS, merge, and worktree
-  retirement.
+- Recovered round ten from the existing ReviewGPT thread as `INVALID`: the
+  prompt omitted the earlier sparse stable-ID provider-day metadata finding.
+  A production-shaped both-order regression reproduced the input-order bug,
+  then passed after the importer reused the full fidelity record key. A strictly
+  newer explicit revision now also selects the newer provider-day metadata in
+  either payload order.
+- Pending: focused verification, commit/push, exact-head CI, ReviewGPT PASS,
+  merge, and worktree retirement.

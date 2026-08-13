@@ -2846,30 +2846,22 @@ function pushJunctionSparseIntervalReadings(
           providerValue,
           providerUnit ?? "",
         ]);
-    const contentFingerprint = shortHash([
-      policy.policyVersion,
-      startAt,
-      endAt,
+    const fidelityRecordKey = buildJunctionTimeseriesFidelityRecordKey({
+      entry,
+      providerUnit,
       providerValue,
-      providerUnit ?? "",
-      value,
-      policy.unit,
-    ]);
+      resource,
+      resourceContext,
+      timestamp,
+    });
     const durationSeconds = Number(((Date.parse(endAt) - Date.parse(startAt)) / 1000).toFixed(3));
     const candidate: JunctionSparseIntervalReading = {
-      contentFingerprint,
+      contentFingerprint: fidelityRecordKey,
       dayKey,
       durationSeconds,
       endAt,
       entry,
-      fidelityRecordKey: buildJunctionTimeseriesFidelityRecordKey({
-        entry,
-        providerUnit,
-        providerValue,
-        resource,
-        resourceContext,
-        timestamp,
-      }),
+      fidelityRecordKey,
       externalIdentityHash,
       providerUnit,
       providerValue,

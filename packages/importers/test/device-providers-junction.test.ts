@@ -4220,6 +4220,99 @@ test("Junction stable-ID fidelity conflicts at one provider revision fail closed
   );
 });
 
+test("Junction sparse stable-ID equality includes provider-day metadata", () => {
+  const representations = [
+    {
+      id: "shared-offset-reading",
+      start: "2026-04-22T23:30:00-04:00",
+      end: "2026-04-22T23:31:00-04:00",
+      timezone_offset: -14_400,
+      unit: "mL",
+      value: 250,
+    },
+    {
+      id: "shared-offset-reading",
+      start: "2026-04-23T03:30:00Z",
+      end: "2026-04-23T03:31:00Z",
+      unit: "mL",
+      value: 250,
+    },
+  ];
+
+  for (const sourceVersion of [undefined, "2026-04-23T04:00:00Z"]) {
+    const versionedRepresentations = representations.map((representation) => ({
+      ...representation,
+      updatedAt: sourceVersion,
+    }));
+    for (const records of [versionedRepresentations, [...versionedRepresentations].reverse()]) {
+      assert.throws(
+        () => normalizeJunctionSnapshot({
+          importedAt: "2026-04-24T12:00:00.000Z",
+          timeseries: {
+            water: {
+              groups: {
+                garmin: [{
+                  data: records,
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        }),
+        /Junction water stable-id records with different bodies require distinct explicit provider revisions/u,
+      );
+    }
+  }
+});
+
+test("Junction sparse stable-ID revisions select newer provider-day metadata in either order", () => {
+  const olderOffsetBody = {
+    id: "shared-offset-revision",
+    start: "2026-04-22T23:30:00-04:00",
+    end: "2026-04-22T23:31:00-04:00",
+    timezone_offset: -14_400,
+    updatedAt: "2026-04-23T04:00:00Z",
+    unit: "mL",
+    value: 250,
+  };
+  const newerUtcBody = {
+    id: "shared-offset-revision",
+    start: "2026-04-23T03:30:00Z",
+    end: "2026-04-23T03:31:00Z",
+    updatedAt: "2026-04-23T05:00:00Z",
+    unit: "mL",
+    value: 250,
+  };
+
+  for (const records of [
+    [olderOffsetBody, newerUtcBody],
+    [newerUtcBody, olderOffsetBody],
+  ]) {
+    const payload = normalizeJunctionSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        water: {
+          groups: {
+            garmin: [{
+              data: records,
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    });
+    const timed = payload.events?.find((event) =>
+      event.kind === "measurement"
+      && readJunctionEventMeasurements(event).some((measurement) => measurement.metric === "water")
+    );
+
+    assert.equal(timed?.dayKey, "2026-04-23");
+    assert.equal(timed?.dataOrigin?.observedAtRaw, "2026-04-23T03:30:00Z");
+    assert.equal(timed?.dataOrigin?.timestampSemantics, "utc");
+    assert.equal(timed?.externalRef?.version, "2026-04-23T05:00:00.000Z");
+  }
+});
+
 test("Junction unversioned calendar aggregates reconcile through the serialized event spine", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-unversioned-fidelity-correction");
   const inputFor = (value: number) => ({
