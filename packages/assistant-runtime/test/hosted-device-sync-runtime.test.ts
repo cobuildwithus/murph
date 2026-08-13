@@ -1565,7 +1565,13 @@ describe("hosted device-sync runtime", () => {
       assert.ok(localAccountId);
       const beforeReconnect = getStore(service).getAccountById(localAccountId);
       assert.ok(beforeReconnect);
-      assert.match(String(beforeReconnect.metadata.junctionExtendedHistoryCoverage), /^m2\|/u);
+      assert.equal(
+        [
+          beforeReconnect.metadata.junctionBloodPressureHistoryBackfillCoverage,
+          beforeReconnect.metadata.junctionNoteHistoryBackfillCoverage,
+        ].filter((value) => typeof value === "string" && /^m2\|/u.test(value)).length,
+        1,
+      );
       getStore(service).patchAccount(localAccountId, {
         displayName: beforeReconnect.displayName,
       });

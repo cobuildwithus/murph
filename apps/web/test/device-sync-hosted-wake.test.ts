@@ -4,6 +4,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
+import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -2140,11 +2141,21 @@ describe("hosted device-sync wakes", () => {
     await expect(establish()).resolves.toBeUndefined();
 
     expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
-    expect(currentConnection.metadata).toMatchObject({
-      junctionBloodPressureHistoryBackfillCoverage: "v2|garmin,oura",
-      junctionNoteHistoryBackfillCoverage: "v2|oura",
-    });
-    expect(currentConnection.metadata.junctionExtendedHistoryCoverage).toMatch(/^m2\|/u);
+    expect(currentConnection.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe(
+      "v2|garmin,oura",
+    );
+    expect([
+      currentConnection.metadata.junctionBloodPressureHistoryBackfillCoverage,
+      currentConnection.metadata.junctionNoteHistoryBackfillCoverage,
+    ].filter((value) => typeof value === "string" && /^m2\|/u.test(value))).toHaveLength(1);
+    expect(clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+      metadata: currentConnection.metadata,
+      providerSlug: "garmin",
+    })).toEqual(currentConnection.metadata);
+    expect(clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+      metadata: currentConnection.metadata,
+      providerSlug: "oura",
+    })).not.toEqual(currentConnection.metadata);
     expect(sources).toEqual(expect.arrayContaining([
       expect.objectContaining({
         lifecycleEpoch: 2,
