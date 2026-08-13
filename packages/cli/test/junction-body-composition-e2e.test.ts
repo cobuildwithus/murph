@@ -111,6 +111,13 @@ function jsonResponse(body: unknown): Response {
 test('Junction body data composes from provider jobs through canonical vault reads and CLI output', async () => {
   const parentRoot = await mkdtemp(path.join(tmpdir(), 'murph-junction-body-e2e-'))
   const vaultRoot = path.join(parentRoot, 'vault')
+  const sparseBodyResources = [
+    'weight',
+    'fat',
+    'body_mass_index',
+    'lean_body_mass',
+    'waist_circumference',
+  ] as const
   let waistValue = 84.6
 
   try {
@@ -126,13 +133,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
       environment: 'sandbox',
       region: 'us',
       summaryResources: ['body'],
-      timeseriesResources: [
-        'weight',
-        'fat',
-        'body_mass_index',
-        'lean_body_mass',
-        'waist_circumference',
-      ],
+      timeseriesResources: [...sparseBodyResources],
       fetchImpl: async (input) => {
         const url = new URL(typeof input === 'string'
           ? input
@@ -258,15 +259,35 @@ test('Junction body data composes from provider jobs through canonical vault rea
     const executor = provider.jobExecutor
     assert.ok(executor)
 
-    await executor.executeJob(context('2026-08-11T00:00:00.000Z'), createJob('backfill', {
+    await executor.executeJob(context('2026-08-11T00:00:00.000Z'), createJob('resource', {
+      resource: 'body',
+      resourceCategory: 'summary',
       windowEnd: '2026-08-11T00:00:00.000Z',
       windowStart: '2026-08-10T00:00:00.000Z',
     }))
+    for (const resource of sparseBodyResources) {
+      await executor.executeJob(context('2026-08-11T00:00:00.000Z'), createJob('resource', {
+        resource,
+        resourceCategory: 'timeseries',
+        windowEnd: '2026-08-11T00:00:00.000Z',
+        windowStart: '2026-08-10T00:00:00.000Z',
+      }))
+    }
 
-    const sparseImport = imports.find((result) =>
-      result.events.filter((event) => event.kind === 'observation' && event.observationGrain === 'sample').length === 5
+    const sparseImports = imports.filter((result) =>
+      result.events.some((event) => event.kind === 'observation' && event.observationGrain === 'sample')
     )
-    assert.ok(sparseImport)
+    assert.equal(sparseImports.length, 5)
+    const sparseEvents = sparseImports.flatMap((result) => result.events).filter((event) =>
+      event.kind === 'observation' && event.observationGrain === 'sample'
+    )
+    assert.equal(
+      sparseEvents.length,
+      5,
+      JSON.stringify(sparseEvents.map((event) =>
+        event.kind === 'observation' ? event.metric : event.kind
+      )),
+    )
     assert.equal(
       imports.flatMap((result) => result.events).filter((event) =>
         event.kind === 'observation'
@@ -277,18 +298,22 @@ test('Junction body data composes from provider jobs through canonical vault rea
         event.kind === 'observation' ? event.metric : event.kind
       ))),
     )
-    assert.equal(sparseImport.samples.length, 0)
-    assert.ok(sparseImport.ingestId)
-    const sparseIngest = await coreRuntime.readIntegrationIngestById(vaultRoot, sparseImport.ingestId)
-    const sparseRoles = sparseIngest?.record.parts
-      .map((part) => part.role)
-      .filter((role) => role.startsWith('junction-timeseries-reading-')) ?? []
-    assert.equal(sparseRoles.length, 5)
+    const sparseRoles: string[] = []
+    for (const sparseImport of sparseImports) {
+      assert.equal(sparseImport.samples.length, 0)
+      assert.ok(sparseImport.ingestId)
+      const sparseIngest = await coreRuntime.readIntegrationIngestById(vaultRoot, sparseImport.ingestId)
+      const importRoles = sparseIngest?.record.parts
+        .map((part) => part.role)
+        .filter((role) => role.startsWith('junction-timeseries-reading-')) ?? []
+      assert.equal(importRoles.length, 1)
+      sparseRoles.push(...importRoles)
+      assert.equal(sparseIngest?.record.parts.some((part) =>
+        part.role === 'provider-snapshot'
+        || /^junction-timeseries-(?!reading-)/u.test(part.role)
+      ), false)
+    }
     assert.equal(new Set(sparseRoles.map((role) => role.split(':')[0])).size, 5)
-    assert.equal(sparseIngest?.record.parts.some((part) =>
-      part.role === 'provider-snapshot'
-      || /^junction-timeseries-(?!reading-)/u.test(part.role)
-    ), false)
 
     waistValue = 83.9
     await executor.executeJob(context('2026-08-11T00:05:00.000Z'), createJob('resource', {
