@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 200,
+  "item": {
+    "id": "calmer-recurring-reminders",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Recurring reminders know when to pause",
+    "summary": "When a recurring reminder receives no reply, Murph now asks once whether to keep, change, or pause it instead of repeating indefinitely.",
+    "details": "If that question also goes unanswered, later reminders stay quiet until the conversation changes. In groups, Murph asks the room and never blames a participant.",
+    "relevanceTags": ["assistant", "reminders", "groups"],
+    "sourcePullRequests": [1775]
+  }
+}
