@@ -756,9 +756,10 @@ keep the one-second presentation-only deadline and late-result rejection.
   regressions prove the action accepts only an exact current-turn message ref,
   admits two valid mixed-sender requests independently, and rejects a foreign
   ref; an earlier native reply still fails exact-source admission; exact flat
-  group and private commands are admitted; native
-  replies, conflicting audience wording, and unclear or context-dependent text
-  are rejected; a missing direct route prevents private admission; and a route
+  group and private commands are admitted; native replies, conflicting audience
+  wording, unsupported subject-led private clauses, and unclear or
+  context-dependent text are rejected before enqueue; a missing direct route
+  prevents private admission; and a route
   lost after admission produces one non-disclosing group terminal rather than
   leaking or silently consuming work. Replay/restart and concurrent
   admission/completion proofs assert one canonical request per source and

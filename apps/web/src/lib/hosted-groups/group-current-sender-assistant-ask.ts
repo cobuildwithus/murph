@@ -105,6 +105,8 @@ const HOSTED_CURRENT_SENDER_LEADING_AUDIENCE_CLAUSE_PATTERN = new RegExp(
     String.raw`(?:[,;:—-]\s*|\s+)(\S[\s\S]*)$`,
   "iu",
 );
+const HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN =
+  /\b(?:private|privately|confidential|confidentially|confidence|direct|dm|group|chat|thread|everyone|here|only|between|eyes|secret|public|publicly|record|me|us)\b/iu;
 const HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN =
   /^(?:please\s+)?(?=[\s\S]{1,120}$)(?:(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make)\b|(?:for|to|between|in|off|on|outside|inside|under|just|only|no)\b|(?:do\s+not|don['’]?t|never|not)\b|(?:this|that|it)\s+(?:is|stays|remains)\b|[\p{L}'’-]+ly\b)[\s\S]*$/iu;
 const HOSTED_CURRENT_SENDER_UNSEPARATED_DELIVERY_DIRECTIVE_PATTERN =
@@ -254,7 +256,7 @@ function readHostedCurrentSenderLeadingAudience(
   }
   const leadingClauses = question.split(
     HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN,
-  );
+  ).map((clause) => clause.trim()).filter(Boolean);
   const firstClause = leadingClauses[0]?.trim() ?? "";
   const leadingAudience = readHostedCurrentSenderAudienceClause({
     clause: firstClause,
@@ -289,8 +291,11 @@ function readHostedCurrentSenderAudienceClause(input: {
     }
     if (
       (input.separatedFromQuestion || index > 0)
-      && HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN.test(
-        suffix,
+      && (
+        HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN.test(suffix)
+        || HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN.test(
+          suffix,
+        )
       )
     ) {
       return "ambiguous";

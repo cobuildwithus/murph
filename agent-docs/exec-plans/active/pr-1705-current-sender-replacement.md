@@ -1,6 +1,6 @@
 # PR #1705 Current-Sender Replacement
 
-Status: Exact-message multi-request correction in progress; focused proof, authorized ReviewGPT round 8, exact-head CI, and merge remain active.
+Status: ReviewGPT round-8 subject-led privacy remediation in progress; corrected exact-head CI, follow-up PASS, and merge remain active.
 Baseline: supplied snapshot at `fb965713898e0fb00afc215a69e93d16c8c6fb78`.
 Owner: Assistant Ask current-sender admission and completion owners.
 Risk: High — privacy-sensitive cross-runtime disclosure.
@@ -66,7 +66,11 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
   direct/group request, so base/head remain identical at 111,567 bytes / 24,330
   tokens direct and 95,823 / 20,745 group with `gpt-tokenizer` 3.4.0
   `o200k_harmony`; the temporary capture hook was removed.
-- [ ] Exact pushed-head GitHub Actions and a round-8 `PASS` remain required.
+- [x] ReviewGPT round 8 finding accepted and remediated: separated subject-led
+  private clauses restore the bounded audience-signal fail-closed guard and
+  cannot enqueue or resolve a private route; focused Web authority proof passes
+  22 tests.
+- [ ] Corrected exact-head GitHub Actions and a follow-up ReviewGPT `PASS` remain required.
 
 ## Rollout And Removal
 

@@ -182,6 +182,17 @@ Updated: 2026-08-12
   request, so base and head are identical: direct 111,567 bytes / 24,330 tokens;
   group 95,823 bytes / 20,745 tokens. The temporary capture hook was removed
   and verified absent.
+- Authorized full-snapshot ReviewGPT round 8 accepted the exact-ref correction
+  but found that round 7 had removed the broader fail-closed signal check for a
+  separated subject-led confidentiality clause. The production path proved
+  that clause could default to the group. The correction
+  restores the bounded audience-signal guard only at separated edges, retains
+  exact one-to-one/DM mappings, ignores empty terminal separators, and adds no
+  owner or lifecycle. Focused classifier/admission proof now rejects three
+  subject-led private forms before route resolution or mailbox append while the
+  22-test Web authority suite remains green.
+- Exact-head CI on `12634c58ab99` passed before the round-8 correction. The
+  corrected head still requires its own CI and the follow-up ReviewGPT PASS.
 
 ## Verification
 
