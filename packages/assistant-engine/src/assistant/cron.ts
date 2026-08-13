@@ -23,6 +23,7 @@ import {
   resolveAssistantCronRunLookupId,
   sortAssistantCronJobs,
   type AssistantCronTargetInput,
+  writeAssistantCronStore,
 } from './cron/store.ts'
 import { readAssistantCronCanonicalRuntimeStore } from './cron/runtime-state.ts'
 import {
@@ -737,8 +738,38 @@ export async function pauseUnsupportedLocalEmailAutomations(input: {
   now?: Date
   vault: string
 }): Promise<{ pausedAutomationCount: number }> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  const pausedLocalJobCount = await withAssistantCronWriteLock(paths, async () => {
+    const store = await readAssistantCronStore(paths)
+    const updatedAt = (input.now ?? new Date()).toISOString()
+    let pausedJobCount = 0
+    const jobs = store.jobs.map((job) => {
+      if (
+        !job.enabled ||
+        job.target.channel?.trim().toLowerCase() !== 'email'
+      ) {
+        return job
+      }
+
+      pausedJobCount += 1
+      return {
+        ...job,
+        enabled: false,
+        updatedAt,
+      }
+    })
+
+    if (pausedJobCount > 0) {
+      await writeAssistantCronStore(paths, {
+        ...store,
+        jobs,
+      })
+    }
+
+    return pausedJobCount
+  })
   const records = await listCanonicalAssistantCronRecords(input.vault, ['active'])
-  let pausedAutomationCount = 0
+  let pausedAutomationCount = pausedLocalJobCount
 
   for (const record of records) {
     if (

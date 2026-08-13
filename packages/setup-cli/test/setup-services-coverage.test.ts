@@ -58,6 +58,7 @@ vi.mock('../src/setup-services/toolchain.ts', async () => {
 import {
   listAssistantCronPresets,
 } from '@murphai/assistant-engine/assistant-cron'
+import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
@@ -1504,6 +1505,79 @@ test('createSetupServices reconciles the prior local email state through real se
       }),
       'utf8',
     )
+    const cronPaths = resolveAssistantStatePaths(vaultPath)
+    const localCronJobs = [
+      assistantCronJobSchema.parse({
+        createdAt: TEST_TIMESTAMP,
+        enabled: true,
+        jobId: 'local-retired-email',
+        keepAfterRun: true,
+        name: 'Retired local email reminder',
+        prompt: 'Send the reminder.',
+        schedule: { expression: '0 11 * * 5', kind: 'cron' },
+        schema: 'murph.assistant-cron-job.v1',
+        state: {
+          consecutiveFailures: 0,
+          lastError: null,
+          lastFailedAt: null,
+          lastRunAt: null,
+          lastSucceededAt: null,
+          nextRunAt: '2026-04-10T15:00:00.000Z',
+          runningAt: null,
+          runningPid: null,
+        },
+        target: {
+          alias: null,
+          channel: 'email',
+          deliverySource: null,
+          deliveryTarget: 'recipient@example.test',
+          identityId: null,
+          participantId: null,
+          sessionId: null,
+          threadId: null,
+        },
+        updatedAt: TEST_TIMESTAMP,
+      }),
+      ...(['telegram', 'linq'] as const).map((channel) =>
+        assistantCronJobSchema.parse({
+          createdAt: TEST_TIMESTAMP,
+          enabled: true,
+          jobId: `local-retained-${channel}`,
+          keepAfterRun: true,
+          name: `Retained ${channel} reminder`,
+          prompt: 'Send the reminder.',
+          schedule: { expression: '0 12 * * 5', kind: 'cron' },
+          schema: 'murph.assistant-cron-job.v1',
+          state: {
+            consecutiveFailures: 0,
+            lastError: null,
+            lastFailedAt: null,
+            lastRunAt: null,
+            lastSucceededAt: null,
+            nextRunAt: '2026-04-10T16:00:00.000Z',
+            runningAt: null,
+            runningPid: null,
+          },
+          target: {
+            alias: null,
+            channel,
+            deliverySource: null,
+            deliveryTarget: `${channel}-room`,
+            identityId: null,
+            participantId: null,
+            sessionId: null,
+            threadId: null,
+          },
+          updatedAt: TEST_TIMESTAMP,
+        }),
+      ),
+    ]
+    await mkdir(path.dirname(cronPaths.cronJobsPath), { recursive: true })
+    await writeFile(
+      cronPaths.cronJobsPath,
+      `${JSON.stringify({ jobs: localCronJobs, version: 1 }, null, 2)}\n`,
+      'utf8',
+    )
     await upsertAutomation({
       continuityPolicy: 'fresh',
       instructions: 'Send the reminder.',
@@ -1614,7 +1688,7 @@ test('createSetupServices reconciles the prior local email state through real se
     })
     assert.match(
       first.notes.join('\n'),
-      /Removed 2 retired local email inbox sources and 1 retired local email auto-reply setting, and paused 1 local email automation/u,
+      /Removed 2 retired local email inbox sources and 1 retired local email auto-reply setting, and paused 2 local email automations/u,
     )
     assert.deepEqual(first.bootstrap?.doctor.connectors, [
       {
@@ -1628,6 +1702,17 @@ test('createSetupServices reconciles the prior local email state through real se
     assert.equal(
       (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
       'paused',
+    )
+    const afterFirstCronStore = await readFile(cronPaths.cronJobsPath, 'utf8')
+    assert.deepEqual(
+      (JSON.parse(afterFirstCronStore) as {
+        jobs: Array<{ enabled: boolean; jobId: string }>
+      }).jobs.map((job) => ({ enabled: job.enabled, jobId: job.jobId })),
+      [
+        { enabled: false, jobId: 'local-retired-email' },
+        { enabled: true, jobId: 'local-retained-telegram' },
+        { enabled: true, jobId: 'local-retained-linq' },
+      ],
     )
     const afterFirstAutomationState = await readFile(automationStatePath, 'utf8')
     assert.deepEqual(
@@ -1648,6 +1733,7 @@ test('createSetupServices reconciles the prior local email state through real se
     assert.equal(second.notes.some((note) => note.includes('retired local email')), false)
     assert.equal(await readFile(paths.inboxConfigPath, 'utf8'), afterFirstSetup)
     assert.equal(await readFile(automationStatePath, 'utf8'), afterFirstAutomationState)
+    assert.equal(await readFile(cronPaths.cronJobsPath, 'utf8'), afterFirstCronStore)
     assert.equal(
       (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
       'paused',

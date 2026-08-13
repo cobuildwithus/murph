@@ -10764,6 +10764,112 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.patchAutomation).toHaveBeenCalledOnce()
   })
 
+  it('pauses legacy local-store email jobs before execution and keeps them recoverable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-local-store-email-unsupported-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const emailJob = await createLocalJob(vaultRoot, 'legacy-email')
+    const telegramJob = await createLocalJob(vaultRoot, 'retained-telegram')
+    const linqJob = await createLocalJob(vaultRoot, 'retained-linq')
+    await updateLocalJob(vaultRoot, emailJob.jobId, (job) => ({
+      ...job,
+      target: {
+        ...job.target,
+        channel: 'email',
+        deliveryTarget: 'recipient@example.test',
+      },
+    }))
+    await updateLocalJob(vaultRoot, telegramJob.jobId, (job) => ({
+      ...job,
+      state: {
+        ...job.state,
+        nextRunAt: '2026-06-20T09:30:00.000Z',
+      },
+      target: {
+        ...job.target,
+        channel: 'telegram',
+        deliveryTarget: 'telegram-room',
+      },
+    }))
+    await updateLocalJob(vaultRoot, linqJob.jobId, (job) => ({
+      ...job,
+      state: {
+        ...job.state,
+        nextRunAt: '2026-06-20T09:30:00.000Z',
+      },
+      target: {
+        ...job.target,
+        channel: 'linq',
+        deliveryTarget: 'linq-room',
+      },
+    }))
+    const beforePause = await readAssistantCronStore(paths)
+    const beforeEmail = beforePause.jobs.find((job) => job.jobId === emailJob.jobId)
+    if (!beforeEmail) {
+      throw new Error('Expected the legacy local email job fixture.')
+    }
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    const afterPause = await readAssistantCronStore(paths)
+    expect(afterPause.jobs).toEqual([
+      {
+        ...beforeEmail,
+        enabled: false,
+        updatedAt: '2026-06-19T15:00:05.000Z',
+      },
+      beforePause.jobs.find((job) => job.jobId === telegramJob.jobId),
+      beforePause.jobs.find((job) => job.jobId === linqJob.jobId),
+    ])
+    await expect(listAssistantCronRuns({
+      job: emailJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      jobId: emailJob.jobId,
+      runs: [],
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+    await expect(readAssistantCronStore(paths)).resolves.toEqual(afterPause)
+
+    await setAssistantCronJobTarget({
+      channel: 'telegram',
+      deliveryTarget: 'telegram-room',
+      job: emailJob.jobId,
+      vault: vaultRoot,
+    })
+    const reenabled = await setAssistantCronJobEnabled(
+      vaultRoot,
+      emailJob.jobId,
+      true,
+    )
+    expect(reenabled).toMatchObject({
+      enabled: true,
+      target: {
+        channel: 'telegram',
+        deliveryTarget: 'telegram-room',
+      },
+    })
+  })
+
   it('keeps pinning the response session for a preserve route without conversation locators', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
