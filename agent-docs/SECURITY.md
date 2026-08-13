@@ -303,10 +303,11 @@ Last verified: 2026-08-11
   invocation, and destructured transport forms, and strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. The lexical census includes
-  destructured parameter shadows and property types. Assigned CommonJS
+  destructured parameter shadows, property paths, and types. Assigned CommonJS
   namespaces remain transports only while the nearest declaration identity is
-  unchanged. Provider facts follow object/array origin maps and exact
-  fetch-compatible provider-bound call targets without treating loose
+  unchanged. Provider facts follow exact properties in closed object/array
+  origin maps, statically recoverable fetch tuples, and exact fetch-compatible
+  provider-bound call targets without treating loose
   `Request` handlers as HTTP transports. The guard reports only concrete low-level
   handwritten wire contracts that
   replace an SDK-owned request, response, fetch, transport, or client contract.
@@ -323,19 +324,19 @@ Last verified: 2026-08-11
   no credentials or only static
   `credentials: "omit"` and either an allowlisted literal header set or a
   path-scoped audited transfer-header factory resolved to its unique top-level
-  declaration; statically known internal or
+  declaration; the URL expression must also belong to one unique registered
+  transfer owner, and a provider-named URL must resolve through its registered
+  owner-path URL normalizer; statically known internal or
   unambiguous single-slash application traffic, plus `new URL` composition only
-  against the exact static `location.origin` owner; exact one-argument incoming
-  `Request` pass-through in hosted runner proxies; dynamic SMART/FHIR endpoints
-  with no explicit registered-provider identifier or host;
+  against the exact static `location.origin` owner;
   registered providers without a verified provider-owned TypeScript SDK, and
   the exact xAI Responses request carrying one `x_search` extension with storage
   disabled and closed request, payload, and tool object shapes whose effective
   values cannot be replaced by spreads, computed or duplicate properties,
   custom serialization, or prototype hooks. These are structural,
-  purpose-specific exceptions, not line- or
-  provider-wide suppression; the xAI and transfer-header exceptions are also
-  restricted to their audited owner paths.
+  purpose-specific exceptions, not line- or provider-wide suppression; the
+  xAI, transfer URL, transfer-header, and streamed-R2 proofs are restricted to
+  their audited owner paths.
   Register each newly verified provider SDK and host explicitly; the guard does
   not claim coverage for an unregistered provider or a provider endpoint whose
   dataflow has no registered host or provider identifier. The opt-in

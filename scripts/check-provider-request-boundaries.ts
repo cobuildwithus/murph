@@ -271,15 +271,6 @@ export const providerHttpExceptionRegistry = Object.freeze([
   },
   {
     description:
-      "Hosted runner proxy/pass-through forwarding an incoming Request object.",
-    id: "incoming-request-pass-through",
-  },
-  {
-    description: "Dynamic SMART/FHIR endpoints selected by the connected clinical system.",
-    id: "dynamic-smart-fhir",
-  },
-  {
-    description:
       "The path-scoped xAI Responses request carrying exactly one x_search extension.",
     id: "xai-x-search-responses",
   },
@@ -293,6 +284,49 @@ const approvedPresignedTransferHeaderFactories = Object.freeze([
   {
     name: "normalizeLinqRequiredHeaders",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
+  },
+] as const);
+const approvedPresignedTransferUrlFactories = Object.freeze([
+  {
+    name: "normalizeLinqAttachmentUploadUrl",
+    relativePath: "packages/operator-config/src/linq-runtime.ts",
+  },
+] as const);
+const approvedPresignedTransferUrlOwners = Object.freeze([
+  {
+    names: ["presignedPutUrl", "url"],
+    ownerName: "putHostedContainerDirectR2SmokePayload",
+    relativePath: "apps/cloudflare/src/container-entrypoint.ts",
+  },
+  {
+    names: ["imageUrl"],
+    ownerName: "fetchMurphHostedLinqContactCardVcfPhoto",
+    relativePath: "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
+  },
+  {
+    names: ["uploadUrl"],
+    ownerName: "sendHostedLinqAttachmentMessage",
+    relativePath: "apps/web/src/lib/hosted-onboarding/linq-client.ts",
+  },
+  {
+    names: ["uploadUrl"],
+    ownerName: "uploadLinqAttachmentBytes",
+    relativePath: "packages/operator-config/src/linq-runtime.ts",
+  },
+  {
+    names: ["url"],
+    ownerName: "downloadHostedLinqAttachmentBytes",
+    relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
+  },
+  {
+    names: ["url"],
+    ownerName: "downloadUrl",
+    relativePath: "packages/inboxd/src/connectors/email/connector.ts",
+  },
+  {
+    names: ["downloadUrl", "url"],
+    ownerName: "downloadUrl",
+    relativePath: "packages/operator-config/src/agentmail-runtime.ts",
   },
 ] as const);
 
@@ -344,7 +378,7 @@ interface MemberBinding {
 interface ParameterBinding {
   readonly name: string;
   readonly ownerName: string | null;
-  readonly propertyName: string | null;
+  readonly propertyPath: readonly string[] | null;
   readonly scopeEnd: number;
   readonly scopeStart: number;
   readonly typeAnnotation: string | null;
@@ -1066,17 +1100,18 @@ function readBindingPatternNames(node: Node): string[] {
 
 function readParameterBindingEntries(
   node: Node,
-): Array<{ readonly name: string; readonly propertyName: string | null }> {
+  propertyPath: readonly string[] = [],
+): Array<{ readonly name: string; readonly propertyPath: readonly string[] | null }> {
   if (node.type === "TSParameterProperty") {
-    return readParameterBindingEntries(node.parameter);
+    return readParameterBindingEntries(node.parameter, propertyPath);
   }
   if (node.type === "AssignmentPattern") {
-    return readParameterBindingEntries(node.left);
+    return readParameterBindingEntries(node.left, propertyPath);
   }
   if (node.type !== "ObjectPattern") {
     return readBindingPatternNames(node).map((name) => ({
       name,
-      propertyName: null,
+      propertyPath: propertyPath.length > 0 ? propertyPath : null,
     }));
   }
   return node.properties.flatMap((property) => {
@@ -1087,10 +1122,10 @@ function readParameterBindingEntries(
     if (!propertyName) {
       return [];
     }
-    return readBindingPatternNames(property.value).map((name) => ({
-      name,
-      propertyName,
-    }));
+    return readParameterBindingEntries(
+      property.value,
+      [...propertyPath, propertyName],
+    );
   });
 }
 
@@ -1370,7 +1405,7 @@ function collectParameterBindings(
         current.push({
           name: entry.name,
           ownerName: readCallableName(node),
-          propertyName: entry.propertyName,
+          propertyPath: entry.propertyPath,
           scopeEnd: node.end ?? Number.MAX_SAFE_INTEGER,
           scopeStart: node.start ?? 0,
           typeAnnotation,
@@ -1440,7 +1475,7 @@ function collectRawProviderHttpViolations(input: {
     const urlArgument = node.arguments.find(
       (argument) => argument.type !== "ArgumentPlaceholder",
     );
-    if (!urlArgument || urlArgument.type === "SpreadElement") {
+    if (!urlArgument) {
       return;
     }
 
@@ -1449,7 +1484,9 @@ function collectRawProviderHttpViolations(input: {
       before: node.start ?? Number.MAX_SAFE_INTEGER,
       bindings: input.bindings,
       contents: input.contents,
-      node: urlArgument,
+      node: urlArgument.type === "SpreadElement"
+        ? urlArgument.argument
+        : urlArgument,
       resolving: new Set(),
     });
     if (
@@ -1492,7 +1529,9 @@ function collectRawProviderHttpViolations(input: {
           contents: input.contents,
           provider,
           relativePath: input.relativePath,
-          urlArgument,
+          urlArgument: urlArgument.type === "SpreadElement"
+            ? urlArgument.argument
+            : urlArgument,
           urlFacts: requestFacts,
         })
       )
@@ -1673,6 +1712,20 @@ function inferProviderExpressionFacts(input: {
   }
   if (isIdentifier(node)) {
     addExplicitProviderIds(facts, providerIdsFromIdentifier(node.name));
+    const parameter = resolveParameterBinding(
+      input.analysis.parameterBindings,
+      node.name,
+      input.before,
+    );
+    if (parameter?.propertyPath) {
+      for (const property of parameter.propertyPath) {
+        addExplicitProviderIds(facts, providerIdsFromIdentifier(property));
+      }
+      addExplicitProviderIds(
+        facts,
+        providerIdsFromIdentifier(parameter.propertyPath.join(".")),
+      );
+    }
     const bindingKey = `variable:${node.name}`;
     if (!input.resolving.has(bindingKey)) {
       const binding = resolveBinding(input.bindings, node.name, input.before);
@@ -1704,6 +1757,43 @@ function inferProviderExpressionFacts(input: {
       addExplicitProviderIds(facts, providerIdsFromIdentifier(key));
       const bindingKey = `member:${key}`;
       if (!input.resolving.has(bindingKey)) {
+        const staticInitializer = resolveStaticMemberInitializer(
+          node,
+          input.bindings,
+          input.before,
+        );
+        if (staticInitializer) {
+          const resolving = new Set(input.resolving);
+          resolving.add(bindingKey);
+          mergeProviderExpressionFacts(
+            facts,
+            inferProviderExpressionFacts({
+              ...input,
+              before: node.start ?? input.before,
+              node: staticInitializer,
+              resolving,
+            }),
+          );
+        } else {
+          const staticContainer = resolveStaticMemberContainer(
+            node,
+            input.bindings,
+            input.before,
+          );
+          if (staticContainer) {
+            const resolving = new Set(input.resolving);
+            resolving.add(bindingKey);
+            mergeProviderExpressionFacts(
+              facts,
+              inferProviderExpressionFacts({
+                ...input,
+                before: node.start ?? input.before,
+                node: staticContainer,
+                resolving,
+              }),
+            );
+          }
+        }
         const binding = resolveMemberBinding(
           input.analysis.memberBindings,
           key,
@@ -1911,10 +2001,6 @@ function matchesRegisteredProviderHttpException(input: {
             node: input.urlArgument,
             resolving: new Set(),
           });
-      case "incoming-request-pass-through":
-        return isIncomingRequestPassThrough(input);
-      case "dynamic-smart-fhir":
-        return isDynamicSmartFhirRequest(input);
       case "xai-x-search-responses":
         return isXaiXSearchResponsesRequest(input);
     }
@@ -2037,108 +2123,6 @@ function isInternalUrlText(value: string): boolean {
     /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::[0-9]+)?(?:\/|$)/u.test(
       value,
     );
-}
-
-function isIncomingRequestPassThrough(input: {
-  readonly analysis: ProviderHttpSourceAnalysis;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly call: CallExpression | OptionalCallExpression;
-  readonly contents: string;
-  readonly relativePath: string;
-  readonly urlArgument: Node;
-}): boolean {
-  if (!/(?:egress|pass-?through|proxy|runner)/iu.test(input.relativePath)) {
-    return false;
-  }
-  const argumentsToForward = input.call.arguments.filter(
-    (argument) => argument.type !== "ArgumentPlaceholder",
-  );
-  return argumentsToForward.length === 1 &&
-    argumentsToForward[0]?.type !== "SpreadElement" &&
-    expressionResolvesToIncomingRequest({
-    analysis: input.analysis,
-    before: input.call.start ?? Number.MAX_SAFE_INTEGER,
-    bindings: input.bindings,
-    contents: input.contents,
-    node: input.urlArgument,
-    resolving: new Set(),
-  });
-}
-
-function expressionResolvesToIncomingRequest(input: {
-  readonly analysis: ProviderHttpSourceAnalysis;
-  readonly before: number;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly contents: string;
-  readonly node: Node;
-  readonly resolving: ReadonlySet<string>;
-}): boolean {
-  const node = unwrapExpression(input.node);
-  if (isIdentifier(node)) {
-    const parameter = resolveParameterBinding(
-      input.analysis.parameterBindings,
-      node.name,
-      input.before,
-    );
-    if (parameter?.typeAnnotation && typeTextIsIncomingRequest(parameter.typeAnnotation)) {
-      return true;
-    }
-    const key = `incoming:${node.name}`;
-    if (input.resolving.has(key)) {
-      return false;
-    }
-    const binding = resolveBinding(input.bindings, node.name, input.before);
-    if (!binding) {
-      return false;
-    }
-    const resolving = new Set(input.resolving);
-    resolving.add(key);
-    return expressionResolvesToIncomingRequest({
-      ...input,
-      before: node.start ?? input.before,
-      node: binding.initializer,
-      resolving,
-    });
-  }
-  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
-    const pathParts = readMemberPath(node);
-    if (!pathParts || pathParts.length < 2) {
-      return false;
-    }
-    const root = pathParts[0];
-    const property = pathParts.at(-1);
-    const parameter = root
-      ? resolveParameterBinding(
-          input.analysis.parameterBindings,
-          root,
-          input.before,
-        )
-      : null;
-    if (!parameter?.typeAnnotation || !property) {
-      return false;
-    }
-    return new RegExp(
-      `\\b${escapeRegExp(property)}\\??\\s*:\\s*(?:globalThis\\.)?Request\\b`,
-      "u",
-    ).test(parameter.typeAnnotation);
-  }
-  return false;
-}
-
-function isDynamicSmartFhirRequest(input: {
-  readonly analysis: ProviderHttpSourceAnalysis;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly call: CallExpression | OptionalCallExpression;
-  readonly contents: string;
-  readonly relativePath: string;
-  readonly urlArgument: Node;
-  readonly urlFacts: ProviderExpressionFacts;
-}): boolean {
-  const context = `${input.relativePath} ${readNodeText(input.urlArgument, input.contents)}`;
-  if (!/(?:smart|fhir)/iu.test(context)) {
-    return false;
-  }
-  return input.urlFacts.explicitProviderIds.size === 0;
 }
 
 function isXaiXSearchResponsesRequest(input: {
@@ -2293,14 +2277,23 @@ function isPresignedByteTransfer(input: {
   readonly urlFacts: ProviderExpressionFacts;
 }): boolean {
   const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
+  const approvedProviderNamedUrl = isApprovedPresignedTransferUrlExpression({
+    analysis: input.analysis,
+    before,
+    bindings: input.bindings,
+    node: input.urlArgument,
+    relativePath: input.relativePath,
+    resolving: new Set(),
+  });
   if (
-    input.urlFacts.explicitProviderIds.size > 0 ||
+    (input.urlFacts.explicitProviderIds.size > 0 && !approvedProviderNamedUrl) ||
     !isOpaqueTransferUrlShape({
       analysis: input.analysis,
       before,
       bindings: input.bindings,
       contents: input.contents,
       node: input.urlArgument,
+      relativePath: input.relativePath,
       resolving: new Set(),
     })
   ) {
@@ -2367,12 +2360,12 @@ function isPresignedByteTransfer(input: {
   }
   const body = readObjectProperty(init, "body");
   if (!body) {
-    return isProvablyStreamedTransferBody({
+    return isApprovedStreamedTransferBody({
       analysis: input.analysis,
       before,
       bindings: input.bindings,
       call: input.call,
-      contents: input.contents,
+      relativePath: input.relativePath,
       urlArgument: input.urlArgument,
     });
   }
@@ -2414,37 +2407,28 @@ function isProvablySafeTransferInitSpread(node: Node): boolean {
   return false;
 }
 
-function isProvablyStreamedTransferBody(input: {
+function isApprovedStreamedTransferBody(input: {
   readonly analysis: ProviderHttpSourceAnalysis;
   readonly before: number;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly call: CallExpression | OptionalCallExpression;
-  readonly contents: string;
+  readonly relativePath: string;
   readonly urlArgument: Node;
 }): boolean {
-  const responseHandler = input.call.arguments.at(-1);
-  if (!responseHandler || !isFunction(responseHandler)) {
+  if (
+    !isApprovedPresignedTransferUrlOwner(
+      input.relativePath,
+      readMemberPath(input.urlArgument)?.at(-1) ?? "",
+      { analysis: input.analysis, before: input.before },
+    )
+  ) {
     return false;
   }
-  const root = findParameterRoot({
-    analysis: input.analysis,
-    before: input.before,
-    bindings: input.bindings,
-    node: input.urlArgument,
-    resolving: new Set(),
-  });
-  if (!root) {
-    return false;
-  }
-  const parameter = resolveParameterBinding(
-    input.analysis.parameterBindings,
-    root,
+  const owner = findInnermostLocalFunction(
+    collectLocalFunctionRanges(input.analysis.sourceFile),
     input.before,
   );
-  if (
-    !parameter?.typeAnnotation ||
-    !/(?:presigned|put|upload)/iu.test(parameter.ownerName ?? "")
-  ) {
+  if (owner?.name !== "putHostedContainerDirectR2SmokePayload") {
     return false;
   }
   let requestName: string | null = null;
@@ -2464,108 +2448,31 @@ function isProvablyStreamedTransferBody(input: {
   if (!requestName) {
     return false;
   }
-  const binaryPropertyPattern =
-    /\b([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:\s*[^;,}]*(?:ArrayBuffer|ArrayBufferView|Blob|Buffer|DataView|Readable|ReadableStream|Uint8Array)\b/gu;
-  const binaryProperties = new Set<string>();
-  for (const match of parameter.typeAnnotation.matchAll(binaryPropertyPattern)) {
-    const property = match[1];
-    if (property) {
-      binaryProperties.add(property);
-    }
-  }
   let hasExactPipe = false;
   traverseFast(input.analysis.sourceFile, (node) => {
     if (
       hasExactPipe ||
-      (node.start ?? 0) < parameter.scopeStart ||
-      (node.end ?? Number.MAX_SAFE_INTEGER) > parameter.scopeEnd ||
-      (!isCallExpression(node) && !isOptionalCallExpression(node)) ||
-      (!isMemberExpression(node.callee) &&
-        !isOptionalMemberExpression(node.callee))
+      (node.start ?? 0) < owner.start ||
+      (node.end ?? Number.MAX_SAFE_INTEGER) > owner.end ||
+      (!isCallExpression(node) && !isOptionalCallExpression(node))
     ) {
       return;
     }
     const calleePath = readMemberPath(node.callee);
-    if (
-      calleePath?.length !== 3 ||
-      calleePath[0] !== root ||
-      calleePath[2] !== "pipe" ||
-      !binaryProperties.has(calleePath[1] ?? "")
-    ) {
+    if (calleePath?.join(".") !== "input.payload.pipe") {
       return;
     }
     const target = node.arguments[0];
     if (!target || !isIdentifier(target, { name: requestName })) {
       return;
     }
-    const targetBinding = resolveBinding(
+    hasExactPipe = resolveBinding(
       input.bindings,
       requestName,
       node.start ?? Number.MAX_SAFE_INTEGER,
-    );
-    hasExactPipe = targetBinding?.initializer.start === input.call.start;
+    )?.initializer.start === input.call.start;
   });
   return hasExactPipe;
-}
-
-function findParameterRoot(input: {
-  readonly analysis: ProviderHttpSourceAnalysis;
-  readonly before: number;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly node: Node;
-  readonly resolving: ReadonlySet<string>;
-}): string | null {
-  const node = unwrapExpression(input.node);
-  if (isIdentifier(node)) {
-    if (
-      resolveParameterBinding(
-        input.analysis.parameterBindings,
-        node.name,
-        input.before,
-      )
-    ) {
-      return node.name;
-    }
-    const key = `parameter-root:${node.name}`;
-    if (input.resolving.has(key)) {
-      return null;
-    }
-    const binding = resolveBinding(input.bindings, node.name, input.before);
-    if (!binding) {
-      return null;
-    }
-    const resolving = new Set(input.resolving);
-    resolving.add(key);
-    return findParameterRoot({
-      ...input,
-      before: node.start ?? input.before,
-      node: binding.initializer,
-      resolving,
-    });
-  }
-  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
-    const root = readMemberPath(node)?.[0];
-    return root &&
-        resolveParameterBinding(
-          input.analysis.parameterBindings,
-          root,
-          input.before,
-        )
-      ? root
-      : null;
-  }
-  if (isNewExpression(node) || isCallExpression(node) || isOptionalCallExpression(node)) {
-    for (const argument of node.arguments) {
-      if (argument.type === "ArgumentPlaceholder" || argument.type === "SpreadElement") {
-        continue;
-      }
-      const root = findParameterRoot({ ...input, node: argument });
-      if (root) {
-        return root;
-      }
-    }
-  }
-  return null;
 }
 
 function hasApprovedTransferHeaders(input: {
@@ -2669,12 +2576,69 @@ function isApprovedPresignedTransferHeaderFactoryCall(
   );
 }
 
+function isApprovedPresignedTransferUrlExpression(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly node: Node;
+  readonly relativePath: string;
+  readonly resolving: ReadonlySet<string>;
+}): boolean {
+  const expression = unwrapExpression(input.node);
+  if (isIdentifier(expression)) {
+    const key = `presigned-url:${expression.name}`;
+    if (input.resolving.has(key)) {
+      return false;
+    }
+    const binding = resolveBinding(input.bindings, expression.name, input.before);
+    if (!binding) {
+      return false;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return isApprovedPresignedTransferUrlExpression({
+      ...input,
+      before: expression.start ?? input.before,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (!isCallExpression(expression) && !isOptionalCallExpression(expression)) {
+    return false;
+  }
+  const callee = unwrapExpression(expression.callee);
+  if (
+    !isIdentifier(callee) ||
+    resolveParameterBinding(input.analysis.parameterBindings, callee.name, input.before) ||
+    resolveBinding(input.bindings, callee.name, input.before)
+  ) {
+    return false;
+  }
+  const functionBinding = resolveFunctionBinding(
+    input.analysis.functionBindings,
+    callee.name,
+    input.before,
+  );
+  return Boolean(
+    functionBinding?.scopeStart === 0 &&
+    approvedPresignedTransferUrlFactories.some(
+      (factory) =>
+        factory.relativePath === normalizeRepoPath(input.relativePath) &&
+        factory.name === callee.name &&
+        input.analysis.functionBindings.get(callee.name)?.filter(
+          (binding) => binding.scopeStart === 0,
+        ).length === 1,
+    ),
+  );
+}
+
 function isOpaqueTransferUrlShape(input: {
   readonly analysis: ProviderHttpSourceAnalysis;
   readonly before: number;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly contents: string;
   readonly node: Node;
+  readonly relativePath: string;
   readonly resolving: ReadonlySet<string>;
 }): boolean {
   const node = unwrapExpression(input.node);
@@ -2699,7 +2663,6 @@ function isOpaqueTransferUrlShape(input: {
     }
     const binding = resolveBinding(input.bindings, node.name, input.before);
     if (binding) {
-      const initializerText = readNodeText(binding.initializer, input.contents);
       const resolving = new Set(input.resolving);
       resolving.add(key);
       if (
@@ -2712,33 +2675,63 @@ function isOpaqueTransferUrlShape(input: {
       ) {
         return true;
       }
-      return isTransferUrlName(node.name) &&
-        /(?:attachment|download|file|image|media|presigned|required|signed|upload)/iu
-          .test(initializerText);
+      return isApprovedPresignedTransferUrlOwner(input.relativePath, node.name, {
+        analysis: input.analysis,
+        before: input.before,
+      });
     }
-    const parameter = resolveParameterBinding(
-      input.analysis.parameterBindings,
-      node.name,
-      input.before,
-    );
-    return Boolean(
-      parameter &&
-      (
-        isTransferUrlName(node.name) ||
-        isTransferOperationName(parameter.ownerName)
-      ),
-    );
+    return isApprovedPresignedTransferUrlOwner(input.relativePath, node.name, {
+      analysis: input.analysis,
+      before: input.before,
+    });
   }
   if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
     const pathParts = readMemberPath(node);
-    return Boolean(pathParts && isTransferUrlName(pathParts.at(-1) ?? ""));
+    const terminal = pathParts?.at(-1);
+    return Boolean(
+      terminal &&
+      isApprovedPresignedTransferUrlOwner(input.relativePath, terminal, {
+        analysis: input.analysis,
+        before: input.before,
+      }),
+    );
   }
   if (isCallExpression(node) || isOptionalCallExpression(node)) {
-    const callText = readNodeText(node, input.contents);
-    return /(?:attachment|download|file|image|media|presigned|signed|upload).*url/iu
-      .test(callText);
+    return isApprovedPresignedTransferUrlExpression({
+      analysis: input.analysis,
+      before: input.before,
+      bindings: input.bindings,
+      node,
+      relativePath: input.relativePath,
+      resolving: input.resolving,
+    });
   }
   return false;
+}
+
+function isApprovedPresignedTransferUrlOwner(
+  relativePath: string,
+  name: string,
+  input: {
+    readonly analysis: ProviderHttpSourceAnalysis;
+    readonly before: number;
+  },
+): boolean {
+  const owner = findInnermostLocalFunction(
+    collectLocalFunctionRanges(input.analysis.sourceFile),
+    input.before,
+  );
+  const matchingOwnerCount = collectLocalFunctionRanges(
+    input.analysis.sourceFile,
+  ).filter((candidate) => candidate.name === owner?.name).length;
+  return Boolean(
+    owner && matchingOwnerCount === 1 && approvedPresignedTransferUrlOwners.some(
+      (approved) =>
+        approved.relativePath === normalizeRepoPath(relativePath) &&
+        approved.ownerName === owner.name &&
+        approved.names.some((candidate) => candidate === name),
+    ),
+  );
 }
 
 function readObjectProperty(
@@ -2762,6 +2755,66 @@ function readObjectProperty(
     }
   }
   return null;
+}
+
+function resolveStaticMemberInitializer(
+  node: Node,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+): Node | null {
+  const pathParts = readMemberPath(node);
+  const root = pathParts?.[0];
+  if (!pathParts || pathParts.length < 2 || !root || root === "this") {
+    return null;
+  }
+  const binding = resolveBinding(bindings, root, before);
+  if (!binding) {
+    return null;
+  }
+  let current = unwrapExpression(binding.initializer);
+  for (const propertyName of pathParts.slice(1)) {
+    if (isObjectExpression(current)) {
+      const property = readClosedObjectProperties(current)?.get(propertyName);
+      if (!property) {
+        return null;
+      }
+      current = unwrapExpression(property.value);
+      continue;
+    }
+    if (
+      current.type === "ArrayExpression" &&
+      current.elements.every((element) => !element || !isSpreadElement(element)) &&
+      /^\d+$/u.test(propertyName)
+    ) {
+      const element = current.elements[Number(propertyName)];
+      if (!element || isSpreadElement(element)) {
+        return null;
+      }
+      current = unwrapExpression(element);
+      continue;
+    }
+    return null;
+  }
+  return current;
+}
+
+function resolveStaticMemberContainer(
+  node: Node,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+): Node | null {
+  const root = readMemberPath(node)?.[0];
+  if (!root || root === "this") {
+    return null;
+  }
+  const initializer = resolveBinding(bindings, root, before)?.initializer;
+  if (!initializer) {
+    return null;
+  }
+  const container = unwrapExpression(initializer);
+  return isObjectExpression(container) || container.type === "ArrayExpression"
+    ? container
+    : null;
 }
 
 function isProvablyBinaryTransferBody(input: {
@@ -3193,11 +3246,6 @@ function readParameterDefaultExpression(node: Node): Node | null {
   return null;
 }
 
-function typeTextIsIncomingRequest(typeText: string): boolean {
-  return /:\s*(?:globalThis\.)?Request\b/u.test(typeText) &&
-    !/RequestInfo/u.test(typeText);
-}
-
 function looksLikeFetchFunctionType(typeText: string): boolean {
   const normalized = stripLeadingTypeAnnotation(typeText);
   const signature = readFetchCallableSignature(normalized);
@@ -3355,10 +3403,10 @@ function isFetchLikeCallTarget(input: {
       return Boolean(
         parameter.typeAnnotation &&
         (
-          parameter.propertyName
+          parameter.propertyPath?.length
             ? typeTextHasFetchProperty(
                 parameter.typeAnnotation,
-                parameter.propertyName,
+                parameter.propertyPath.at(-1) ?? "",
                 fetchTypeNames,
                 input.exact,
               )
@@ -3618,21 +3666,6 @@ function typeTextHasFetchProperty(
 
 function stripLeadingTypeAnnotation(typeText: string): string {
   return typeText.trim().replace(/^:\s*/u, "");
-}
-
-function isTransferOperationName(name: string | null): boolean {
-  if (!name) {
-    return false;
-  }
-  const normalized = normalizeIdentifierForMatch(name);
-  return /(?:download|upload).*(?:body|bytes|stream)|(?:body|bytes|stream).*(?:download|upload)/u
-    .test(normalized);
-}
-
-function isTransferUrlName(name: string): boolean {
-  const normalized = normalizeIdentifierForMatch(name);
-  return /(?:attachment|download|file|image|media|presigned|signed|upload)[a-z0-9]*(?:url|uri)$/u
-    .test(normalized);
 }
 
 function compareViolations(

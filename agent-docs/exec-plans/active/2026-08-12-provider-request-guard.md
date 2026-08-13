@@ -8,10 +8,11 @@ Updated: 2026-08-13
 
 - Make the external provider guard detect production SDK bypasses instead of
   only validating request objects at a small registered set of SDK call sites.
-- Preserve the narrow raw-transport exceptions required for presigned byte
-  transfers, internal traffic, generic runner proxying, dynamic SMART/FHIR
-  endpoints, providers without a verified provider-owned TypeScript SDK, and
-  the existing path-scoped xAI `x_search` Responses extension.
+- Preserve narrow raw transport for presigned byte transfers, internal traffic,
+  generic runner proxying, dynamic SMART/FHIR endpoints, providers without a
+  verified provider-owned TypeScript SDK, and the existing path-scoped xAI
+  `x_search` Responses extension. Generic runner and SMART/FHIR expressions
+  need no exception when they carry no registered-provider facts.
 
 ## Success criteria
 
@@ -173,6 +174,22 @@ Updated: 2026-08-13
   runner pass-through requires exactly one non-spread `Request` argument. Loose
   `Request` handlers remain outside provider-target evidence, so no exception or
   second resolver was added.
+- The valid round-5 retry accepted two remaining fact-flow gaps and one
+  complexity collapse. The shared fact collector now retains nested
+  destructured property provenance, follows exact properties only through
+  closed local object/array literals, and inspects provider-bearing fetch tuple
+  spreads before exception matching. Opaque spreads cannot enter any structural
+  exception. Incoming-Request and SMART/FHIR exception owners were deleted:
+  production-path fixtures prove the actual generic runner and clinical SMART
+  calls carry no registered-provider facts, while provider-bearing lookalikes
+  fail normally. Parent production-path review also removed the real Linq
+  presigned byte `PUT` from the migration inventory by binding its provider-named
+  URL to the unique audited owner-path normalizer, alongside the already bound
+  header factory. Parent review then deleted the remaining transfer URL/source
+  naming heuristics: every retained production byte or stream operation now
+  resolves to a unique registered owner, and the streamed direct-R2 smoke must
+  additionally prove the exact request binding and pipe target. This is not a
+  provider-wide allowance.
 
 ## Verification
 
@@ -185,14 +202,15 @@ Updated: 2026-08-13
 
 Current evidence:
 
-- Focused guard suite: 71 tests passed after the round-5 diagnostic correction.
+- Focused guard suite: 77 tests passed after the round-5 correction.
 - Repository-tool suite: 34 files and 577 tests passed after the round-5
   diagnostic correction. The earlier round-4 contended run timed out two
   Crabbox repeated-signal cases; that file passed alone and each quiet full
   rerun passed.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
-- `pnpm provider-requests:guard`: intentionally exits 1 with 44 current
+- `pnpm provider-requests:guard`: intentionally exits 1 with 43 current
   low-level provider transports/contracts; sibling migrations own those call
-  sites.
+  sites. The removed 44th item was the actual Linq presigned byte transfer,
+  which policy explicitly retains as raw transport.
 - Diff verification reaches the provider guard and stops on the same expected
   findings.

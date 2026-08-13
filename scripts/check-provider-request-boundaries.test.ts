@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -657,6 +659,23 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([2, 5, 14]);
   });
 
+  it("preserves provider facts across destructured transport aliases", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function direct({ openAiFetch: send }: { openAiFetch: typeof fetch }) {",
+        "  await send('/v1/responses', { method: 'POST' });",
+        "}",
+        "async function nested({ openAi: { fetch: send } }: { openAi: { fetch: typeof fetch } }) {",
+        "  await send('/v1/responses', { method: 'POST' });",
+        "}",
+      ].join("\n"),
+      "apps/cloudflare/src/provider-request-proxy.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 5]);
+  });
+
   it("reports direct CommonJS transports without treating unrelated require calls as HTTP", () => {
     const commonJsMatches = violationsOfKind(
       "raw-provider-http",
@@ -746,31 +765,14 @@ describe("check-provider-request-boundaries", () => {
       .toEqual([{ kind: "object-spread", line: 3 }]);
   });
 
-  it("allows a Node HTTP presigned PUT with a proven piped stream", () => {
+  it("does not create a provider exception for Node streamed transfers", () => {
     expect(
       violationsOfKind(
         "raw-provider-http",
         [
           "import { request as httpsRequest } from 'node:https';",
-          "function putPresignedPayload(input: { payload: Readable; presignedPutUrl: string; tlsCaCertificatePem?: string }) {",
-          "  const url = new URL(input.presignedPutUrl);",
-          "  const clientRequest = httpsRequest(url, { ...(input.tlsCaCertificatePem ? { ca: input.tlsCaCertificatePem } : {}), method: 'PUT' }, () => undefined);",
-          "  input.payload.pipe(clientRequest);",
-          "}",
-        ].join("\n"),
-        "apps/cloudflare/src/openai-presigned-upload.ts",
-      ),
-    ).toEqual([]);
-  });
-
-  it("requires an AST-proven pipe into the exact presigned request", () => {
-    expect(
-      violationsOfKind(
-        "raw-provider-http",
-        [
-          "import { request as httpsRequest } from 'node:https';",
-          "function putPresignedPayload(input: { payload: Readable; presignedPutUrl: string }) {",
-          "  const url = new URL(input.presignedPutUrl);",
+          "function putOpenAiPresignedPayload(input: { payload: Readable; openAiPresignedPutUrl: string }) {",
+          "  const url = new URL(input.openAiPresignedPutUrl);",
           "  const clientRequest = httpsRequest(url, { method: 'PUT' }, () => undefined);",
           "  // input.payload.pipe(clientRequest);",
           "}",
@@ -833,7 +835,7 @@ describe("check-provider-request-boundaries", () => {
     ).toEqual([]);
   });
 
-  it("allows an opaque presigned byte upload but reports a direct provider call beside it", () => {
+  it("requires a registered owner even for structurally safe byte uploads", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
       [
@@ -849,10 +851,10 @@ describe("check-provider-request-boundaries", () => {
       "apps/web/src/lib/linq/attachment-upload.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([7]);
+    expect(matches.map((match) => match.line)).toEqual([2, 7]);
   });
 
-  it("allows an opaque presigned byte download", () => {
+  it("requires a registered owner even for structurally safe byte downloads", () => {
     expect(
       violationsOfKind(
         "raw-provider-http",
@@ -864,7 +866,7 @@ describe("check-provider-request-boundaries", () => {
         ].join("\n"),
         "apps/web/src/lib/linq/attachment-download.ts",
       ),
-    ).toEqual([]);
+    ).toHaveLength(1);
   });
 
   it("does not exempt credential-bearing or provider-synthesized uploads", () => {
@@ -929,7 +931,7 @@ describe("check-provider-request-boundaries", () => {
       "apps/web/src/lib/linq/attachment-upload.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([2, 3, 6, 7, 8, 9]);
+    expect(matches.map((match) => match.line)).toEqual([2, 3, 6, 7, 8, 9, 12, 13]);
   });
 
   it("admits only registered presigned transfer-header factories", () => {
@@ -938,9 +940,11 @@ describe("check-provider-request-boundaries", () => {
         "raw-provider-http",
         [
           "function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return headers; }",
+          "function normalizeLinqAttachmentUploadUrl(url: string) { return url; }",
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
+          "  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
           "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
-          "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "  await fetch(uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
           "}",
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
@@ -951,32 +955,86 @@ describe("check-provider-request-boundaries", () => {
         "raw-provider-http",
         [
           "function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return headers; }",
+          "function normalizeLinqAttachmentUploadUrl(url: string) { return url; }",
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
+          "  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
           "  const headers = normalizeOtherRequiredHeaders(input.requiredHeaders);",
-          "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "  await fetch(uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
           "}",
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
       ).map((match) => match.line),
-    ).toEqual([4]);
+    ).toEqual([6]);
 
     expect(
       violationsOfKind(
         "raw-provider-http",
         [
           "function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return headers; }",
+          "function normalizeLinqAttachmentUploadUrl(url: string) { return url; }",
           "async function uploadLinqAttachmentBytes(input: { bytes: Uint8Array; requiredHeaders: Record<string, string>; uploadUrl: string }) {",
+          "  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
           "  function normalizeLinqRequiredHeaders(headers: Record<string, string>) { return { authorization: headers.authorization }; }",
           "  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders);",
-          "  await fetch(input.uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
+          "  await fetch(uploadUrl, { body: input.bytes, headers, method: 'PUT' });",
           "}",
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
       ).map((match) => match.line),
-    ).toEqual([5]);
+    ).toEqual([7]);
   });
 
-  it("allows incoming Request pass-through but reports a direct provider call in the same proxy", () => {
+  it("keeps the actual Linq presigned byte upload outside migration findings", () => {
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        readFileSync("packages/operator-config/src/linq-runtime.ts", "utf8"),
+        "packages/operator-config/src/linq-runtime.ts",
+      ).map((match) => match.line),
+    ).not.toContain(886);
+  });
+
+  it("keeps every registered production byte or stream transfer outside migration findings", () => {
+    const owners = [
+      ["apps/cloudflare/src/container-entrypoint.ts", 1646],
+      ["apps/web/src/lib/hosted-onboarding/linq-client.ts", 848],
+      ["apps/web/src/lib/hosted-onboarding/linq-contact-card.ts", 589],
+      ["packages/assistant-runtime/src/hosted-runtime/events/linq.ts", 490],
+      ["packages/inboxd/src/connectors/email/connector.ts", 128],
+      ["packages/operator-config/src/agentmail-runtime.ts", 482],
+    ] as const;
+
+    for (const [relativePath, line] of owners) {
+      expect(
+        violationsOfKind(
+          "raw-provider-http",
+          readFileSync(relativePath, "utf8"),
+          relativePath,
+        ).map((match) => match.line),
+      ).not.toContain(line);
+    }
+  });
+
+  it("does not inherit a transfer allowance through a duplicate owner name", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function downloadHostedLinqAttachmentBytes(url: string, input: { fetchImplementation: typeof fetch }) {",
+        "  await input.fetchImplementation(url);",
+        "}",
+        "function shadow() {",
+        "  async function downloadHostedLinqAttachmentBytes(url: string, input: { fetchImplementation: typeof fetch }) {",
+        "    await input.fetchImplementation(url);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 6]);
+  });
+
+  it("reports provider-bearing incoming Requests without a path exception", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
       [
@@ -988,10 +1046,10 @@ describe("check-provider-request-boundaries", () => {
       "apps/cloudflare/src/hosted-runner-egress-proxy.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([3]);
+    expect(matches.map((match) => match.line)).toEqual([2, 3]);
   });
 
-  it("rejects a second init on incoming Request forwarding", () => {
+  it("reports every provider-bearing incoming Request forwarding shape", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
       [
@@ -1005,10 +1063,10 @@ describe("check-provider-request-boundaries", () => {
       "apps/cloudflare/src/hosted-runner-egress-proxy.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([3, 4, 5]);
+    expect(matches.map((match) => match.line)).toEqual([2, 3, 4, 5]);
   });
 
-  it("allows dynamic SMART/FHIR traffic but reports a registered provider endpoint beside it", () => {
+  it("fails closed when SMART/FHIR traffic shares explicit provider file evidence", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
       [
@@ -1017,10 +1075,10 @@ describe("check-provider-request-boundaries", () => {
         "  await fetchImpl('https://api.openai.com/v1/responses');",
         "}",
       ].join("\n"),
-      "apps/web/src/lib/openai/smart-fhir-client.ts",
+      "apps/web/src/lib/clinical-records/smart.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([3]);
+    expect(matches.map((match) => match.line)).toEqual([2, 3]);
   });
 
   it("does not exempt provider-named parameters or config in SMART/FHIR code", () => {
@@ -1036,7 +1094,7 @@ describe("check-provider-request-boundaries", () => {
         "  await fetchImpl(openAiEndpoint);",
         "}",
       ].join("\n"),
-      "apps/web/src/lib/openai/smart-fhir-client.ts",
+      "apps/web/src/lib/clinical-records/smart.ts",
     );
 
     expect(matches.map((match) => match.line)).toEqual([3, 4, 7]);
@@ -1055,6 +1113,23 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => match.line)).toEqual([4]);
+  });
+
+  it("keeps actual generic runner and SMART traffic outside provider candidates", () => {
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        readFileSync("apps/cloudflare/src/runner-egress-intercept.ts", "utf8"),
+        "apps/cloudflare/src/runner-egress-intercept.ts",
+      ),
+    ).toEqual([]);
+    expect(
+      violationsOfKind(
+        "raw-provider-http",
+        readFileSync("apps/web/src/lib/clinical-records/smart.ts", "utf8"),
+        "apps/web/src/lib/clinical-records/smart.ts",
+      ),
+    ).toEqual([]);
   });
 
   it("keeps no-verified-SDK providers explicit and rejects general xAI HTTP", () => {
@@ -1201,8 +1276,6 @@ describe("check-provider-request-boundaries", () => {
     expect(providerHttpExceptionRegistry.map((entry) => entry.id)).toEqual([
       "presigned-byte-transfer",
       "internal-same-origin",
-      "incoming-request-pass-through",
-      "dynamic-smart-fhir",
       "xai-x-search-responses",
     ]);
   });
@@ -1312,7 +1385,7 @@ describe("check-provider-request-boundaries", () => {
         "const created = parseLinqResponse();",
         "fetch(created.upload_url, { body: new Uint8Array([1]).buffer, method: 'PUT' });",
       ].join("\n"),
-      "apps/web/src/lib/hosted-onboarding/linq-client.ts",
+      "apps/web/src/lib/attachment-upload.ts",
     );
     const internalHandlerMatches = violationsOfKind(
       "raw-provider-http",
@@ -1328,6 +1401,50 @@ describe("check-provider-request-boundaries", () => {
 
     expect(staticMemberMatches).toEqual([]);
     expect(internalHandlerMatches).toEqual([]);
+  });
+
+  it("follows exact static properties in local provider route maps", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const routes = {",
+        "  responses: 'https://api.openai.com/v1/responses',",
+        "  messages: 'https://api.linqapp.com/api/partner/v3/chats',",
+        "  nested: { image: 'https://api.openai.com/v1/images' },",
+        "} as const;",
+        "fetch(routes.responses, { method: 'POST' });",
+        "fetch(routes.messages, { method: 'POST' });",
+        "fetch(routes.nested.image, { method: 'POST' });",
+        "const created = await createAttachment();",
+        "fetch(created.upload_url, { method: 'PUT' });",
+      ].join("\n"),
+      "apps/web/src/lib/provider-route-map.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([6, 7, 8]);
+  });
+
+  it("fails closed for provider-bearing fetch argument spreads", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const requestArgs: Parameters<typeof fetch> = ['https://api.openai.com/v1/responses', { method: 'POST' }];",
+        "fetch(...requestArgs);",
+        "const internalArgs: Parameters<typeof fetch> = ['/api/status'];",
+        "fetch(...internalArgs);",
+        "async function relay(openAiFetch: typeof fetch, args: Parameters<typeof fetch>) {",
+        "  await openAiFetch(...args);",
+        "}",
+        "async function exceptions(openAiFetch: typeof fetch, openAiRequest: Request, openAiUploadArgs: Parameters<typeof fetch>) {",
+        "  await fetch(...[openAiRequest]);",
+        "  await fetch(...openAiUploadArgs);",
+        "  await openAiFetch(...['https://api.x.ai/v1/responses', { method: 'POST' }]);",
+        "}",
+      ].join("\n"),
+      "apps/cloudflare/src/provider-request-proxy.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 6, 9, 10, 11]);
   });
 
 });
