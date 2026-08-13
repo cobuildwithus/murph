@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   WorkoutMemberActionExpectedSetResultV1,
+  WorkoutMemberActionExpectedSetStateV1,
   WorkoutMemberActionSetResultV1,
   WorkoutSession,
 } from "@murphai/contracts";
@@ -109,6 +110,34 @@ function appendAction(setCount = 1) {
   };
 }
 
+function removeAction(input: {
+  expectedSets?: WorkoutMemberActionExpectedSetStateV1[];
+  setPosition?: number;
+} = {}) {
+  const expectedSets = input.expectedSets ?? [
+    { logged: false, result: null },
+    { logged: true, result: { kind: "reps" as const, reps: 8 } },
+  ];
+  return {
+    expectedWorkout: {
+      actionBinding: ACTION_BINDING,
+      exercises: [{
+        name: "Leg press",
+        sets: expectedSets.map(({ logged }) => ({ logged })),
+      }],
+    },
+    kind: "workout.live.apply" as const,
+    mutations: [{
+      exerciseName: "Leg press",
+      exercisePosition: 1,
+      expectedSets,
+      kind: "set.remove" as const,
+      setPosition: input.setPosition ?? 2,
+    }],
+    version: 1 as const,
+  };
+}
+
 describe("live workout member action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -185,6 +214,175 @@ describe("live workout member action", () => {
       vault: "/vault",
     })).resolves.toEqual({ status: "unchanged" });
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("removes a set and compacts canonical set order", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1 }, { order: 2, reps: 8 }, { order: 3 }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        ...removeAction({
+          expectedSets: [
+            { logged: false, result: null },
+            { logged: true, result: { kind: "reps", reps: 8 } },
+            { logged: false, result: null },
+          ],
+        }),
+        expectedWorkout: {
+          actionBinding: ACTION_BINDING,
+          exercises: [{
+            name: "Leg press",
+            sets: [{ logged: false }, { logged: true }, { logged: false }],
+          }],
+        },
+      },
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
+      ...BASE_WORKOUT.exercises[0],
+      sets: [{ order: 1 }, { order: 2 }],
+    }]);
+  });
+
+  it("treats an exact set-removal replay as unchanged", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1 }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: removeAction(),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("edits retained original positions before compacting removed sets", async () => {
+    const expectedSets = [
+      { logged: false, result: null },
+      { logged: true, result: { kind: "reps" as const, reps: 8 } },
+      { logged: false, result: null },
+    ];
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1 }, { order: 2, reps: 8 }, { order: 3 }],
+      }],
+    })]);
+
+    const action = removeAction({ expectedSets, setPosition: 1 });
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        ...action,
+        mutations: [
+          ...action.mutations,
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedResult: { kind: "reps" as const, reps: 8 },
+            kind: "set.put" as const,
+            requiresExistingSet: true,
+            result: { kind: "reps" as const, reps: 10 },
+            setPosition: 2,
+          },
+        ],
+      },
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
+      ...BASE_WORKOUT.exercises[0],
+      sets: [{ order: 1, reps: 10 }, { order: 2 }],
+    }]);
+
+    mocks.updateLiveWorkoutExercises.mockClear();
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1, reps: 10 }, { order: 2 }],
+      }],
+    })]);
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        ...action,
+        mutations: [
+          ...action.mutations,
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedResult: { kind: "reps" as const, reps: 8 },
+            kind: "set.put" as const,
+            requiresExistingSet: true,
+            result: { kind: "reps" as const, reps: 10 },
+            setPosition: 2,
+          },
+        ],
+      },
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale set removal and keeps at least one set", async () => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1 }, { order: 2, reps: 10 }],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: removeAction(),
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [{ order: 1 }, { order: 2 }],
+      }],
+    })]);
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        ...removeAction({
+          expectedSets: [
+            { logged: false, result: null },
+            { logged: false, result: null },
+          ],
+          setPosition: 1,
+        }),
+        expectedWorkout: {
+          actionBinding: ACTION_BINDING,
+          exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+        },
+      },
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
   });
 
   it("fails closed when the targeted set changed after the visible snapshot", async () => {

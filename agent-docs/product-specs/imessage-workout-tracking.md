@@ -135,8 +135,10 @@ An active workout may have zero pending sets after the final result is logged; i
 ## Direct action loop
 
 The expanded native editor derives one bounded expected shape from the visible
-V6 workout snapshot and emits only closed `exercise.append` and `set.put`
-mutations. Positions are one-based presentation coordinates, and each exercise
+V6 workout snapshot and emits only closed `exercise.append`, `set.put`, and
+`set.remove` mutations. A removal carries the full typed set snapshot for that
+exercise, so the canonical owner can reject stale input and recognize an exact
+replay after positional compaction. Positions are one-based presentation coordinates, and each exercise
 or set coordinate may appear at most once so the batch has one exact,
 single-valued postcondition. The action carries no member id or canonical
 workout id. Its one-way action binding is a stale-card

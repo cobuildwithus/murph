@@ -105,6 +105,26 @@ export type WorkoutMemberActionExpectedSetResultV1 = z.infer<
   typeof workoutMemberActionExpectedSetResultV1Schema
 >;
 
+export const workoutMemberActionExpectedSetStateV1Schema = z
+  .object({
+    logged: z.boolean(),
+    result: workoutMemberActionExpectedSetResultV1Schema.nullable(),
+  })
+  .strict()
+  .superRefine((state, context) => {
+    if (state.logged !== (state.result !== null)) {
+      context.addIssue({
+        code: "custom",
+        message: "Logged state and typed set state must agree.",
+        path: ["result"],
+      });
+    }
+  });
+
+export type WorkoutMemberActionExpectedSetStateV1 = z.infer<
+  typeof workoutMemberActionExpectedSetStateV1Schema
+>;
+
 const workoutMemberActionExpectedSetV1Schema = z
   .object({
     logged: z.boolean(),
@@ -149,6 +169,18 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
         setPosition: workoutSetPositionSchema,
       })
       .strict(),
+    z
+      .object({
+        exerciseName: singleLineText(memberActionV1Bounds.exerciseName),
+        exercisePosition: workoutExercisePositionSchema,
+        expectedSets: z
+          .array(workoutMemberActionExpectedSetStateV1Schema)
+          .min(2)
+          .max(memberActionV1Bounds.setsPerExercise),
+        kind: z.literal("set.remove"),
+        setPosition: workoutSetPositionSchema,
+      })
+      .strict(),
   ],
 ).superRefine((mutation, context) => {
   if (
@@ -185,6 +217,15 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
       path: ["expectedResult"],
     });
   }
+  if (mutation.kind === "set.remove") {
+    if (mutation.setPosition > mutation.expectedSets.length) {
+      context.addIssue({
+        code: "custom",
+        message: "A removed set must exist in the expected exercise snapshot.",
+        path: ["setPosition"],
+      });
+    }
+  }
 });
 
 export type WorkoutMemberActionMutationV1 = z.infer<
@@ -211,12 +252,20 @@ export const workoutLiveApplyMemberActionV1Schema = z
   })
   .strict()
   .superRefine((action, context) => {
-    const targets = new Set<string>();
+    const targets = new Map<string, WorkoutMemberActionMutationV1>();
+    const removalSnapshots = new Map<
+      number,
+      { exerciseName: string; expectedSets: string }
+    >();
     action.mutations.forEach((mutation, index) => {
       const target = mutation.kind === "exercise.append"
         ? `exercise:${mutation.exercisePosition}`
         : `set:${mutation.exercisePosition}:${mutation.setPosition}`;
-      if (targets.has(target)) {
+      const existing = targets.get(target);
+      const replacesRemovedSet = existing?.kind === "set.remove"
+        && mutation.kind === "set.put"
+        && !mutation.requiresExistingSet;
+      if (existing && !replacesRemovedSet) {
         context.addIssue({
           code: "custom",
           message: "Each workout mutation target must be unique.",
@@ -224,7 +273,30 @@ export const workoutLiveApplyMemberActionV1Schema = z
         });
         return;
       }
-      targets.add(target);
+      targets.set(target, mutation);
+
+      if (mutation.kind === "set.remove") {
+        const snapshot = {
+          exerciseName: mutation.exerciseName,
+          expectedSets: JSON.stringify(mutation.expectedSets),
+        };
+        const existingSnapshot = removalSnapshots.get(
+          mutation.exercisePosition,
+        );
+        if (
+          existingSnapshot
+          && (existingSnapshot.exerciseName !== snapshot.exerciseName
+            || existingSnapshot.expectedSets !== snapshot.expectedSets)
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "Set removals for one exercise must share one snapshot.",
+            path: ["mutations", index, "expectedSets"],
+          });
+          return;
+        }
+        removalSnapshots.set(mutation.exercisePosition, snapshot);
+      }
     });
   });
 

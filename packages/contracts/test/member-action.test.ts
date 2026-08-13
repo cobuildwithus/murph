@@ -243,6 +243,74 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts a set removal only with its exact visible state", () => {
+    const request = validRequest();
+    const removal = {
+      exerciseName: "Leg press",
+      exercisePosition: 1,
+      expectedSets: [
+        { logged: false, result: null },
+        { logged: true, result: { kind: "reps" as const, reps: 8 } },
+      ],
+      kind: "set.remove" as const,
+      setPosition: 2,
+    };
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: { ...request.action, mutations: [removal] },
+    }).success).toBe(true);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [
+          removal,
+          {
+            ...request.action.mutations[0],
+            requiresExistingSet: false,
+            setPosition: 2,
+          },
+        ],
+      },
+    }).success).toBe(true);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          ...removal,
+          expectedSets: [{
+            logged: true,
+            result: { kind: "reps", reps: 8 },
+          }],
+        }],
+      },
+    }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          ...removal,
+          setPosition: 3,
+        }],
+      },
+    }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [{
+          ...removal,
+          expectedSets: [
+            { logged: true, result: null },
+            { logged: true, result: { kind: "reps", reps: 8 } },
+          ],
+        }],
+      },
+    }).success).toBe(false);
+  });
+
   it("rejects duplicate mutation targets so exact replay has one postcondition", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({
@@ -258,6 +326,26 @@ describe("member action contract", () => {
         ],
       },
     }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        mutations: [
+          request.action.mutations[0],
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedSets: [
+              { logged: false, result: null },
+              { logged: false, result: null },
+            ],
+            kind: "set.remove",
+            setPosition: 1,
+          },
+        ],
+      },
+    }).success).toBe(false);
+
     const append = {
       exercisePosition: 2,
       kind: "exercise.append" as const,
