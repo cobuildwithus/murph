@@ -455,7 +455,9 @@ export function decodeDeviceWebhookRawBody(payload: DeviceWebhookQueuePayloadV1)
 }
 
 export function createDeviceWebhookHeaders(payload: DeviceWebhookQueuePayloadV1): Headers {
-  return new Headers(payload.headers.map(({ name, value }) => [name, value]));
+  return new Headers(
+    payload.headers.map(({ name, value }): [string, string] => [name, value]),
+  );
 }
 
 function createDeviceWebhookTransportAad(transportId: string): Uint8Array {
