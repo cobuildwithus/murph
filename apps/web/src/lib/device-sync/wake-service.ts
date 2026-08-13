@@ -7,6 +7,9 @@ import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
+import {
+  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -85,16 +88,6 @@ import {
 const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
 const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v2";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
-const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
-  "junctionWeightHistoryBackfillCoverage";
-const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX = "v1|";
-const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_SOURCE_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
-const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_BLOCKED_SOURCES = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-]);
-
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
@@ -797,65 +790,20 @@ async function resetHostedJunctionWeightHistoryCoverageForSource(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   tx: HostedPrismaTransactionClient;
 }): Promise<void> {
-  const reset = removeCurrentJunctionWeightHistoryCoverage({
-    existingValue:
-      input.connection.metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY],
+  const metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata: input.connection.metadata,
     providerSlug: input.sourceProviderSlug,
+    resource: "weight",
+    version: 1,
   });
-  if (!reset.changed) {
+  if (!metadata) {
     return;
   }
 
-  const metadata = { ...input.connection.metadata };
-  if (reset.value === null) {
-    delete metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY];
-  } else {
-    metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY] = reset.value;
-  }
   await input.store.syncDurableConnectionState({
     ...input.connection,
     metadata,
   }, input.tx);
-}
-
-function removeCurrentJunctionWeightHistoryCoverage(input: {
-  existingValue: unknown;
-  providerSlug: string;
-}): { changed: boolean; value: string | null } {
-  if (
-    typeof input.existingValue !== "string"
-    || !input.existingValue.startsWith(JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX)
-  ) {
-    return { changed: false, value: null };
-  }
-
-  const encodedProviderSlugs = input.existingValue.slice(
-    JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX.length,
-  );
-  const providerSlugs = encodedProviderSlugs.split(",");
-  const canonicalProviderSlugs = [...new Set(providerSlugs)]
-    .sort((left, right) => left.localeCompare(right));
-  if (
-    providerSlugs.length === 0
-    || canonicalProviderSlugs.join(",") !== encodedProviderSlugs
-    || providerSlugs.some((providerSlug) =>
-      !JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_SOURCE_PATTERN.test(providerSlug)
-      || JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_BLOCKED_SOURCES.has(providerSlug)
-    )
-    || !providerSlugs.includes(input.providerSlug)
-  ) {
-    return { changed: false, value: input.existingValue };
-  }
-
-  const remainingProviderSlugs = providerSlugs.filter(
-    (providerSlug) => providerSlug !== input.providerSlug,
-  );
-  return {
-    changed: true,
-    value: remainingProviderSlugs.length > 0
-      ? `${JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX}${remainingProviderSlugs.join(",")}`
-      : null,
-  };
 }
 
 /**

@@ -81,7 +81,14 @@ export interface JunctionProviderConnection {
 
 export type JunctionDateQueryFormat = "date" | "datetime";
 
+export interface JunctionCollectionWorkLimit {
+  maxAttemptsPerPage: number;
+  maxPages: number;
+  requestTimeoutMs: number;
+}
+
 export interface JunctionWindowInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
   dateQueryFormat?: JunctionDateQueryFormat;
   maxRecords?: number;
   resource: string;
@@ -99,6 +106,7 @@ export interface JunctionProfileSummaryInput {
 }
 
 export interface JunctionWorkoutStreamInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
   signal?: AbortSignal | null;
   workoutId: string;
 }
@@ -421,7 +429,16 @@ export class JunctionClient {
       "GET",
       `/v2/timeseries/workouts/${encodeURIComponent(workoutId)}/stream`,
       undefined,
-      { endpointKind: "junction_workout_stream", signal: input.signal ?? null },
+      {
+        endpointKind: "junction_workout_stream",
+        signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
+      },
     );
   }
 
@@ -532,12 +549,15 @@ export class JunctionClient {
     let cursor: string | null = null;
     let pages = 0;
     const extractRecords = options.extractRecords ?? extractCollectionRecords;
+    const pageLimit = input.collectionWorkLimit?.maxPages ?? MAX_COLLECTION_PAGES;
 
     do {
-      if (pages >= MAX_COLLECTION_PAGES) {
+      if (pages >= pageLimit) {
         throw deviceSyncError({
-          code: "JUNCTION_API_PAGINATION_LIMIT",
-          message: `Junction ${input.resource} response exceeded the configured page limit.`,
+          code: input.collectionWorkLimit
+            ? "JUNCTION_API_WINDOW_TOO_LARGE"
+            : "JUNCTION_API_PAGINATION_LIMIT",
+          message: `Junction ${input.resource} response exceeded the page budget for one complete window.`,
           retryable: true,
           httpStatus: 502,
         });
@@ -561,7 +581,16 @@ export class JunctionClient {
         "GET",
         `${path}?${search.toString()}`,
         undefined,
-        { endpointKind: options.endpointKind, signal: input.signal ?? null },
+        {
+          endpointKind: options.endpointKind,
+          signal: input.signal ?? null,
+          ...(input.collectionWorkLimit
+            ? {
+                maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+                timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+              }
+            : {}),
+        },
       );
       const maxRecords = input.maxRecords ?? MAX_COLLECTION_RECORDS;
       if (!Number.isSafeInteger(maxRecords) || maxRecords < 1) {
@@ -590,9 +619,17 @@ export class JunctionClient {
     method: "DELETE" | "GET" | "POST",
     path: string,
     body?: Record<string, unknown>,
-    options: { endpointKind?: string; optional404?: boolean; signal?: AbortSignal | null } = {},
+    options: {
+      endpointKind?: string;
+      maxAttempts?: number;
+      optional404?: boolean;
+      signal?: AbortSignal | null;
+      timeoutMs?: number;
+    } = {},
   ): Promise<T> {
-    const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
+    const attempts = method === "GET"
+      ? options.maxAttempts ?? MAX_GET_ATTEMPTS
+      : 1;
     let lastError: unknown;
     const endpointKind = options.endpointKind ?? resolveJunctionEndpointKind(path);
     const requestDiagnostics = buildProviderRequestDiagnostics({
@@ -611,7 +648,7 @@ export class JunctionClient {
       throwIfProviderRequestAborted(options.signal);
       const requestAbort = createProviderRequestAbortSignal({
         signal: options.signal ?? null,
-        timeoutMs: this.requestTimeoutMs,
+        timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
       });
 
       try {

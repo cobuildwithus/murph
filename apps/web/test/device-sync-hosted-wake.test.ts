@@ -4,6 +4,10 @@ import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
 import type { StoredDeviceSyncAccount } from "@murphai/device-syncd/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -87,6 +91,45 @@ const mocks = vi.hoisted(() => {
 
   return state;
 });
+
+function addJunctionHistoryCoverage(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+  resource: string,
+): Record<string, unknown> {
+  const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata,
+    providerSlug,
+    resource,
+    version: resource === "note" ? 2 : 1,
+  });
+  if (!update) {
+    throw new TypeError("Expected representable Junction history coverage.");
+  }
+  return { ...metadata, [update.metadataKey]: update.value };
+}
+
+function hasJunctionHistoryCoverage(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+  resource: string,
+): boolean {
+  return hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    metadata,
+    providerSlug,
+    resource,
+    resource === "note" ? 2 : 1,
+  );
+}
+
+function toFutureJunctionHistoryCoverage(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(metadata).map(([key, value]) => [
+    key,
+    typeof value === "string" ? value.replace(/^m1\|/u, "m2|") : value,
+  ]));
+}
 
 const ROUTING_INDEX_KEY = Buffer.alloc(32, 1);
 
@@ -816,9 +859,15 @@ describe("hosted device-sync wakes", () => {
   it("reopens companion weight history only for the new explicit-connect source epoch", async () => {
     let currentConnection = buildHostedConnection({
       id: "dsc_junction_123",
-      metadata: {
-        junctionWeightHistoryBackfillCoverage: "v1|apple_health_kit,withings",
-      },
+      metadata: addJunctionHistoryCoverage(
+        addJunctionHistoryCoverage(
+          addJunctionHistoryCoverage({}, "apple_health_kit", "caffeine"),
+          "apple_health_kit",
+          "weight",
+        ),
+        "withings",
+        "weight",
+      ),
       provider: "junction",
       setupPhase: "source_confirmed",
     });
@@ -887,15 +936,23 @@ describe("hosted device-sync wakes", () => {
       sourceProviderSlug: "apple_health_kit",
       status: "disconnected",
     });
-    expect(currentConnection.metadata).toEqual({
-      junctionWeightHistoryBackfillCoverage: "v1|withings",
-    });
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "apple_health_kit",
+      "weight",
+    )).toBe(false);
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "withings",
+      "weight",
+    )).toBe(true);
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "apple_health_kit",
+      "caffeine",
+    )).toBe(true);
     expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: {
-          junctionWeightHistoryBackfillCoverage: "v1|withings",
-        },
-      }),
+      expect.objectContaining({ metadata: currentConnection.metadata }),
       mocks.prismaTx,
     );
 
@@ -967,11 +1024,16 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("preserves future companion weight coverage while still creating the explicit-connect epoch", async () => {
+    const futureCoverage = toFutureJunctionHistoryCoverage(
+      addJunctionHistoryCoverage(
+        addJunctionHistoryCoverage({}, "apple_health_kit", "weight"),
+        "withings",
+        "weight",
+      ),
+    );
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
-      metadata: {
-        junctionWeightHistoryBackfillCoverage: "v2|apple_health_kit,withings",
-      },
+      metadata: futureCoverage,
       provider: "junction",
       setupPhase: "source_confirmed",
     });
@@ -997,18 +1059,18 @@ describe("hosted device-sync wakes", () => {
       status: "disconnected",
       tx: mocks.prismaTx,
     }));
-    expect(connection.metadata).toEqual({
-      junctionWeightHistoryBackfillCoverage: "v2|apple_health_kit,withings",
-    });
+    expect(connection.metadata).toEqual(futureCoverage);
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
   it("does not reset companion weight coverage when explicit connect finds the source already connected", async () => {
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
-      metadata: {
-        junctionWeightHistoryBackfillCoverage: "v1|apple_health_kit,withings",
-      },
+      metadata: addJunctionHistoryCoverage(
+        addJunctionHistoryCoverage({}, "apple_health_kit", "weight"),
+        "withings",
+        "weight",
+      ),
       provider: "junction",
       setupPhase: "source_confirmed",
     });
@@ -3294,9 +3356,7 @@ describe("hosted device-sync wakes", () => {
     let currentConnection = buildHostedConnection({
       displayName: "Junction",
       externalAccountId: "junction-user-established",
-      metadata: {
-        junctionWeightHistoryBackfillCoverage: "v1|renpho",
-      },
+      metadata: addJunctionHistoryCoverage({}, "renpho", "weight"),
       provider: "junction",
       scopes: [],
       setupPhase: "source_confirmed",
@@ -3306,10 +3366,11 @@ describe("hosted device-sync wakes", () => {
     const revokeSourceAccess = vi.fn(async () => {
       currentConnection = {
         ...currentConnection,
-        metadata: {
-          ...currentConnection.metadata,
-          junctionWeightHistoryBackfillCoverage: "v1|renpho,withings",
-        },
+        metadata: addJunctionHistoryCoverage(
+          currentConnection.metadata,
+          "withings",
+          "weight",
+        ),
       };
     });
     mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
@@ -3348,15 +3409,18 @@ describe("hosted device-sync wakes", () => {
     })).resolves.toBeUndefined();
 
     expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "withings");
-    expect(currentConnection.metadata).toEqual({
-      junctionWeightHistoryBackfillCoverage: "v1|renpho",
-    });
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "renpho",
+      "weight",
+    )).toBe(true);
+    expect(hasJunctionHistoryCoverage(
+      currentConnection.metadata,
+      "withings",
+      "weight",
+    )).toBe(false);
     expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: {
-          junctionWeightHistoryBackfillCoverage: "v1|renpho",
-        },
-      }),
+      expect.objectContaining({ metadata: currentConnection.metadata }),
       mocks.prismaTx,
     );
   });

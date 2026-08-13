@@ -1,9 +1,28 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
 } from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+function addWeightHistoryCoverage(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+): Record<string, unknown> {
+  const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata,
+    providerSlug,
+    resource: "weight",
+    version: 1,
+  });
+  if (!update) {
+    throw new TypeError("Expected representable Junction weight history coverage.");
+  }
+  return { ...metadata, [update.metadataKey]: update.value };
+}
 
 const mocks = vi.hoisted(() => ({
   buildHostedPublicDeviceSyncAccount: vi.fn((input: {
@@ -1560,12 +1579,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
   });
 
   it("does not resurrect companion weight coverage from a pre-reconnect completion", async () => {
+    const currentMetadata = addWeightHistoryCoverage({}, "withings");
+    const staleMetadata = addWeightHistoryCoverage(
+      currentMetadata,
+      "apple_health_kit",
+    );
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         id: "conn_junction_weight_reconnect",
-        metadata: {
-          junctionWeightHistoryBackfillCoverage: "v1|withings",
-        },
+        metadata: currentMetadata,
         provider: "junction",
         updatedAt: "2026-04-06T10:01:00.000Z",
       }),
@@ -1579,9 +1601,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         body: JSON.stringify({
           updates: [{
             connection: {
-              metadata: {
-                junctionWeightHistoryBackfillCoverage: "v1|apple_health_kit,withings",
-              },
+              metadata: staleMetadata,
             },
             connectionId: "conn_junction_weight_reconnect",
             observedConnectedAt: "2026-04-06T09:00:00.000Z",
@@ -1596,9 +1616,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
-    expect(harness.record.metadata).toEqual({
-      junctionWeightHistoryBackfillCoverage: "v1|withings",
-    });
+    expect(harness.record.metadata).toEqual(currentMetadata);
   });
 
   it("rejects runtime writes after a provider-application binding becomes stale", async () => {
