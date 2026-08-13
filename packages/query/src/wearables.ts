@@ -258,20 +258,36 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const activityScore = resolveMetric("activityScore", selectMetricCandidates(explicitDateCandidates, "activityScore"), {
       metricFamily: "activity",
     });
-    const activityAverageHeartRate = resolveMetric(
-      "activityAverageHeartRate",
-      selectMetricCandidates(explicitDateCandidates, "activityAverageHeartRate"),
-      { metricFamily: "activity" },
+    const activityAverageHeartRate = withMetricFallback(
+      resolveMetric(
+        "activityAverageHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "activityAverageHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      resolveMetric(
+        "averageHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "averageHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      "Used the legacy activity average heart rate because no dedicated activity average was available.",
     );
     const walkingAverageHeartRate = resolveMetric(
       "walkingAverageHeartRate",
       selectMetricCandidates(explicitDateCandidates, "walkingAverageHeartRate"),
       { metricFamily: "activity" },
     );
-    const minimumHeartRate = resolveMetric(
-      "minimumHeartRate",
-      selectMetricCandidates(explicitDateCandidates, "minimumHeartRate"),
-      { metricFamily: "activity" },
+    const minimumHeartRate = withMetricFallback(
+      resolveMetric(
+        "minimumHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "minimumHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      resolveMetric(
+        "lowestHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "lowestHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      "Used the legacy activity minimum heart rate because no dedicated activity minimum was available.",
     );
     const lowActivityMinutes = resolveMetric(
       "lowActivityMinutes",
