@@ -7,6 +7,57 @@ Last verified: 2026-08-13
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Optional local Frog issue repair uses exact App-and-main-bound admission,
+ReviewGPT-authored implementation patches, parent-revalidated ordinary
+protected PR merges, one authenticated-operator/same-repository PR predicate,
+fully traversed deterministic-branch PR history plus latest-body-editor
+provenance with parent-local baseline preservation and foreign-descendant
+handoff plus pre-synchronization exact/ancestor local-handoff restoration, GitHub-owned
+implement/resume recovery state including clean
+post-commit/pre-first-push continuation and exact parent-local body/head
+provenance for remote-no-PR continuation, dual pre-push/pre-create issue
+authority refresh, exact immutable `origin/main` friction-task blob/path/digest
+packaging plus trusted local/PR identity retention and post-wait/final-merge
+fresh-ref revalidation after the final scope evaluation for implementation and
+canonical review without the mutable
+GitHub-content connector, mandatory
+foul-play assessment in both implementation prompts without hostile-comment
+queue veto, no historical
+close-only path, a native workspace-only Codex
+permission profile, canonical parent-owned ReviewGPT gates whose complete prompt-preset surface is
+trusted-main-bound and whose archive uses the exact digest-bound parent-local
+body with pre/post-wait and pre-persistence drift checks that preserve a new
+operator handoff, plus fresh trusted-control fences after every long canonical
+review and immediately before merge, and matching fences from the invocation's
+loaded-runner head to fresh `main` so old in-memory authority cannot merge under
+superseded policy, candidate-and-runner-bound PASS recovery across restarts,
+and frozen scriptless primary dependency reconciliation with lockfile drift in
+the trusted review surface, using a dependency-free bounded exact-process-group
+bootstrap whose cleanup precedes native-lock release, an explicit Frog-script
+bounded generated-launcher handoff on that retained gate so install-time `RunAtLoad`
+is prompt without turning ordinary contention into a retry queue, an explicit Frog-script
+merge allowlist with one canonical
+issue-bound completed-plan exception and exclusions for policy, skills,
+friction tasks, general documentation, and GitHub Actions helpers, one
+non-closing issue binding with parent-only post-merge
+closure and bounded never-closed recovery that refuses a deliberate reopen, durable
+descendant/closed-unmerged findings/retrospective
+handoffs for terminal checks and conflicts, fixed-body empty-tree human
+handoff for terminal pre-PR implementation/worker outcomes without a second
+implementation, retryable post-commit task refresh outside worker-output
+classification, pre-remote local disposition recovery, unchanged-PR
+ancestor-only descendant discard and exact-body handoff without a push, and
+exact retained-head
+or nonexistence lease authorization that preserves foreign deterministic
+branches, one absolute process-group-bounded
+invocation, a native-advisory-serialized two-hour LaunchAgent, and bounded
+metadata-only local state. Its ownership and proof are jointly
+specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
+`agent-docs/operations/verification-and-runtime.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
+
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
 connection-specific retry work and Web dirty rows retain dirty resource/deletion
