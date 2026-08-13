@@ -53,6 +53,8 @@ import {
   consumeOAuthState,
   createOAuthState,
   deleteExpiredOAuthStates,
+  discardUnconsumedOAuthState,
+  resolveOAuthStateWithoutProviderAuthority,
 } from "./store/oauth-states.ts";
 import {
   DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION,
@@ -65,6 +67,7 @@ import {
   upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
 import {
+  clearOAuthCredentialAfterConfirmedRevoke as clearStoredOAuthCredentialAfterConfirmedRevoke,
   markSyncFailed as markStoredSyncFailed,
   markConnectionSetupFailed as markStoredConnectionSetupFailed,
   markSyncStarted as markStoredSyncStarted,
@@ -82,6 +85,7 @@ import {
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   ConsumeOAuthStateResult,
+  DiscardUnconsumedOAuthStateResult,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
   DeviceSyncJobInput,
@@ -90,6 +94,7 @@ import type {
   ListDeviceConnectionSourcesInput,
   ListDeviceSyncAccountsInput,
   OAuthStateRecord,
+  OAuthStateConsumeClaim,
   ProviderAuthTokens,
   StoredDeviceConnectionSource,
   StoredDeviceSyncAccount,
@@ -177,6 +182,25 @@ export class SqliteDeviceSyncStore {
     expectedOwnerId?: string,
   ): ConsumeOAuthStateResult {
     return consumeOAuthState(this.database, state, now, expectedProvider, expectedOwnerId);
+  }
+
+  discardUnconsumedOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): DiscardUnconsumedOAuthStateResult {
+    return discardUnconsumedOAuthState(
+      this.database,
+      state,
+      now,
+      expectedProvider,
+      expectedOwnerId,
+    );
+  }
+
+  resolveOAuthStateWithoutProviderAuthority(claim: OAuthStateConsumeClaim): boolean {
+    return resolveOAuthStateWithoutProviderAuthority(this.database, claim);
   }
 
   listAccounts(input: ListDeviceSyncAccountsInput | string = {}): StoredDeviceSyncAccount[] {
@@ -394,7 +418,13 @@ export class SqliteDeviceSyncStore {
     now: string,
     code: string,
     message: string,
-  ): { account: StoredDeviceSyncAccount | null; applied: boolean } {
+    oauthClaim?: OAuthStateConsumeClaim,
+  ): {
+    account: StoredDeviceSyncAccount | null;
+    applied: boolean;
+    blockedByRefreshLease: boolean;
+    oauthTokenVersion: number | null;
+  } {
     return markStoredConnectionSetupFailed(
       this.database,
       accountId,
@@ -402,6 +432,22 @@ export class SqliteDeviceSyncStore {
       now,
       code,
       message,
+      oauthClaim,
+    );
+  }
+
+  clearOAuthCredentialAfterConfirmedRevoke(
+    accountId: string,
+    expectedConnectedAt: string,
+    expectedTokenVersion: number,
+    now: string,
+  ): boolean {
+    return clearStoredOAuthCredentialAfterConfirmedRevoke(
+      this.database,
+      accountId,
+      expectedConnectedAt,
+      expectedTokenVersion,
+      now,
     );
   }
 

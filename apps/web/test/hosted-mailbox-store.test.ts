@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
+  appendPreparedHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
   appendHostedEnvironmentVoiceMailboxEnvelopeTx,
@@ -31,6 +32,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   projectHostedMailboxItem,
+  prepareHostedMailboxEnvelopeAppend,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLiveItemById,
   readHostedMailboxRecentLiveConversationItemIds,
@@ -1185,6 +1187,91 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("does not reserve ordering sequences when prepared encryption fails", async () => {
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate(),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt(input) {
+        return input.value;
+      },
+      encrypt() {
+        throw new Error("forced prepared mailbox encryption failure");
+      },
+    });
+    const prisma = Object.assign(Object.create(null), tx, {
+      $transaction: async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx),
+    });
+
+    try {
+      await expect(prepareHostedMailboxEnvelopeAppend({
+        envelope: buildHostedEnvironmentVoiceEnvelope(
+          "environment-voice/member_mailbox_1/failed-preparation.webm",
+        ),
+        prisma,
+      })).rejects.toThrow("forced prepared mailbox encryption failure");
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    } finally {
+      restoreDefaultHostedSecureBoxTestCodec();
+    }
+  });
+
+  it("pre-encrypts a prepared append before its database-only commit", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    let terminalTransactionActive = false;
+    let encryptionCalls = 0;
+    let encryptionCallsDuringTerminalTransaction = 0;
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt(input) {
+        return input.value;
+      },
+      encrypt(input) {
+        encryptionCalls += 1;
+        if (terminalTransactionActive) {
+          encryptionCallsDuringTerminalTransaction += 1;
+        }
+        return `hsb-prepared-test:${Buffer.from(input.value).toString("base64url")}`;
+      },
+    });
+    const prisma = Object.assign(Object.create(null), tx, {
+      $transaction: async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx),
+    });
+
+    try {
+      const prepared = await prepareHostedMailboxEnvelopeAppend({
+        envelope: buildHostedEnvironmentVoiceEnvelope(
+          "environment-voice/member_mailbox_1/prepared.webm",
+        ),
+        prisma,
+      });
+      expect(encryptionCalls).toBeGreaterThan(0);
+
+      terminalTransactionActive = true;
+      await expect(appendPreparedHostedMailboxEnvelopeTx({
+        prepared,
+        tx,
+      })).resolves.toMatchObject({
+        mailboxItemId: expect.any(String),
+      });
+      terminalTransactionActive = false;
+
+      expect(encryptionCallsDuringTerminalTransaction).toBe(0);
+      expect(hostedMailboxItem.create).toHaveBeenCalledOnce();
+    } finally {
+      terminalTransactionActive = false;
+      restoreDefaultHostedSecureBoxTestCodec();
+    }
+  });
+
   it("indexes accepted Linq input without an extra source-lock query", async () => {
     let insertedRow: HostedMailboxItemRow | null = null;
     const hostedMailboxItem = createHostedMailboxItemDelegate({

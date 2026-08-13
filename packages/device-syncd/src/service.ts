@@ -284,6 +284,15 @@ class DeviceSyncServiceController {
         createOAuthState: (record) => this.store.createOAuthState(record),
         consumeOAuthState: (state, now, expectedProvider, expectedOwnerId) =>
           this.store.consumeOAuthState(state, now, expectedProvider, expectedOwnerId),
+        discardUnconsumedOAuthState: (state, now, expectedProvider, expectedOwnerId) =>
+          this.store.discardUnconsumedOAuthState(
+            state,
+            now,
+            expectedProvider,
+            expectedOwnerId,
+          ),
+        resolveOAuthStateWithoutProviderAuthority: (claim) =>
+          this.store.resolveOAuthStateWithoutProviderAuthority(claim),
         upsertConnection: (record) =>
           this.toPublicAccount(
             this.store.upsertAccount({
@@ -307,6 +316,7 @@ class DeviceSyncServiceController {
               existingAccountPolicy: record.existingAccountPolicy,
               connectedAt: record.connectedAt,
               nextReconcileAt: record.nextReconcileAt ?? null,
+              oauthClaim: record.oauthClaim,
             }),
           ),
         markConnectionSetupFailed: (record) => {
@@ -316,11 +326,35 @@ class DeviceSyncServiceController {
             record.now,
             record.code,
             record.message,
+            record.oauthClaim,
           );
           return {
             account: result.account ? this.toPublicAccount(result.account) : null,
             applied: result.applied,
+            blockedByRefreshLease: result.blockedByRefreshLease,
+            oauthTokenVersion: result.oauthTokenVersion,
           };
+        },
+        clearOAuthCredentialAfterConfirmedRevoke: (record) =>
+          this.store.clearOAuthCredentialAfterConfirmedRevoke(
+            record.accountId,
+            record.expectedConnectedAt,
+            record.expectedTokenVersion,
+            record.now,
+          ),
+        getOAuthCleanupAccount: (record) => {
+          const account = this.store.getAccountById(record.accountId);
+          if (
+            !account
+            || account.connectedAt !== record.expectedConnectedAt
+            || account.localTokenRevision !== record.expectedTokenVersion
+            || account.status !== "reauthorization_required"
+            || account.setupPhase !== "failed"
+            || account.credential.kind !== "oauth_tokens"
+          ) {
+            return null;
+          }
+          return this.toDecryptedAccount(account);
         },
         getConnectionById: (accountId) => {
           const account = this.store.getAccountById(accountId);

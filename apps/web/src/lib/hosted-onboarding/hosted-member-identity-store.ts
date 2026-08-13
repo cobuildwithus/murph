@@ -5,6 +5,7 @@ import {
   type HostedMember,
   type HostedMemberIdentity,
   Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 
 import {
@@ -65,13 +66,45 @@ export interface HostedMemberIdentityWriteInput {
   memberId: string;
   phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
-  prisma: Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
   phoneNumber: string | null;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
+}
+
+export interface PreparedHostedMemberIdentityWrite {
+  create: Prisma.HostedMemberIdentityUncheckedCreateInput;
+  update: Prisma.HostedMemberIdentityUncheckedUpdateInput;
+}
+
+export async function prepareHostedMemberIdentityWrite(input: Omit<
+  HostedMemberIdentityWriteInput,
+  "prisma"
+> & { prisma: PrismaClient }): Promise<PreparedHostedMemberIdentityWrite> {
+  await ensureHostedMemberIdentityControlRootTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const mutation = await buildHostedMemberIdentityMutationData(input);
+  return {
+    create: { memberId: input.memberId, ...mutation },
+    update: mutation,
+  };
+}
+
+export async function commitPreparedHostedMemberIdentityWriteTx(input: {
+  memberId: string;
+  prepared: PreparedHostedMemberIdentityWrite;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.hostedMemberIdentity.upsert({
+    create: input.prepared.create,
+    update: input.prepared.update,
+    where: { memberId: input.memberId },
+  });
 }
 
 export interface HostedMemberSignupPhoneStateWriteInput {

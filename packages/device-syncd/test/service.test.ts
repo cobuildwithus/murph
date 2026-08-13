@@ -495,6 +495,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
     code: "abc",
   });
   assert.equal(connected.account.externalAccountId, "demo-abc");
+  assert.equal(store.summarize().oauthStates, 0);
   assert.equal(service.listAccounts().length, 1);
 
   await service.runWorkerOnce();

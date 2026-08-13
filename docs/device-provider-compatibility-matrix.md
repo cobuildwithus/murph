@@ -147,8 +147,10 @@ provider. Successful Garmin coverage clears that source marker independently.
 Current ingestion stays active. The member must confirm the existing
 connection-wide disconnect before restarting the Garmin export, because the
 reset can disconnect other wearables on the same Junction connection. If
-provider-side deregistration fails, the local disconnect still stands and the
-member must remove the connection in the Garmin account before reconnecting.
+provider-side deregistration fails, Murph keeps the cleanup credential and
+connection nonterminal so the member can retry. The UI continues to require
+manual removal in the Garmin account before reconnecting while cleanup is
+unresolved.
 
 The direct companion overnight-PRV row is deliberately not a provider
 push-primary cell: the continuously subscribed phone is the scheduled summary

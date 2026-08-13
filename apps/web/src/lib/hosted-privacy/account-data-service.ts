@@ -24,11 +24,17 @@ import {
   isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
-  enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+  commitPreparedHostedMemberChannelsUpdatedTx,
+  prepareHostedMemberChannelsUpdatedForSnapshot,
+  resolveHostedMemberEmailLinked,
 } from "../hosted-onboarding/member-channel-sync";
 import {
-  reconcileHostedPrivyIdentityOnMemberTx,
-} from "../hosted-onboarding/member-identity-service";
+  commitPreparedHostedMemberIdentityWriteTx,
+  prepareHostedMemberIdentityWrite,
+  readHostedMemberIdentity,
+  type PreparedHostedMemberIdentityWrite,
+} from "../hosted-onboarding/hosted-member-identity-store";
+import { buildHostedPersistedPhoneIdentityFields } from "../hosted-onboarding/member-identity-fields";
 import {
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD,
@@ -80,7 +86,11 @@ import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import type { HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
+import {
+  readHostedMemberSnapshot,
+  type HostedMemberCoreState,
+} from "../hosted-onboarding/hosted-member-store";
+import type { PreparedHostedMailboxEnvelopeAppend } from "../hosted-mailbox/store";
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
   closeHostedUsageCreditPurchasesForAccountDeletion,
@@ -599,7 +609,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "providers.oura_whoop_strava",
     label: "Oura, WHOOP, and Strava provider revocation",
     deletion: "best-effort-delete",
-    note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Wearable sources without a provider-side revocation hook are deleted locally unless source-side revocation is implemented.",
+    note: "Requires the provider revokeAccess hook to confirm revocation before deleting a durable cleanup credential. Credential-kind none is the only local proof that no external cleanup remains.",
   },
   {
     slug: "providers.composio_connected_apps",
@@ -647,8 +657,7 @@ export type HostedAccountProviderRevocationStatus =
   | "not_needed"
   | "revoked"
   | "warning"
-  | "failed"
-  | "skipped_not_configured";
+  | "failed";
 
 export interface HostedAccountProviderRevocationResult {
   connectionId: string;
@@ -745,21 +754,48 @@ interface HostedAccountDeletionTargetRows {
 }
 
 type DeviceConnectionIdentity = {
+  accessTokenEncrypted: string | null;
+  accessTokenExpiresAt: Date | null;
+  connectedAt: Date;
+  credentialKind: string;
+  credentialMetadataJson: Prisma.JsonValue;
+  externalAccountIdEncrypted: string | null;
   id: string;
+  keyVersion: string | null;
+  metadataJson: Prisma.JsonValue;
   provider: string;
+  providerApplicationId: string | null;
+  providerApplicationRevision: number | null;
   providerAccountBlindIndex: string;
+  providerConfigKey: string | null;
+  refreshLeaseExpiresAt: Date | null;
+  refreshLeaseOwner: string | null;
+  refreshLeaseTokenVersion: number | null;
+  refreshTokenEncrypted: string | null;
+  scopesJson: Prisma.JsonValue;
   sources: readonly {
+    id: string;
+    sourceInstanceKey: string;
     sourceProviderSlug: string;
     status: string;
   }[];
+  status: string;
+  tokenVersion: number | null;
 };
 
 type HostedAccountDeletionDatabaseResult = {
   channelSyncDispatch: Awaited<
-    ReturnType<typeof enqueueHostedMemberChannelsUpdatedForActiveMemberTx>
-  >;
+    ReturnType<typeof commitPreparedHostedMemberChannelsUpdatedTx>
+  > | null;
   deletedCounts: HostedAccountDataCounts;
   deletedRuntimeMemberIds: readonly string[];
+};
+
+type PreparedHostedPrivyPhoneTransferDatabaseCommit = {
+  channelAppend: PreparedHostedMailboxEnvelopeAppend;
+  identityWrite: PreparedHostedMemberIdentityWrite;
+  rawFingerprint: string;
+  targetMemberId: string;
 };
 
 interface HostedPrivyPhoneTransferAccountDeletionCompletion {
@@ -772,10 +808,15 @@ interface HostedPrivyPhoneTransferAccountDeletionCompletion {
 
 export interface HostedPrivyPhoneTransferAccountDeletionResult {
   channelSyncDispatch: Awaited<
-    ReturnType<typeof enqueueHostedMemberChannelsUpdatedForActiveMemberTx>
+    ReturnType<typeof commitPreparedHostedMemberChannelsUpdatedTx>
   >;
   deletion: HostedAccountDeletionResult;
 }
+
+type HostedAccountDeletionInternalResult = {
+  channelSyncDispatch: HostedAccountDeletionDatabaseResult["channelSyncDispatch"];
+  deletion: HostedAccountDeletionResult;
+};
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Messages already delivered to external carrier, Telegram, email, or Linq systems are not recalled from those services.",
@@ -851,7 +892,7 @@ export async function deleteHostedPrivyPhoneTransferSourceAccountData(input: {
   ) {
     throwHostedPrivyPhoneTransferTargetNotReady();
   }
-  return deleteHostedAccountDataInternal({
+  const result = await deleteHostedAccountDataInternal({
     exitFeedback: null,
     memberId: input.transfer.sourceMemberId,
     phoneTransfer: {
@@ -864,6 +905,13 @@ export async function deleteHostedPrivyPhoneTransferSourceAccountData(input: {
     prisma: input.prisma,
     request: input.request,
   });
+  if (!result.channelSyncDispatch) {
+    throwHostedPrivyPhoneTransferTargetNotReady();
+  }
+  return {
+    channelSyncDispatch: result.channelSyncDispatch,
+    deletion: result.deletion,
+  };
 }
 
 async function deleteHostedAccountDataInternal(input: {
@@ -872,7 +920,7 @@ async function deleteHostedAccountDataInternal(input: {
   phoneTransfer: HostedPrivyPhoneTransferAccountDeletionCompletion | null;
   prisma: PrismaClient;
   request: Request;
-}): Promise<HostedPrivyPhoneTransferAccountDeletionResult> {
+}): Promise<HostedAccountDeletionInternalResult> {
   const member = await input.prisma.hostedMember.findUnique({
     select: { billingStatus: true, createdAt: true, id: true },
     where: { id: input.memberId },
@@ -947,6 +995,10 @@ async function deleteHostedAccountDataInternal(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  const expectedDeviceAuthorityFingerprint =
+    buildDeviceConnectionAuthorityFingerprint(
+      providerRevocationConnectionIdentities,
+    );
   const deviceProviderRevocations = await revokeDeviceProvidersBestEffort({
     connections: providerRevocationConnectionIdentities,
     memberId: input.memberId,
@@ -1017,6 +1069,15 @@ async function deleteHostedAccountDataInternal(input: {
   const phoneTransferSession = input.phoneTransfer
     ? await readHostedPrivyPhoneTransferTargetSession(input.phoneTransfer)
     : null;
+  const preparedPhoneTransferDatabaseCommit =
+    input.phoneTransfer && phoneTransferSession
+      ? await prepareHostedPrivyPhoneTransferDatabaseCommit({
+          completion: input.phoneTransfer,
+          now: deletionStartedAt,
+          prisma: input.prisma,
+          session: phoneTransferSession,
+        })
+      : null;
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
     if (input.phoneTransfer && phoneTransferSession) {
       await acquireHostedPrivyPhoneTransferPhoneLocksTx({
@@ -1032,13 +1093,13 @@ async function deleteHostedAccountDataInternal(input: {
         ],
         prisma: tx,
       });
-      await assertHostedPrivyPhoneTransferSourceRetirementFenceTx({
-        identity: phoneTransferSession.identity,
-        member: input.phoneTransfer.targetMember,
+      if (!preparedPhoneTransferDatabaseCommit) {
+        throwHostedPrivyPhoneTransferTargetNotReady();
+      }
+      await assertHostedPrivyPhoneTransferRawFingerprintUnchangedTx({
+        completion: input.phoneTransfer,
+        expectedFingerprint: preparedPhoneTransferDatabaseCommit.rawFingerprint,
         prisma: tx,
-        targetPhoneNumberBeforeTransfer:
-          input.phoneTransfer.targetPhoneNumberBeforeTransfer,
-        transfer: input.phoneTransfer.transfer,
       });
     }
     await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
@@ -1113,17 +1174,47 @@ async function deleteHostedAccountDataInternal(input: {
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
+    await lockDeviceConnectionAuthorityRowsForAccountDeletionTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     const deviceConnectionIdentities = await listDeviceConnectionIdentities({
       memberId: input.memberId,
       prisma: tx,
     });
+    const inFlightDeviceTokenRefreshCount = deviceConnectionIdentities.filter(
+      (connection) =>
+        typeof connection.refreshLeaseOwner === "string"
+        || connection.refreshLeaseExpiresAt instanceof Date
+        || typeof connection.refreshLeaseTokenVersion === "number",
+    ).length;
+    const inFlightDeviceOauthCallbackCount = await tx.deviceOauthSession.count({
+      where: {
+        consumedAt: { not: null },
+        userId: transactionDeletionMemberIdFilter,
+      },
+    });
+    if (
+      inFlightDeviceOauthCallbackCount > 0
+      || inFlightDeviceTokenRefreshCount > 0
+    ) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+        httpStatus: 503,
+        message: "A connected-health authorization or credential refresh is still finishing. Retry account deletion.",
+        retryable: true,
+      });
+    }
     assertHostedAccountDeletionTargetsUnchanged({
       currentDatabaseFingerprint:
         buildHostedAccountDeletionTargetDatabaseFingerprint(
           transactionTargetRows,
         ),
+      currentDeviceAuthorityFingerprint:
+        buildDeviceConnectionAuthorityFingerprint(deviceConnectionIdentities),
       expectedDatabaseFingerprint:
         preparedDeletionTargets.databaseFingerprint,
+      expectedDeviceAuthorityFingerprint,
       runtimeMemberIds: transactionDeletionMemberIds,
       prepared: preparedCleanup,
     });
@@ -1139,20 +1230,18 @@ async function deleteHostedAccountDataInternal(input: {
     let channelSyncDispatch: HostedAccountDeletionDatabaseResult["channelSyncDispatch"] =
       null;
     if (input.phoneTransfer && phoneTransferSession) {
-      await reconcileHostedPrivyIdentityOnMemberTx({
-        identity: phoneTransferSession.identity,
-        member: input.phoneTransfer.targetMember,
-        now: deletionStartedAt,
+      if (!preparedPhoneTransferDatabaseCommit) {
+        throwHostedPrivyPhoneTransferTargetNotReady();
+      }
+      await commitPreparedHostedMemberIdentityWriteTx({
+        memberId: preparedPhoneTransferDatabaseCommit.targetMemberId,
+        prepared: preparedPhoneTransferDatabaseCommit.identityWrite,
         prisma: tx,
       });
-      channelSyncDispatch =
-        await enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
-          linkedAccounts: phoneTransferSession.linkedAccounts,
-          memberId: input.phoneTransfer.targetMember.id,
-          occurredAt: deletionStartedAt.toISOString(),
-          prisma: tx,
-          sourceType: "settings.phone.sync",
-        });
+      channelSyncDispatch = await commitPreparedHostedMemberChannelsUpdatedTx({
+        prepared: preparedPhoneTransferDatabaseCommit.channelAppend,
+        prisma: tx,
+      });
     }
 
     return {
@@ -1232,6 +1321,155 @@ async function readHostedPrivyPhoneTransferTargetSession(
     throwHostedPrivyPhoneTransferTargetNotReady();
   }
   return session;
+}
+
+async function prepareHostedPrivyPhoneTransferDatabaseCommit(input: {
+  completion: HostedPrivyPhoneTransferAccountDeletionCompletion;
+  now: Date;
+  prisma: PrismaClient;
+  session: Awaited<ReturnType<typeof buildHostedPrivySessionState>>;
+}): Promise<PreparedHostedPrivyPhoneTransferDatabaseCommit> {
+  // Capture the raw database authority before any decrypted projection or
+  // prepared ciphertext is derived. A concurrent writer after this point then
+  // makes the locked terminal comparison fail instead of letting an older
+  // prepared value overwrite newer target state.
+  const rawFingerprint = await readHostedPrivyPhoneTransferRawFingerprint({
+    completion: input.completion,
+    prisma: input.prisma,
+  });
+  await assertHostedPrivyPhoneTransferSourceRetirementFenceTx({
+    identity: input.session.identity,
+    member: input.completion.targetMember,
+    prisma: input.prisma,
+    targetPhoneNumberBeforeTransfer:
+      input.completion.targetPhoneNumberBeforeTransfer,
+    transfer: input.completion.transfer,
+  });
+  const [currentIdentity, currentSnapshot] = await Promise.all([
+    readHostedMemberIdentity({
+      memberId: input.completion.targetMember.id,
+      prisma: input.prisma,
+    }),
+    readHostedMemberSnapshot({
+      memberId: input.completion.targetMember.id,
+      prisma: input.prisma,
+    }),
+  ]);
+  if (!currentIdentity || !currentSnapshot || !input.session.identity.phone) {
+    throwHostedPrivyPhoneTransferTargetNotReady();
+  }
+  const nextPhoneIdentity = buildHostedPersistedPhoneIdentityFields({
+    currentIdentity,
+    now: input.now,
+    phone: input.session.identity.phone,
+  });
+  const identityWrite = await prepareHostedMemberIdentityWrite({
+    ...nextPhoneIdentity,
+    memberId: input.completion.targetMember.id,
+    prisma: input.prisma,
+    privyUserId: input.session.identity.userId,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+  });
+  const desiredSnapshot = {
+    ...currentSnapshot,
+    identity: {
+      ...currentIdentity,
+      ...nextPhoneIdentity,
+      privyUserId: input.session.identity.userId,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
+    },
+  };
+  const emailLinked = await resolveHostedMemberEmailLinked({
+    linkedAccounts: input.session.linkedAccounts,
+    memberId: input.completion.targetMember.id,
+    prisma: input.prisma,
+  });
+  const channelAppend = await prepareHostedMemberChannelsUpdatedForSnapshot({
+    emailLinked,
+    member: desiredSnapshot,
+    memberId: input.completion.targetMember.id,
+    occurredAt: input.now.toISOString(),
+    prisma: input.prisma,
+    sourceType: "settings.phone.sync",
+  });
+  return {
+    channelAppend,
+    identityWrite,
+    rawFingerprint,
+    targetMemberId: input.completion.targetMember.id,
+  };
+}
+
+async function readHostedPrivyPhoneTransferRawFingerprint(input: {
+  completion: HostedPrivyPhoneTransferAccountDeletionCompletion;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<string> {
+  const [
+    sourceIdentity,
+    sourceMember,
+    targetEmailAuthorization,
+    targetIdentity,
+    targetMember,
+    targetRouting,
+  ] =
+    await Promise.all([
+      input.prisma.hostedMemberIdentity.findUnique({
+        where: { memberId: input.completion.transfer.sourceMemberId },
+      }),
+      input.prisma.hostedMember.findUnique({
+        select: {
+          billingStatus: true,
+          id: true,
+          suspendedAt: true,
+        },
+        where: { id: input.completion.transfer.sourceMemberId },
+      }),
+      input.prisma.hostedMemberEmailAuthorization.findUnique({
+        where: { memberId: input.completion.targetMember.id },
+      }),
+      input.prisma.hostedMemberIdentity.findUnique({
+        where: { memberId: input.completion.targetMember.id },
+      }),
+      input.prisma.hostedMember.findUnique({
+        select: {
+          billingStatus: true,
+          id: true,
+          suspendedAt: true,
+        },
+        where: { id: input.completion.targetMember.id },
+      }),
+      input.prisma.hostedMemberRouting.findUnique({
+        where: { memberId: input.completion.targetMember.id },
+      }),
+    ]);
+  if (!sourceIdentity || !sourceMember || !targetIdentity || !targetMember) {
+    throwHostedPrivyPhoneTransferTargetNotReady();
+  }
+  return JSON.stringify([
+    sourceMember,
+    sourceIdentity,
+    targetEmailAuthorization,
+    targetMember,
+    targetIdentity,
+    targetRouting,
+  ]);
+}
+
+async function assertHostedPrivyPhoneTransferRawFingerprintUnchangedTx(input: {
+  completion: HostedPrivyPhoneTransferAccountDeletionCompletion;
+  expectedFingerprint: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const currentFingerprint = await readHostedPrivyPhoneTransferRawFingerprint(input);
+  if (currentFingerprint !== input.expectedFingerprint) {
+    throwHostedPrivyPhoneTransferTargetNotReady();
+  }
 }
 
 function isSameHostedPrivyPhoneTransferRetirement(
@@ -1623,7 +1861,9 @@ function haveSameStrings(left: readonly string[], right: readonly string[]): boo
 
 function assertHostedAccountDeletionTargetsUnchanged(input: {
   currentDatabaseFingerprint: string;
+  currentDeviceAuthorityFingerprint: string;
   expectedDatabaseFingerprint: string;
+  expectedDeviceAuthorityFingerprint: string;
   prepared: PreparedHostedAccountDeletionCleanup;
   runtimeMemberIds: readonly string[];
 }): void {
@@ -1643,6 +1883,65 @@ function assertHostedAccountDeletionTargetsUnchanged(input: {
       retryable: true,
     });
   }
+  if (
+    input.currentDeviceAuthorityFingerprint
+    !== input.expectedDeviceAuthorityFingerprint
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORITY_SET_CHANGED",
+      httpStatus: 503,
+      message: "A connected-health authorization changed during deletion. Retry so it can be revoked.",
+      retryable: true,
+    });
+  }
+}
+
+function buildDeviceConnectionAuthorityFingerprint(
+  connections: readonly DeviceConnectionIdentity[],
+): string {
+  return JSON.stringify(
+    [...connections]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((connection) => [
+        connection.id,
+        connection.provider,
+        connection.providerAccountBlindIndex,
+        connection.externalAccountIdEncrypted,
+        connection.credentialKind,
+        connection.providerConfigKey,
+        connection.providerApplicationId,
+        connection.providerApplicationRevision,
+        connection.accessTokenEncrypted,
+        connection.accessTokenExpiresAt instanceof Date
+          ? connection.accessTokenExpiresAt.toISOString()
+          : connection.accessTokenExpiresAt,
+        connection.refreshTokenEncrypted,
+        connection.keyVersion,
+        connection.credentialMetadataJson,
+        connection.metadataJson,
+        connection.scopesJson,
+        connection.status,
+        connection.connectedAt instanceof Date
+          ? connection.connectedAt.toISOString()
+          : connection.connectedAt,
+        connection.tokenVersion,
+        connection.refreshLeaseOwner,
+        connection.refreshLeaseExpiresAt instanceof Date
+          ? connection.refreshLeaseExpiresAt.toISOString()
+          : connection.refreshLeaseExpiresAt,
+        connection.refreshLeaseTokenVersion,
+        [...(connection.sources ?? [])]
+          .sort((left, right) =>
+            String(left.id).localeCompare(String(right.id))
+          )
+          .map((source) => [
+            source.id,
+            source.sourceInstanceKey,
+            source.sourceProviderSlug,
+            source.status,
+          ]),
+      ]),
+  );
 }
 
 function buildStringInFilter(values: readonly string[]): string | { in: string[] } {
@@ -2310,13 +2609,13 @@ async function deleteHostedAccountPrismaRows(input: {
           RETURNING 1
         ),
         deleted_usage_credit_grants AS (
-          DELETE FROM hosted_usage_credit_grant AS grant
+          DELETE FROM hosted_usage_credit_grant AS usage_grant
           WHERE EXISTS (
             SELECT 1
             FROM hosted_usage_credit_entry AS entry
             LEFT JOIN hosted_usage_credit_purchase AS purchase
               ON purchase.id = entry.purchase_id
-            WHERE entry.id = grant.entry_id
+            WHERE entry.id = usage_grant.entry_id
               AND (
                 entry.beneficiary_member_id IN (SELECT id FROM target_members)
                 OR purchase.beneficiary_member_id IN (SELECT id FROM target_members)
@@ -2358,9 +2657,9 @@ async function deleteHostedAccountPrismaRows(input: {
           RETURNING 1
         ),
         deleted_group_disclosure_grants AS (
-          DELETE FROM hosted_group_disclosure_grant AS grant
+          DELETE FROM hosted_group_disclosure_grant AS disclosure_grant
           USING hosted_group_member AS membership
-          WHERE membership.id = grant.membership_id
+          WHERE membership.id = disclosure_grant.membership_id
             AND (
               membership.member_id IN (SELECT id FROM target_members)
               OR membership.group_id IN (SELECT id FROM target_groups)
@@ -2678,8 +2977,8 @@ async function deleteHostedAccountPrismaRows(input: {
           RETURNING 1
         ),
         deleted_group_sponsorship_authorizations AS (
-          DELETE FROM hosted_group_sponsorship_authorization AS authorization
-          WHERE authorization.beneficiary_member_id IN (SELECT id FROM target_members)
+          DELETE FROM hosted_group_sponsorship_authorization AS sponsorship_authorization
+          WHERE sponsorship_authorization.beneficiary_member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
         deleted_ai_usage AS (
@@ -2738,8 +3037,8 @@ async function deleteHostedAccountPrismaRows(input: {
           RETURNING 1
         ),
         deleted_member_email_authorizations AS (
-          DELETE FROM hosted_member_email_authorization AS authorization
-          WHERE authorization.member_id IN (SELECT id FROM target_members)
+          DELETE FROM hosted_member_email_authorization AS email_authorization
+          WHERE email_authorization.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
         deleted_subscription_checkouts AS (
@@ -2944,25 +3243,72 @@ async function deleteHostedAccountPrismaRows(input: {
   return counts;
 }
 
+export async function lockDeviceConnectionAuthorityRowsForAccountDeletionTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  // Lock the parent rows first. Besides serializing current connection
+  // credential writers, this blocks a new source FK from appearing between
+  // the source lock and the exact authority snapshot below.
+  await input.prisma.$queryRaw<Array<{ id: string }>>`
+    /* device-account-deletion:connection-authority-lock */
+    SELECT connection.id
+    FROM device_connection AS connection
+    WHERE connection.user_id = ${input.memberId}
+    ORDER BY connection.id ASC
+    FOR UPDATE OF connection
+  `;
+  await input.prisma.$queryRaw<Array<{ id: string }>>`
+    /* device-account-deletion:source-authority-lock */
+    SELECT source.id
+    FROM device_connection_source AS source
+    JOIN device_connection AS connection
+      ON connection.id = source.connection_id
+    WHERE connection.user_id = ${input.memberId}
+    ORDER BY source.id ASC
+    FOR UPDATE OF source
+  `;
+}
+
 async function listDeviceConnectionIdentities(input: {
   memberId: string;
   prisma: HostedAccountDataPrisma;
 }): Promise<DeviceConnectionIdentity[]> {
   return input.prisma.deviceConnection.findMany({
     select: {
+      accessTokenEncrypted: true,
+      accessTokenExpiresAt: true,
+      connectedAt: true,
+      credentialKind: true,
+      credentialMetadataJson: true,
+      externalAccountIdEncrypted: true,
       id: true,
+      keyVersion: true,
+      metadataJson: true,
       provider: true,
+      providerApplicationId: true,
+      providerApplicationRevision: true,
       providerAccountBlindIndex: true,
+      providerConfigKey: true,
+      refreshLeaseExpiresAt: true,
+      refreshLeaseOwner: true,
+      refreshLeaseTokenVersion: true,
+      refreshTokenEncrypted: true,
+      scopesJson: true,
       sources: {
         orderBy: [
           { status: "asc" },
           { sourceProviderSlug: "asc" },
         ],
         select: {
+          id: true,
+          sourceInstanceKey: true,
           sourceProviderSlug: true,
           status: true,
         },
       },
+      status: true,
+      tokenVersion: true,
     },
     where: { userId: input.memberId },
   });
@@ -3058,22 +3404,44 @@ async function revokeDeviceProvidersBestEffort(input: {
     return [];
   }
 
-  let controlPlane: ReturnType<typeof createHostedDeviceSyncControlPlane>;
-  try {
-    controlPlane = createHostedDeviceSyncControlPlane(input.request);
-  } catch (error) {
-    return input.connections.map((connection) => ({
-      connectionId: connection.id,
-      errorCode: safeErrorCode(error),
-      providerLabel: resolveDeviceConnectionProviderLabel(connection),
-      status: "skipped_not_configured",
-      warningCode: null,
-    }));
-  }
-
   const results: HostedAccountProviderRevocationResult[] = [];
+  let controlPlane: ReturnType<typeof createHostedDeviceSyncControlPlane> | null = null;
+  let controlPlaneInitializationAttempted = false;
+  let controlPlaneInitializationError: unknown = null;
   let registry: ReturnType<typeof createHostedDeviceSyncRegistry> | null = null;
   for (const connection of input.connections) {
+    // This canonical raw field is the sole cleanup authority. Do not hydrate an
+    // account or resolve a provider application after confirmed release.
+    if (connection.credentialKind === "none") {
+      results.push({
+        connectionId: connection.id,
+        errorCode: null,
+        providerLabel: resolveDeviceConnectionProviderLabel(connection),
+        status: "not_needed",
+        warningCode: null,
+      });
+      continue;
+    }
+
+    if (!controlPlaneInitializationAttempted) {
+      controlPlaneInitializationAttempted = true;
+      try {
+        controlPlane = createHostedDeviceSyncControlPlane(input.request);
+      } catch (error) {
+        controlPlaneInitializationError = error;
+      }
+    }
+    if (!controlPlane) {
+      results.push({
+        connectionId: connection.id,
+        errorCode: safeErrorCode(controlPlaneInitializationError),
+        providerLabel: resolveDeviceConnectionProviderLabel(connection),
+        status: "failed",
+        warningCode: null,
+      });
+      continue;
+    }
+
     try {
       const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
         input.memberId,
@@ -3081,12 +3449,14 @@ async function revokeDeviceProvidersBestEffort(input: {
       );
 
       if (!storedAccount) {
+        // Any non-none raw kind owns cleanup authority. Missing hydration is a
+        // corrupt/incomplete credential, never proof of provider revocation.
         results.push({
           connectionId: connection.id,
-          errorCode: null,
+          errorCode: "CONNECTION_SECRET_MISSING",
           providerLabel: resolveDeviceConnectionProviderLabel(connection),
-          status: "warning",
-          warningCode: "CONNECTION_SECRET_MISSING",
+          status: "failed",
+          warningCode: null,
         });
         continue;
       }
@@ -3104,24 +3474,11 @@ async function revokeDeviceProvidersBestEffort(input: {
         : cleanup.revokeAccessOverride ?? undefined;
 
       if (!revokeAccess) {
-        if (cleanup.repairRequired) {
-          results.push({
-            connectionId: connection.id,
-            errorCode: null,
-            providerLabel: resolveDeviceConnectionProviderLabel(connection),
-            status: "warning",
-            warningCode: cleanup.warning?.code ?? "DEVICE_PROVIDER_APPLICATION_REPAIR_REQUIRED",
-          });
-          continue;
-        }
-
         results.push({
           connectionId: connection.id,
-          errorCode: storedAccount.credential.kind === "provider_config"
-            ? "PROVIDER_REVOKE_NOT_CONFIGURED"
-            : null,
+          errorCode: cleanup.warning?.code ?? "PROVIDER_REVOKE_NOT_CONFIGURED",
           providerLabel: resolveDeviceConnectionProviderLabel(connection),
-          status: storedAccount.credential.kind === "provider_config" ? "failed" : "not_needed",
+          status: "failed",
           warningCode: null,
         });
         continue;

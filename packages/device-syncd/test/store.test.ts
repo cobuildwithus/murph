@@ -6,6 +6,7 @@ import { test } from "vitest";
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
+import { DeviceSyncError } from "../src/errors.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "../src/store/jobs.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -3065,6 +3066,7 @@ test("device sync store bootstraps current tables even when stale legacy tables 
     });
     assert.deepEqual(store.consumeOAuthState("defaulted-state", "2026-04-07T00:01:00.000Z"), {
       status: "consumed",
+      consumedAt: "2026-04-07T00:01:00.000Z",
       record: {
         state: "defaulted-state",
         provider: "demo",
@@ -3562,6 +3564,7 @@ test("device sync store filters listed accounts by provider and returns unexpire
     );
     assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:00.000Z"), {
       status: "consumed",
+      consumedAt: "2026-04-07T00:05:00.000Z",
       record: {
         state: "active-state",
         provider: "demo",
@@ -3575,6 +3578,7 @@ test("device sync store filters listed accounts by provider and returns unexpire
     });
     assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:01.000Z"), {
       status: "replayed",
+      consumedAt: "2026-04-07T00:05:00.000Z",
       record: {
         state: "active-state",
         provider: "demo",
@@ -3586,7 +3590,32 @@ test("device sync store filters listed accounts by provider and returns unexpire
         expiresAt: "2026-04-07T00:10:00.000Z",
       },
     });
+    assert.equal(
+      store.deleteExpiredOAuthStates("2026-04-07T00:10:00.000Z"),
+      0,
+    );
     assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:10:00.000Z"), {
+      status: "replayed",
+      consumedAt: "2026-04-07T00:05:00.000Z",
+      record: {
+        state: "active-state",
+        provider: "demo",
+        returnTo: "/devices",
+        metadata: {
+          intent: "connect",
+        },
+        createdAt: "2026-04-07T00:00:00.000Z",
+        expiresAt: "2026-04-07T00:10:00.000Z",
+      },
+    });
+    assert.equal(
+      store.resolveOAuthStateWithoutProviderAuthority({
+        state: "active-state",
+        consumedAt: "2026-04-07T00:05:00.000Z",
+      }),
+      true,
+    );
+    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:10:01.000Z"), {
       status: "missing",
     });
   } finally {
@@ -3595,6 +3624,82 @@ test("device sync store filters listed accounts by provider and returns unexpire
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("device sync store commits a connection and exact OAuth claim resolution atomically", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-oauth-connection-atomic");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const record = {
+      state: "atomic-state",
+      provider: "demo",
+      returnTo: "/devices",
+      metadata: {},
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:10:00.000Z",
+    };
+    store.createOAuthState(record);
+    const consumed = store.consumeOAuthState(
+      record.state,
+      "2026-04-07T00:05:00.000Z",
+      record.provider,
+    );
+    assert.equal(consumed.status, "consumed");
+    if (consumed.status !== "consumed") {
+      throw new Error("Expected an exact consumed OAuth claim.");
+    }
+
+    assert.throws(
+      () => store.upsertAccount({
+        provider: "demo",
+        externalAccountId: "rolled-back-account",
+        scopes: [],
+        tokens: {
+          accessToken: "rolled-back-access",
+          accessTokenEncrypted: "enc:rolled-back-access",
+        },
+        connectedAt: "2026-04-07T00:06:00.000Z",
+        oauthClaim: {
+          state: record.state,
+          consumedAt: "2026-04-07T00:05:01.000Z",
+        },
+      }),
+      (error: unknown) => error instanceof DeviceSyncError && error.code === "OAUTH_STATE_CHANGED",
+    );
+    assert.equal(store.getAccountByExternalAccount("demo", "rolled-back-account"), null);
+    assert.equal(
+      store.consumeOAuthState(
+        record.state,
+        "2026-04-07T00:07:00.000Z",
+        record.provider,
+      ).status,
+      "replayed",
+    );
+
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "committed-account",
+      scopes: [],
+      tokens: {
+        accessToken: "committed-access",
+        accessTokenEncrypted: "enc:committed-access",
+      },
+      connectedAt: "2026-04-07T00:08:00.000Z",
+      oauthClaim: {
+        state: record.state,
+        consumedAt: consumed.consumedAt,
+      },
+    });
+    assert.equal(account.externalAccountId, "committed-account");
+    assert.deepEqual(
+      store.consumeOAuthState(record.state, "2026-04-07T00:09:00.000Z"),
+      { status: "missing" },
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
   }
 });
 
@@ -3631,6 +3736,7 @@ test("device sync store preserves unexpired OAuth state on provider mismatch", a
       ),
       {
         status: "consumed",
+        consumedAt: "2026-04-07T00:05:01.000Z",
         record: {
           state: "provider-mismatch-state",
           provider: "demo",
@@ -3687,6 +3793,7 @@ test("device sync store preserves OAuth state on owner mismatch and returns owne
       ),
       {
         status: "consumed",
+        consumedAt: "2026-04-07T00:05:01.000Z",
         record: {
           state: "owner-bound-state",
           provider: "demo",
@@ -3709,6 +3816,7 @@ test("device sync store preserves OAuth state on owner mismatch and returns owne
       ),
       {
         status: "replayed",
+        consumedAt: "2026-04-07T00:05:01.000Z",
         record: {
           state: "owner-bound-state",
           provider: "demo",
@@ -3782,6 +3890,7 @@ test("device sync store migrates existing OAuth state tables to preserve owner b
     );
     assert.deepEqual(store.consumeOAuthState("legacy-state", "2026-04-07T00:05:01.000Z", "demo"), {
       status: "consumed",
+      consumedAt: "2026-04-07T00:05:01.000Z",
       record: {
         state: "legacy-state",
         provider: "demo",
@@ -3948,7 +4057,7 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
   }
 });
 
-test("device sync store clears tokens and requires reauthorization after connection setup failures", async () => {
+test("device sync store retains failed setup tokens until confirmed provider revocation", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-setup-failed");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
@@ -3961,7 +4070,12 @@ test("device sync store clears tokens and requires reauthorization after connect
         "OAUTH_DENIED",
         "operator denied access",
       ),
-      { account: null, applied: false },
+      {
+        account: null,
+        applied: false,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: null,
+      },
     );
 
     const account = store.upsertAccount({
@@ -3992,26 +4106,26 @@ test("device sync store clears tokens and requires reauthorization after connect
     assert.equal(failed.applied, true);
     assert.equal(failed.account?.id, account.id);
     assert.equal(failed.account?.status, "reauthorization_required");
-    assertStoredCredentialKind(failed.account, "none");
-    assert.equal(failed.account?.accessTokenExpiresAt, null);
+    assertStoredCredentialKind(failed.account, "oauth_tokens");
+    assert.equal(failed.account?.accessTokenExpiresAt, "2026-04-07T02:00:00.000Z");
     assert.equal(failed.account?.lastSyncErrorAt, "2026-04-07T00:30:00.000Z");
     assert.equal(failed.account?.lastErrorCode, "OAUTH_DENIED");
     assert.equal(failed.account?.lastErrorMessage, "operator denied access");
     assert.equal(failed.account?.nextReconcileAt, null);
     assert.equal(failed.account?.localConnectionRevision, account.localConnectionRevision + 1);
-    assert.equal(failed.account?.localTokenRevision, account.localTokenRevision + 1);
+    assert.equal(failed.account?.localTokenRevision, account.localTokenRevision);
 
-    const credentialState = readCredentialStateForTesting(store, account.id);
+    let credentialState = readCredentialStateForTesting(store, account.id);
     assert.ok(credentialState);
     assert.deepEqual({ ...credentialState }, {
-      access_token_encrypted: null,
-      access_token_expires_at: null,
-      credential_kind: "none",
+      access_token_encrypted: "enc:setup-access",
+      access_token_expires_at: "2026-04-07T02:00:00.000Z",
+      credential_kind: "oauth_tokens",
       credential_metadata_json: "{}",
       provider_config_key: null,
-      refresh_token_encrypted: null,
+      refresh_token_encrypted: "enc:setup-refresh",
     });
-    const observationState = readObservationStateForTesting(store, account.id);
+    let observationState = readObservationStateForTesting(store, account.id);
     assert.ok(observationState);
     assert.deepEqual({ ...observationState }, {
       hosted_observed_connection_revision: 0,
@@ -4021,9 +4135,45 @@ test("device sync store clears tokens and requires reauthorization after connect
       last_error_code: "OAUTH_DENIED",
       last_webhook_at: "2026-04-07T00:20:00.000Z",
       local_connection_revision: account.localConnectionRevision + 1,
-      local_token_revision: account.localTokenRevision + 1,
+      local_token_revision: account.localTokenRevision,
       next_reconcile_at: null,
     });
+
+    assert.equal(
+      store.clearOAuthCredentialAfterConfirmedRevoke(
+        account.id,
+        account.connectedAt,
+        account.localTokenRevision,
+        "2026-04-07T00:31:00.000Z",
+      ),
+      true,
+    );
+    const cleared = store.getAccountById(account.id);
+    assertStoredCredentialKind(cleared, "none");
+    assert.equal(cleared?.accessTokenExpiresAt, null);
+    assert.equal(cleared?.localConnectionRevision, account.localConnectionRevision + 2);
+    assert.equal(cleared?.localTokenRevision, account.localTokenRevision + 1);
+
+    credentialState = readCredentialStateForTesting(store, account.id);
+    assert.ok(credentialState);
+    assert.deepEqual({ ...credentialState }, {
+      access_token_encrypted: null,
+      access_token_expires_at: null,
+      credential_kind: "none",
+      credential_metadata_json: "{}",
+      provider_config_key: null,
+      refresh_token_encrypted: null,
+    });
+    observationState = readObservationStateForTesting(store, account.id);
+    assert.ok(observationState);
+    assert.equal(
+      observationState.local_connection_revision,
+      account.localConnectionRevision + 2,
+    );
+    assert.equal(
+      observationState.local_token_revision,
+      account.localTokenRevision + 1,
+    );
 
     const raceAccount = store.upsertAccount({
       provider: "demo",
@@ -4130,6 +4280,19 @@ test("device sync store clears tokens and requires reauthorization after connect
     assert.equal(staleFailure.account?.updatedAt, epochTwo.updatedAt);
     assertStoredCredentialKind(staleFailure.account, "oauth_tokens");
     assert.equal(staleFailure.account?.lastErrorCode, null);
+    assert.equal(
+      store.clearOAuthCredentialAfterConfirmedRevoke(
+        epochTwo.id,
+        epochOne.connectedAt,
+        epochOne.localTokenRevision,
+        "2026-04-07T00:51:00.000Z",
+      ),
+      false,
+    );
+    assert.equal(
+      requireStoredOAuthCredential(store.getAccountById(epochTwo.id)).accessTokenEncrypted,
+      "enc:epoch-two-access",
+    );
   } finally {
     store.close();
     await rm(tempDir, {

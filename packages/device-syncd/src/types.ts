@@ -274,6 +274,11 @@ export type UpsertPublicDeviceSyncExistingAccountPolicy =
   | "replace"
   | "preserve_established";
 
+export interface OAuthStateConsumeClaim {
+  state: string;
+  consumedAt: string;
+}
+
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
   provider: string;
@@ -290,6 +295,8 @@ export interface UpsertPublicDeviceSyncConnectionInput {
   existingAccountPolicy: UpsertPublicDeviceSyncExistingAccountPolicy;
   connectedAt: string;
   nextReconcileAt?: string | null;
+  cleanupOwnership?: "oauth_provider_revoke";
+  oauthClaim?: OAuthStateConsumeClaim;
 }
 
 export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
@@ -298,11 +305,27 @@ export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
   now: string;
   code: string;
   message: string;
+  oauthClaim?: OAuthStateConsumeClaim;
 }
 
 export interface MarkPublicDeviceSyncConnectionSetupFailedResult {
   account: PublicDeviceSyncAccount | null;
   applied: boolean;
+  blockedByRefreshLease: boolean;
+  oauthTokenVersion: number | null;
+}
+
+export interface ClearPublicDeviceSyncOAuthCredentialInput {
+  accountId: string;
+  expectedConnectedAt: string;
+  expectedTokenVersion: number;
+  now: string;
+}
+
+export interface GetPublicDeviceSyncOAuthCleanupAccountInput {
+  accountId: string;
+  expectedConnectedAt: string;
+  expectedTokenVersion: number;
 }
 
 export interface UpsertPublicDeviceSyncConnectionResult {
@@ -331,6 +354,7 @@ export type DeviceSyncWebhookTraceClaimResult =
 export type ConsumeOAuthStateResult =
   | {
       status: "consumed";
+      consumedAt: string;
       record: OAuthStateRecord;
     }
   | {
@@ -341,6 +365,7 @@ export type ConsumeOAuthStateResult =
        * distinguishable from an unknown one.
        */
       status: "replayed";
+      consumedAt: string;
       record: OAuthStateRecord;
     }
   | {
@@ -354,6 +379,13 @@ export type ConsumeOAuthStateResult =
       status: "owner_mismatch";
     };
 
+export type DiscardUnconsumedOAuthStateResult =
+  | {
+      status: "discarded";
+      record: OAuthStateRecord;
+    }
+  | Extract<ConsumeOAuthStateResult, { status: "replayed" | "missing" | "provider_mismatch" | "owner_mismatch" }>;
+
 export interface DeviceSyncPublicIngressStore {
   deleteExpiredOAuthStates(now: string): number | Promise<number>;
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord | Promise<OAuthStateRecord>;
@@ -363,6 +395,15 @@ export interface DeviceSyncPublicIngressStore {
     expectedProvider?: string,
     expectedOwnerId?: string,
   ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
+  discardUnconsumedOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): DiscardUnconsumedOAuthStateResult | Promise<DiscardUnconsumedOAuthStateResult>;
+  resolveOAuthStateWithoutProviderAuthority(
+    claim: OAuthStateConsumeClaim,
+  ): boolean | Promise<boolean>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
   upsertConnectionWithPrevious?(
     input: UpsertPublicDeviceSyncConnectionInput,
@@ -371,6 +412,12 @@ export interface DeviceSyncPublicIngressStore {
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): MarkPublicDeviceSyncConnectionSetupFailedResult
     | Promise<MarkPublicDeviceSyncConnectionSetupFailedResult>;
+  clearOAuthCredentialAfterConfirmedRevoke(
+    input: ClearPublicDeviceSyncOAuthCredentialInput,
+  ): boolean | Promise<boolean>;
+  getOAuthCleanupAccount(
+    input: GetPublicDeviceSyncOAuthCleanupAccountInput,
+  ): DeviceSyncAccount | null | Promise<DeviceSyncAccount | null>;
   getConnectionById(
     accountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;

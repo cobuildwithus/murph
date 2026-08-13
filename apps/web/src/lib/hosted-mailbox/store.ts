@@ -53,6 +53,7 @@ import {
 import {
   decryptHostedMailboxPayloadString,
   encryptHostedMailboxPayloadString,
+  encryptPreparedHostedMailboxPayloadString,
   type HostedMailboxPayloadStorage,
 } from "./encryption";
 import { hashHostedMailboxStoredPayload } from "./fingerprint";
@@ -212,6 +213,35 @@ interface HostedRuntimeMailboxProjectionRow {
 }
 
 export type HostedMailboxProducerEnvelope = HostedExecutionWake;
+
+export type PreparedHostedMailboxEnvelopeAppend =
+  | {
+      dedupeKey: string;
+      existingItemId: string;
+      itemKind: HostedMailboxKind;
+      lane: HostedMailboxLane;
+      mode: "existing";
+      payloadBytes: number;
+      payloadHash: string;
+      payloadSchema: string;
+      userId: string;
+    }
+  | {
+      assistantInputLookupKey: string | null;
+      dedupeKey: string;
+      expiresAt: Date | null;
+      itemId: string;
+      itemKind: HostedMailboxKind;
+      lane: HostedMailboxLane;
+      occurredAt: Date;
+      payloadBytes: number;
+      payloadHash: string;
+      payloadSchema: string;
+      payloadStorage: HostedMailboxEncryptedPayloadStorage;
+      sourceMessageLookupKey: string | null;
+      userId: string;
+      mode: "prepared";
+    };
 
 interface AppendHostedMailboxItemBaseInput {
   dedupeKey: string;
@@ -516,6 +546,216 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   return appendHostedMailboxEnvelopeInternalTx(input);
+}
+
+export async function prepareHostedMailboxEnvelopeAppend(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  prisma: PrismaClient;
+}): Promise<PreparedHostedMailboxEnvelopeAppend> {
+  const envelope = input.envelope;
+  const lane = resolveHostedMailboxLaneForKind(envelope.kind);
+  const encodedPayload = serializeHostedMailboxPayload(envelope);
+  const metadata = deriveHostedMailboxStoredPayloadMetadata({
+    payloadSerializedJson: encodedPayload.serialized,
+    userId: envelope.userId,
+  });
+  const payloadSchema = HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
+  const assistantInputLookupKey = envelope.kind === "conversation.message"
+    ? requireNonEmptyString(
+        createHostedAssistantInputLookupKey(createHostedMailboxAssistantInputId({
+          dedupeKey: envelope.eventId,
+          eventId: envelope.eventId,
+          lane,
+          secret: readHostedConversationAssistantIdentifierSecret(envelope),
+          userId: envelope.userId,
+        })) ?? "",
+        "Hosted mailbox assistant input lookup key",
+      )
+    : null;
+  const reserved = await input.prisma.$transaction(async (tx) => {
+    await assertHostedMailboxEnvelopeWorkspaceTargetTx({ envelope, tx });
+    await tx.hostedWorkspace.upsert({
+      create: { userId: envelope.userId },
+      update: {},
+      where: { userId: envelope.userId },
+    });
+    await acquireHostedMailboxDedupeAppendLockTx({
+      dedupeKey: envelope.eventId,
+      tx,
+      userId: envelope.userId,
+    });
+    const existing = await findHostedMailboxItemByDedupeKeyTx({
+      dedupeKey: envelope.eventId,
+      tx,
+      userId: envelope.userId,
+    });
+    if (existing) {
+      if (hasHostedMailboxDedupeConflict({
+        existing,
+        kind: requireHostedMailboxWritableKind(envelope.kind),
+        lane,
+        payloadBytes: metadata.payloadBytes,
+        payloadHash: metadata.payloadHash,
+        payloadSchema,
+      })) {
+        throw new TypeError("Hosted mailbox prepared append conflicts with an existing event.");
+      }
+      return { existingItemId: existing.id } as const;
+    }
+    return { prepared: true } as const;
+  });
+  if ("existingItemId" in reserved) {
+    if (typeof reserved.existingItemId !== "string") {
+      throw new TypeError("Hosted mailbox existing item id is missing.");
+    }
+    return {
+      dedupeKey: envelope.eventId,
+      existingItemId: requireNonEmptyString(
+        reserved.existingItemId,
+        "Hosted mailbox existing item id",
+      ),
+      itemKind: requireHostedMailboxWritableKind(envelope.kind),
+      lane,
+      mode: "existing",
+      payloadBytes: metadata.payloadBytes,
+      payloadHash: metadata.payloadHash,
+      payloadSchema,
+      userId: envelope.userId,
+    };
+  }
+  const itemId = randomUUID();
+  const occurredAt = requireDate(envelope.occurredAt, "Hosted mailbox occurredAt");
+  const payloadStorage = await encryptHostedMailboxPayloadStorage({
+    dedupeKey: envelope.eventId,
+    itemId,
+    kind: requireHostedMailboxWritableKind(envelope.kind),
+    lane,
+    occurredAt,
+    payloadBytes: metadata.payloadBytes,
+    payloadSchema,
+    prisma: input.prisma,
+    serialized: metadata.serialized,
+    userId: envelope.userId,
+  });
+  return {
+    assistantInputLookupKey,
+    dedupeKey: envelope.eventId,
+    expiresAt: null,
+    itemId,
+    itemKind: requireHostedMailboxWritableKind(envelope.kind),
+    lane,
+    occurredAt,
+    payloadBytes: metadata.payloadBytes,
+    payloadHash: metadata.payloadHash,
+    payloadSchema,
+    payloadStorage,
+    sourceMessageLookupKey: null,
+    userId: envelope.userId,
+    mode: "prepared",
+  };
+}
+
+export async function appendPreparedHostedMailboxEnvelopeTx(input: {
+  prepared: PreparedHostedMailboxEnvelopeAppend;
+  tx: HostedMailboxMutationTx;
+}): Promise<{ mailboxItemId: string }> {
+  if (input.prepared.mode === "existing") {
+    await acquireHostedMailboxDedupeAppendLockTx({
+      dedupeKey: input.prepared.dedupeKey,
+      tx: input.tx,
+      userId: input.prepared.userId,
+    });
+    const existing = await findHostedMailboxItemByDedupeKeyTx({
+      dedupeKey: input.prepared.dedupeKey,
+      tx: input.tx,
+      userId: input.prepared.userId,
+    });
+    if (
+      !existing
+      || existing.id !== input.prepared.existingItemId
+      || hasHostedMailboxDedupeConflict({
+        existing,
+        kind: input.prepared.itemKind,
+        lane: input.prepared.lane,
+        payloadBytes: input.prepared.payloadBytes,
+        payloadHash: input.prepared.payloadHash,
+        payloadSchema: input.prepared.payloadSchema,
+      })
+    ) {
+      throw new TypeError("Hosted mailbox existing prepared append changed before commit.");
+    }
+    return { mailboxItemId: existing.id };
+  }
+  const prepared = input.prepared;
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey: prepared.dedupeKey,
+    tx: input.tx,
+    userId: prepared.userId,
+  });
+  const existing = await findHostedMailboxItemByDedupeKeyTx({
+    dedupeKey: prepared.dedupeKey,
+    tx: input.tx,
+    userId: prepared.userId,
+  });
+  if (existing) {
+    if (hasHostedMailboxDedupeConflict({
+      existing,
+      kind: prepared.itemKind,
+      lane: prepared.lane,
+      payloadBytes: prepared.payloadBytes,
+      payloadHash: prepared.payloadHash,
+      payloadSchema: prepared.payloadSchema,
+    })) {
+      throw new TypeError("Hosted mailbox prepared append changed before commit.");
+    }
+    return { mailboxItemId: existing.id };
+  }
+  await acquireHostedMailboxCausalAppendLockTx({
+    tx: input.tx,
+    userId: prepared.userId,
+  });
+  const causalSeq = await allocateHostedMailboxCausalSeqTx({
+    tx: input.tx,
+    userId: prepared.userId,
+  });
+  const laneSeq = await allocateHostedMailboxLaneSeqTx({
+    lane: prepared.lane,
+    tx: input.tx,
+    userId: prepared.userId,
+  });
+  const rows = await input.tx.$queryRaw<Array<{ id: string }>>`
+    INSERT INTO hosted_mailbox_item (
+      id, user_id, assistant_input_lookup_key, source_message_lookup_key,
+      causal_seq, lane, lane_seq, dedupe_key, kind, occurred_at,
+      payload_schema, payload_inline_ciphertext, payload_ref, payload_bytes,
+      payload_hash, consumed_at, expires_at, updated_at
+    ) VALUES (
+      ${prepared.itemId}, ${prepared.userId}, ${prepared.assistantInputLookupKey},
+      ${prepared.sourceMessageLookupKey}, ${causalSeq}, ${prepared.lane},
+      ${laneSeq}, ${prepared.dedupeKey}, ${prepared.itemKind},
+      ${prepared.occurredAt}, ${prepared.payloadSchema},
+      ${prepared.payloadStorage.payloadInlineCiphertext},
+      ${prepared.payloadStorage.payloadRef}, ${prepared.payloadBytes},
+      ${prepared.payloadHash}, NULL, ${prepared.expiresAt}, NOW()
+    )
+    ON CONFLICT (user_id, dedupe_key) DO NOTHING
+    RETURNING id
+  `;
+  const mailboxItemId = rows[0]?.id;
+  if (!mailboxItemId) {
+    throw new Error("Hosted mailbox prepared append conflict could not be resolved.");
+  }
+  if (prepared.payloadStorage.storage === "ref") {
+    await input.tx.hostedMailboxPayload.create({
+      data: {
+        mailboxItemId,
+        payloadCiphertext: prepared.payloadStorage.payloadCiphertext,
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        userId: prepared.userId,
+      },
+    });
+  }
+  return { mailboxItemId };
 }
 
 export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
@@ -2364,7 +2604,7 @@ async function encryptHostedMailboxPayloadStorage(input: {
   itemId: string;
   kind: HostedMailboxKind;
   lane: HostedMailboxLane;
-  laneSeq: bigint;
+  laneSeq?: bigint;
   occurredAt: Date;
   payloadBytes: number;
   payloadSchema: string;
@@ -2378,19 +2618,24 @@ async function encryptHostedMailboxPayloadStorage(input: {
   const aadPayloadSchema = payloadStorage === "inline"
     ? input.payloadSchema
     : HOSTED_MAILBOX_PAYLOAD_SCHEMA;
-  const ciphertext = await encryptHostedMailboxPayloadString({
+  const cryptoInput = {
     dedupeKey: input.dedupeKey,
     itemId: input.itemId,
     kind: input.kind,
     lane: input.lane,
-    laneSeq: input.laneSeq,
     occurredAt: input.occurredAt.toISOString(),
     payloadSchema: aadPayloadSchema,
     payloadStorage,
     prisma: input.prisma,
     userId: input.userId,
     value: input.serialized,
-  });
+  };
+  const ciphertext = input.laneSeq === undefined
+    ? await encryptPreparedHostedMailboxPayloadString(cryptoInput)
+    : await encryptHostedMailboxPayloadString({
+        ...cryptoInput,
+        laneSeq: input.laneSeq,
+      });
 
   if (!ciphertext) {
     throw new TypeError("Hosted mailbox payload encryption returned an empty ciphertext.");
