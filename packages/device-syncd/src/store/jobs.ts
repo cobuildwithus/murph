@@ -844,12 +844,46 @@ export function enqueueDeviceSyncJobInTransaction(
   const now = toIsoTimestamp(new Date());
 
   if (input.dedupeKey) {
+    const historicalVerification = input.provider === "junction"
+      && input.kind === "resource"
+      && input.payload?.historicalBackfill === true
+      && input.payload.historicalVerification === true;
+    const verificationCoordinate = historicalVerification
+      ? stringifyJson({
+          historicalBackfillVersion: input.payload?.historicalBackfillVersion ?? null,
+          resource: input.payload?.resource ?? null,
+          sourceLifecycleEpoch: input.payload?.sourceLifecycleEpoch ?? null,
+          sourceProviderSlug: input.payload?.sourceProviderSlug ?? null,
+        })
+      : "{}";
+    // A verification generation changes its durable dedupe key so a later
+    // offer can run after terminal completion. While any generation for the
+    // same provider coordinate is nonterminal, derive that stable coordinate
+    // from its existing payload inside this admission transaction and return
+    // the active row. The account/provider/status predicate keeps this bounded
+    // to the account's tiny active queue; no cross-account JSON scan is owned.
     const existing = database.prepare(`
       select *
       from device_job
       where account_id = ?
         and provider = ?
-        and dedupe_key = ?
+        and (
+          dedupe_key = ?
+          or (
+            ? = 1
+            and kind = 'resource'
+            and coalesce(json_extract(payload_json, '$.historicalBackfill'), 0) = 1
+            and coalesce(json_extract(payload_json, '$.historicalVerification'), 0) = 1
+            and json_extract(payload_json, '$.sourceProviderSlug')
+              = json_extract(?, '$.sourceProviderSlug')
+            and json_extract(payload_json, '$.resource')
+              = json_extract(?, '$.resource')
+            and json_extract(payload_json, '$.sourceLifecycleEpoch')
+              is json_extract(?, '$.sourceLifecycleEpoch')
+            and json_extract(payload_json, '$.historicalBackfillVersion')
+              is json_extract(?, '$.historicalBackfillVersion')
+          )
+        )
         and status in ('queued', 'running')
         and not (
           status = 'running'
@@ -868,6 +902,11 @@ export function enqueueDeviceSyncJobInTransaction(
       input.accountId,
       input.provider,
       input.dedupeKey,
+      historicalVerification ? 1 : 0,
+      verificationCoordinate,
+      verificationCoordinate,
+      verificationCoordinate,
+      verificationCoordinate,
       now,
       COMPANION_HRV_RMSSD_RESOURCE,
     ) as StoredJobRow | undefined;

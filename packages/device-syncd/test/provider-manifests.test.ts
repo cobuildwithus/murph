@@ -514,6 +514,8 @@ describe("deviceSyncProviderManifests", () => {
           historicalMalformedDateRetryAttempts: 3,
           historicalNoProgressAttempts: 2,
           historicalNoProgressRescan: true,
+          historicalVerification: true,
+          historicalVerificationGeneration: 42,
           historicalProviderRecordsSeen: true,
           historicalUnresolvedProviderRecordIdentitiesJson:
             "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
@@ -536,6 +538,8 @@ describe("deviceSyncProviderManifests", () => {
       historicalMalformedDateRetryAttempts: 3,
       historicalNoProgressAttempts: 2,
       historicalNoProgressRescan: true,
+      historicalVerification: true,
+      historicalVerificationGeneration: 42,
       historicalProviderRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson:
         "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",

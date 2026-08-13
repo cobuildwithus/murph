@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { rm } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { test } from "vitest";
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
@@ -25,6 +27,7 @@ import type { StoredDeviceSyncAccount } from "../src/types.ts";
 
 const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
+const execFileAsync = promisify(execFile);
 const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
   `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
   "u",
@@ -3090,6 +3093,126 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
     assert.deepEqual(duplicateJob.payload, {
       full: true,
     });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store admits one active Junction verification coordinate across generations", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-junction-verification-dedupe");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  const store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-verification-dedupe",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const verificationPayload = (generation: number) => ({
+      historicalBackfill: true,
+      historicalVerification: true,
+      historicalVerificationGeneration: generation,
+      historicalWindowStart: "2026-01-01T00:00:00.000Z",
+      resource: "caffeine",
+      sourceLifecycleEpoch: 3,
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-08-01T00:00:00.000Z",
+      windowStart: "2026-01-01T00:00:00.000Z",
+    });
+    const enqueueVerification = (
+      targetStore: SqliteDeviceSyncStore,
+      generation: number,
+    ) => targetStore.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-08-01T00:00:00.000Z",
+      dedupeKey: `junction-verification-generation-${generation}`,
+      kind: "resource",
+      payload: verificationPayload(generation),
+      provider: "junction",
+    });
+
+    const scheduled = enqueueVerification(store, 1);
+    assert.equal(enqueueVerification(store, 2).id, scheduled.id);
+    const running = store.claimDueJob("worker-a", "2026-08-01T00:00:00.000Z", 60_000);
+    assert.equal(running?.id, scheduled.id);
+    assert.equal(enqueueVerification(store, 2).id, scheduled.id);
+
+    const accountState = store.getAccountById(account.id);
+    assert.ok(accountState);
+    assert.ok(running);
+    const checkpointed = store.updateJobContinuationAndPatchSyncMetadataIfOwned({
+      accountId: account.id,
+      availableAt: "2026-08-01T00:01:00.000Z",
+      disconnectGeneration: accountState.disconnectGeneration,
+      jobId: running.id,
+      localConnectionRevision: accountState.localConnectionRevision,
+      now: "2026-08-01T00:00:30.000Z",
+      payload: {
+        ...running.payload,
+        windowStart: "2026-02-01T00:00:00.000Z",
+      },
+      releaseLease: true,
+      workerId: "worker-a",
+    });
+    assert.ok(checkpointed);
+    assert.equal(enqueueVerification(store, 2).id, scheduled.id);
+
+    const competingStore = new SqliteDeviceSyncStore(databasePath);
+    assert.equal(enqueueVerification(competingStore, 2).id, scheduled.id);
+    competingStore.close();
+
+    store.completeJob(scheduled.id, "2026-08-01T00:02:00.000Z");
+    const concurrentInput = {
+      accountId: account.id,
+      availableAt: "2026-08-01T00:03:00.000Z",
+      dedupeKey: "junction-verification-generation-2",
+      kind: "resource",
+      payload: verificationPayload(2),
+      provider: "junction",
+    };
+    const childScript = `
+      const { SqliteDeviceSyncStore } = await import(process.env.MURPH_TEST_STORE_MODULE_URL);
+      const childStore = new SqliteDeviceSyncStore(process.env.MURPH_TEST_DATABASE_PATH);
+      try {
+        const input = JSON.parse(Buffer.from(process.env.MURPH_TEST_JOB_INPUT, "base64url"));
+        process.stdout.write(childStore.enqueueJob(input).id);
+      } finally {
+        childStore.close();
+      }
+    `;
+    const childEnvironment = {
+      ...process.env,
+      MURPH_TEST_DATABASE_PATH: databasePath,
+      MURPH_TEST_JOB_INPUT: Buffer.from(JSON.stringify(concurrentInput)).toString("base64url"),
+      MURPH_TEST_STORE_MODULE_URL: new URL("../src/store.ts", import.meta.url).href,
+    };
+    const concurrentOffers = await Promise.all([
+      execFileAsync(process.execPath, ["--input-type=module", "--eval", childScript], {
+        env: childEnvironment,
+      }),
+      execFileAsync(process.execPath, ["--input-type=module", "--eval", childScript], {
+        env: childEnvironment,
+      }),
+    ]);
+    const [nextGenerationId, duplicateGenerationId] = concurrentOffers.map(({ stdout }) =>
+      stdout.trim()
+    );
+    assert.ok(nextGenerationId);
+    assert.notEqual(nextGenerationId, scheduled.id);
+    assert.equal(duplicateGenerationId, nextGenerationId);
+    assert.equal(store.getJobById(nextGenerationId)?.dedupeKey, concurrentInput.dedupeKey);
   } finally {
     store.close();
     await rm(tempDir, {

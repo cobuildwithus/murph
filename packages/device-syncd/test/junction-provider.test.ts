@@ -14444,8 +14444,11 @@ test("Junction same-day aggregate rows complete sparse history after bounded chu
     executor.createScheduledJobs?.(
       createStoredAccount({ metadata, sources: [source] }),
       "2026-08-20T12:00:00.000Z",
-    ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
-    false,
+    ).jobs.some((candidate) =>
+      candidate.payload?.resource === "caffeine"
+      && candidate.payload.historicalVerification === true
+    ),
+    true,
   );
 
   metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
@@ -14495,8 +14498,11 @@ test("Junction same-day aggregate rows complete sparse history after bounded chu
     executor.createScheduledJobs?.(
       createStoredAccount({ metadata, sources: [source] }),
       "2026-08-26T12:00:00.000Z",
-    ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
-    false,
+    ).jobs.some((candidate) =>
+      candidate.payload?.resource === "caffeine"
+      && candidate.payload.historicalVerification === true
+    ),
+    true,
   );
 });
 
@@ -14693,7 +14699,10 @@ test("Junction exhausted malformed dates advance one lineage to later valid hist
   assert.equal(executor.createScheduledJobs?.(
     createStoredAccount({ metadata, sources: [source] }),
     "2026-08-07T12:00:00.000Z",
-  ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"), false);
+  ).jobs.some((candidate) =>
+    candidate.payload?.resource === "caffeine"
+    && candidate.payload.historicalVerification === true
+  ), true);
 });
 
 test("Junction exhausted malformed date waits for historical pull readiness before coverage", async () => {

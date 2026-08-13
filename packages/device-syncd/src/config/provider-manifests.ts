@@ -213,6 +213,8 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       historicalMalformedDateRetryAttempts: numberJobField({ includeInHostedHint: true }),
       historicalNoProgressAttempts: numberJobField({ includeInHostedHint: true }),
       historicalNoProgressRescan: booleanJobField({ includeInHostedHint: true }),
+      historicalVerification: booleanJobField({ includeInHostedHint: true }),
+      historicalVerificationGeneration: numberJobField({ includeInHostedHint: true }),
       historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),

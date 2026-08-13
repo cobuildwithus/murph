@@ -351,9 +351,11 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
 const JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE = JUNCTION_CONNECT_SOURCE_TARGETS.length;
 // A date-atomic 30-day history segment performs at most one initial source
 // admission plus three exact-source reads per provider date. Keep the
-// background scheduler at one extended-history job per pass so its composed
-// maximum is 91 sequential reads and cannot contend with current sync,
-// onboarding, or inbound reply work through parallel history jobs.
+// background scheduler at one extended-history root offer per pass. A complete
+// 180-day daily-aggregate verification is six sequential job segments (at most
+// 546 source reads), while each worker job remains capped at 91 and outside a
+// database transaction. Stable coordinate dedupe coalesces an offer with an
+// already queued or running lineage instead of resetting its progress.
 const JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE = 1;
 
 function resolveJunctionExtendedTimeseriesBackfillPolicy(
@@ -731,12 +733,6 @@ export function createJunctionDeviceSyncProvider(
             source.resourceAvailabilitySummary,
             resource,
           )
-          || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-            account.metadata,
-            sourceProviderSlug,
-            resource,
-            policy.version,
-          )
           || !canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
             account.metadata,
             sourceProviderSlug,
@@ -762,52 +758,86 @@ export function createJunctionDeviceSyncProvider(
         .sort(([left], [right]) => left.localeCompare(right))
         .slice(0, JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE)
         .map(([sourceProviderSlug, source]) => {
+          const historicalVerification =
+            hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+              account.metadata,
+              sourceProviderSlug,
+              resource,
+              policy.version,
+            );
           const window = buildExtendedTimeseriesBackfillWindow(
             resource,
-            policy.historyAnchor === "schedule_time" ? now : source.firstSeenAt,
+            historicalVerification || policy.historyAnchor === "schedule_time"
+              ? now
+              : source.firstSeenAt,
           );
-          return buildExtendedTimeseriesBackfillJob({
-            availableAt: now,
-            ...(resource === "note" ? { historicalBackfillVersion: policy.version } : {}),
-            historicalWindowStart: window.windowStart,
+          return {
+            historicalVerification,
+            policy,
             resource,
-            ...(policy.historyAnchor === "schedule_time"
-              ? { sourceLifecycleEpoch: source.lifecycleEpoch }
-              : {}),
+            source,
             sourceProviderSlug,
-            windowEnd: window.windowEnd,
-            windowStart: window.windowStart,
-          });
+            window,
+          };
         });
     });
 
-    candidates.sort((left, right) => {
-      const resourceComparison = normalizeString(left.payload?.resource)?.localeCompare(
-        normalizeString(right.payload?.resource) ?? "",
-      ) ?? 0;
-      return resourceComparison || (
-        normalizeString(left.payload?.sourceProviderSlug)?.localeCompare(
-          normalizeString(right.payload?.sourceProviderSlug) ?? "",
-        ) ?? 0
-      );
-    });
-    if (candidates.length <= JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE) {
-      return candidates;
+    if (candidates.length === 0) {
+      return [];
     }
 
-    // Scheduling owns no cursor. Rotate deterministic fixed-size pages by the
-    // existing reconcile cadence so every resource/source pair is eventually
-    // offered without adding metadata or flooding the durable job queue.
-    const pageCount = Math.ceil(
-      candidates.length / JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE,
+    // Scheduling owns no cursor. Finish initial product obligations before
+    // spending the cap on verification: while any coordinate is uncovered,
+    // every offer comes from that tier. Once there is no initial backlog,
+    // rotate covered coordinates by the existing reconcile cadence. The bit is
+    // stable completion evidence, not permanent provider completeness.
+    // Deriving the page and verification generation from time makes rotation
+    // survive restart without another persisted owner.
+    candidates.sort((left, right) => {
+      const resourceComparison = left.resource.localeCompare(right.resource);
+      return resourceComparison || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
+    });
+    const uncoveredCandidates = candidates.filter((candidate) =>
+      !candidate.historicalVerification
     );
+    const eligibleCandidates = uncoveredCandidates.length > 0
+      ? uncoveredCandidates
+      : candidates;
     const scheduleSlot = Math.floor(Date.parse(now) / reconcileIntervalMs);
+    const pageCount = Math.ceil(
+      eligibleCandidates.length / JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE,
+    );
     const pageIndex = scheduleSlot % pageCount;
     const pageStart = pageIndex * JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE;
-    return candidates.slice(
+    const historicalVerificationGeneration = Math.floor(scheduleSlot / pageCount);
+    const selected = eligibleCandidates.slice(
       pageStart,
       pageStart + JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE,
     );
+    return selected.map((candidate) => {
+      const {
+        historicalVerification,
+        policy,
+        resource,
+        source,
+        sourceProviderSlug,
+        window,
+      } = candidate;
+      return buildExtendedTimeseriesBackfillJob({
+        availableAt: now,
+        ...(resource === "note" ? { historicalBackfillVersion: policy.version } : {}),
+        historicalVerification,
+        ...(historicalVerification ? { historicalVerificationGeneration } : {}),
+        historicalWindowStart: window.windowStart,
+        resource,
+        ...(policy.historyAnchor === "schedule_time"
+          ? { sourceLifecycleEpoch: source.lifecycleEpoch }
+          : {}),
+        sourceProviderSlug,
+        windowEnd: window.windowEnd,
+        windowStart: window.windowStart,
+      });
+    });
   }
 
   /**
@@ -2169,6 +2199,7 @@ export function createJunctionDeviceSyncProvider(
         }
         if (
           extendedHistoricalPolicy?.completion === "daily_aggregate"
+          && executionJob.payload.historicalVerification !== true
           && window.windowStart === historicalWindowStart
         ) {
           const historicalPullReadiness = resolveJunctionHistoricalPullReadiness({
@@ -2463,6 +2494,7 @@ export function createJunctionDeviceSyncProvider(
         );
         const historicalPullReadiness =
           extendedHistoricalPolicy?.completion === "daily_aggregate"
+          && executionJob.payload.historicalVerification !== true
           && timeseriesImport.fetchComplete
             ? resolveJunctionHistoricalPullReadiness({
                 resource: effectiveResource,
@@ -2742,6 +2774,17 @@ export function createJunctionDeviceSyncProvider(
         };
       }
       if (historicalPullReadiness === "unavailable" && !recordsSeen) {
+        if (input.job.payload.historicalVerification === true) {
+          return withJunctionMetadataPatch(
+            input.result,
+            buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
+              input.context,
+              input.job,
+              input.resource,
+              sourceProviderSlug,
+            ),
+          );
+        }
         const noProgressAttempts =
           readJunctionHistoricalNoProgressAttempts(input.job) + 1;
         const retryDelayMs =
@@ -2856,6 +2899,21 @@ export function createJunctionDeviceSyncProvider(
       retryDelayMs =
         EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
         ?? null;
+    }
+    if (
+      input.job.payload.historicalVerification === true
+      && input.importResult.fetchComplete
+      && !unresolvedProviderRecordsSeen
+    ) {
+      return withJunctionExtendedTimeseriesBackfillCompletion(
+        input.result,
+        buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
+          input.context,
+          input.job,
+          input.resource,
+          sourceProviderSlug,
+        ),
+      );
     }
     if (
       retryDelayMs === null
@@ -7039,6 +7097,17 @@ function readJunctionHistoricalCoverageTarget(
     ?? undefined;
 }
 
+function readJunctionHistoricalVerificationGeneration(
+  payload: Record<string, unknown>,
+): number {
+  const rawGeneration = payload.historicalVerificationGeneration;
+  return typeof rawGeneration === "number"
+      && Number.isSafeInteger(rawGeneration)
+      && rawGeneration >= 0
+    ? rawGeneration
+    : 0;
+}
+
 function readJunctionHistoricalUnresolvedProviderRecords(
   job: DeviceSyncJobRecord,
 ): JunctionHistoricalUnresolvedProviderRecords {
@@ -7211,6 +7280,22 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return null;
   }
 
+  if (payload.historicalVerification === true) {
+    return sha256Text(JSON.stringify([
+      "junction",
+      "extended-timeseries-verification",
+      normalizeProviderSlug(payload.sourceProviderSlug),
+      resource,
+      policy.historyAnchor === "schedule_time"
+        ? readJunctionSourceLifecycleEpoch(payload)
+        : null,
+      resource === "note"
+        ? readJunctionNoteHistoryBackfillVersion(payload)
+        : policy.version,
+      readJunctionHistoricalVerificationGeneration(payload),
+    ]));
+  }
+
   if (policy.historyAnchor === "schedule_time") {
     return sha256Text(JSON.stringify([
       "junction",
@@ -7245,6 +7330,8 @@ function buildExtendedTimeseriesBackfillJob(input: {
   historicalProviderRecordsSeen?: boolean;
   historicalBackfillVersion?: number;
   historicalNoProgressRescan?: boolean;
+  historicalVerification?: boolean;
+  historicalVerificationGeneration?: number;
   historicalRecordsSeen?: boolean;
   historicalUnresolvedProviderRecordIdentitiesJson?: string;
   historicalUnresolvedProviderRecordCount?: number;
@@ -7269,6 +7356,12 @@ function buildExtendedTimeseriesBackfillJob(input: {
     ?? (input.parentJob ? readJunctionHistoricalNoProgressAttempts(input.parentJob) : 0);
   const historicalNoProgressRescan = input.historicalNoProgressRescan
     ?? input.parentJob?.payload.historicalNoProgressRescan === true;
+  const historicalVerification = input.historicalVerification
+    ?? input.parentJob?.payload.historicalVerification === true;
+  const historicalVerificationGeneration = input.historicalVerificationGeneration
+    ?? (input.parentJob
+      ? readJunctionHistoricalVerificationGeneration(input.parentJob.payload)
+      : 0);
   const historicalProviderRecordsSeen = input.historicalProviderRecordsSeen
     ?? input.parentJob?.payload.historicalProviderRecordsSeen === true;
   const historicalRecordsSeen = input.historicalRecordsSeen
@@ -7297,6 +7390,12 @@ function buildExtendedTimeseriesBackfillJob(input: {
       : {}),
     ...(historicalNoProgressRescan
       ? { historicalNoProgressRescan: true }
+      : {}),
+    ...(historicalVerification
+      ? { historicalVerification: true }
+      : {}),
+    ...(historicalVerification
+      ? { historicalVerificationGeneration }
       : {}),
     ...(historicalProviderRecordsSeen
       ? { historicalProviderRecordsSeen: true }

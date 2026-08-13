@@ -758,9 +758,11 @@ test("covered Link reconnects retain bounded blood-pressure catch-up", async () 
     );
     assert.equal(
       requireValue(scheduled).jobs.some((job) =>
-        job.kind === "resource" && job.payload?.resource === "blood_pressure"
+        job.kind === "resource"
+        && job.payload?.resource === "blood_pressure"
+        && job.payload?.historicalVerification === true
       ),
-      false,
+      true,
     );
   }
 });
@@ -905,8 +907,9 @@ test("an existing source receives one migration anchored to its first-seen windo
     completed.jobs.some((job) =>
       job.kind === "resource"
       && job.payload?.resource === "blood_pressure"
+      && job.payload?.historicalVerification === true
     ),
-    false,
+    true,
   );
 });
 
@@ -1018,8 +1021,12 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
     "2026-06-12T12:00:00.000Z",
   );
   assert.equal(
-    completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
-    false,
+    completed.jobs.some((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "note"
+      && job.payload?.historicalVerification === true
+    ),
+    true,
   );
 });
 
@@ -1087,7 +1094,7 @@ test("sparse daily resources receive one rollout-anchored summary-history job", 
   );
 });
 
-test("terminal matrix coverage suppresses every extended-history pair", () => {
+test("terminal matrix coverage keeps every extended-history pair in rolling rotation", () => {
   const extendedResources = [
     "blood_pressure",
     "note",
@@ -1124,13 +1131,81 @@ test("terminal matrix coverage suppresses every extended-history pair", () => {
     NOW,
   );
 
-  assert.equal(
-    scheduled.jobs.some((job) =>
-      job.kind === "resource"
-      && extendedResourceSet.has(String(job.payload?.resource))
-    ),
-    false,
+  const historyJobs = scheduled.jobs.filter((job) =>
+    job.kind === "resource"
+    && extendedResourceSet.has(String(job.payload?.resource))
   );
+  assert.equal(historyJobs.length, 1);
+  assert.equal(historyJobs[0]?.payload?.historicalVerification, true);
+  assert.equal(historyJobs[0]?.payload?.windowEnd, BACKFILL_WINDOW_END);
+});
+
+test("uncovered history wins the cap before covered verification", () => {
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { blood_pressure: true },
+      slug: "withings",
+    }],
+    requests: [],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const scheduled = createScheduledJobs(
+    createStoredAccount({
+      metadata: addHistoryCoverage({}, "omron", "blood_pressure"),
+      sources: [
+        createSourceSummary("omron", "2026-01-01T12:00:00.000Z"),
+        createSourceSummary("withings", "2026-02-01T12:00:00.000Z"),
+      ],
+    }),
+    NOW,
+  );
+  const job = findBloodPressureJob(scheduled.jobs);
+
+  assert.equal(job.payload?.sourceProviderSlug, "withings");
+  assert.equal(job.payload?.historicalVerification, undefined);
+});
+
+test("empty verification terminates and the next rotation generation is admissible", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ requests });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary("omron", "2026-01-01T12:00:00.000Z")];
+  const metadata = addHistoryCoverage({}, "omron", "blood_pressure");
+  const initialOffer = findBloodPressureJob(createScheduledJobs(
+    createStoredAccount({ metadata, sources }),
+    NOW,
+  ).jobs);
+  const sameGenerationOffer = findBloodPressureJob(createScheduledJobs(
+    createStoredAccount({ metadata, sources }),
+    new Date(Date.parse(NOW) + 30 * 60_000).toISOString(),
+  ).jobs);
+
+  assert.equal(initialOffer.payload?.historicalVerification, true);
+  assert.equal(sameGenerationOffer.dedupeKey, initialOffer.dedupeKey);
+  const completed = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ account: createAccount({ metadata, sources }) }),
+    job: toJobRecord(initialOffer, 1),
+    provider,
+  });
+  assert.equal(completed.executionCount, 30);
+  assert.equal(completed.result.scheduledJobs?.length ?? 0, 0);
+  assertHistoryCoverage(completed.result.metadataPatch, "omron", "blood_pressure");
+
+  const nextGenerationAt = new Date(Date.parse(NOW) + 60 * 60_000).toISOString();
+  const nextGenerationOffer = findBloodPressureJob(createScheduledJobs(
+    createStoredAccount({ metadata, sources }),
+    nextGenerationAt,
+  ).jobs);
+  assert.notEqual(nextGenerationOffer.dedupeKey, initialOffer.dedupeKey);
+  assert.ok(
+    Number(nextGenerationOffer.payload?.historicalVerificationGeneration)
+      > Number(initialOffer.payload?.historicalVerificationGeneration),
+  );
+  assert.equal(requests.length, 30);
 });
 
 test("an unrepresentable source is omitted from extended-history scheduling", () => {
@@ -1418,8 +1493,9 @@ test("a sparse daily aggregate retries a date with a malformed sibling", async (
   assert.equal(
     completed.jobs.some((job) =>
       job.kind === "resource" && job.payload?.resource === "caffeine"
+      && job.payload?.historicalVerification === true
     ),
-    false,
+    true,
   );
   const normalized = await Promise.all(importedSnapshots.map(async (snapshot) => {
     const parsed = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
@@ -1579,7 +1655,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
       createStoredAccount({ metadata: completed.result.metadataPatch, sources }),
       "2026-06-12T12:00:00.000Z",
     ).jobs.some((job) => job.payload?.resource === "caffeine"),
-    false,
+    true,
   );
 });
 
@@ -1923,7 +1999,7 @@ test("a persistently malformed sparse day exhausts its retry without stale cover
       createStoredAccount({ metadata: finalResult?.metadataPatch, sources }),
       now,
     ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
-    false,
+    true,
   );
 });
 
@@ -2054,7 +2130,7 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
         createStoredAccount({ metadata: completed.result.metadataPatch, sources }),
         "2026-07-22T12:00:00.000Z",
       ).jobs.some((job) => job.payload?.resource === "caffeine"),
-      false,
+      true,
     );
   } finally {
     store.close();
@@ -2173,7 +2249,7 @@ test("a queued pre-reconnect job cannot block or certify the current source epoc
       createStoredAccount({ metadata: completed.metadataPatch, sources: [epochTwoSource] }),
       "2026-06-12T12:00:00.000Z",
     ).jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
-    false,
+    true,
   );
 });
 
@@ -2321,8 +2397,12 @@ test("empty Oura note history reaches terminal source coverage", async () => {
     "2026-06-12T12:00:00.000Z",
   );
   assert.equal(
-    completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
-    false,
+    completed.jobs.some((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "note"
+      && job.payload?.historicalVerification === true
+    ),
+    true,
   );
 });
 
@@ -2392,9 +2472,11 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
   );
   assert.equal(
     requireValue(afterCoverage).jobs.some((job) =>
-      job.kind === "resource" && job.payload?.resource === "blood_pressure"
+      job.kind === "resource"
+      && job.payload?.resource === "blood_pressure"
+      && job.payload?.historicalVerification === true
     ),
-    false,
+    true,
   );
 });
 

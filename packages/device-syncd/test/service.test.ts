@@ -2113,7 +2113,8 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     assert.equal(scheduledHistoryJobs?.some((job) =>
       job.payload?.sourceProviderSlug === "garmin"
       && job.payload?.resource === "caffeine"
-    ), false);
+      && job.payload.historicalVerification === true
+    ), true);
   } finally {
     reopenedStore.close();
   }
@@ -2355,17 +2356,22 @@ test("Junction sparse history persists malformed disposition through restart wit
       .reduce((sum, byte) => sum + byte.toString(2).replaceAll("0", "").length, 0);
     assert.equal(setBitCount, 1, "the exhausted lineage owns one terminal bit");
 
+    let verificationRootId: string | undefined;
     for (let pass = 0; pass < 3; pass += 1) {
       fixture.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
       await fixture.service.runSchedulerOnce();
-      assert.equal(activeHistoryJobs().length, 0);
+      const [verificationRoot] = activeHistoryJobs();
+      assert.ok(verificationRoot);
+      assert.equal(verificationRoot.payload.historicalVerification, true);
+      verificationRootId ??= verificationRoot.id;
+      assert.equal(verificationRoot.id, verificationRootId);
     }
   } finally {
     fixture.close();
   }
 });
 
-test("Junction stale fifth sparse-history scan carries one fixed target through restart", async () => {
+test("Junction verification recovers late sparse history beyond the fixed target after restart", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-moving-history-repair");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   let now = new Date("2040-08-01T12:00:00.000Z");
@@ -2373,10 +2379,12 @@ test("Junction stale fifth sparse-history scan carries one fixed target through 
   let dailyCaffeineRequestCount = 0;
   let historicalPullChecks = 0;
   let historicalRequestCount = 0;
-  let importedPostAnchorFactCount = 0;
+  const importedLateFactCounts = new Map<string, number>();
   const historicalWindows: Array<{ end: string; start: string }> = [];
   const dailyCaffeineWindows: Array<{ end: string; start: string }> = [];
-  const postAnchorFactAt = "2040-07-23T08:00:00.000Z";
+  const latePrefixFactAt = "2040-07-23T08:00:00.000Z";
+  const latePostTargetFactAt = "2040-08-04T08:00:00.000Z";
+  const lateFactTimes = [latePrefixFactAt, latePostTargetFactAt];
   await initializeVault({ vaultRoot });
   const canonicalImporter = createImporters();
   const provider = createJunctionDeviceSyncProvider({
@@ -2449,14 +2457,19 @@ test("Junction stale fifth sparse-history scan carries one fixed target through 
           dailyCaffeineRequestCount += 1;
           dailyCaffeineWindows.push({ end, start });
         }
-        const containsPostAnchorFact =
-          now.getTime() >= Date.parse("2040-08-12T12:00:00.000Z")
-          && Date.parse(start) <= Date.parse(postAnchorFactAt)
-          && Date.parse(end) + 24 * 60 * 60_000 > Date.parse(postAnchorFactAt);
+        const availableLateFacts = now.getTime() >= Date.parse("2040-08-20T12:00:00.000Z")
+          ? lateFactTimes.filter((factAt) =>
+              Date.parse(start) <= Date.parse(factAt)
+              && Date.parse(end) + 24 * 60 * 60_000 > Date.parse(factAt)
+            )
+          : [];
         return createJsonResponse({
-          groups: containsPostAnchorFact
+          groups: availableLateFacts.length > 0
             ? { garmin: [{
-                data: [{ start: postAnchorFactAt, value: 0.095 }],
+                data: availableLateFacts.map((factAt, index) => ({
+                  start: factAt,
+                  value: 0.095 + index * 0.001,
+                })),
                 source: { provider: "garmin", type: "watch" },
               }] }
             : {},
@@ -2479,8 +2492,11 @@ test("Junction stale fifth sparse-history scan carries one fixed target through 
     },
     importer: {
       async importDeviceProviderSnapshot(snapshot) {
-        if (JSON.stringify(snapshot).includes(postAnchorFactAt)) {
-          importedPostAnchorFactCount += 1;
+        const serializedSnapshot = JSON.stringify(snapshot);
+        for (const factAt of lateFactTimes) {
+          if (serializedSnapshot.includes(factAt)) {
+            importedLateFactCounts.set(factAt, (importedLateFactCounts.get(factAt) ?? 0) + 1);
+          }
         }
         return canonicalImporter.importDeviceProviderSnapshot(snapshot);
       },
@@ -2668,11 +2684,15 @@ test("Junction stale fifth sparse-history scan carries one fixed target through 
     const historicalRequestCountAfterStaleTerminal = historicalRequestCount;
     assert.ok(historicalRequestCountAfterStaleTerminal > historicalRequestCountBeforeTerminalScan);
     assert.equal(dailyCaffeineRequestCount, dailyCaffeineRequestCountBeforeBlockedRestart);
-    assert.equal(historicalWindows.slice(-1).some((window) =>
-      Date.parse(window.start) <= Date.parse(postAnchorFactAt)
-      && Date.parse(window.end) > Date.parse(postAnchorFactAt)
-    ), false);
-    assert.equal(importedPostAnchorFactCount, 0);
+    assert.equal(historicalWindows.some((window) =>
+      Date.parse(window.start) <= Date.parse(latePrefixFactAt)
+      && Date.parse(window.end) + 24 * 60 * 60_000 > Date.parse(latePrefixFactAt)
+    ), true, "the initial lineage scanned the prefix before the late fact appeared");
+    assert.ok(
+      Date.parse(latePostTargetFactAt) > Date.parse(fixedCoverageTarget),
+      "the second late fact is after the persisted schedule-time target",
+    );
+    assert.equal(importedLateFactCounts.size, 0);
     let persisted = runtime.store.getAccountById(account.id);
     assert.ok(persisted);
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -2683,7 +2703,40 @@ test("Junction stale fifth sparse-history scan carries one fixed target through 
     ), true, "the restarted lineage completes its bounded schedule-time target");
     assert.equal(activeHistoryJobs().length, 0);
 
-    const historicalRowCountAfterCompletion = readJobsForAccountForTesting(
+    runtime.close();
+    closed = true;
+    now = new Date("2040-08-20T12:00:00.000Z");
+    runtime = createRuntime();
+    closed = false;
+    const coverageBeforeVerification = runtime.store.getAccountById(account.id);
+    assert.ok(coverageBeforeVerification);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      coverageBeforeVerification.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true, "the completion bit survives the database reopen");
+    runtime.store.upsertConnectionSource({
+      connectionId: account.id,
+      lastSeenAt: now.toISOString(),
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { blood_oxygen: false, caffeine: true },
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+
+    runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await runtime.service.runSchedulerOnce();
+    const verificationRoot = activeHistoryJobs().find((job) =>
+      job.payload.historicalVerification === true
+    );
+    assert.ok(verificationRoot);
+    assert.equal(verificationRoot.payload.windowEnd, "2040-08-20T00:00:00.000Z");
+    assert.equal(verificationRoot.payload.windowStart, "2040-07-20T00:00:00.000Z");
+    const verificationDedupeKey = verificationRoot.dedupeKey;
+    const verificationRootId = verificationRoot.id;
+    const historyRowCountBeforeDuplicateOffer = readJobsForAccountForTesting(
       runtime.store,
       account.id,
     ).filter((row) => {
@@ -2692,9 +2745,15 @@ test("Junction stale fifth sparse-history scan carries one fixed target through 
         && job.payload.historicalBackfill === true
         && job.payload.resource === "caffeine";
     }).length;
+
     runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await runtime.service.runSchedulerOnce();
-    assert.equal(activeHistoryJobs().length, 0);
+    const duplicateOfferJobs = activeHistoryJobs().filter((job) =>
+      job.payload.historicalVerification === true
+    );
+    assert.equal(duplicateOfferJobs.length, 1);
+    assert.equal(duplicateOfferJobs[0]?.id, verificationRootId);
+    assert.equal(duplicateOfferJobs[0]?.dedupeKey, verificationDedupeKey);
     assert.equal(
       readJobsForAccountForTesting(runtime.store, account.id).filter((row) => {
         const job = runtime.store.getJobById(row.id);
@@ -2702,30 +2761,45 @@ test("Junction stale fifth sparse-history scan carries one fixed target through 
           && job.payload.historicalBackfill === true
           && job.payload.resource === "caffeine";
       }).length,
-      historicalRowCountAfterCompletion,
-      "terminal coverage must prevent a replacement root",
+      historyRowCountBeforeDuplicateOffer,
+      "the same verification generation coalesces without another durable root",
     );
 
-    dailyBlockerFails = false;
-    now = new Date("2040-08-20T12:00:00.000Z");
-    runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
-    await runtime.service.runSchedulerOnce();
-    for (
-      let pass = 0;
-      pass < 20 && dailyCaffeineRequestCount === dailyCaffeineRequestCountBeforeBlockedRestart;
-      pass += 1
-    ) {
+    workerRuns = 0;
+    while (activeHistoryJobs().length > 0) {
       const processed = await runtime.service.runWorkerOnce();
+      workerRuns += 1;
+      assert.ok(workerRuns < 80);
       if (!processed && pendingJobs().length > 0) {
         advanceToNextJob();
       }
     }
-    assert.ok(dailyCaffeineRequestCount > dailyCaffeineRequestCountBeforeBlockedRestart);
+    assert.equal(
+      dailyCaffeineRequestCount,
+      dailyCaffeineRequestCountBeforeBlockedRestart,
+      "the blocked current reconcile never reaches caffeine",
+    );
     assert.equal(dailyCaffeineWindows.some((window) =>
-      Date.parse(window.start) <= Date.parse(postAnchorFactAt)
-      && Date.parse(window.end) > Date.parse(postAnchorFactAt)
-    ), false, "the recovered rolling daily window must no longer include the post-anchor fact");
-    assert.equal(importedPostAnchorFactCount, 0);
+      lateFactTimes.some((factAt) =>
+        Date.parse(window.start) <= Date.parse(factAt)
+        && Date.parse(window.end) + 24 * 60 * 60_000 > Date.parse(factAt)
+      )
+    ), false, "the seven-day current window cannot own either late fact");
+    for (const factAt of lateFactTimes) {
+      assert.equal(historicalWindows.some((window) =>
+        Date.parse(window.start) <= Date.parse(factAt)
+        && Date.parse(window.end) + 24 * 60 * 60_000 > Date.parse(factAt)
+      ), true);
+      assert.equal(importedLateFactCounts.get(factAt), 1);
+    }
+    persisted = runtime.store.getAccountById(account.id);
+    assert.ok(persisted);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      persisted.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true, "verification preserves stable product completion evidence");
     assert.equal(activeHistoryJobs().length, 0);
   } finally {
     if (!closed) {
@@ -2860,7 +2934,7 @@ test("Junction schedule-time history keeps one durable retry chain across UTC da
   }
 });
 
-test("a stale Junction history retry finishes without coverage and is replaced once at the current window", async () => {
+test("a stale Junction history retry finishes coverage before rolling verification", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-stale-history-replacement");
   let now = new Date("2026-08-01T12:00:00.000Z");
   vi.useFakeTimers();
@@ -3036,10 +3110,13 @@ test("a stale Junction history retry finishes without coverage and is replaced o
     store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await service.runSchedulerOnce();
     const replacements = activeHistoryJobs();
-    assert.equal(replacements.length, 0);
+    assert.equal(replacements.length, 1);
+    assert.equal(replacements[0]?.payload.historicalVerification, true);
     const replacementWindowStartIndex = successfulCaffeineWindows.length;
     assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
     const completedDailyBeforeReplacement = store.getAccountById(account.id)?.lastSyncCompletedAt;
+    assert.equal(activeHistoryJobs().length, 1);
+    assert.equal((await service.runWorkerOnce())?.kind, "resource");
     assert.equal(activeHistoryJobs().length, 0);
     assert.equal(hasCoverage(), true);
     assert.equal(
@@ -3067,7 +3144,8 @@ test("a stale Junction history retry finishes without coverage and is replaced o
     vi.setSystemTime(now);
     store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await service.runSchedulerOnce();
-    assert.equal(activeHistoryJobs().length, 0);
+    assert.equal(activeHistoryJobs().length, 1);
+    assert.equal(activeHistoryJobs()[0]?.payload.historicalVerification, true);
   } finally {
     close();
     vi.useRealTimers();
