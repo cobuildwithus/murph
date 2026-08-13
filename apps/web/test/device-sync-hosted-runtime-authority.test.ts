@@ -93,7 +93,6 @@ function buildHostedRecord(
     lastWebhookAt: string | null;
     metadata: Record<string, unknown>;
     nextReconcileAt: string | null;
-    nextRuntimeWakeAt: string | null;
     provider: string;
     providerApplicationId: string | null;
     providerApplicationRevision: number | null;
@@ -149,9 +148,6 @@ function buildHostedRecord(
     updatedAt: "2026-04-06T10:00:00.000Z",
     userId: "user_123",
     ...overrides,
-    nextRuntimeWakeAt: overrides.nextRuntimeWakeAt
-      ? new Date(overrides.nextRuntimeWakeAt)
-      : null,
   };
 }
 
@@ -237,9 +233,7 @@ function createAuthorityHarness(input: {
     ? buildStoredAccount(currentRecord)
     : input.storedAccount;
 
-  const syncDurableConnectionState = vi.fn(async (
-    account: ReturnType<typeof buildPublicConnection> & { nextRuntimeWakeAt?: string | null },
-  ) => {
+  const syncDurableConnectionState = vi.fn(async (account: ReturnType<typeof buildPublicConnection>) => {
     currentRecord = {
       ...currentRecord,
       accessTokenExpiresAt: account.accessTokenExpiresAt,
@@ -256,13 +250,6 @@ function createAuthorityHarness(input: {
       lastWebhookAt: account.lastWebhookAt,
       metadata: account.metadata,
       nextReconcileAt: account.nextReconcileAt,
-      nextRuntimeWakeAt: account.status !== "active"
-        ? null
-        : Object.prototype.hasOwnProperty.call(account, "nextRuntimeWakeAt")
-          ? account.nextRuntimeWakeAt
-            ? new Date(account.nextRuntimeWakeAt)
-            : null
-          : currentRecord.nextRuntimeWakeAt,
       provider: account.provider,
       scopes: [...account.scopes],
       setupExpiresAt: account.setupExpiresAt,
@@ -2398,11 +2385,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
   });
 
   it("does not clear OAuth tokens from a disconnected status update without a credential mutation", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        nextRuntimeWakeAt: "2026-04-06T10:15:00.000Z",
-      }),
-    });
+    const harness = createAuthorityHarness();
     const { applyHostedDeviceSyncRuntimeResult } = await import(
       "@/src/lib/device-sync/hosted-runtime-authority"
     );
@@ -2440,7 +2423,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(harness.record.accessTokenExpiresAt).toBeNull();
-    expect(harness.record.nextRuntimeWakeAt).toBeNull();
     expect(harness.record.status).toBe("disconnected");
     expect(harness.storedAccount).toMatchObject({
       credential: {
@@ -2851,7 +2833,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         externalAccountId: null,
-        nextRuntimeWakeAt: "2026-04-06T10:05:00.000Z",
       }),
       storedAccount: null,
     });
@@ -2865,7 +2846,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         externalAccountId: null,
         externalAccountIdEncrypted: `encrypted-external-account-id-${index}`,
         id: `conn_${String(index + 1).padStart(2, "0")}`,
-        nextRuntimeWakeAt: index === 0 ? "2026-04-06T10:05:00.000Z" : null,
         refreshTokenEncrypted: `encrypted-refresh-token-${index}`,
         updatedAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
       }),
@@ -2907,15 +2887,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
     expect(response.connections).toHaveLength(
       HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
-    );
-    expect(response.capabilities).toEqual({
-      connectionSourceApply: true,
-      runtimeJobWakeProjection: true,
-    });
-    expect(response.connections.find(
-      (entry) => entry.connection.id === "conn_01",
-    )?.localState.nextRuntimeWakeAt).toBe(
-      "2026-04-06T10:05:00.000Z",
     );
     expect(response.connections.every((entry) =>
       entry.connection.externalAccountId === `opaque:${entry.connection.id}`
@@ -3485,54 +3456,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
     expect(harness.record.setupExpiresAt).toBe(null);
     expect(harness.record.setupPhase).toBe("source_confirmed");
-  });
-
-  it("persists provider cadence separately from runtime wake recovery", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        nextReconcileAt: "2026-04-06T13:00:00.000Z",
-      }),
-    });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              localState: {
-                nextReconcileAt: "2026-04-06T14:00:00.000Z",
-                nextRuntimeWakeAt: "2026-04-06T10:15:00.000Z",
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(response.updates[0]).toMatchObject({
-      connectionId: "conn_123",
-      writeUpdate: "applied",
-    });
-    expect(harness.syncDurableConnectionState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        nextReconcileAt: "2026-04-06T14:00:00.000Z",
-        nextRuntimeWakeAt: "2026-04-06T10:15:00.000Z",
-      }),
-      expect.anything(),
-    );
-    expect(harness.record.nextReconcileAt).toBe("2026-04-06T14:00:00.000Z");
-    expect(harness.record.nextRuntimeWakeAt?.toISOString()).toBe(
-      "2026-04-06T10:15:00.000Z",
-    );
   });
 
   it("persists provider-config runtime credentials without writing token bundles", async () => {

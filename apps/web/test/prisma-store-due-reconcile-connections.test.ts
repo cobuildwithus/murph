@@ -48,7 +48,6 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(query.text).toContain('"connection"."status" = \'active\'');
     expect(query.text).toContain('"connection"."connected_at"');
     expect(query.text).toContain('"connection"."next_reconcile_at" <= $1');
-    expect(query.text).not.toContain('"connection"."next_runtime_wake_at"');
     expect(query.text).toContain('join "hosted_member" as "member"');
     expect(query.text).toContain('"member"."suspended_at" is null');
     // Access is the resolver projection: own active billing OR active

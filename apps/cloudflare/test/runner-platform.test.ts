@@ -91,6 +91,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedExecutionStructuredLogRecord,
+  readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
   buildHostedExecutionRuntimePlatform,
@@ -1099,6 +1100,85 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const putRequest = requireFetchRequest(fetchMock.mock.calls[1], "direct R2 workspace snapshot PUT");
       expect(putRequest.method).toBe("PUT");
       expect(putRequest.url).toBe(putUrl);
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("retains bounded R2 error diagnostics without presigned URL material", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-secret`;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot platform fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        return new Response(
+          "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<Error><Code>InternalError</Code>"
+            + "<Message>We encountered an internal error. Please try again. "
+            + `Object ${objectKey}?X-Amz-Signature=fixture-secret.</Message>`
+            + "<RequestId>r2request0123456789</RequestId>"
+            + `<Resource>${objectKey}?X-Amz-Signature=fixture-secret</Resource>`
+            + "</Error>",
+          {
+            headers: {
+              "content-type": "application/xml",
+            },
+            status: 500,
+          },
+        );
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      let uploadError: unknown;
+      try {
+        await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+          encryptedByteSize: encryptedBytes.byteLength,
+          encryptedObjectSha256: "c".repeat(64),
+          objectKey,
+          snapshotId: "snapshot_runner_platform",
+          sourceFilePath: encryptedFilePath,
+        });
+      } catch (error) {
+        uploadError = error;
+      }
+
+      const safeError = readHostedRuntimeSafeErrorText(uploadError);
+      expect(safeError).toContain("R2 error code InternalError.");
+      expect(safeError).toContain(
+        "R2 error message: We encountered an internal error. Please try again.",
+      );
+      expect(safeError).toContain("R2 request ID r2request0123456789.");
+      expect(safeError).not.toContain(objectKey);
+      expect(safeError).not.toContain("fixture-secret");
+      expect(safeError).not.toContain(putUrl);
     } finally {
       await rm(tempRoot, {
         force: true,

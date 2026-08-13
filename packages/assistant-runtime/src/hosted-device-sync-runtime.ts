@@ -16,6 +16,7 @@ import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
   DeviceSyncJobFailureDiagnostic,
+  DeviceSyncJobRecord,
   StoredDeviceConnectionSource,
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
@@ -49,6 +50,7 @@ import type {
   HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  HostedExecutionDeviceSyncWake,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -275,18 +277,6 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       });
     }
 
-    if (
-      !terminalStatus
-      && snapshot.capabilities?.runtimeJobWakeProjection === true
-      && entry.localState.nextRuntimeWakeAt
-      && store.readNextJobWakeAtForAccount(stored.id) === null
-    ) {
-      input.service.queueScheduledReconcileAt(
-        stored.id,
-        entry.localState.nextRuntimeWakeAt,
-      );
-    }
-
     state.hostedToLocalAccountIds.set(entry.connection.id, stored.id);
     state.localToHostedAccountIds.set(stored.id, entry.connection.id);
     state.observedTokenVersions.set(entry.connection.id, stored.hostedObservedTokenVersion ?? null);
@@ -430,19 +420,13 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       continue;
     }
 
-    const nextRuntimeWakeAt = store.readNextJobWakeAtForAccount(account.id);
-    const runtimeJobWakeProjectionEnabled =
-      input.state.snapshot?.capabilities?.runtimeJobWakeProjection === true;
     const update = buildHostedDeviceSyncRuntimeConnectionUpdate({
       account,
       baseline: snapshotByConnectionId.get(hostedConnectionId) ?? null,
       codec,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
-      nextReconcileAt: runtimeJobWakeProjectionEnabled
-        ? account.nextReconcileAt ?? null
-        : earliestIsoTimestamp(account.nextReconcileAt ?? null, nextRuntimeWakeAt),
-      nextRuntimeWakeAt: runtimeJobWakeProjectionEnabled ? nextRuntimeWakeAt : undefined,
+      nextReconcileAt: account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -599,8 +583,18 @@ async function applyHostedDeviceSyncWakeHint(input: {
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
 
-  for (const hint of jobHints) {
-    const job = hostedJobHintToDeviceSyncJobInput(hint, input.wake.occurredAt);
+  for (const [index, hint] of jobHints.entries()) {
+    const job = hostedJobHintToDeviceSyncJobInput(
+      {
+        ...hint,
+        dedupeKey: resolveHostedDeviceSyncWakeJobDedupeKey({
+          hint,
+          index,
+          wake: input.wake,
+        }),
+      },
+      input.wake.occurredAt,
+    );
     store.enqueueJob({
       accountId: localAccountId,
       availableAt: job.availableAt,
@@ -619,6 +613,107 @@ async function applyHostedDeviceSyncWakeHint(input: {
   }
 
   return false;
+}
+
+export function resolveHostedDeviceSyncWakeRecovery(input: {
+  scheduledJobs: readonly DeviceSyncJobRecord[];
+  service: DeviceSyncService;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): {
+  retryAt: string;
+  wake: HostedExecutionDeviceSyncWake;
+} | null {
+  if (input.wake.kind !== "device-sync.wake") {
+    return null;
+  }
+  const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
+  const localAccountId = wakeContext.connectionId
+    ? input.state.hostedToLocalAccountIds.get(wakeContext.connectionId) ?? null
+    : null;
+  if (!localAccountId) {
+    return null;
+  }
+  const store = requireHostedRuntimeDeviceSyncStore(input.service);
+  const account = store.getAccountById(localAccountId);
+  if (!account) {
+    return null;
+  }
+
+  const originalHints = normalizeHostedDeviceSyncJobHints(wakeContext.hint);
+  const sourceHints = originalHints.length > 0
+    ? originalHints
+    : input.scheduledJobs
+      .filter((job) => job.accountId === localAccountId)
+      .map((job) => ({
+        availableAt: job.availableAt,
+        dedupeKey: job.dedupeKey,
+        kind: job.kind,
+        maxAttempts: job.maxAttempts,
+        payload: { ...job.payload },
+        priority: job.priority,
+      } satisfies HostedExecutionDeviceSyncJobHint));
+  if (sourceHints.length === 0) {
+    return null;
+  }
+
+  let retryAt: string | null = null;
+  const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
+  for (const [index, hint] of sourceHints.entries()) {
+    const dedupeKey = resolveHostedDeviceSyncWakeJobDedupeKey({
+      hint,
+      index,
+      wake: input.wake,
+    });
+    const job = store.getLatestJobByDedupeKey({
+      accountId: localAccountId,
+      dedupeKey,
+      provider: account.provider,
+    });
+    if (!job || (job.status !== "queued" && job.status !== "running")) {
+      continue;
+    }
+    const jobRetryAt = job.status === "running"
+      ? job.leaseExpiresAt ?? job.availableAt
+      : job.availableAt;
+    const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
+    retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
+      ? jobRetryAt
+      : retryAt;
+    retryHints.push({
+      availableAt: jobRetryAt,
+      dedupeKey,
+      kind: hint.kind,
+      maxAttempts: remainingAttempts,
+      ...(hint.payload ? { payload: { ...hint.payload } } : {}),
+      ...(typeof hint.priority === "number" ? { priority: hint.priority } : {}),
+    });
+  }
+  if (!retryAt || retryHints.length === 0) {
+    return null;
+  }
+
+  return {
+    retryAt,
+    wake: {
+      ...input.wake,
+      hint: {
+        ...(input.wake.hint ?? {}),
+        jobs: retryHints,
+      },
+    },
+  };
+}
+
+function resolveHostedDeviceSyncWakeJobDedupeKey(input: {
+  hint: HostedExecutionDeviceSyncJobHint;
+  index: number;
+  wake: HostedExecutionDeviceSyncWake;
+}): string {
+  return input.hint.dedupeKey
+    ?? `hosted-device-sync-wake:${createHash("sha256")
+      .update(JSON.stringify([input.wake.eventId, input.index]))
+      .digest("hex")}`;
 }
 
 async function applyHostedPendingDirtyDeviceSyncState(input: {
@@ -1158,7 +1253,6 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
   nextReconcileAt: string | null;
-  nextRuntimeWakeAt?: string | null;
   observedTokenVersion: number | null;
   sourceApplyEnabled: boolean;
   sources: readonly StoredDeviceConnectionSource[];
@@ -1231,11 +1325,6 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
       input.nextReconcileAt,
       baselineLocalState?.nextReconcileAt ?? null,
     );
-    assignNextRuntimeWakeAtUpdate(
-      update,
-      input.nextRuntimeWakeAt,
-      baselineLocalState?.nextRuntimeWakeAt,
-    );
     assignFailureDiagnosticUpdate(
       update,
       input.account.lastSyncErrorAt ?? null,
@@ -1293,11 +1382,6 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     input.account.status,
     input.nextReconcileAt,
     baselineLocalState?.nextReconcileAt ?? null,
-  );
-  assignNextRuntimeWakeAtUpdate(
-    update,
-    input.nextRuntimeWakeAt,
-    baselineLocalState?.nextRuntimeWakeAt,
   );
 
   if (!equalHostedDeviceSyncRuntimeCredentials(credential, baselineCredential)) {
@@ -2332,21 +2416,6 @@ function assignNextReconcileAtUpdate(
   update.localState = {
     ...(update.localState ?? {}),
     nextReconcileAt: localValue,
-  } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
-}
-
-function assignNextRuntimeWakeAtUpdate(
-  update: HostedDeviceSyncRuntimeConnectionUpdate,
-  localValue: string | null | undefined,
-  baselineValue: string | null | undefined,
-): void {
-  if (localValue === undefined || localValue === (baselineValue ?? null)) {
-    return;
-  }
-
-  update.localState = {
-    ...(update.localState ?? {}),
-    nextRuntimeWakeAt: localValue,
   } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
 }
 

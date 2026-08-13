@@ -353,7 +353,6 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
   lastSyncStartedAt: string | null;
   lastWebhookAt: string | null;
   nextReconcileAt: string | null;
-  nextRuntimeWakeAt?: string | null;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
@@ -380,7 +379,6 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotCapabilities {
   connectionSourceApply?: boolean;
-  runtimeJobWakeProjection?: boolean;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotCursor {
@@ -433,7 +431,6 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
   lastSyncStartedAt?: string | null;
   lastWebhookAt?: string | null;
   nextReconcileAt?: string | null;
-  nextRuntimeWakeAt?: string | null;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
@@ -887,14 +884,6 @@ function parseHostedExecutionDeviceSyncRuntimeSnapshotCapabilities(
           connectionSourceApply: requireBoolean(
             record.connectionSourceApply,
             "Hosted device-sync runtime snapshot response capabilities.connectionSourceApply",
-          ),
-        }),
-    ...(record.runtimeJobWakeProjection === undefined
-      ? {}
-      : {
-          runtimeJobWakeProjection: requireBoolean(
-            record.runtimeJobWakeProjection,
-            "Hosted device-sync runtime snapshot response capabilities.runtimeJobWakeProjection",
           ),
         }),
   };
@@ -1734,14 +1723,6 @@ function parseHostedExecutionDeviceSyncRuntimeLocalState(
     lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
     lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `${label}.lastWebhookAt`),
     nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `${label}.nextReconcileAt`),
-    ...(record.nextRuntimeWakeAt === undefined
-      ? {}
-      : {
-          nextRuntimeWakeAt: readNullableIsoTimestamp(
-            record.nextRuntimeWakeAt,
-            `${label}.nextRuntimeWakeAt`,
-          ),
-        }),
   };
 }
 
@@ -2330,7 +2311,6 @@ function parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(
     "lastSyncStartedAt",
     "lastWebhookAt",
     "nextReconcileAt",
-    "nextRuntimeWakeAt",
   ] as const) {
     if (record[field] !== undefined) {
       next[field] = readNullableIsoTimestamp(

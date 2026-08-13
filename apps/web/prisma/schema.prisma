@@ -39,7 +39,6 @@ model DeviceConnection {
   lastErrorCode              String?                  @map("last_error_code")
   lastErrorMessage           String?                  @map("last_error_message")
   nextReconcileAt            DateTime?                @map("next_reconcile_at")
-  nextRuntimeWakeAt          DateTime?                @map("next_runtime_wake_at")
   createdAt                  DateTime                 @default(now()) @map("created_at")
   updatedAt                  DateTime                 @updatedAt @map("updated_at")
   signals                    DeviceSyncSignal[]

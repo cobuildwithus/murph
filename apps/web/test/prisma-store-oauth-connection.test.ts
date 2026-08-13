@@ -111,7 +111,6 @@ type MutableConnectionRecord = {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   nextReconcileAt: Date | null;
-  nextRuntimeWakeAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -2955,7 +2954,6 @@ function cloneConnection(record: MutableConnectionRecord | null): MutableConnect
         lastSyncCompletedAt: record.lastSyncCompletedAt ? new Date(record.lastSyncCompletedAt) : null,
         lastSyncErrorAt: record.lastSyncErrorAt ? new Date(record.lastSyncErrorAt) : null,
         nextReconcileAt: record.nextReconcileAt ? new Date(record.nextReconcileAt) : null,
-        nextRuntimeWakeAt: record.nextRuntimeWakeAt ? new Date(record.nextRuntimeWakeAt) : null,
         refreshLeaseExpiresAt: record.refreshLeaseExpiresAt ? new Date(record.refreshLeaseExpiresAt) : null,
         createdAt: new Date(record.createdAt),
         updatedAt: new Date(record.updatedAt),
@@ -3002,7 +3000,6 @@ function createConnection(overrides: Partial<MutableConnectionRecord>): MutableC
     lastErrorCode: overrides.lastErrorCode ?? null,
     lastErrorMessage: overrides.lastErrorMessage ?? null,
     nextReconcileAt: overrides.nextReconcileAt ?? null,
-    nextRuntimeWakeAt: overrides.nextRuntimeWakeAt ?? null,
     createdAt: overrides.createdAt ?? new Date("2026-03-25T00:00:00.000Z"),
     updatedAt: overrides.updatedAt ?? new Date("2026-03-25T00:00:00.000Z"),
   };

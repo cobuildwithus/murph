@@ -112,6 +112,28 @@ export function getDeviceSyncJobById(database: DatabaseSync, jobId: string): Dev
   return mapJobRow(row);
 }
 
+export function getLatestDeviceSyncJobByDedupeKey(input: {
+  accountId: string;
+  database: DatabaseSync;
+  dedupeKey: string;
+  provider: string;
+}): DeviceSyncJobRecord | null {
+  const row = input.database.prepare(`
+    select *
+    from device_job
+    where account_id = ?
+      and provider = ?
+      and dedupe_key = ?
+    order by created_at desc, id desc
+    limit 1
+  `).get(
+    input.accountId,
+    input.provider,
+    input.dedupeKey,
+  ) as StoredJobRow | undefined;
+  return mapJobRow(row);
+}
+
 export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | null {
   const row = database.prepare(`
     select wake_at

@@ -8,9 +8,10 @@ This index is the table of contents for the current canonical docs in this repos
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
-`nextReconcileAt`, while queued-job continuation reaches Temporal through the
-runtime-owned workspace `nextWakeAt` and uses Web's separate
-`nextRuntimeWakeAt` only for cold-replacement recovery. The contract is jointly
+`nextReconcileAt`, while the encrypted system-mailbox item retains exact
+connection-specific retry work and Web dirty rows retain dirty resource/deletion
+work across cold replacement. The machine-local SQLite store is an execution
+cache, and mailbox ordering remains per connection. The contract is jointly
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

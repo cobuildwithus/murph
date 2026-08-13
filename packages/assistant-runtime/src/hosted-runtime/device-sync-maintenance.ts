@@ -27,6 +27,7 @@ import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   reconcileHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
+  resolveHostedDeviceSyncWakeRecovery,
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncCompletedImportTiming,
   type HostedDeviceSyncRuntimeSyncState,
@@ -155,6 +156,7 @@ export async function runHostedDeviceSyncPass(
   };
   let controlPlaneSynced = false;
   let processedJobs = 0;
+  let scheduledJobs: Awaited<ReturnType<DeviceSyncService["runSchedulerOnce"]>> = [];
 
   try {
     await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
@@ -166,6 +168,7 @@ export async function runHostedDeviceSyncPass(
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
+        scheduledJobs,
         service,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
         wake,
@@ -202,17 +205,19 @@ export async function runHostedDeviceSyncPass(
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
+        scheduledJobs,
         service,
         syncState,
         wake,
       });
     }
 
-    await service.runSchedulerOnce();
+    scheduledJobs = await service.runSchedulerOnce() ?? [];
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,
+        scheduledJobs,
         service,
         syncState,
         wake,
@@ -246,6 +251,7 @@ export async function runHostedDeviceSyncPass(
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
+        scheduledJobs,
         service,
         syncState,
         wake,
@@ -266,6 +272,7 @@ export async function runHostedDeviceSyncPass(
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
+        scheduledJobs,
         service,
         syncState,
         wake,
@@ -283,6 +290,7 @@ export async function runHostedDeviceSyncPass(
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
+        scheduledJobs,
         service,
         syncState,
         wake,
@@ -293,8 +301,18 @@ export async function runHostedDeviceSyncPass(
       nextWakeAt: service.getNextWakeAt(),
       state: syncState,
     });
-    const postCheckpointRecord = resolveHostedDeviceSyncDirtyPostCheckpointRecord({
+    const wakeRecovery = resolveHostedDeviceSyncWakeRecovery({
+      scheduledJobs,
+      service,
       state: syncState,
+      wake,
+    });
+    const postCheckpointRecord = attachHostedDeviceSyncMailboxRetry({
+      mailboxRetryAt: wakeRecovery?.retryAt ?? null,
+      record: resolveHostedDeviceSyncDirtyPostCheckpointRecord({
+        state: syncState,
+      }),
+      retainedWake: wakeRecovery?.wake ?? null,
     });
     const stagedDirtyAcks = listHostedDeviceSyncDirtyProcessedRecords({
       state: syncState,
@@ -320,6 +338,7 @@ export async function runHostedDeviceSyncPass(
     if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs,
+        scheduledJobs,
         service,
         syncState,
         wake,
@@ -478,6 +497,7 @@ function buildHostedDeviceSyncPreServiceYieldedPassResult(
 
 function buildHostedDeviceSyncYieldedPassResult(input: {
   processedJobs: number;
+  scheduledJobs: Awaited<ReturnType<DeviceSyncService["runSchedulerOnce"]>>;
   service: DeviceSyncService;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   syncState?: HostedDeviceSyncRuntimeSyncState | null;
@@ -500,10 +520,22 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
   const stagedDirtyAcks = syncState
     ? listHostedDeviceSyncDirtyProcessedRecords({ state: syncState })
     : input.stagedDirtyAcks ?? [];
+  const wakeRecovery = syncState
+    ? resolveHostedDeviceSyncWakeRecovery({
+        scheduledJobs: input.scheduledJobs,
+        service: input.service,
+        state: syncState,
+        wake: input.wake,
+      })
+    : null;
   return {
     nextWakeAt,
     postCheckpointRecord: syncState
-      ? resolveHostedDeviceSyncDirtyPostCheckpointRecord({ state: syncState })
+      ? attachHostedDeviceSyncMailboxRetry({
+          mailboxRetryAt: wakeRecovery ? nextWakeAt : null,
+          record: resolveHostedDeviceSyncDirtyPostCheckpointRecord({ state: syncState }),
+          retainedWake: wakeRecovery?.wake ?? null,
+        })
       : null,
     processedJobs: input.processedJobs,
     skipped: true,
@@ -853,6 +885,41 @@ function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {
     ),
     records: pendingDirtyAcks.map(toHostedDeviceSyncDirtyProcessedPostCheckpointRecord),
   };
+}
+
+function attachHostedDeviceSyncMailboxRetry(input: {
+  mailboxRetryAt: string | null;
+  record: HostedMaintenanceMetrics["postCheckpointRecord"];
+  retainedWake: Extract<HostedRuntimeEvent, { kind: "device-sync.wake" }> | null;
+}): HostedMaintenanceMetrics["postCheckpointRecord"] {
+  if (!input.mailboxRetryAt) {
+    return input.record;
+  }
+  if (!input.record) {
+    return {
+      kind: "device-sync.dirty-processed-batch",
+      retainMailboxItemUntil: input.mailboxRetryAt,
+      ...(input.retainedWake ? { retainedWake: input.retainedWake } : {}),
+      records: [],
+    };
+  }
+  if (input.record.kind === "device-sync.dirty-processed") {
+    const { kind: _kind, ...record } = input.record;
+    return {
+      kind: "device-sync.dirty-processed-batch",
+      retainMailboxItemUntil: input.mailboxRetryAt,
+      ...(input.retainedWake ? { retainedWake: input.retainedWake } : {}),
+      records: [record],
+    };
+  }
+  if (input.record.kind === "device-sync.dirty-processed-batch") {
+    return {
+      ...input.record,
+      retainMailboxItemUntil: input.mailboxRetryAt,
+      ...(input.retainedWake ? { retainedWake: input.retainedWake } : {}),
+    };
+  }
+  throw new TypeError("Hosted device-sync mailbox retry received an unrelated checkpoint record.");
 }
 
 function listHostedDeviceSyncDirtyProcessedRecords(input: {

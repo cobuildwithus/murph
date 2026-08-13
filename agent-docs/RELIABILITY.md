@@ -633,13 +633,18 @@ Last verified: 2026-08-12
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
   schedule consumed by the global due-reconcile sweep. While a runner is warm,
-  an earlier queued-job wake remains owned by its machine-local job store and
-  reaches Temporal through the existing workspace `nextWakeAt`. Web persists
-  that time separately as `nextRuntimeWakeAt` only so a replacement runner can
-  re-admit scheduled provider work after the machine-local store is lost; the
-  global due-reconcile sweep must never read that recovery projection. A
-  capability bit gates the split so older Web versions retain the legacy
-  minimum projection and cannot strand a cold-restore continuation.
+  an earlier queued-job wake reaches Temporal through the existing workspace
+  `nextWakeAt`. The connection-specific encrypted system-mailbox item stays
+  pending while work admitted from that wake remains retryable and is narrowed
+  before checkpoint publication to the unfinished job kind, payload/window,
+  dedupe identity, next retry time, and remaining attempt limit. Terminal
+  success or terminal failure clears that source. Web dirty rows separately
+  remain authoritative until dirty resource/deletion jobs are terminally
+  acknowledged. Because the device-sync SQLite store is intentionally excluded
+  from hosted snapshots, a replacement runner rebuilds from those owners; it
+  never projects local retry timing into `nextReconcileAt`. Per-connection
+  mailbox ordering prevents a future retry for one connection from blocking
+  due device-sync work for another.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;
@@ -1131,7 +1136,11 @@ Last verified: 2026-08-12
   failure retains retry ownership. Deploy preflight requires the canonical
   runtime and preview buckets to be ENAM Standard. Runtime code has no fallback
   bucket, migration phase, or storage-specific admission gate; ordinary retry
-  and mailbox durability remain the failure boundary.
+  and mailbox durability remain the failure boundary. A rejected direct
+  snapshot upload may add only the bounded, redacted R2 XML error code, message,
+  and request id to the existing `checkpoint.snapshot_failed` error cause; the
+  raw body, resource path, object key, and presigned request material remain
+  excluded.
 - One-time current-sender Assistant Ask has two target-bound completion adapters
   over the same mailbox lifecycle, deterministic request identity, ten-minute
   expiry, isolated reviewed personal read, and completion identity.

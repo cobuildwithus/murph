@@ -367,13 +367,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
-    const postCheckpointRecord =
-      metrics.postCheckpointRecord
-      ?? createRetainedHostedSystemMailboxPostCheckpointRecord({
-        item: prepared,
-        metrics,
-        retainProcessedItemUntilRecorded: input.retainProcessedItemUntilRecorded === true,
-      });
+    const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
     if (postCheckpointRecord || input.retainProcessedItemUntilRecorded === true) {
       const processedItem: HostedSystemMailboxPendingItem = {
         ...prepared,
@@ -459,25 +453,6 @@ function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
   return item.routeAction === "run-device-sync-wake"
     ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
     : null;
-}
-
-function createRetainedHostedSystemMailboxPostCheckpointRecord(input: {
-  item: HostedSystemMailboxPendingItem;
-  metrics: HostedMailboxExecutionMetrics;
-  retainProcessedItemUntilRecorded: boolean;
-}): HostedSystemMailboxPostCheckpointRecord | null {
-  if (
-    !input.retainProcessedItemUntilRecorded
-    || input.item.routeAction !== "run-device-sync-wake"
-    || !input.metrics.nextWakeAt
-  ) {
-    return null;
-  }
-  return {
-    kind: "device-sync.dirty-processed-batch",
-    nextWakeAt: input.metrics.nextWakeAt,
-    records: [],
-  };
 }
 
 function shouldPreemptHostedDeviceSyncSystemMailboxItem(
@@ -678,12 +653,25 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       runtime: input.runtime,
       signal: input.signal ?? null,
     });
-    await removeHostedSystemMailboxPendingItemIfCurrent({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-    });
+    const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
+    if (retainUntil) {
+      await retainHostedDeviceSyncSystemMailboxItem({
+        item: input.item,
+        nextAttemptAt: retainUntil,
+        vaultRoot: input.vaultRoot,
+      });
+    } else {
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: input.item,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     const nextWake = selectHostedRuntimeWakeCandidate([
       await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+      createHostedRuntimeWakeCandidate(
+        retainUntil,
+        HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+      ),
       createHostedRuntimeWakeCandidate(
         recordResult.nextWakeAt,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
@@ -721,6 +709,42 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       recorded: 0,
     };
   }
+}
+
+function resolveHostedDeviceSyncMailboxRetentionAt(
+  item: HostedSystemMailboxPendingItem,
+): string | null {
+  if (
+    item.routeAction !== "run-device-sync-wake"
+    || item.postCheckpointRecord?.kind !== "device-sync.dirty-processed-batch"
+  ) {
+    return null;
+  }
+  return item.postCheckpointRecord.retainMailboxItemUntil ?? null;
+}
+
+async function retainHostedDeviceSyncSystemMailboxItem(input: {
+  item: HostedSystemMailboxPendingItem;
+  nextAttemptAt: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
+    pending: state.pending.map((item) =>
+      hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)
+        ? {
+            ...input.item,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            nextAttemptAt: input.nextAttemptAt,
+            postCheckpointRecord: null,
+            status: "pending" as const,
+            wake: input.item.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch"
+              ? input.item.postCheckpointRecord.retainedWake ?? input.item.wake
+              : input.item.wake,
+          }
+        : item
+    ),
+  }));
 }
 
 function isHostedDeviceSyncDirtyPostCheckpointRecord(

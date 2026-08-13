@@ -186,10 +186,9 @@ export interface DeviceSyncService {
   handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
   queueManualReconcile(accountId: string): QueueManualReconcileResult;
-  queueScheduledReconcileAt(accountId: string, availableAt: string): QueueManualReconcileResult;
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextWakeAt(now?: string): string | null;
-  runSchedulerOnce(): Promise<void>;
+  runSchedulerOnce(): Promise<DeviceSyncJobRecord[]>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
@@ -534,21 +533,6 @@ class DeviceSyncServiceController {
   }
 
   queueManualReconcile(accountId: string): QueueManualReconcileResult {
-    return this.queueReconcileAt(accountId, this.nowIso(), "manual-reconcile");
-  }
-
-  queueScheduledReconcileAt(
-    accountId: string,
-    availableAt: string,
-  ): QueueManualReconcileResult {
-    return this.queueReconcileAt(accountId, availableAt, "scheduled-recovery");
-  }
-
-  private queueReconcileAt(
-    accountId: string,
-    availableAt: string,
-    dedupeNamespace: "manual-reconcile" | "scheduled-recovery",
-  ): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
     if (
@@ -582,23 +566,18 @@ class DeviceSyncServiceController {
     }
 
     const provider = this.requireProvider(account.provider);
-    const scheduledJobs = resolveProviderJobExecutor(provider)?.createScheduledJobs?.(
-      account,
-      availableAt,
-    ).jobs ?? [];
+    const now = this.nowIso();
+    const scheduledJobs = resolveProviderJobExecutor(provider)?.createScheduledJobs?.(account, now).jobs ?? [];
     const jobs = scheduledJobs.length > 0 ? scheduledJobs : [{ kind: "reconcile", priority: 80 }];
     const queuedJobs = this.enqueueJobs(
       account,
       jobs.map((job) => ({
         ...job,
         priority: job.kind === "reconcile" ? Math.max(job.priority ?? 0, 80) : job.priority,
-        availableAt:
-          dedupeNamespace === "manual-reconcile" && job.kind === "reconcile"
-            ? availableAt
-            : job.availableAt ?? availableAt,
+        availableAt: job.kind === "reconcile" ? now : job.availableAt ?? now,
         dedupeKey:
           job.dedupeKey ??
-          `${dedupeNamespace}:${job.kind}:${sha256Text(stringifyJson(job.payload ?? {}))}`,
+          `manual-reconcile:${job.kind}:${sha256Text(stringifyJson(job.payload ?? {}))}`,
       })),
     );
     const primary = queuedJobs[0];
@@ -689,9 +668,10 @@ class DeviceSyncServiceController {
     return nextWakeAt;
   }
 
-  async runSchedulerOnce(): Promise<void> {
-    await this.schedulerMutex.runIfIdle(async () => {
+  async runSchedulerOnce(): Promise<DeviceSyncJobRecord[]> {
+    return await this.schedulerMutex.runIfIdle(async () => {
       const now = this.nowIso();
+      const queuedJobs: DeviceSyncJobRecord[] = [];
 
       try {
         for (const account of this.store.listAccounts()) {
@@ -713,7 +693,7 @@ class DeviceSyncServiceController {
           }
 
           const schedule = jobExecutor.createScheduledJobs(account, now);
-          this.enqueueJobs(account, schedule.jobs);
+          queuedJobs.push(...this.enqueueJobs(account, schedule.jobs));
           this.store.patchAccount(account.id, {
             nextReconcileAt: schedule.nextReconcileAt ?? null,
           });
@@ -724,7 +704,8 @@ class DeviceSyncServiceController {
           error: summarizeError(error),
         });
       }
-    });
+      return queuedJobs;
+    }) ?? [];
   }
 
   async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
@@ -1676,8 +1657,6 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     handleOAuthCallback: (callbackInput) => controller.handleOAuthCallback(callbackInput),
     handleWebhook: (providerName, headers, rawBody) => controller.handleWebhook(providerName, headers, rawBody),
     queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
-    queueScheduledReconcileAt: (accountId, availableAt) =>
-      controller.queueScheduledReconcileAt(accountId, availableAt),
     disconnectAccount: (accountId, expectedConnectedAt) =>
       controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),

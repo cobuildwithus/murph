@@ -26,7 +26,9 @@ const mocks = vi.hoisted(() => ({
   initInboxRuntime: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
+  requireHostedRuntimeDeviceSyncStore: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
+  resolveHostedDeviceSyncWakeRecovery: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
@@ -54,6 +56,7 @@ vi.mock("@murphai/device-syncd/registry", () => ({
 vi.mock("../src/device-sync-service.ts", () => ({
   closeHostedRuntimeDeviceSyncService: mocks.closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService: mocks.createHostedRuntimeDeviceSyncService,
+  requireHostedRuntimeDeviceSyncStore: mocks.requireHostedRuntimeDeviceSyncStore,
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -91,6 +94,8 @@ vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
     mocks.promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
     mocks.reconcileHostedDeviceSyncControlPlaneState,
+  resolveHostedDeviceSyncWakeRecovery:
+    mocks.resolveHostedDeviceSyncWakeRecovery,
   syncHostedDeviceSyncControlPlaneState: mocks.syncHostedDeviceSyncControlPlaneState,
 }));
 
@@ -341,6 +346,10 @@ beforeEach(async () => {
   mocks.createDeviceSyncRegistry.mockReturnValue({
     list: () => ["oura"],
   });
+  mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+    readNextJobWakeAtForAccount: () => null,
+  });
+  mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue(null);
   mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
@@ -3002,6 +3011,145 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains an exact connection wake while that connection has local retry work", async () => {
+    const retryAt = "2026-04-08T00:05:00.000Z";
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 1),
+      getNextWakeAt: () => retryAt,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      getAccountById: (accountId: string) =>
+        accountId === "local_retry_account" ? { provider: "oura" } : null,
+      getLatestJobByDedupeKey: ({ dedupeKey }: { dedupeKey: string }) =>
+        dedupeKey === "initial-history"
+          ? {
+              accountId: "local_retry_account",
+              attempts: 1,
+              availableAt: retryAt,
+              createdAt: "2026-04-08T00:00:00.000Z",
+              dedupeKey,
+              finishedAt: null,
+              id: "job_exact_retry",
+              kind: "resource",
+              lastErrorCode: "PROVIDER_RETRYABLE",
+              lastErrorMessage: "retryable",
+              leaseExpiresAt: null,
+              leaseOwner: null,
+              maxAttempts: 5,
+              payload: {
+                windowEnd: "2026-04-08T00:00:00.000Z",
+                windowStart: "2025-10-10T00:00:00.000Z",
+              },
+              priority: 0,
+              provider: "oura",
+              startedAt: "2026-04-08T00:00:00.000Z",
+              status: "queued",
+              updatedAt: retryAt,
+            }
+          : null,
+      readNextJobWakeAtForAccount: (accountId: string) =>
+        accountId === "local_retry_account" ? retryAt : null,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([
+        ["hosted_retry_connection", "local_retry_account"],
+      ]),
+      localToHostedAccountIds: new Map([
+        ["local_retry_account", "hosted_retry_connection"],
+      ]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: null,
+    });
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValueOnce({
+      retryAt,
+      wake: {
+        connectionId: "hosted_retry_connection",
+        eventId: "evt_device_sync_exact_retry",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: retryAt,
+            dedupeKey: "initial-history",
+            kind: "resource",
+            maxAttempts: 4,
+            payload: {
+              windowEnd: "2026-04-08T00:00:00.000Z",
+              windowStart: "2025-10-10T00:00:00.000Z",
+            },
+          }],
+        },
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        provider: "oura",
+        reason: "connected",
+        userId: "member_123",
+      },
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        connectionId: "hosted_retry_connection",
+        eventId: "evt_device_sync_exact_retry",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            dedupeKey: "initial-history",
+            kind: "resource",
+            payload: {
+              windowEnd: "2026-04-08T00:00:00.000Z",
+              windowStart: "2025-10-10T00:00:00.000Z",
+            },
+          }],
+        },
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        provider: "oura",
+        reason: "connected",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+    );
+
+    assert.deepEqual(result.postCheckpointRecord, {
+      kind: "device-sync.dirty-processed-batch",
+      records: [],
+      retainMailboxItemUntil: retryAt,
+      retainedWake: {
+        connectionId: "hosted_retry_connection",
+        eventId: "evt_device_sync_exact_retry",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: retryAt,
+            dedupeKey: "initial-history",
+            kind: "resource",
+            maxAttempts: 4,
+            payload: {
+              windowEnd: "2026-04-08T00:00:00.000Z",
+              windowStart: "2025-10-10T00:00:00.000Z",
+            },
+          }],
+        },
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        provider: "oura",
+        reason: "connected",
+        userId: "member_123",
+      },
+    });
+    assert.equal(result.nextWakeAt, retryAt);
   });
 
   it("yields before dirty control-plane fetch when foreground input is waiting", async () => {

@@ -1780,19 +1780,24 @@ independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,
 not a scheduler queue. The runtime must support dirty-pending and dirty-ack
 callbacks; dirty ack means the dirty revision was handed off into the
-checkpointed local device-sync job store, not that upstream provider sync
-succeeded. Connection-established and disconnect lifecycle commands may still
-use coarse device-sync mailbox wakes because they are explicit lifecycle events,
-not high-cardinality freshness hints.
+local execution cache. Web keeps the dirty row and payload authority until the
+runtime reports terminal job completion, so a lost cache cannot acknowledge
+unfinished provider work. Connection-established and disconnect lifecycle
+commands may still use coarse device-sync mailbox wakes because they are
+explicit lifecycle events, not high-cardinality freshness hints.
 The machine-local job store projects its earliest queued-job continuation
-through the runtime-owned workspace `nextWakeAt` while the runner is warm. Web
-also persists that timestamp in the separate `nextRuntimeWakeAt` recovery field
-so a cold replacement, whose snapshot intentionally excludes the device-sync
-SQLite store, can re-admit scheduled provider work. The global due-reconcile
-sweep must ignore this recovery projection and consume only the Web-owned
-provider `nextReconcileAt`. Web advertises `runtimeJobWakeProjection` when this
-split is available; runners talking to an older Web retain the legacy minimum
-projection into `nextReconcileAt` so mixed-version restores cannot strand work.
+through the runtime-owned workspace `nextWakeAt` while the runner is warm. The
+connection-specific encrypted system-mailbox item remains pending while a job
+admitted from that wake is queued or running. Before checkpoint publication,
+the runtime replaces that item's job hints with only unfinished work and records
+the exact kind, payload/window, dedupe identity, retry time, and remaining
+attempt limit. A cold replacement, whose snapshot intentionally excludes the
+device-sync SQLite store, reconstructs the same unfinished operation from that
+item. Terminal success or failure advances the mailbox item. Web dirty rows use
+their existing terminal acknowledgement boundary instead. Device-sync mailbox
+ordering is per connection, so a retained retry cannot block a due wake for a
+different connection. The global due-reconcile sweep consumes only the
+Web-owned provider `nextReconcileAt`; local retry timing never enters that sweep.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally
