@@ -55,9 +55,11 @@ Updated: 2026-08-12
     interrupted round-ten result.
 11. [x] Resolve the recovered ledger gap by making sparse stable-ID equality
     include provider-day metadata, then rerun substantive round ten.
-12. [ ] Resolve round ten's cross-day receipt and transport-dedupe findings,
-    obtain exact-head green CI and a ReviewGPT PASS, then merge and retire the
-    task worktree.
+12. [x] Resolve round ten's cross-day receipt and transport-dedupe findings,
+    then run round eleven against the exact pushed head.
+13. [ ] Resolve round eleven's durable calendar-refresh finding, obtain
+    exact-head green CI and a ReviewGPT PASS, then merge and retire the task
+    worktree.
 
 ## Decisions
 
@@ -66,8 +68,10 @@ Updated: 2026-08-12
   resources every reconcile, and the prior seven-day all-resource correction
   sweep only after the account crosses a UTC day.
 - Successful sparse fidelity resource jobs return the canonical importer's
-  provider-local day keys and reuse the calendar-day importer for each closed
-  corrected date; no second aggregate owner or correction queue is required.
+  provider-local day keys and atomically enqueue one existing durable resource
+  job for each closed corrected date. Each continuation calls only the existing
+  calendar-day importer, so retry and yield progress survive later revisions
+  without a second queue, store, scheduler, or aggregate owner.
 - A child-row timestamp cannot order the complete resource/day collection.
   Serialized canonical event-spine reconciliation is the existing owner for
   unversioned daily and dense feature facts.
@@ -128,6 +132,14 @@ Updated: 2026-08-12
   and timestamp-semantics fields instead of adding another conflict comparator.
   Neither correction adds persisted state, a queue, a scheduler, or a second
   revision owner.
+- Round eleven's review-induced finding is accepted. A transient multi-date
+  refresh could lose an older failed source day after a second correction, and
+  yield restarted the precise job instead of advancing calendar work. The
+  existing atomic job-completion path now persists one deduplicated resource
+  continuation per closed affected date. A 64-day cap rejects excessive fanout
+  before the core write and is rechecked before enqueue. This reuses the
+  existing device-job queue and calendar importer; it adds no store, schema,
+  service, scheduler, cursor, watermark, or aggregate owner.
 
 ## Verification
 
@@ -195,5 +207,24 @@ Updated: 2026-08-12
   integrity, and `git diff --check` pass. The dependency-aware `test:diff` run
   also passed all affected package and app phases before the retry-proof
   tightening; the final focused rerun covers that narrow core result change.
+- Round eleven found that accepted calendar refresh work existed only in a
+  transient loop. A v1/D1 to v2/D2 correction whose D1 refresh failed could be
+  followed by v3/D3, after which stale v2 replay could no longer reconstruct
+  D1. The remediation tests prove each immediate core transition, prove stale
+  replay has no older-day evidence, and prove the durable failed D1 job remains
+  queued while later D2/D3 jobs coalesce and complete. Calendar-job yield now
+  re-enqueues the same day without refetching the precise window, and a 66-day
+  correction set rejects atomically at the 64-day bound.
+- Passed 179 core device-import tests and 398 combined Junction provider,
+  provider-manifest, device-sync store, and device-sync service tests plus the
+  owning package typechecks after round-eleven remediation. The provider test
+  also proves the 64-day receipt bound fails before calendar provider-call
+  fanout, while the manifest tests prove the durable day survives hosted hints
+  and enqueue normalization.
+- The dependency-aware `test:diff` run passed every affected package and app
+  phase until the hosted-web production build encountered a transient Google
+  Fonts fetch failure. Repeating that exact hosted-web build succeeded with all
+  244 pages and runtime checks. The remaining Cloudflare verification then
+  passed its typecheck, 2,406 node tests, and 11 Workers tests.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

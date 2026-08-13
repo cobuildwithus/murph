@@ -365,6 +365,12 @@ const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
 // Delay calendar-day ownership until that date has closed in every admitted
 // civil offset instead of treating UTC midnight as globally complete.
 const JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS = 12 * 60 * 60_000;
+const JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS = 64;
+const JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET = new Set<string>([
+  "caffeine",
+  "water",
+  "mindfulness_minutes",
+]);
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
 const JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT = 64;
@@ -1833,6 +1839,48 @@ export function createJunctionDeviceSyncProvider(
       return sourceProviders;
     };
 
+    const calendarRefreshDay = readJunctionSparseCalendarRefreshDay(job);
+    if (calendarRefreshDay) {
+      if (
+        !resource
+        || !JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(resource)
+        || !isConfiguredJunctionResource("timeseries", resource)
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_CALENDAR_REFRESH_JOB_INVALID",
+          message: "Junction calendar refresh job did not name an admitted sparse resource.",
+          retryable: false,
+        });
+      }
+      const sourceProviders = await loadAndProjectSourceProviders();
+      const windowStart = `${calendarRefreshDay}T00:00:00.000Z`;
+      const dailyImport = await importTimeseriesDailySnapshots(
+        context,
+        sourceProviders,
+        windowStart,
+        addMilliseconds(windowStart, TIMESERIES_CHUNK_MS),
+        skippedOptionalResources,
+        [resource],
+        sourceProviderSlug,
+      );
+      const followUp = dailyImport.yieldedAt
+        ? buildJunctionSparseCalendarRefreshJob({
+            dayKey: calendarRefreshDay,
+            priority: job.priority,
+            resource,
+            sourceProviderSlug,
+          })
+        : null;
+      return withJunctionSkippedResourceMetadata(
+        context,
+        {
+          ...(followUp ? { scheduledJobs: [followUp] } : {}),
+          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+        },
+        skippedOptionalResources,
+      );
+    }
+
     const summaries: Record<string, unknown[]> = {};
 
     if (resource) {
@@ -2145,35 +2193,23 @@ export function createJunctionDeviceSyncProvider(
           );
         }
 
-        if (
-          timeseriesImport.fetchComplete
-          && JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(effectiveResource)
-        ) {
-          const dailyImport = await importTimeseriesDailySnapshotDays(
-            context,
-            sourceProviders,
-            skippedOptionalResources,
-            [effectiveResource],
-            timeseriesImport.canonicalEventDayKeys,
-            sourceProviderSlug,
-          );
-          if (dailyImport.yieldedAt) {
-            return withJunctionSkippedResourceMetadata(
-              context,
-              buildYieldedJunctionJobResult({
-                context,
-                job,
-                windowEnd: window.windowEnd,
-                windowStart: window.windowStart,
-              }),
-              skippedOptionalResources,
-            );
-          }
-        }
+        const calendarRefreshJobs = timeseriesImport.fetchComplete
+            && JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
+          ? buildJunctionSparseCalendarRefreshJobs({
+              asOf: context.now,
+              dayKeys: timeseriesImport.canonicalEventDayKeys,
+              priority: job.priority,
+              resource: effectiveResource,
+              sourceProviderSlug,
+            })
+          : [];
 
         const result = withJunctionSkippedResourceMetadata(
           context,
           {
+            ...(calendarRefreshJobs.length > 0
+              ? { scheduledJobs: calendarRefreshJobs }
+              : {}),
             nextReconcileAt: clampWebhookJobNextReconcileAt(context),
           },
           skippedOptionalResources,
@@ -3081,33 +3117,6 @@ export function createJunctionDeviceSyncProvider(
     return {
       yieldedAt: null,
     };
-  }
-
-  async function importTimeseriesDailySnapshotDays(
-    context: ProviderJobContext,
-    sourceProviders: readonly JunctionProviderConnection[],
-    skippedOptionalResources: JunctionSkippedOptionalResource[],
-    resources: readonly string[],
-    dayKeys: readonly string[],
-    sourceProviderSlug?: string | null,
-  ): Promise<JunctionTimeseriesImportResult> {
-    for (const dayKey of [...new Set(dayKeys)].sort()) {
-      const windowStart = `${dayKey}T00:00:00.000Z`;
-      const windowEnd = addMilliseconds(windowStart, TIMESERIES_CHUNK_MS);
-      const result = await importTimeseriesDailySnapshots(
-        context,
-        sourceProviders,
-        windowStart,
-        windowEnd,
-        skippedOptionalResources,
-        resources,
-        sourceProviderSlug,
-      );
-      if (result.yieldedAt) {
-        return result;
-      }
-    }
-    return { yieldedAt: null };
   }
 
   async function importJunctionDirectResourceSnapshot(
@@ -6372,6 +6381,89 @@ function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
     ...(input.availableAt ? { availableAt: input.availableAt } : {}),
     dedupeKey: sha256Text(JSON.stringify(dedupeIdentity)),
   };
+}
+
+function buildJunctionSparseCalendarRefreshJobs(input: {
+  asOf: string;
+  dayKeys: readonly string[];
+  priority: number;
+  resource: string;
+  sourceProviderSlug?: string | null;
+}): DeviceSyncJobInput[] {
+  const dayKeys = [...new Set(input.dayKeys)].sort();
+  if (dayKeys.length > JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS) {
+    throw deviceSyncError({
+      code: "JUNCTION_CALENDAR_REFRESH_DAY_LIMIT_EXCEEDED",
+      message: "Junction sparse import exceeded the calendar refresh day limit.",
+      retryable: false,
+      details: {
+        affectedDayCount: dayKeys.length,
+        maxAllowed: JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS,
+      },
+    });
+  }
+
+  return dayKeys
+    .filter((dayKey) => isGloballyClosedJunctionProviderDay(dayKey, input.asOf))
+    .map((dayKey) => buildJunctionSparseCalendarRefreshJob({
+      dayKey,
+      priority: input.priority,
+      resource: input.resource,
+      sourceProviderSlug: input.sourceProviderSlug,
+    }));
+}
+
+function buildJunctionSparseCalendarRefreshJob(input: {
+  dayKey: string;
+  priority: number;
+  resource: string;
+  sourceProviderSlug?: string | null;
+}): DeviceSyncJobInput {
+  const windowStart = `${input.dayKey}T00:00:00.000Z`;
+  const windowEnd = addMilliseconds(windowStart, TIMESERIES_CHUNK_MS);
+  const sourceProviderSlug = normalizeProviderSlug(input.sourceProviderSlug);
+  return {
+    kind: "resource",
+    payload: {
+      calendarRefreshDay: input.dayKey,
+      resource: input.resource,
+      resourceCategory: "timeseries",
+      ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+      windowEnd,
+      windowStart,
+    } satisfies JunctionDeviceSyncJobPayloads["resource"],
+    priority: input.priority,
+    dedupeKey: sha256Text(JSON.stringify([
+      "junction",
+      "sparse-calendar-refresh",
+      sourceProviderSlug,
+      input.resource,
+      input.dayKey,
+    ])),
+  };
+}
+
+function readJunctionSparseCalendarRefreshDay(job: DeviceSyncJobRecord): string | null {
+  if (!("calendarRefreshDay" in job.payload)) {
+    return null;
+  }
+  const dayKey = job.payload.calendarRefreshDay;
+  if (!isCanonicalEventDayKey(dayKey)) {
+    throw deviceSyncError({
+      code: "JUNCTION_CALENDAR_REFRESH_JOB_INVALID",
+      message: "Junction calendar refresh job had an invalid provider day.",
+      retryable: false,
+    });
+  }
+  return dayKey;
+}
+
+function isGloballyClosedJunctionProviderDay(dayKey: string, asOf: string): boolean {
+  if (!isCanonicalEventDayKey(dayKey)) {
+    return false;
+  }
+  const windowEnd = addMilliseconds(`${dayKey}T00:00:00.000Z`, TIMESERIES_CHUNK_MS);
+  return Date.parse(windowEnd) <= resolveGloballyClosedProviderDayEnd(windowEnd, asOf);
 }
 
 function buildJunctionExtendedTimeseriesBackfillDedupeKey(

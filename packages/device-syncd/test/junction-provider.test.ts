@@ -7959,7 +7959,9 @@ test("Junction transport preserves provider-day conflicts for importer rejection
             snapshot as Parameters<typeof normalizeJunctionSnapshot>[0],
           );
           intervalDayKeys.push(...(normalized.events ?? []).flatMap((event) =>
-            event.kind === "measurement" && event.externalRef?.facet === "interval"
+            event.kind === "measurement"
+                && event.externalRef?.facet === "interval"
+                && typeof event.dayKey === "string"
               ? [event.dayKey]
               : []
           ));
@@ -8215,7 +8217,7 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
     windowEnd: "2026-04-03T03:50:00.000Z",
   });
 
-  await executeJunctionJob(
+  const preClosureResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
       now: "2026-04-03T11:59:59.999Z",
@@ -8230,10 +8232,11 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
     "The provider-local April 2 day must remain unpublished before its UTC-12 close boundary.",
   );
   assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(preClosureResult.scheduledJobs, undefined);
   requests.length = 0;
   importedSnapshots.length = 0;
 
-  await executeJunctionJob(
+  const preciseResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
       now: "2026-04-03T12:00:00.000Z",
@@ -8241,6 +8244,57 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
     }),
     job,
   );
+
+  const calendarJob = requireValue(
+    preciseResult.scheduledJobs?.[0],
+    "Junction sparse correction should persist its calendar refresh as a continuation.",
+  );
+  assert.deepEqual(preciseResult.scheduledJobs, [{
+    kind: "resource",
+    payload: {
+      calendarRefreshDay: "2026-04-02",
+      resource: "caffeine",
+      resourceCategory: "timeseries",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    },
+    priority: job.priority,
+    dedupeKey: sha256ForTest(JSON.stringify([
+      "junction",
+      "sparse-calendar-refresh",
+      null,
+      "caffeine",
+      "2026-04-02",
+    ])),
+  }]);
+  assert.equal(importedSnapshots.length, 1, "Precise completion must not refresh a day transiently.");
+
+  const calendarJobRecord = {
+    ...createJob("resource", calendarJob.payload ?? {}),
+    dedupeKey: calendarJob.dedupeKey ?? null,
+    priority: calendarJob.priority ?? 0,
+  };
+  const yielded = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot,
+      shouldYield: () => true,
+    }),
+    calendarJobRecord,
+  );
+  assert.deepEqual(yielded.scheduledJobs, preciseResult.scheduledJobs);
+  assert.equal(importedSnapshots.length, 1, "A yielded calendar job must not repeat the precise import.");
+
+  const calendarResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot,
+    }),
+    calendarJobRecord,
+  );
+  assert.deepEqual(calendarResult.scheduledJobs, undefined);
 
   assert.deepEqual(importedSnapshots.map((snapshot) => {
     const entry = snapshot as {
@@ -8268,6 +8322,65 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
     requireValue(dailyRequest, "Junction sparse resource job should refresh its closed daily total."),
     "2026-04-02",
     "2026-04-02",
+  );
+});
+
+test("Junction sparse corrections reject excessive calendar-refresh fanout", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              id: "bounded-water-reading",
+              start: "2026-04-02T08:00:00.000Z",
+              unit: "mL",
+              value: 250,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, { timeseriesResources: ["water"] });
+  const affectedDayKeys = Array.from({ length: 65 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10)
+  );
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        now: "2026-04-03T12:00:00.000Z",
+        importSnapshot: async () => ({
+          canonicalEventCount: 1,
+          canonicalEventDayKeys: affectedDayKeys,
+          durableDeliveryAccepted: true,
+        }),
+      }),
+      createJob("resource", {
+        resource: "water",
+        resourceCategory: "timeseries",
+        windowStart: "2026-04-02T08:00:00.000Z",
+        windowEnd: "2026-04-02T09:00:00.000Z",
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_CALENDAR_REFRESH_DAY_LIMIT_EXCEEDED"
+      && !error.retryable,
+  );
+  assert.equal(
+    requests.filter((url) => url.includes("/v2/timeseries/")).length,
+    1,
+    "The bound must fail before any calendar-day provider-call fanout.",
   );
 });
 

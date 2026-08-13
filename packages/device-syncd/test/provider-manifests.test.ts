@@ -487,6 +487,25 @@ describe("deviceSyncProviderManifests", () => {
       shapeHostedDeviceSyncJobHintPayload("junction", {
         kind: "resource",
         payload: {
+          calendarRefreshDay: "2026-04-02",
+          resource: "water",
+          resourceCategory: "timeseries",
+          windowEnd: "2026-04-03T00:00:00.000Z",
+          windowStart: "2026-04-02T00:00:00.000Z",
+        },
+      }),
+    ).toEqual({
+      calendarRefreshDay: "2026-04-02",
+      resource: "water",
+      resourceCategory: "timeseries",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    });
+
+    expect(
+      shapeHostedDeviceSyncJobHintPayload("junction", {
+        kind: "resource",
+        payload: {
           eventType: "daily.data.activity.created",
           historicalBackfillVersion: 2,
           historicalProviderRecordsSeen: true,
@@ -627,6 +646,28 @@ describe("deviceSyncProviderManifests", () => {
       payload: {
         windowEnd: "2026-04-22T00:00:00.000Z",
         windowStart: "2026-04-01T00:00:00.000Z",
+      },
+    });
+
+    expect(
+      normalizeConfiguredDeviceSyncJobInput("junction", {
+        kind: "resource",
+        payload: {
+          calendarRefreshDay: "2026-04-02",
+          resource: "water",
+          resourceCategory: "timeseries",
+          windowEnd: "2026-04-03T00:00:00.000Z",
+          windowStart: "2026-04-02T00:00:00.000Z",
+        },
+      }, "test"),
+    ).toEqual({
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        resourceCategory: "timeseries",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
       },
     });
 

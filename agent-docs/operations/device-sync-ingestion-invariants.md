@@ -156,9 +156,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    identity, but those precise snapshots emit intervals only. The canonical
    import receipt returns the provider-local day keys that own those intervals.
    When an accepted stable-row correction moves an interval between provider
-   dates, the transient receipt includes both the displaced and incoming day;
-   the resource job refreshes each affected date through the calendar-day path
-   only after the UTC-12 close boundary. That path is the sole writer of their
+   dates, the transient receipt includes both the displaced and incoming day.
+   Before the precise job completes, it atomically converts every closed
+   affected date into one deduplicated existing `resource` job. Each job owns
+   exactly one resource/provider date and retries that existing calendar-day
+   importer independently, so a failed date, a later correction, or a runtime
+   yield cannot erase or restart accepted refresh work. Core rejects more than
+   64 affected dates before its canonical write, and the provider repeats that
+   bound before queue fanout. That path is the sole writer of their
    daily sums, so a UTC-normalized execution window cannot select the wrong provider
    date and a growing precise set cannot
    create an immutable partial aggregate or block a later interval. Every
@@ -180,8 +185,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    fidelity dedupe must preserve provider calendar-date and timestamp-semantics
    differences so those conflicts reach this importer-owned comparison in
    either response order. This keeps
-   each compact resolution consistent without a second cursor, watermark, or
-   state owner.
+   each compact resolution consistent without a second cursor, watermark,
+   queue, schema, or state owner; the already-durable device-job row is the
+   calendar-refresh obligation.
 
 5. **Louder, never quieter.** Drops and skips surface as persisted
    `device-sync.job_failed`/skip metadata. But observability is not recovery:

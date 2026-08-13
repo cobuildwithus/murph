@@ -196,6 +196,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   },
   resource: {
     payload: {
+      calendarRefreshDay: stringJobField({ includeInHostedHint: true }),
       companionAdmissionId: stringJobField({ includeInHostedHint: true }),
       companionObservationJson: stringJobField({ includeInHostedHint: true }),
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),

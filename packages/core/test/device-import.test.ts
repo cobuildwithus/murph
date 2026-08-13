@@ -7444,6 +7444,124 @@ test("importDeviceBatch rejects sleep-type enrichment with other same-revision c
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
 });
 
+test("importDeviceBatch reports each immediate Junction sparse cross-day transition", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-cross-day-chain");
+  await initializeVault({ vaultRoot, createdAt: "2026-04-01T00:00:00.000Z" });
+  const buildEvent = (dayKey: string, version: string) => ({
+    kind: "measurement" as const,
+    occurredAt: `${dayKey}T08:00:00.000Z`,
+    recordedAt: `${dayKey}T08:00:00.000Z`,
+    dayKey,
+    title: "Junction water intake",
+    externalRef: {
+      system: "junction",
+      resourceType: "junction-garmin-water",
+      resourceId: "water-cross-day-chain",
+      facet: "interval",
+      version,
+    },
+    fields: {
+      measurements: [{ metric: "water", unit: "ml", value: 250 }],
+    },
+  });
+
+  const v1 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-04T09:00:00.000Z",
+    events: [buildEvent("2026-04-01", "2026-04-04T08:00:00.000Z")],
+  });
+  assert.deepEqual(v1.affectedEventDayKeys, ["2026-04-01"]);
+
+  const v2 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-05T09:00:00.000Z",
+    events: [buildEvent("2026-04-02", "2026-04-05T08:00:00.000Z")],
+  });
+  assert.deepEqual(v2.affectedEventDayKeys, ["2026-04-01", "2026-04-02"]);
+
+  const v3 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-06T09:00:00.000Z",
+    events: [buildEvent("2026-04-03", "2026-04-06T08:00:00.000Z")],
+  });
+  assert.deepEqual(v3.affectedEventDayKeys, ["2026-04-02", "2026-04-03"]);
+
+  const delayedV2 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-07T09:00:00.000Z",
+    events: [buildEvent("2026-04-02", "2026-04-05T08:00:00.000Z")],
+  });
+  assert.equal(delayedV2.applied, false);
+  assert.equal(
+    delayedV2.affectedEventDayKeys,
+    undefined,
+    "A delayed stale revision cannot reconstruct older refresh work; the durable day jobs retain it.",
+  );
+});
+
+test("importDeviceBatch rejects excessive Junction sparse affected-day fanout atomically", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-affected-days");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+
+  const buildEvents = (startAt: string, version: string) =>
+    Array.from({ length: 33 }, (_, index) => {
+      const occurredAt = new Date(Date.parse(startAt) + index * 24 * 60 * 60_000).toISOString();
+      return {
+        kind: "measurement" as const,
+        occurredAt,
+        recordedAt: occurredAt,
+        dayKey: occurredAt.slice(0, 10),
+        title: "Junction water intake",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-water",
+          resourceId: `water-affected-day-${index}`,
+          facet: "interval",
+          version,
+        },
+        fields: {
+          measurements: [{
+            metric: "water",
+            unit: "ml",
+            value: index + 1,
+          }],
+        },
+      };
+    });
+
+  const baseline = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-10T12:00:00.000Z",
+    events: buildEvents("2026-01-01T08:00:00.000Z", "2026-04-10T10:00:00.000Z"),
+  });
+  assert.equal(baseline.affectedEventDayKeys?.length, 33);
+  const beforeRejectedCorrection = await snapshotVaultFiles(vaultRoot);
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-user-1",
+      importedAt: "2026-04-11T12:00:00.000Z",
+      events: buildEvents("2026-03-01T08:00:00.000Z", "2026-04-11T10:00:00.000Z"),
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "DEVICE_IMPORT_AFFECTED_DAY_LIMIT_EXCEEDED",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedCorrection);
+});
+
 test("importDeviceBatch keeps Junction sleep summary stages over later cycle fallback facts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-junction-summary-over-cycle");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

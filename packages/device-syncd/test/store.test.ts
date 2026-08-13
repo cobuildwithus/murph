@@ -295,6 +295,134 @@ test("device sync store rolls back webhook jobs when the trace claim was lost", 
   }
 });
 
+test("device sync store preserves failed calendar work across a later correction", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-calendar-obligations");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-obligations",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const workerId = "calendar-obligation-worker";
+    const v2 = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-04T00:00:00.000Z",
+      kind: "resource",
+      payload: { resource: "water", revision: "v2" },
+      priority: 100,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob(workerId, "2026-04-04T00:01:00.000Z", 60_000)?.id,
+      v2.id,
+    );
+    assert.equal(store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+      accountId: account.id,
+      completedAt: "2026-04-04T00:01:10.000Z",
+      disconnectGeneration: account.disconnectGeneration,
+      jobIds: [v2.id],
+      jobs: [{
+        availableAt: "2026-04-04T00:01:10.000Z",
+        dedupeKey: "calendar-water-2026-04-01",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-01", resource: "water" },
+        priority: 61,
+      }, {
+        availableAt: "2026-04-04T00:01:10.000Z",
+        dedupeKey: "calendar-water-2026-04-02",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-02", resource: "water" },
+        priority: 60,
+      }],
+      provider: "junction",
+      syncSucceededAt: "2026-04-04T00:01:00.000Z",
+      syncSuccessOptions: { localConnectionRevision: account.localConnectionRevision },
+      workerId,
+    }), true);
+
+    const failedDayOne = store.claimDueJob(
+      workerId,
+      "2026-04-04T00:02:00.000Z",
+      60_000,
+    );
+    assert.equal(failedDayOne?.payload.calendarRefreshDay, "2026-04-01");
+    assert.equal(store.failJobIfOwned(
+      failedDayOne!.id,
+      workerId,
+      "2026-04-04T00:02:10.000Z",
+      "JUNCTION_RETRYABLE",
+      "Calendar fetch failed.",
+      "2026-04-05T00:00:00.000Z",
+      true,
+    ), true);
+    const afterV2 = store.getAccountById(account.id);
+    assert.ok(afterV2);
+
+    const v3 = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-04T00:03:00.000Z",
+      kind: "resource",
+      payload: { resource: "water", revision: "v3" },
+      priority: 100,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob(workerId, "2026-04-04T00:04:00.000Z", 60_000)?.id,
+      v3.id,
+    );
+    assert.equal(store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+      accountId: account.id,
+      completedAt: "2026-04-04T00:04:10.000Z",
+      disconnectGeneration: afterV2.disconnectGeneration,
+      jobIds: [v3.id],
+      jobs: [{
+        availableAt: "2026-04-04T00:04:10.000Z",
+        dedupeKey: "calendar-water-2026-04-02",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-02", resource: "water" },
+        priority: 60,
+      }, {
+        availableAt: "2026-04-04T00:04:10.000Z",
+        dedupeKey: "calendar-water-2026-04-03",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-03", resource: "water" },
+        priority: 60,
+      }],
+      provider: "junction",
+      syncSucceededAt: "2026-04-04T00:04:00.000Z",
+      syncSuccessOptions: { localConnectionRevision: afterV2.localConnectionRevision },
+      workerId,
+    }), true);
+
+    const dayTwo = store.claimDueJob(workerId, "2026-04-04T00:05:00.000Z", 60_000);
+    assert.equal(dayTwo?.payload.calendarRefreshDay, "2026-04-02");
+    assert.equal(store.completeJobIfOwned(dayTwo!.id, workerId, "2026-04-04T00:05:10.000Z"), true);
+    const dayThree = store.claimDueJob(workerId, "2026-04-04T00:06:00.000Z", 60_000);
+    assert.equal(dayThree?.payload.calendarRefreshDay, "2026-04-03");
+    assert.equal(store.completeJobIfOwned(dayThree!.id, workerId, "2026-04-04T00:06:10.000Z"), true);
+    assert.equal(store.claimDueJob(workerId, "2026-04-04T23:59:59.000Z", 60_000), null);
+    const retriedDayOne = store.claimDueJob(
+      workerId,
+      "2026-04-05T00:00:00.000Z",
+      60_000,
+    );
+    assert.equal(retriedDayOne?.id, failedDayOne?.id);
+    assert.equal(retriedDayOne?.payload.calendarRefreshDay, "2026-04-01");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("device sync store commits source admission with initial jobs atomically", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-connection-admission");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

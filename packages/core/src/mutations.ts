@@ -1690,6 +1690,7 @@ const JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES = [
   "-mindfulness-minutes",
   "-water",
 ] as const;
+const MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS = 64;
 
 function isJunctionSparseIntervalExternalRef(externalRef: ExternalRef): boolean {
   return externalRef.system === "junction"
@@ -1709,9 +1710,8 @@ function junctionSparseAffectedDayKeys(
       continue;
     }
     dayKeys.add(event.dayKey);
-    // A precise correction can land before its calendar refresh. Retain the
-    // immediately displaced provider day on exact retry so that a failed
-    // post-import refresh can be retried without a second persisted owner.
+    // Include the immediately displaced provider day so the caller can persist
+    // one calendar-refresh job for each side of this accepted transition.
     const previousRevision = eventSpineRevision(event) - 1;
     if (previousRevision < 1) {
       continue;
@@ -1726,7 +1726,18 @@ function junctionSparseAffectedDayKeys(
       dayKeys.add(previousDayKey);
     }
   }
-  return [...dayKeys].sort();
+  const affectedDayKeys = [...dayKeys].sort();
+  if (affectedDayKeys.length > MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS) {
+    throw new VaultError(
+      "DEVICE_IMPORT_AFFECTED_DAY_LIMIT_EXCEEDED",
+      "Junction sparse import exceeded the affected provider-day limit; nothing was imported.",
+      {
+        affectedDayCount: affectedDayKeys.length,
+        maxAllowed: MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS,
+      },
+    );
+  }
+  return affectedDayKeys;
 }
 
 // Device-sync content equality ignores per-import identity (id, lifecycle,
