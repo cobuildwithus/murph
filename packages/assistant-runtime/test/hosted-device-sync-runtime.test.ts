@@ -8172,21 +8172,48 @@ describe("hosted device-sync runtime", () => {
       "hosted-device-sync-runtime-",
     );
     await mkdir(vaultRoot, { recursive: true });
-    const service = createDeviceSyncServiceForVault(vaultRoot);
+    const demoProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...demoProvider,
+      provider: "junction",
+      descriptor: {
+        ...demoProvider.descriptor,
+        provider: "junction",
+        displayName: "Junction",
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
-        code: "manual-reconcile",
-        provider: "demo",
-        state: begin.state,
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "manual-reconcile",
+        provider: "junction",
+        scopes: [],
+        status: "active",
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_manual_reconcile",
-        externalAccountId: connected.account.externalAccountId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: account.externalAccountId,
         localState: {
+          lastErrorCode: "DEVICE_DATA_MEMBER_EDIT_CONFLICT",
+          lastErrorMessage: "A member-owned correction conflicts with connected data.",
+          lastSyncErrorAt: "2026-04-04T09:30:00.000Z",
           nextReconcileAt: "2026-04-04T12:00:00.000Z",
         },
+        provider: "junction",
+        tokenBundle: null,
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -8204,7 +8231,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const jobs = readJobsForAccount(service, connected.account.id);
+      const jobs = readJobsForAccount(service, account.id);
       assert.equal(jobs.length, 1);
       assert.equal(jobs[0]?.kind, "reconcile");
       assert.equal(jobs[0]?.priority, 80);
@@ -8214,7 +8241,7 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(jobs[0]?.status, "queued");
       assert.equal(
-        getStore(service).getAccountById(connected.account.id)?.nextReconcileAt,
+        getStore(service).getAccountById(account.id)?.nextReconcileAt,
         "2026-04-04T12:00:00.000Z",
       );
     } finally {
