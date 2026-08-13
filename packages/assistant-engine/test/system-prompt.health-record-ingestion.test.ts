@@ -1,5 +1,12 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
+import {
+  ASSISTANT_SKILLS,
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 function buildPrompt(): string {
@@ -55,20 +62,23 @@ describe('assistant system prompt health record ingestion invariant', () => {
     )
   })
 
-  it('routes unfamiliar workout CSVs through one validated local bulk transformation', () => {
+  it('routes workout CSV imports to the on-demand owner', async () => {
     const prompt = buildPrompt()
+    const skill = ASSISTANT_SKILLS.find(({ slug }) => slug === 'workout-csv-import')
+    const instructions = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import', 'SKILL.md'),
+      'utf8',
+    )
 
-    expect(prompt).toContain(
-      'first run `vault-cli workout import inspect <readable-file-path> --format json`',
-    )
-    expect(prompt).toContain('A request for explicit source or units is not a format failure')
-    expect(prompt).toContain('local Python and the standard-library CSV parser')
-    expect(prompt).toContain('one `activity_session` row per grouped workout')
-    expect(prompt).toContain(
-      '`vault-cli event payload-schema --for import-jsonl --kind activity_session --format json`',
-    )
-    expect(prompt).toContain('never use input row position alone')
-    expect(prompt).toContain('apply that exact unchanged file once with `--apply`')
-    expect(prompt).toContain('do not make one model or CLI call per set')
+    expect(skill?.triggerHint).toContain('Strong, Hevy, an unknown export format')
+    expect(prompt).toContain('workout-csv-import owns CSV/history import')
+    expect(prompt).not.toContain('one `activity_session` row per grouped workout')
+    expect(instructions).toContain('vault-cli workout import inspect')
+    expect(instructions).toContain('vault-cli document import')
+    expect(instructions).toContain('only the standard-library `csv`')
+    expect(instructions).toContain('one temporary JSONL row per workout')
+    expect(instructions).toContain('Never use row number')
+    expect(instructions).toContain('Confirm the JSONL SHA-256 is unchanged')
+    expect(instructions).toContain('never blindly retry after an ambiguous failure')
   })
 })

@@ -310,7 +310,7 @@ describe('assistant skill assets', () => {
       'Eye-health evidence, symptom urgency, contact-lens safety, and refractive guidance come from the required Health Commons lookup.',
     )
     expect(systemPrompt).toContain(
-      'Recovery-modality evidence and safety come from the required Health Commons lookup.',
+      'Use Health Commons for recovery-modality evidence and safety.',
     )
   })
 
