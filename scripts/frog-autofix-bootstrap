@@ -21,6 +21,10 @@ function processGroupExists(processGroupId) {
     return true;
   } catch (error) {
     if (error?.code === "ESRCH") return false;
+    // The scriptless pnpm tree cannot change away from the invoking user's
+    // identity. EPERM therefore means this numeric group id was reused by a
+    // foreign process after the owned group disappeared. Never signal it.
+    if (error?.code === "EPERM") return false;
     throw error;
   }
 }
@@ -29,7 +33,7 @@ function signalProcessGroup(processGroupId, signal) {
   try {
     process.kill(-processGroupId, signal);
   } catch (error) {
-    if (error?.code !== "ESRCH") throw error;
+    if (error?.code !== "ESRCH" && error?.code !== "EPERM") throw error;
   }
 }
 

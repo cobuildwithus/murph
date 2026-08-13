@@ -110,7 +110,10 @@ Updated: 2026-08-11
 ## Decisions
 
 - Use a user-session macOS LaunchAgent with `StartInterval=7200` and
-  `RunAtLoad`, not an endless shell loop or hosted service.
+  `RunAtLoad`, not an endless shell loop or hosted service. Give the generated
+  launchd entry a bounded 30-second wait on the existing retained
+  native gate so the install-triggered first run survives bootstrap without
+  creating another scheduler, queue, or lifecycle owner.
 - Handle one issue per invocation. Backlog advances every two hours while each
   individual repair remains serialized and reviewable.
 - Keep GitHub as the only durable work queue and completion ledger. Local state
@@ -145,6 +148,12 @@ Updated: 2026-08-11
     remain on the unmerged reconciliation PR
   - a mutating run from a secondary worktree failed before discovery or model
     work and retained only one bounded `blocked` event
+- ReviewGPT round 14 verified the bounded dependency-bootstrap correction and
+  found that launchd could consume `RunAtLoad` while installation still held
+  the immediate native gate. The generated launcher now marks only that
+  handoff for a bounded wait; a real macOS copied-wrapper fixture proves prompt
+  exactly-once admission, long-repair timeout without duplicate admission, and
+  stable gate-inode retention.
 - Pending external proof: exact-head ReviewGPT gates and CI, merge, primary
   checkout installation, loaded LaunchAgent inspection, and one installed run.
 Completed: 2026-08-11

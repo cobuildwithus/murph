@@ -1207,12 +1207,20 @@ Last verified: 2026-08-13
   dependency reconciliation before loading the TypeScript parent. A dependency-
   free bootstrap gives pnpm one exact detached process group and a fixed
   30-minute deadline; timeout or leader-first exit signals only that proven
-  group and confirms it is gone before the native gate can release. Dependency-
+  group and confirms it is gone before the native gate can release. A zero-
+  signal `EPERM` after that same-user, scriptless tree exits is treated as
+  foreign numeric group-id reuse, never as authority to signal the replacement.
+  Dependency-
   control movement, including `pnpm-lock.yaml`, triggers the existing one-run
   restart. The bootstrap is in loaded-runner authority and the lockfile is in
   the trusted ReviewGPT control inventory. Canonical review and parent helpers
   therefore cannot retain an older installed runtime after trusted source
-  advances or strand the queue behind an unbounded pre-parent install.
+  advances or strand the queue behind an unbounded pre-parent install. The
+  generated launcher supplies one non-secret handoff marker so its `RunAtLoad`
+  invocation may wait at most 30 seconds for the install holder to release the
+  retained native-gate inode. The wrapper clears that marker before loading
+  TypeScript; it grants no durable authority, bypass, or second queue, and all
+  other native-gate contention remains immediate.
 - Missing or rejected implementation output/patches and edit-only child
   timeout, nonzero exit, or invalid output are graceful terminal pre-PR
   dispositions, not authorization for another implementation. The parent

@@ -46,6 +46,8 @@ superseded policy, candidate-and-runner-bound PASS recovery across restarts,
 and frozen scriptless primary dependency reconciliation with lockfile drift in
 the trusted review surface, using a dependency-free bounded exact-process-group
 bootstrap whose cleanup precedes native-lock release, an explicit Frog-script
+bounded generated-launcher handoff on that retained gate so install-time `RunAtLoad`
+is prompt without turning ordinary contention into a retry queue, an explicit Frog-script
 merge allowlist with one canonical
 issue-bound completed-plan exception and exclusions for policy, skills,
 friction tasks, general documentation, and GitHub Actions helpers, one

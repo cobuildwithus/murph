@@ -4231,7 +4231,7 @@ function assertNativeAcquisitionGate() {
   }
   const contender = runCommand(
     "/usr/bin/lockf",
-    ["-t", "0", nativeGatePath, "/usr/bin/true"],
+    ["-k", "-t", "0", nativeGatePath, "/usr/bin/true"],
     homedir(),
   );
   if (contender.status === 0) {

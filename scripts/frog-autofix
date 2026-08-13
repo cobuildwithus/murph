@@ -45,8 +45,15 @@ case "${1:-}" in
         exit 2
       fi
       /bin/chmod 600 "$native_gate"
-      exec /usr/bin/lockf -t 0 "$native_gate" \
-        /usr/bin/env MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD=1 \
+      native_gate_timeout=0
+      if [[ "${1:-}" == "run" \
+        && "${MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF:-}" == "1" ]]; then
+        native_gate_timeout=30
+      fi
+      exec /usr/bin/lockf -k -t "$native_gate_timeout" "$native_gate" \
+        /usr/bin/env \
+        MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF=0 \
+        MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD=1 \
         "$repo_root/scripts/frog-autofix" "$@"
     fi
     ;;
@@ -58,7 +65,8 @@ unset \
   FROG_NAMESPACE \
   FROG_SCHEMA \
   GH_TOKEN \
-  GITHUB_TOKEN
+  GITHUB_TOKEN \
+  MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF
 
 case "${1:-}" in
   install|run)

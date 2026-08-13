@@ -188,7 +188,8 @@ case "$repo_relative" in
     ;;
 esac
 
-exec "$HOME/$repo_relative/scripts/frog-autofix" run
+exec /usr/bin/env MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF=1 \
+  "$HOME/$repo_relative/scripts/frog-autofix" run
 `;
 }
 

@@ -197,13 +197,22 @@ Last verified: 2026-08-13
   both gates, refuses to remove active state, and retains the native gate inode
   so a concurrent contender can never switch to a replacement inode. Install
   also acquires the JSON owner, so it cannot reconfigure launchd while an
-  orphaned verified worker still owns the prior run.
+  orphaned verified worker still owns the prior run. The native entrypoint
+  keeps the gate inode across holders. The generated launchd launcher marks its
+  `run` as an installation handoff: that invocation waits at most 30
+  seconds for the installer tail to release the same gate, then proceeds once
+  or exits without loading the parent. Manual contenders remain non-waiting,
+  and a scheduled run blocked by a real repair remains bounded rather than
+  creating a retry owner.
 - Before `install` or `run` loads the TypeScript parent, the native entrypoint
   reconciles the clean primary dependency tree with the committed lockfile and
   disables lifecycle scripts. A manifest, workspace, pnpm hook, or lock-only
   change during automatic primary advancement requires the existing one-run
   restart; the next invocation reconciles before using ReviewGPT, `tsx`, or
-  parent helper binaries.
+  parent helper binaries. Because that scriptless pnpm tree cannot change user
+  identity, a later zero-signal `EPERM` means the numeric process-group id has
+  been reused by a foreign process; the bootstrap treats its owned group as
+  gone and never signals the replacement.
 - Each invocation fetches the default branch, advances only an exact clean
   primary checkout by fast-forward, revalidates repository and issue authority,
   and admits the oldest eligible issue. It processes one issue, uses a

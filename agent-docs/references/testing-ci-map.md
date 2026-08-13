@@ -4,6 +4,10 @@ Last verified: 2026-08-13
 
 ## Current Repo Checks
 
+The focused Frog row's native-lock coverage includes a real macOS copied-wrapper
+install/`RunAtLoad` handoff: prompt release admits exactly once, a longer repair
+times out without duplicate admission, and the stable gate inode is retained.
+
 | Command | Purpose | Current coverage |
 | --- | --- | --- |
 | `pnpm typecheck` | Full workspace type proof through stable TypeScript 7. Independent guards overlap the clean contracts prerequisite; package/app no-emit checks use bounded no-sort fanout. The hosted web invokes the root compiler explicitly while retaining local TypeScript 5 only for framework/Solana tools that still require the legacy compiler API or peer range. Repo-owned source-analysis checks use Babel's parser instead of a TypeScript compiler API, leaving the web-local TypeScript 5 boundary independently removable once its consumers support TypeScript 7. Tsconfig path-map discovery reads root configs shallowly and scans only `packages/**` plus `apps/**`, avoiding unrelated local residue. Repo tools reuse an ignored incremental cache. | `scripts/*.{sh,mjs,ts}`, `e2e/smoke/verify-scenario-integrity.ts`, `packages/contracts/**`, `packages/clinical-records/**`, `packages/hosted-execution/**`, `packages/hosted-local-harness/**`, `packages/runtime-state/**`, `packages/operator-config/**`, `packages/assistant-engine/**`, `packages/assistant-cli/**`, `packages/setup-cli/**`, `packages/cli/**`, `packages/openclaw-plugin/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**`, `packages/inboxd/**`, `packages/parsers/**`, `packages/assistantd/**`, `packages/assistant-runtime/**`, `packages/health-metrics/**`, `packages/query/**`, `apps/web/**`, `apps/cloudflare/**`, `config/workspace-source-resolution.ts` |

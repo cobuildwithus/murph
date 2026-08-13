@@ -13,7 +13,12 @@ stable native acquisition gate, process/worker owner record, home-relative
 checkout/Codex-home locators, bounded metadata, and transient parent review
 material removed when the invocation ends. Every installing, uninstalling, or
 repairing process enters the same macOS advisory gate before it may inspect or
-replace the recoverable JSON owner record.
+replace the recoverable JSON owner record. The gate inode is retained across
+holders. The generated launchd entry marks its `run` invocation as an
+installation handoff, allowing a bounded 30-second wait for the installing
+holder to finish; ordinary manual and interval contention remains immediate.
+The marker is cleared before the TypeScript parent loads, so it grants no
+lasting authority or second admission path.
 
 Admission requires an open `enhancement` issue authored by the exact Frog App
 and exactly one matching `issue:` binding already committed beneath

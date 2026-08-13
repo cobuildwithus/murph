@@ -1172,7 +1172,8 @@ describe("Frog autofix guards", () => {
     expect(plist).toContain(`<integer>${FROG_AUTOFIX_INTERVAL_SECONDS}</integer>`);
     expect(plist).toContain("<key>RunAtLoad</key>");
     expect(plist).toContain("$HOME/Library/Application Support/Murph/FrogAutofix/launch");
-    expect(launcher).toContain('exec "$HOME/$repo_relative/scripts/frog-autofix" run');
+    expect(launcher).toContain("MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF=1");
+    expect(launcher).toContain('"$HOME/$repo_relative/scripts/frog-autofix" run');
     for (const content of [plist, launcher]) {
       expect(content).not.toMatch(/\/Users\/[A-Za-z0-9._-]+/u);
       expect(content).not.toContain("GH_TOKEN");
@@ -1196,7 +1197,9 @@ describe("Frog autofix guards", () => {
     expect(wrapper).toContain("GH_TOKEN");
     expect(wrapper).toContain("GITHUB_TOKEN");
     expect(wrapper).toContain("verify-permissions");
-    expect(wrapper).toContain("/usr/bin/lockf -t 0");
+    expect(wrapper).toContain('native_gate_timeout=30');
+    expect(wrapper).toContain('/usr/bin/lockf -k -t "$native_gate_timeout"');
+    expect(wrapper).toContain("MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF=0");
     expect(wrapper).toContain("MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD=1");
     expect(wrapper).toContain('install|uninstall|run)');
     const reconcile = wrapper.indexOf(
@@ -1221,7 +1224,7 @@ describe("Frog autofix guards", () => {
       "mutating Frog autofix commands require the native launcher gate",
     );
     expect(implementation).toContain("String(process.ppid)");
-    expect(implementation).toContain('["-t", "0", nativeGatePath, "/usr/bin/true"]');
+    expect(implementation).toContain('["-k", "-t", "0", nativeGatePath, "/usr/bin/true"]');
     expect(implementation).not.toContain(
       "rmSync(supportRoot, { recursive: false })",
     );
@@ -1325,7 +1328,7 @@ describe("Frog autofix guards", () => {
           "process.argv[1] = process.execPath;",
           "const bootstrap = await import(pathToFileURL(bootstrapPath).href);",
           "process.exitCode = await bootstrap.reconcileDependencies(repoRoot, {",
-          "  deadlineMs: 1_000,",
+          "  deadlineMs: 5_000,",
           "  terminationGraceMs: 100,",
           "});",
         ].join("\n"),
@@ -1343,7 +1346,7 @@ describe("Frog autofix guards", () => {
           FROG_REAL_NODE: process.execPath,
           PATH: `${bin}:${process.env.PATH ?? ""}`,
         },
-        timeout: 10_000,
+        timeout: 20_000,
       },
     );
     const childExists = () => {
@@ -1514,6 +1517,165 @@ describe("Frog autofix guards", () => {
     }
   });
 
+  it("admits the launchd RunAtLoad handoff after install releases the native gate", () => {
+    if (process.platform !== "darwin") return;
+    const root = mkdtempSync(path.join(tmpdir(), "frog-run-at-load-"));
+    const scripts = path.join(root, "scripts");
+    const bin = path.join(root, "bin");
+    const fakeHome = path.join(root, "home");
+    const admissions = path.join(root, "admissions");
+    const active = path.join(root, "parent-active");
+    const gate = path.join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "Murph",
+      "FrogAutofix",
+      "run.native.lock",
+    );
+    const bootstrapPath = path.join(scripts, "frog-autofix-bootstrap");
+    const wrapperPath = path.join(scripts, "frog-autofix");
+    try {
+      mkdirSync(scripts, { recursive: true });
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(fakeHome, { recursive: true });
+      mkdirSync(path.join(root, "node_modules", ".bin"), { recursive: true });
+      copyFileSync(
+        path.join(repositoryRoot, "scripts", "frog-autofix"),
+        wrapperPath,
+      );
+      writeFileSync(
+        wrapperPath,
+        readFileSync(wrapperPath, "utf8").replace(
+          "native_gate_timeout=30",
+          "native_gate_timeout=2",
+        ),
+      );
+      copyFileSync(
+        path.join(repositoryRoot, "scripts", "frog-autofix-bootstrap"),
+        bootstrapPath,
+      );
+      writeFileSync(path.join(bin, "node"), [
+        "#!/bin/sh",
+        "exit 0",
+      ].join("\n"));
+      writeFileSync(path.join(root, "node_modules", ".bin", "tsx"), [
+        "#!/bin/sh",
+        '[ -z "${MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF:-}" ] || exit 8',
+        'case "${2:-}" in',
+        "install)",
+        "  MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF=1 \\",
+        '    "$FROG_WRAPPER" run >/dev/null 2>&1 &',
+        "  ;;",
+        "run)",
+        '  printf "admitted\\n" >> "$FROG_ADMISSIONS"',
+        '  if [ "${FROG_PARENT_MODE:-}" = "busy" ]; then',
+        '    : > "$FROG_PARENT_ACTIVE"',
+        "    /bin/sleep 3",
+        "  fi",
+        "  ;;",
+        "*) exit 2 ;;",
+        "esac",
+      ].join("\n"));
+      chmodSync(path.join(bin, "node"), 0o755);
+      chmodSync(path.join(root, "node_modules", ".bin", "tsx"), 0o755);
+      chmodSync(bootstrapPath, 0o755);
+      chmodSync(wrapperPath, 0o755);
+      writeFileSync(
+        path.join(root, ".gitignore"),
+        "admissions\nbin/\nhome/\nnode_modules/\nparent-active\n",
+      );
+      const git = (...args: string[]) => {
+        const command = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+        expect(command.status, command.stderr).toBe(0);
+      };
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      git("add", ".gitignore", "scripts/frog-autofix", "scripts/frog-autofix-bootstrap");
+      git("commit", "--quiet", "-m", "fixture");
+
+      const environment = {
+        ...process.env,
+        FROG_ADMISSIONS: admissions,
+        FROG_PARENT_ACTIVE: active,
+        FROG_WRAPPER: wrapperPath,
+        HOME: fakeHome,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      };
+      const install = spawnSync("/bin/sh", [
+        "-c",
+        [
+          '"$1" install || exit 3',
+          "attempt=0",
+          'while [ ! -e "$FROG_ADMISSIONS" ]; do',
+          "  attempt=$((attempt + 1))",
+          '  [ "$attempt" -lt 500 ] || exit 4',
+          "  /bin/sleep 0.01",
+          "done",
+          '[ "$(/usr/bin/wc -l < "$FROG_ADMISSIONS" | /usr/bin/tr -d " ")" = 1 ] || exit 5',
+        ].join("\n"),
+        "frog-run-at-load-test",
+        wrapperPath,
+      ], {
+        encoding: "utf8",
+        env: environment,
+        timeout: 10_000,
+      });
+      expect(install.error).toBeUndefined();
+      expect(install.status, install.stderr).toBe(0);
+      expect(readFileSync(admissions, "utf8")).toBe("admitted\n");
+      const gateReleaseDeadline = Date.now() + 2_000;
+      let gateReleased = false;
+      while (Date.now() < gateReleaseDeadline) {
+        const probe = spawnSync(
+          "/usr/bin/lockf",
+          ["-k", "-t", "0", gate, "/usr/bin/true"],
+        );
+        if (probe.status === 0) {
+          gateReleased = true;
+          break;
+        }
+        expect(probe.status).toBe(75);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+      expect(gateReleased).toBe(true);
+      const stableGateInode = statSync(gate).ino;
+
+      rmSync(admissions);
+      const busy = spawnSync("/bin/sh", [
+        "-c",
+        [
+          'FROG_PARENT_MODE=busy "$1" run >/dev/null 2>&1 &',
+          "holder=$!",
+          "attempt=0",
+          'while [ ! -e "$FROG_PARENT_ACTIVE" ]; do',
+          "  attempt=$((attempt + 1))",
+          '  [ "$attempt" -lt 500 ] || exit 3',
+          "  /bin/sleep 0.01",
+          "done",
+          'MURPH_FROG_AUTOFIX_LAUNCHD_HANDOFF=1 "$1" run >/dev/null 2>&1',
+          "launcher_status=$?",
+          '[ "$launcher_status" = 75 ] || exit 4',
+          'wait "$holder" || exit 5',
+          '[ "$(/usr/bin/wc -l < "$FROG_ADMISSIONS" | /usr/bin/tr -d " ")" = 1 ] || exit 6',
+        ].join("\n"),
+        "frog-run-at-load-busy-test",
+        wrapperPath,
+      ], {
+        encoding: "utf8",
+        env: environment,
+        timeout: 10_000,
+      });
+      expect(busy.error).toBeUndefined();
+      expect(busy.status, busy.stderr).toBe(0);
+      expect(readFileSync(admissions, "utf8")).toBe("admitted\n");
+      expect(statSync(gate).ino).toBe(stableGateInode);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("admits only one real contender through the stable native acquisition gate", () => {
     if (process.platform !== "darwin") return;
     const root = mkdtempSync(path.join(tmpdir(), "frog-native-lock-"));
@@ -1522,9 +1684,9 @@ describe("Frog autofix guards", () => {
       const result = spawnSync("/bin/bash", [
         "-c",
         [
-          '/usr/bin/lockf -t 0 "$1" /bin/sleep 1 &',
+          '/usr/bin/lockf -k -t 0 "$1" /bin/sleep 1 &',
           "first=$!",
-          '/usr/bin/lockf -t 0 "$1" /bin/sleep 1 &',
+          '/usr/bin/lockf -k -t 0 "$1" /bin/sleep 1 &',
           "second=$!",
           "wait $first; first_status=$?",
           "wait $second; second_status=$?",

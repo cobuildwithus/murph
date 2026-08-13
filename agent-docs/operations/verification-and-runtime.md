@@ -666,8 +666,12 @@ candidate-and-runner-bound persisted PASS recovery that rejects legacy or
 drifted evidence across restarts, plus frozen scriptless primary dependency
 reconciliation before the mutating parent loads, dependency-free exact-process-
 group supervision with a fixed deadline and confirmed descendant cleanup before
-native-lock release, bootstrap loaded-runner coverage, and lockfile coverage in
-the trusted review-control inventory,
+native-lock release, foreign numeric process-group reuse refusal, bootstrap
+loaded-runner coverage, lockfile coverage in
+the trusted review-control inventory, and a real macOS install/`RunAtLoad`
+handoff that waits only at the generated launcher boundary, admits exactly once
+after prompt gate release, times out behind a longer repair, and retains the
+same native-gate inode,
 operator-handoff preservation during a blocked model review, non-closing exact
 issue binding across short and full-URL forms plus parent-only post-merge
 closure and never-closed retry that refuses deliberate reopen,
@@ -692,7 +696,9 @@ primary checkout: install with the intended Codex home, confirm `status`
 reports `loaded=yes` and `interval_seconds=7200`, inspect the generated plist,
 launcher, relative locators, lock, and bounded event log for owner-only modes
 and identifier/credential absence. Confirm the stable native gate remains while
-the JSON owner record clears, then invoke one manual `run`. When no
+the JSON owner record clears and that `RunAtLoad` records a prompt first
+admission rather than disappearing behind installation, then invoke one manual
+`run`. When no
 committed eligible binding exists, success is a no-worker event. When one does
 exist, the exact GitHub PR/check/merge/issue lifecycle is the required end-to-
 end proof; a locally successful child exit alone is not completion evidence.
