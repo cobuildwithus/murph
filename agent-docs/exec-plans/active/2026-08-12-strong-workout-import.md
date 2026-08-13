@@ -217,6 +217,16 @@ Updated: 2026-08-12
   split by selected axis, so a load-only correction preserves an edited
   distance and a distance-only correction preserves an edited load; edits to
   the selected axis still fail closed.
+- Final ReviewGPT round 10 found that provider-first recovery contradicted
+  itself when the member also knew the stored units were wrong. Provider
+  correction now always reuses exact manifest units for its narrow reparse, so
+  the executable first step needs only the confirmed provider; the separate
+  unit correction follows with the confirmed unit.
+- Final ReviewGPT round 10 also found that the unit-correction structure fence
+  rejected ordinary member context such as notes, reps, duration, RPE, and
+  derived exercise mode. The fence now covers only exercise identity/order and
+  set array order. Selected-axis projections still reject edited load or
+  distance values, and expected-latest fences still reject concurrent changes.
 
 ## Verification
 
@@ -259,3 +269,10 @@ Updated: 2026-08-12
   with that edit preserved, independent load and distance correction ownership,
   identical correction no-ops with an edited unselected axis, changed-unit
   expanded-snapshot rejection, and legacy unit-provenance migration.
+- Round 10 remediation proof: production-runtime usecase coverage proves a
+  provider correction can reuse the wrong stored unit without asking the
+  member to repeat it, then a separate unit correction retains the same event,
+  member context, and raw evidence before exact replay and snapshot expansion.
+  Unit-correction coverage proves notes, reps, duration, RPE, and exercise mode
+  survive, while a positional set-order edit and a selected-axis load edit both
+  still fail closed.

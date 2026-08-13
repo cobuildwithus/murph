@@ -185,7 +185,10 @@ describe('assistant manual provider export guidance', () => {
       'preserves the original workout timezone and other non-unit fields',
     )
     expect(normalizedReference).toContain(
-      'correct the provider first and the units second',
+      'correct the provider first by rerunning the exact CSV with only the confirmed `--source`',
+    )
+    expect(normalizedReference).toContain(
+      'do not restate a known-wrong unit',
     )
     expect(normalizedReference).toContain(
       'stop instead of overwriting member changes',

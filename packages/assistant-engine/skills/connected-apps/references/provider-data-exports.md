@@ -144,7 +144,10 @@ flag only after explicit confirmation; it supersedes the same imported workout
 identities, requires the exact prior raw evidence, and preserves the original
 workout timezone and other non-unit fields, including context added after the
 import. If both the provider and units were previously wrong, correct the
-provider first and the units second; do not combine the two recovery steps.
+provider first by rerunning the exact CSV with only the confirmed `--source`;
+Murph reuses the prior manifest units for that narrow correction, so do not
+restate a known-wrong unit. Then rerun the exact CSV with the confirmed source,
+corrected unit, and `--correct-units`; do not combine the two recovery steps.
 If Murph reports overlapping exercise/set edits, stop instead of overwriting
 member changes.
 

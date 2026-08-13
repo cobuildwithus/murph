@@ -688,8 +688,9 @@ function mappingFromAttachedEvents(
     matches: alignedMatches,
     records: alignedRecords,
     canonicalSourceMatches: alignedRecords.every(
-      (record) => record.kind === 'activity_session'
-        && record.workout?.sourceApp === plan.source,
+      (record) => record.lifecycle?.state === 'deleted'
+        || (record.kind === 'activity_session'
+          && record.workout?.sourceApp === plan.source)
     ),
     currentMappingReplay: alignedRecords.every(
       (record) => record.externalRef?.version === WORKOUT_CSV_MAPPING_REVISION,
@@ -782,6 +783,33 @@ async function resolvePriorSnapshotRecords(input: {
         'A prior workout source session is missing or changed in the refreshed export; nothing was imported.',
       )
     }
+    const fullMapping = mappingFromAttachedEvents(priorPlan, matches)
+    const hasPostMappingCorrection = fullMapping?.records.every((record) => {
+      if (record.lifecycle?.state === 'deleted') return true
+      const revision = Date.parse(record.externalRef?.version ?? '')
+      return Number.isFinite(revision) && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
+    }) === true
+    const correctedWeightInterpretation = hasPostMappingCorrection
+      && fullMapping!.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(weightOwnedProjection(record.workout))
+            === JSON.stringify(weightOwnedProjection(input.plan.sessions[currentIndex]!.workout))
+      })
+    const correctedDistanceInterpretation = hasPostMappingCorrection
+      && fullMapping!.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+            === JSON.stringify(distanceOwnedProjection(
+              input.plan.sessions[currentIndex]!.workout,
+              input.plan.sessions[currentIndex]!.distanceKm,
+            ))
+      })
     let comparisonPlan: WorkoutCsvImportPlan
     try {
       comparisonPlan = input.importers.planWorkoutCsvImport({
@@ -789,10 +817,14 @@ async function resolvePriorSnapshotRecords(input: {
         timeZone: input.plan.timeZone,
         source: input.plan.source,
         delimiter: candidate.delimiter,
-        weightUnit: candidate.weightUnit === undefined
+        weightUnit: correctedWeightInterpretation
+          ? input.plan.weightUnit ?? undefined
+          : candidate.weightUnit === undefined
           ? input.plan.weightUnit ?? undefined
           : candidate.weightUnit ?? undefined,
-        distanceUnit: candidate.distanceUnit === undefined
+        distanceUnit: correctedDistanceInterpretation
+          ? input.plan.distanceUnit ?? undefined
+          : candidate.distanceUnit === undefined
           ? input.plan.distanceUnit ?? undefined
           : candidate.distanceUnit ?? undefined,
       })
@@ -821,7 +853,6 @@ async function resolvePriorSnapshotRecords(input: {
         )
       }
     }
-    const fullMapping = mappingFromAttachedEvents(priorPlan, matches)
     const partialMatchesByIndex = new Map<number, WorkoutRawRefMatch>()
     if (fullMapping) {
       fullMapping.matches.forEach((match, index) => partialMatchesByIndex.set(index, match))
@@ -967,16 +998,18 @@ async function resolveExistingWorkoutEvidence(input: {
       const recordTimeZone = recordTimeZones.size === 1 ? [...recordTimeZones][0] : undefined
       const originalTimeZone = recordTimeZone ?? candidate.timeZone
       const currentWeightValuesMatch = mapping.records.every((record, sessionIndex) =>
-        record.kind === 'activity_session'
-        && JSON.stringify(weightOwnedProjection(record.workout))
-          === JSON.stringify(weightOwnedProjection(input.plan.sessions[sessionIndex]?.workout)))
+        record.lifecycle?.state === 'deleted'
+        || (record.kind === 'activity_session'
+          && JSON.stringify(weightOwnedProjection(record.workout))
+            === JSON.stringify(weightOwnedProjection(input.plan.sessions[sessionIndex]?.workout))))
       const currentDistanceValuesMatch = mapping.records.every((record, sessionIndex) =>
-        record.kind === 'activity_session'
-        && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
-          === JSON.stringify(distanceOwnedProjection(
-            input.plan.sessions[sessionIndex]?.workout,
-            input.plan.sessions[sessionIndex]?.distanceKm,
-          )))
+        record.lifecycle?.state === 'deleted'
+        || (record.kind === 'activity_session'
+          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+            === JSON.stringify(distanceOwnedProjection(
+              input.plan.sessions[sessionIndex]?.workout,
+              input.plan.sessions[sessionIndex]?.distanceKm,
+            ))))
       const evidence = {
         rawFile,
         ...mapping,
@@ -986,6 +1019,7 @@ async function resolveExistingWorkoutEvidence(input: {
           currentWeightValuesMatch
           && currentDistanceValuesMatch
           && mapping.records.every((record) => {
+            if (record.lifecycle?.state === 'deleted') return true
             const revision = Date.parse(record.externalRef?.version ?? '')
             return Number.isFinite(revision)
               && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
@@ -1036,16 +1070,8 @@ function correctionStructure(workout: WorkoutSession | undefined) {
     name: exercise.name,
     sourceExerciseId: exercise.sourceExerciseId,
     order: exercise.order,
-    groupId: exercise.groupId,
-    mode: exercise.mode,
-    note: exercise.note,
     sets: exercise.sets.map((set) => ({
       order: set.order,
-      type: set.type,
-      note: set.note,
-      reps: set.reps,
-      durationSeconds: set.durationSeconds,
-      rpe: set.rpe,
     })),
   }))
 }
@@ -1416,7 +1442,6 @@ export async function importWorkoutCsv(input: {
     }
   }
 
-  assertStructuredPlanImportable(plan)
   const existingEvidence = await resolveExistingWorkoutEvidence({
     core,
     vault: input.vault,
@@ -1425,11 +1450,15 @@ export async function importWorkoutCsv(input: {
   })
   const sourceDialectCorrection = existingEvidence.records !== undefined
     && existingEvidence.canonicalSourceMatches === false
+  if (!sourceDialectCorrection) {
+    assertStructuredPlanImportable(plan)
+  }
   if (
     existingEvidence.records
     && !existingEvidence.currentUnitsMatch
     && !existingEvidence.currentCorrectedUnitsMatch
     && !input.correctUnits
+    && !sourceDialectCorrection
   ) {
     throw new VaultCliError(
       'conflict',
@@ -1494,7 +1523,7 @@ export async function importWorkoutCsv(input: {
     if (input.correctUnits && sourceDialectCorrection) {
       throw new VaultCliError(
         'invalid_option',
-        'Correct the workout provider first, then run a separate --correct-units command; nothing was imported.',
+        'Correct the workout provider first by rerunning this exact CSV with the confirmed --source and without --correct-units; prior manifest units will be reused. Then run a separate --correct-units command. Nothing was imported.',
       )
     }
     const originalSource = existingEvidence.originalSource
@@ -1525,10 +1554,14 @@ export async function importWorkoutCsv(input: {
     const correctionPlan = importers.planWorkoutCsvImport({
       text,
       timeZone: existingEvidence.originalTimeZone,
-      source: input.source,
-      delimiter: input.delimiter,
-      weightUnit: input.weightUnit,
-      distanceUnit: input.distanceUnit,
+      source: plan.source,
+      delimiter: existingEvidence.originalDelimiter ?? input.delimiter,
+      weightUnit: sourceDialectCorrection
+        ? existingEvidence.originalWeightUnit ?? undefined
+        : input.weightUnit,
+      distanceUnit: sourceDialectCorrection
+        ? existingEvidence.originalDistanceUnit ?? undefined
+        : input.distanceUnit,
     })
     assertStructuredPlanImportable(correctionPlan)
     const correctedMapping = mappingFromAttachedEvents(
