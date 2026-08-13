@@ -456,6 +456,35 @@ function readJunctionWorkoutProgressIdentities(
   return identities as string[];
 }
 
+function junctionFullJobTimeseriesProgress(
+  activeResource: string,
+  completedResources: readonly string[] = [],
+): string {
+  return JSON.stringify({
+    v: 1,
+    a: activeResource,
+    i: [...completedResources].sort(),
+  });
+}
+
+function readJunctionFullJobTimeseriesProgress(
+  payload: Record<string, unknown> | undefined,
+): { activeResource: string; completedResources: string[] } {
+  const encoded = payload?.timeseriesResourceCursor;
+  if (typeof encoded !== "string") {
+    assert.fail("expected encoded full-job timeseries resource progress");
+  }
+  const parsed = JSON.parse(encoded) as { a?: unknown; i?: unknown; v?: unknown };
+  assert.equal(parsed.v, 1);
+  assert.equal(typeof parsed.a, "string");
+  assert.equal(Array.isArray(parsed.i), true);
+  assert.equal(JSON.stringify(parsed), encoded);
+  return {
+    activeResource: String(parsed.a),
+    completedResources: parsed.i as string[],
+  };
+}
+
 function createJunctionWorkoutStreamTestProvider(input: {
   listWorkoutIds(indexRequest: number): readonly string[];
   listResponse?: (indexRequest: number) => Promise<Response> | Response;
@@ -1022,7 +1051,7 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
   assert.deepEqual(hourlyContinuation.payload, {
     emptyBackfillAttempts: 1,
     timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "heartrate",
+    timeseriesResourceCursor: junctionFullJobTimeseriesProgress("heartrate"),
     timeseriesWindowHours: 1,
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-02T00:00:00.000Z",
@@ -1039,11 +1068,73 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
   assert.deepEqual(hourlyResult.scheduledJobs?.[0]?.payload, {
     emptyBackfillAttempts: 1,
     timeseriesCursor: "2026-04-02T01:00:00.000Z",
-    timeseriesResourceCursor: "heartrate",
+    timeseriesResourceCursor: junctionFullJobTimeseriesProgress("heartrate"),
     timeseriesWindowHours: 1,
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-02T00:00:00.000Z",
   });
+});
+
+test.each([
+  "glucose",
+  "electrocardiogram_voltage",
+] as const)("Junction direct %s units complete three-page grouped responses", async (resource) => {
+  let pages = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname !== `/v2/timeseries/junction-user-1/${resource}/grouped`) {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    pages += 1;
+    return createJsonResponse({
+      groups: {},
+      ...(pages < 3 ? { next_cursor: `page-${pages + 1}` } : {}),
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: [resource],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext(),
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor: junctionFullJobTimeseriesProgress(resource),
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(pages, 3);
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+});
+
+test("Junction direct workout_stream unit completes a three-page workout index", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => [],
+    listResponse: (page) => createJsonResponse({
+      data: [],
+      ...(page < 3 ? { next_cursor: `page-${page + 1}` } : {}),
+    }),
+  });
+
+  const result = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext(),
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor: junctionFullJobTimeseriesProgress("workout_stream"),
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    harness.requestUrls.filter((url) => url.includes("/v2/summary/workouts/")).length,
+    3,
+  );
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
 });
 
 test("Junction cancellation retains the deterministic timeseries continuation", async () => {
@@ -1114,7 +1205,7 @@ test("Junction cancellation retains the deterministic timeseries continuation", 
   );
   assert.deepEqual(retryResult.scheduledJobs?.[0]?.payload, {
     timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "blood_oxygen",
+    timeseriesResourceCursor: junctionFullJobTimeseriesProgress("blood_oxygen"),
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-01T00:00:00.000Z",
   });
@@ -3887,7 +3978,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
     windowStart: ownerWindowStart,
     windowEnd: ownerWindowEnd,
     timeseriesCursor: ownerWindowStart,
-    timeseriesResourceCursor: "blood_oxygen",
+    timeseriesResourceCursor: junctionFullJobTimeseriesProgress("blood_oxygen"),
   });
   assert.equal(
     continuation.dedupeKey,
@@ -3939,7 +4030,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
     windowStart: ownerWindowStart,
     windowEnd: ownerWindowEnd,
     timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "blood_oxygen",
+    timeseriesResourceCursor: junctionFullJobTimeseriesProgress("blood_oxygen"),
   });
   assert.equal(secondImportedSnapshots.length, 1);
 
@@ -15301,7 +15392,7 @@ test("Junction mixed sparse and dense backfills advance exact resource and day c
   assert.deepEqual(continuation.payload, {
     emptyBackfillAttempts: 1,
     timeseriesCursor: ownerWindowStart,
-    timeseriesResourceCursor: "blood_oxygen",
+    timeseriesResourceCursor: junctionFullJobTimeseriesProgress("blood_oxygen"),
     windowEnd: ownerWindowEnd,
     windowStart: ownerWindowStart,
   });
@@ -15336,14 +15427,14 @@ test("Junction mixed sparse and dense backfills advance exact resource and day c
     context,
     createJob("backfill", {
       timeseriesCursor: "2026-03-01T00:00:00.000Z",
-      timeseriesResourceCursor: "blood_oxygen",
+      timeseriesResourceCursor: junctionFullJobTimeseriesProgress("blood_oxygen"),
       windowEnd: ownerWindowEnd,
       windowStart: ownerWindowStart,
     }),
   );
   assert.deepEqual(resourceBoundaryResult.scheduledJobs?.[0]?.payload, {
     timeseriesCursor: ownerWindowStart,
-    timeseriesResourceCursor: "fat",
+    timeseriesResourceCursor: junctionFullJobTimeseriesProgress("fat", ["blood_oxygen"]),
     windowEnd: ownerWindowEnd,
     windowStart: ownerWindowStart,
   });
@@ -15843,7 +15934,7 @@ test("Junction timeseries resource continuation metadata fails closed before pro
   assert.deepEqual(requestUrls, []);
 });
 
-test("Junction timeseries continuation uses an exact resource-name cursor", async () => {
+test("Junction full-job progress selects newly inserted resources before advancing", async () => {
   const groupedRequests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
@@ -15863,8 +15954,9 @@ test("Junction timeseries continuation uses an exact resource-name cursor", asyn
     throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
     summaryResources: ["activity"],
-    // Resource names, not set positions, are the durable continuation authority.
-    timeseriesResources: ["distance", "calories_active", "steps"],
+    // `steps` represents a resource inserted before the active cursor after
+    // this continuation was originally scheduled.
+    timeseriesResources: ["distance", "steps", "calories_active"],
   });
 
   const result = await executeJunctionJob(
@@ -15872,24 +15964,26 @@ test("Junction timeseries continuation uses an exact resource-name cursor", asyn
     createJunctionJobContext(),
     createJob("reconcile", {
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
-      timeseriesResourceCursor: "calories_active",
+      timeseriesResourceCursor: junctionFullJobTimeseriesProgress(
+        "calories_active",
+        ["distance"],
+      ),
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-02T00:00:00.000Z",
     }),
   );
 
   assert.deepEqual(groupedRequests, ["calories_active"]);
-  assert.deepEqual(result.scheduledJobs?.[0]?.payload, {
-    timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "steps",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-    windowStart: "2026-04-02T00:00:00.000Z",
+  const insertedResource = requireValue(result.scheduledJobs?.[0], "expected inserted resource");
+  assert.deepEqual(readJunctionFullJobTimeseriesProgress(insertedResource.payload), {
+    activeResource: "steps",
+    completedResources: ["calories_active", "distance"],
   });
 });
 
 test("Junction full-job workout_stream retains exact progress in its direct continuation", async () => {
   const importedWorkoutIds: string[] = [];
-  let firstImport = true;
+  let allowSecondWorkout = false;
   const retryableFailure = new DeviceSyncError({
     code: "TEST_WORKOUT_STREAM_RETRYABLE",
     message: "retry the remaining workout",
@@ -15906,8 +16000,7 @@ test("Junction full-job workout_stream retains exact progress in its direct cont
       return { imported: true };
     }
     const workoutId = String(feature?.workoutId);
-    if (workoutId === "workout-2" && firstImport) {
-      firstImport = false;
+    if (workoutId === "workout-2" && !allowSecondWorkout) {
       throw retryableFailure;
     }
     importedWorkoutIds.push(workoutId);
@@ -15926,12 +16019,11 @@ test("Junction full-job workout_stream retains exact progress in its direct cont
     initial.scheduledJobs?.[0],
     "The setup pass should schedule workout_stream directly.",
   );
-  assert.deepEqual(direct.payload, {
-    timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "workout_stream",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-    windowStart: "2026-04-02T00:00:00.000Z",
+  assert.deepEqual(readJunctionFullJobTimeseriesProgress(direct.payload), {
+    activeResource: "workout_stream",
+    completedResources: [],
   });
+  assert.equal(direct.payload?.timeseriesCursor, "2026-04-02T00:00:00.000Z");
 
   const partial = await executeJunctionJob(
     harness.provider,
@@ -15944,15 +16036,28 @@ test("Junction full-job workout_stream retains exact progress in its direct cont
   );
   assert.equal(continuation.kind, "reconcile");
   assert.equal(continuation.payload?.timeseriesCursor, "2026-04-02T00:00:00.000Z");
-  assert.equal(continuation.payload?.timeseriesResourceCursor, "workout_stream");
+  assert.deepEqual(readJunctionFullJobTimeseriesProgress(continuation.payload), {
+    activeResource: "workout_stream",
+    completedResources: [],
+  });
   assert.deepEqual(readJunctionWorkoutProgressIdentities(continuation.payload), [
     junctionWorkoutCandidateIdentity("workout-1"),
   ]);
 
+  await assert.rejects(
+    () => executeJunctionJob(
+      harness.provider,
+      createJunctionJobContext({ importSnapshot }),
+      createJobFromInput(continuation, 1),
+    ),
+    (error) => error === retryableFailure,
+  );
+  allowSecondWorkout = true;
+
   const completed = await executeJunctionJob(
     harness.provider,
     createJunctionJobContext({ importSnapshot }),
-    createJobFromInput(continuation, 1),
+    createJobFromInput(continuation, 2),
   );
   assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2"]);
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);

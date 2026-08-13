@@ -693,7 +693,7 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   assert.equal(boundedResult.scheduledJobs?.length, 1);
   assert.equal(
     boundedResult.scheduledJobs?.[0]?.payload?.timeseriesResourceCursor,
-    "blood_pressure",
+    JSON.stringify({ v: 1, a: "blood_pressure", i: [] }),
   );
   assert.equal(
     boundedResult.scheduledJobs?.[0]?.payload?.timeseriesCursor,
