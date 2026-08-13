@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -152,6 +152,16 @@ Updated: 2026-08-12
   header factory call to its unique audited top-level declaration instead of
   trusting a same-named local function. No new policy owner or compatibility
   path was introduced.
+- ReviewGPT round 4 accepted two remaining coverage gaps within the existing
+  design. The lexical census now includes TypeScript import-equals declarations
+  and every name bound by destructured function parameters, so provider SDKs,
+  transports, and shadows cannot disappear through those forms. The shared
+  expression facts now follow computed origin maps and merge provider evidence
+  from explicitly transport-shaped call targets such as an injected
+  `openAiFetch`, while root-relative traffic cannot erase that explicit target
+  evidence. Parent review kept static response-member reads and project-owned
+  provider handlers outside that target rule, preserving presigned byte
+  transfers and internal handler composition without adding an exception.
 
 ## Verification
 
@@ -164,9 +174,10 @@ Updated: 2026-08-12
 
 Current evidence:
 
-- Focused guard suite: 62 tests passed after the round-3 correction.
-- Repository-tool suite: 34 files and 568 tests passed after the round-3
-  correction.
+- Focused guard suite: 67 tests passed after the round-4 correction.
+- Repository-tool suite: 34 files and 573 tests passed after the round-4
+  correction. An earlier contended run timed out two Crabbox repeated-signal
+  cases; that file passed alone and the quiet full rerun passed.
 - Tools TypeScript no-emit check and `git diff --check`: passed.
 - `pnpm provider-requests:guard`: intentionally exits 1 with 44 current
   low-level provider transports/contracts; sibling migrations own those call

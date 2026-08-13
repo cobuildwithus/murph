@@ -591,6 +591,17 @@ function analyzeProviderSource(sourceFile: Node, contents: string): ProviderSour
   const typeRoots = new Set<string>();
 
   traverseFast(sourceFile, (node) => {
+    if (node.type === "TSImportEqualsDeclaration") {
+      const moduleName = readImportEqualsModuleName(node);
+      if (moduleName && isProviderModule(moduleName)) {
+        typeRoots.add(node.id.name);
+        if (node.importKind !== "type") {
+          clientNames.add(node.id.name);
+          clientNames.add(lowercaseInitial(node.id.name));
+        }
+      }
+      return;
+    }
     if (isVariableDeclarator(node) && node.init) {
       const requiredModule = readRequiredModuleName(unwrapExpression(node.init));
       if (requiredModule && isProviderModule(requiredModule)) {
@@ -832,6 +843,23 @@ function collectHttpTransportBindings(
   };
 
   traverseFast(sourceFile, (node) => {
+    if (node.type === "TSImportEqualsDeclaration") {
+      const moduleName = readImportEqualsModuleName(node);
+      const transport = moduleName
+        ? classifyHttpTransportModule(moduleName)
+        : null;
+      if (transport && node.importKind !== "type") {
+        addBinding(
+          node.id.name,
+          transport === "fetch-package" ? "call" : "namespace",
+          node,
+          transport,
+        );
+      } else {
+        addBinding(node.id.name, "shadow", node, null);
+      }
+      return;
+    }
     if (!isImportDeclaration(node)) {
       return;
     }
@@ -948,6 +976,12 @@ function collectHttpTransportBindings(
       }
       return;
     }
+    if (node.type === "TSImportEqualsDeclaration") {
+      if (!hasTransportBindingAt(bindings, node.id.name, node.start ?? 0)) {
+        addBinding(node.id.name, "shadow", node, null);
+      }
+      return;
+    }
     if (node.type === "CatchClause" && node.param) {
       for (const name of readBindingPatternNames(node.param)) {
         addBinding(name, "shadow", node, null);
@@ -1048,6 +1082,17 @@ function readRequiredModuleName(node: Node): string | null {
   }
   const moduleName = node.arguments[0];
   return moduleName && isStringLiteral(moduleName) ? moduleName.value : null;
+}
+
+function readImportEqualsModuleName(node: Node): string | null {
+  if (
+    node.type !== "TSImportEqualsDeclaration" ||
+    node.moduleReference.type !== "TSExternalModuleReference" ||
+    !isStringLiteral(node.moduleReference.expression)
+  ) {
+    return null;
+  }
+  return node.moduleReference.expression.value;
 }
 
 function readTransportNamespaceKind(
@@ -1269,20 +1314,19 @@ function collectParameterBindings(
     }
     for (const parameter of node.params) {
       const identifier = readParameterIdentifier(parameter);
-      if (!identifier) {
-        continue;
+      for (const name of readBindingPatternNames(parameter)) {
+        const current = bindings.get(name) ?? [];
+        current.push({
+          name,
+          ownerName: readCallableName(node),
+          scopeEnd: node.end ?? Number.MAX_SAFE_INTEGER,
+          scopeStart: node.start ?? 0,
+          typeAnnotation: identifier?.name === name && identifier.typeAnnotation
+            ? readNodeText(identifier.typeAnnotation, contents)
+            : null,
+        });
+        bindings.set(name, current);
       }
-      const current = bindings.get(identifier.name) ?? [];
-      current.push({
-        name: identifier.name,
-        ownerName: readCallableName(node),
-        scopeEnd: node.end ?? Number.MAX_SAFE_INTEGER,
-        scopeStart: node.start ?? 0,
-        typeAnnotation: identifier.typeAnnotation
-          ? readNodeText(identifier.typeAnnotation, contents)
-          : null,
-      });
-      bindings.set(identifier.name, current);
     }
   });
   return bindings;
@@ -1329,7 +1373,7 @@ function collectRawProviderHttpViolations(input: {
       return;
     }
 
-    const urlFacts = inferProviderExpressionFacts({
+    const requestFacts = inferProviderExpressionFacts({
       analysis: input.analysis,
       before: node.start ?? Number.MAX_SAFE_INTEGER,
       bindings: input.bindings,
@@ -1337,9 +1381,22 @@ function collectRawProviderHttpViolations(input: {
       node: urlArgument,
       resolving: new Set(),
     });
+    if (isProviderBoundHttpCallTarget(node.callee)) {
+      mergeProviderExpressionFacts(
+        requestFacts,
+        inferProviderExpressionFacts({
+          analysis: input.analysis,
+          before: node.start ?? Number.MAX_SAFE_INTEGER,
+          bindings: input.bindings,
+          contents: input.contents,
+          node: node.callee,
+          resolving: new Set(),
+        }),
+      );
+    }
     const providers = providerBoundaryRegistry.filter(
       (provider) =>
-        urlFacts.providerIds.has(provider.id) &&
+        requestFacts.providerIds.has(provider.id) &&
         provider.rawHttpPolicy === "require-official-sdk",
     );
     if (providers.length === 0) {
@@ -1355,7 +1412,7 @@ function collectRawProviderHttpViolations(input: {
           provider,
           relativePath: input.relativePath,
           urlArgument,
-          urlFacts,
+          urlFacts: requestFacts,
         })
       )
     ) {
@@ -1460,6 +1517,14 @@ function findInnermostLocalFunction(
 function readCalledName(node: Node): string | null {
   const expression = unwrapExpression(node);
   return isIdentifier(expression) ? expression.name : null;
+}
+
+function isProviderBoundHttpCallTarget(node: Node): boolean {
+  const expression = unwrapExpression(node);
+  const targetName = isIdentifier(expression)
+    ? expression.name
+    : readMemberPath(expression)?.join(".") ?? "";
+  return /(?:fetch|http|request|transport)/iu.test(targetName);
 }
 
 function collectHandwrittenProviderTransportViolations(input: {
@@ -1590,6 +1655,17 @@ function inferProviderExpressionFacts(input: {
         key,
         input.analysis.fileProviderIds,
       );
+    } else {
+      mergeProviderExpressionFacts(
+        facts,
+        inferProviderExpressionFacts({ ...input, node: node.object }),
+      );
+      if (node.computed) {
+        mergeProviderExpressionFacts(
+          facts,
+          inferProviderExpressionFacts({ ...input, node: node.property }),
+        );
+      }
     }
     return facts;
   }
@@ -1738,14 +1814,15 @@ function matchesRegisteredProviderHttpException(input: {
       case "presigned-byte-transfer":
         return isPresignedByteTransfer(input);
       case "internal-same-origin":
-        return isInternalSameOriginRequest({
-          analysis: input.analysis,
-          before: input.call.start ?? Number.MAX_SAFE_INTEGER,
-          bindings: input.bindings,
-          contents: input.contents,
-          node: input.urlArgument,
-          resolving: new Set(),
-        });
+        return input.urlFacts.explicitProviderIds.size === 0 &&
+          isInternalSameOriginRequest({
+            analysis: input.analysis,
+            before: input.call.start ?? Number.MAX_SAFE_INTEGER,
+            bindings: input.bindings,
+            contents: input.contents,
+            node: input.urlArgument,
+            resolving: new Set(),
+          });
       case "incoming-request-pass-through":
         return isIncomingRequestPassThrough(input);
       case "dynamic-smart-fhir":

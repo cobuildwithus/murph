@@ -299,9 +299,13 @@ Last verified: 2026-08-11
   generated output, fixtures, and tests. For the explicit provider registry it
   preserves the SDK request-object checks, reports the global fetch primitive,
   imported Node HTTP/HTTPS and Undici transports, explicit aliases, injected
-  fetch-call signatures, CommonJS `require`, direct invocation, and destructured transport forms,
-  and strict fetch-shaped wrappers at their nearest lexical binding when they resolve to provider
-  literals or provider-configured URL data, and reports only concrete low-level
+  fetch-call signatures, CommonJS `require`, TypeScript import-equals, direct
+  invocation, and destructured transport forms, and strict fetch-shaped
+  wrappers at their nearest lexical binding when they resolve to provider
+  literals or provider-configured URL data. The lexical census includes
+  destructured parameter shadows, and provider facts follow computed origin
+  maps and explicitly provider-bound HTTP transport targets. The guard reports
+  only concrete low-level
   handwritten wire contracts that
   replace an SDK-owned request, response, fetch, transport, or client contract.
   Provider-domain helpers and SDK-backed business adapters are not transport
