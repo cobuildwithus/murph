@@ -43,10 +43,10 @@ export function prepareHostedDeviceWebhookQueueTransport(input: {
   }
   try {
     const headers = copyDeviceWebhookTransportHeaders(input.headers);
-    return {
-      enabled: canQueueDeviceWebhook({ headers, rawBody: input.rawBody }),
-      headers,
-    };
+    if (!canQueueDeviceWebhook({ headers, rawBody: input.rawBody })) {
+      return { enabled: false, headers: [] };
+    }
+    return { enabled: true, headers };
   } catch {
     return { enabled: false, headers: [] };
   }
