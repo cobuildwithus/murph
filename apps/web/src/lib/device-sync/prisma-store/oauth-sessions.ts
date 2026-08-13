@@ -71,6 +71,15 @@ export class PrismaHostedOAuthSessionStore {
           memberId: ownerId,
           provider,
           revision,
+          setups: {
+            some: {
+              active: true,
+              memberId: ownerId,
+              provider,
+              providerApplicationRevision: revision,
+              status: "oauth_in_progress",
+            },
+          },
         },
       });
       if (!application) {
@@ -81,7 +90,6 @@ export class PrismaHostedOAuthSessionStore {
           retryable: false,
         });
       }
-
       return createOAuthStateRecord(tx, input, {
         applicationId: binding.applicationId,
         provider,

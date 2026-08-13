@@ -1345,6 +1345,15 @@ async function assertHostedProviderApplicationBindingForUpsert(input: {
       memberId: input.ownerId,
       provider: input.provider,
       revision: input.binding.revision,
+      setups: {
+        some: {
+          active: true,
+          memberId: input.ownerId,
+          provider: input.provider,
+          providerApplicationRevision: input.binding.revision,
+          status: "oauth_in_progress",
+        },
+      },
     },
   });
   if (!application) {

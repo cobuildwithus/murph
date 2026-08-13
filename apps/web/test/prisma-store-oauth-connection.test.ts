@@ -440,6 +440,15 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         memberId: "user-123",
         provider: "strava",
         revision: 4,
+        setups: {
+          some: {
+            active: true,
+            memberId: "user-123",
+            provider: "strava",
+            providerApplicationRevision: 4,
+            status: "oauth_in_progress",
+          },
+        },
       },
     });
     expect(created).toMatchObject({
@@ -448,6 +457,67 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       providerApplicationRevision: 4,
       userId: "user-123",
     });
+  });
+
+  it("rejects an OAuth callback connection after the setup entered deletion", async () => {
+    const create = vi.fn();
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => null),
+        create,
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => null),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnectionWithProviderApplication({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-123",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_STALE",
+    });
+    expect(tx.deviceProviderApplication.findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+        memberId: true,
+        provider: true,
+        revision: true,
+      },
+      where: expect.objectContaining({
+        id: "dpa_123",
+        setups: {
+          some: expect.objectContaining({ status: "oauth_in_progress" }),
+        },
+      }),
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("rejects a second active connection for the same member-owned provider", async () => {

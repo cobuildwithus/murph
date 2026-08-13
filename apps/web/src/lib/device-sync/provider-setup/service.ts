@@ -57,6 +57,12 @@ type DeleteRequest = Extract<
   { action: "delete" }
 >;
 interface ProviderSetupStore {
+  beginDeletion(
+    expected: MemberOwnedProviderSetupRecord,
+  ): Promise<{
+    kind: "connection_conflict" | "ready";
+    setup: MemberOwnedProviderSetupRecord;
+  }>;
   ensureActive(input: {
     connectSourceId: string;
     connectTarget: string;
@@ -530,15 +536,10 @@ export class MemberOwnedProviderSetupService {
         retryable: false,
       });
     }
-    const disposition = await this.store.readConnectionDisposition(setup);
-    if (disposition.kind !== "none") {
-      if (setup.status !== "disconnect_first") {
-        setup = await this.transition(setup, { status: "disconnect_first" });
-      }
+    const deletion = await this.store.beginDeletion(setup);
+    setup = deletion.setup;
+    if (deletion.kind === "connection_conflict") {
       throw disconnectFirstError(this.registration.presentation.providerName);
-    }
-    if (setup.status !== "deletion_pending") {
-      setup = await this.transition(setup, { status: "deletion_pending" });
     }
     const contract = this.browserContract(memberId);
     const run = await this.computer.acquireOwnedRun({
@@ -570,6 +571,11 @@ export class MemberOwnedProviderSetupService {
       request.deleteSelector,
     ]);
     const setup = await this.requireExactDeletionSetup(memberId, request);
+    const disposition = await this.store.readConnectionDisposition(setup);
+    if (disposition.kind !== "none") {
+      await this.transition(setup, { status: "disconnect_first" });
+      throw disconnectFirstError(this.registration.presentation.providerName);
+    }
     const contract = this.browserContract(memberId);
     const result = await this.computer.actOwnedRun({
       code: buildBlindOwnedApplicationDeleteCode({
@@ -648,6 +654,9 @@ export class MemberOwnedProviderSetupService {
     }
     if (setup.status === "disconnect_first") {
       throw disconnectFirstError(this.registration.presentation.providerName);
+    }
+    if (setup.status !== "oauth_ready" && setup.status !== "oauth_in_progress") {
+      throw setupBusyError(setup.status);
     }
     const binding = readMemberOwnedProviderSetupBinding(setup);
     if (!binding) {

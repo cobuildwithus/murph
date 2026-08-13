@@ -250,6 +250,87 @@ export class PrismaDeviceProviderSetupStore {
     };
   }
 
+  async beginDeletion(
+    expected: MemberOwnedProviderSetupRecord,
+  ): Promise<{
+    kind: "connection_conflict" | "ready";
+    setup: MemberOwnedProviderSetupRecord;
+  }> {
+    return this.prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, expected.memberId);
+      const current = await tx.deviceProviderSetup.findFirst({
+        select: DEVICE_PROVIDER_SETUP_SELECT,
+        where: {
+          active: true,
+          id: expected.id,
+          memberId: expected.memberId,
+          provider: expected.provider,
+          providerApplicationId: expected.providerApplicationId,
+          providerApplicationRevision: expected.providerApplicationRevision,
+          version: expected.version,
+        },
+      });
+      if (!current) {
+        throw new DeviceProviderSetupError(
+          "DEVICE_PROVIDER_SETUP_CONFLICT",
+          "Private provider setup changed. Refresh and try again.",
+        );
+      }
+
+      const connection = await tx.deviceConnection.findFirst({
+        select: { id: true },
+        where: {
+          provider: expected.provider,
+          status: { not: "disconnected" },
+          userId: expected.memberId,
+        },
+      });
+      const status = connection ? "disconnect_first" : "deletion_pending";
+      if (current.status === status) {
+        return {
+          kind: connection ? "connection_conflict" : "ready",
+          setup: mapSetup(current),
+        };
+      }
+
+      const updated = await tx.deviceProviderSetup.updateMany({
+        data: {
+          status,
+          version: { increment: 1 },
+        },
+        where: {
+          active: true,
+          id: current.id,
+          memberId: current.memberId,
+          provider: current.provider,
+          providerApplicationId: current.providerApplicationId,
+          providerApplicationRevision: current.providerApplicationRevision,
+          version: current.version,
+        },
+      });
+      if (updated.count !== 1) {
+        throw new DeviceProviderSetupError(
+          "DEVICE_PROVIDER_SETUP_CONFLICT",
+          "Private provider setup changed. Refresh and try again.",
+        );
+      }
+      const successor = await tx.deviceProviderSetup.findUnique({
+        select: DEVICE_PROVIDER_SETUP_SELECT,
+        where: { id: current.id },
+      });
+      if (!successor) {
+        throw new DeviceProviderSetupError(
+          "DEVICE_PROVIDER_SETUP_NOT_FOUND",
+          "Private provider setup was not found for the current member.",
+        );
+      }
+      return {
+        kind: connection ? "connection_conflict" : "ready",
+        setup: mapSetup(successor),
+      };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }
+
   async markConnectedForExactApplication(input: {
     applicationId: string;
     memberId: string;
@@ -268,7 +349,7 @@ export class PrismaDeviceProviderSetupStore {
         provider: input.provider,
         providerApplicationId: input.applicationId,
         providerApplicationRevision: input.revision,
-        status: { notIn: ["connected", "deletion_pending", "deleted"] },
+        status: "oauth_in_progress",
       },
     });
 

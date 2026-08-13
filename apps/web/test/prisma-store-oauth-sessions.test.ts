@@ -112,6 +112,15 @@ describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
         memberId: "user_123",
         provider: "strava",
         revision: 4,
+        setups: {
+          some: {
+            active: true,
+            memberId: "user_123",
+            provider: "strava",
+            providerApplicationRevision: 4,
+            status: "oauth_in_progress",
+          },
+        },
       },
     });
     expect(create).toHaveBeenCalledWith({
@@ -127,6 +136,52 @@ describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
         userId: "user_123",
       }),
     }));
+  });
+
+  it("rejects new OAuth state after the exact setup entered deletion", async () => {
+    const create = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      deviceOauthSession: { create },
+      deviceProviderApplication: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const store = {
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      },
+      createOAuthStateWithProviderApplication:
+        PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
+    };
+
+    await expect(store.createOAuthStateWithProviderApplication({
+      state: "state_123",
+      ownerId: "user_123",
+      provider: "strava",
+      returnTo: null,
+      metadata: {},
+      createdAt: "2026-04-13T12:00:00.000Z",
+      expiresAt: "2026-04-13T12:15:00.000Z",
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_STALE",
+    });
+    expect(tx.deviceProviderApplication.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: expect.objectContaining({
+        id: "dpa_123",
+        setups: {
+          some: expect.objectContaining({ status: "oauth_in_progress" }),
+        },
+      }),
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("rejects a stale application revision before persisting OAuth state", async () => {

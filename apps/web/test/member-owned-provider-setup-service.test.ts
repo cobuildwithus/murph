@@ -113,6 +113,36 @@ class MemorySetupStore {
     return this.disposition;
   }
 
+  async beginDeletion(): Promise<{
+    kind: "connection_conflict" | "ready";
+    setup: MemberOwnedProviderSetupRecord;
+  }> {
+    if (this.disposition.kind !== "none") {
+      return {
+        kind: "connection_conflict",
+        setup: await this.transition({
+          expectedVersion: this.setup.version,
+          memberId: this.setup.memberId,
+          provider: this.setup.provider,
+          setupId: this.setup.id,
+          status: "disconnect_first",
+        }),
+      };
+    }
+    return {
+      kind: "ready",
+      setup: this.setup.status === "deletion_pending"
+        ? this.setup
+        : await this.transition({
+            expectedVersion: this.setup.version,
+            memberId: this.setup.memberId,
+            provider: this.setup.provider,
+            setupId: this.setup.id,
+            status: "deletion_pending",
+          }),
+    };
+  }
+
   async transition(input: TransitionInput): Promise<MemberOwnedProviderSetupRecord> {
     if (
       input.expectedVersion !== this.setup.version
@@ -664,6 +694,38 @@ describe("member-owned provider setup service", () => {
     expect(deleteApplication).toHaveBeenCalledTimes(1);
   });
 
+  it("revalidates live connection truth immediately before trusted deletion", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      providerApplicationId: APPLICATION_ID,
+      providerApplicationRevision: 3,
+      status: "deletion_pending",
+      version: 4,
+    });
+    store.disposition = {
+      binding: { applicationId: APPLICATION_ID, provider: "strava", revision: 3 },
+      connectionId: "dsc_callback_won",
+      kind: "exact",
+      status: "active",
+    };
+    const computer = new FakeProviderComputer();
+    const service = createService({ computer, store });
+
+    await expect(service.deleteOwnedApplication(MEMBER_ID, {
+      action: "delete",
+      confirmSelector: "button.confirm-delete",
+      deleteSelector: "button.delete-application",
+      provider: "strava",
+      runId: RUN_ID,
+      setupId: SETUP_ID,
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_DISCONNECT_FIRST",
+    });
+    expect(computer.actOwnedRun).not.toHaveBeenCalled();
+    expect(store.setup.status).toBe("disconnect_first");
+  });
+
   it("starts OAuth only for the exact sealed application binding", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
@@ -711,6 +773,35 @@ describe("member-owned provider setup service", () => {
     expect(result.authorizationUrl).toBe("https://provider.example.test/oauth/authorize");
     expect(result.callbackProofCookie).toMatch(/^murph-device-sync-strava=/u);
     expect(result.setup.status).toBe("oauth_in_progress");
+  });
+
+  it("does not let a stale OAuth action cross the deletion fence", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      providerApplicationId: APPLICATION_ID,
+      providerApplicationRevision: 3,
+      status: "deletion_pending",
+      version: 4,
+    });
+    const startConnectionWithProviderApplication = vi.fn();
+    const service = createService({
+      computer: new FakeProviderComputer(),
+      createIngress: () => ({ startConnectionWithProviderApplication }),
+      store,
+    });
+
+    await expect(service.startOAuth({
+      memberId: MEMBER_ID,
+      request: new Request("https://web.example.test/connect"),
+      returnTo: "/connect?connected=strava",
+      sessionId: "session_synthetic",
+      setupId: SETUP_ID,
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_STATE_CONFLICT",
+    });
+    expect(startConnectionWithProviderApplication).not.toHaveBeenCalled();
+    expect(store.setup).toMatchObject({ status: "deletion_pending", version: 4 });
   });
 });
 

@@ -571,6 +571,7 @@ function createReauthorizationRequiredSetupFixture() {
     status: "reauthorization_required",
   };
   const store: ProviderSetupStore = {
+    beginDeletion: async () => ({ kind: "ready", setup }),
     ensureActive: async () => setup,
     listMemberSetups: async () => [setup],
     markConnectedForExactApplication: async () => setup,
