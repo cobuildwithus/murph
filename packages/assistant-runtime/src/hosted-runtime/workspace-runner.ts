@@ -311,11 +311,14 @@ export interface HostedWorkspaceDurableCheckpointEffectResult {
   requiresFollowUpCheckpoint?: boolean;
 }
 
-export type HostedWorkspaceDurableCheckpointEffect =
-  () => Promise<HostedWorkspaceDurableCheckpointEffectResult | null | void>
+export interface HostedWorkspaceDurableCheckpointEffect {
+  (): Promise<HostedWorkspaceDurableCheckpointEffectResult | null | void>
     | HostedWorkspaceDurableCheckpointEffectResult
     | null
     | void;
+  readonly vaultShareProjectionFailureWake?:
+    HostedWorkspaceDurableCheckpointEffectResult;
+}
 
 export type HostedWorkspaceDurableCheckpointEffects =
   | HostedWorkspaceDurableCheckpointEffect

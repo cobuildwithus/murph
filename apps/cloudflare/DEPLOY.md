@@ -28,6 +28,27 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Vault-Share Delivery Contract Rollout
+
+Deploy the Cloudflare Worker and runner bundle first with
+`container_rollout=immediate`, and require managed-container smoke to report the
+exact new bundle fingerprint before deploying Web's required
+`sourceWorkspaceVersion` parser, absolute effect-deadline parser, and conditional
+replacement writer. The runner also marks only actual Web responses so a
+proxy-local response cannot release publication ownership early. Old Web
+ignores the additive runner request fields, so the first phase keeps projection
+working; the source-version fence and shared deadline become authoritative only
+after Web deploys. Do not deploy Web first: an older runner omits required
+delivery fields and its projection fails closed, retaining the existing
+device-sync continuation until a compatible runner handles it.
+
+After both deploys, checkpoint one device-sync update with an active share,
+confirm the replacement is readable through the ordinary group shared-data
+path, and confirm the managed runner fingerprint still matches the deployed
+bundle. Once Web requires the field, the compatible runner is the rollback
+floor. Roll back Web before the runner only if necessary; otherwise forward-fix
+the pair. Do not add a second retry owner or compatibility watermark.
+
 ## Generic Group-Email Cutover
 
 The newsletter deletion is a hard public-runtime and private-skill cutover.
@@ -280,6 +301,28 @@ fingerprints after rollout.
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
 cards can still fetch their immutable image.
+
+## Private Completion Continuity Rollout
+
+Deploy Web first, then deploy the Cloudflare Worker and runner bundle together
+with `container_rollout=immediate`. Only authenticated private-completion
+intents write the new strict outbox continuity fields; generic notifications
+remain compatible. An old runner cannot parse a retained new-format private
+intent, so the first such write is the rollback floor for that workspace.
+Forward-fix on this bundle or newer after the floor is crossed.
+
+Recent production evidence showed six total Assistant Ask completion mailbox
+items—an upper bound on private completions—and no matching private-completion
+or outbox-quarantine runtime-log events over 14 days. Recent successful
+protected deploy workflows completed in 8–13 minutes;
+immediate rollout makes that one workflow the expected compatibility window.
+Require managed-container smoke to report the new runner fingerprint, monitor
+`outbox.intent.quarantined` and strict outbox parse failures, then verify one
+same-channel private completion is delivered exactly once, never to the group,
+and is visible before the next ordinary direct turn, whether that consumer is
+an attended member turn, an exact-session scheduled occurrence, or an
+exact-session Assistant Ask continuation, and before a direct exact notification
+can append newer ordinary-session history.
 
 ## Audience-Key Rollout
 

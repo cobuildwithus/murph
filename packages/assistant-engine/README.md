@@ -63,6 +63,36 @@ formatter uses a fresh ephemeral thread on the resident App Server. Its
 thread-local deny configuration does not change the ordinary process launch
 identity or persist a resumable notification thread.
 
+An authenticated current-sender private Assistant Ask completion is the narrow
+deterministic exception. It starts no formatter or provider turn and does not
+mutate the member's ordinary conversation when the notification is queued.
+Only after the hosted outbox reaches canonical `sent` does the hosted runtime
+import the exact reviewed assistant text into the exact ordinary direct session
+returned by the queue-time hosted-default continuity lookup. Compatible model
+or reasoning changes preserve that binding. If no ordinary session existed,
+the intent remains unbound until the first canonical attended direct turn;
+another same-route detached session is never inferred as the owner. That turn
+may bind its exact session before delivery finishes, but transcript import,
+session advancement, and stale native provider-resume clearing remain gated on
+canonical delivery. The outbox intent journals an interrupted
+import, and nested hosted direct route plus accepted assistant-input authority
+repairs it before provider-resume selection even for text-only payloads.
+An ordinary direct scheduled occurrence also repairs an exact session-bound
+obligation before provider-resume selection, but cannot claim unbound work;
+that remains reserved for the first attended direct turn.
+The direct output-only Assistant Ask continuation uses that same bound-only
+admission before provider planning. A direct exact notification also repairs
+only an obligation already bound to its resolved ordinary session before it
+appends newer history; an isolated notification session cannot import another
+session's obligation. Rejected completions, unrelated-session continuations,
+and every generic detached notification remain unable to claim unbound work.
+An outbox intent written before the explicit continuity binding existed fails
+closed instead of inferring an owner. Partial or ambiguous provider receipts do
+not participate, even when they preserve message metadata for transport retry.
+A current canonically sent continuity
+obligation remains exempt from terminal outbox pruning until its journal is
+applied; applied intents return to ordinary terminal retention.
+
 The `creative-response` and `creative-response-text` notification prompt
 profiles are isolated system continuations for verified, explicitly requested
 social moments. Both prompts are built only from the engine-supplied task and

@@ -294,9 +294,11 @@ const CONNECT_SOURCE_UI = {
     name: "Abbott LibreView",
   },
   dexcom: {
-    description: "Real-time CGM glucose and trend arrows.",
+    description: "CGM glucose readings and trends.",
     logo: logoAsset("dexcom.png"),
     name: "Dexcom",
+    unavailableActionLabel: "Coming soon",
+    unavailableMessage: "Dexcom connections are coming soon.",
   },
   kardia: {
     description: "Portable ECG recordings and rhythm detection.",
@@ -729,6 +731,7 @@ export function resolveConfiguredConnectSources(
     (source) =>
       source.connectionAvailable !== false ||
       Boolean(source.setupGuideId) ||
+      Boolean(source.unavailableMessage) ||
       source.connected === true ||
       source.requiresReconnect === true ||
       Boolean(source.recoveryKind) ||

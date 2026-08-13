@@ -105,7 +105,7 @@ test("stale launch-document versions do not stop chat-adjacent companion actions
   );
 });
 
-test("Strava bypasses ordinary direct connect through the member-owned setup gate", () => {
+test("Strava uses member-owned setup while modern Dexcom stays product-gated", () => {
   const routeSource = readSource(
     "../../packages/device-syncd/src/config/connect-routes.ts",
   );
@@ -119,6 +119,10 @@ test("Strava bypasses ordinary direct connect through the member-owned setup gat
   );
   assert.match(
     targetSource,
-    /return !listMemberOwnedDeviceSyncConnectTargets\(\)\.some\(/u,
+    /DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set\(\["dexcom"\]\)/u,
+  );
+  assert.match(
+    targetSource,
+    /&& !listMemberOwnedDeviceSyncConnectTargets\(\)\.some\(/u,
   );
 });

@@ -76,7 +76,7 @@ export function SourceCard({
       || source.disconnectScope === "junction_account"
       || Boolean(source.disconnectSourceProviderSlug)
     );
-  const unavailableMessage = !requiresReconnect && !requiresConnectionReset && !isAvailable
+  const unavailableMessage = !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;
   // These branches add message content beside the source details. Stack the
@@ -243,7 +243,9 @@ export function SourceCard({
             ) : requiresReconnect ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 {reconnectUnavailable
-                  ? `${source.name} needs attention from the connected app before Murph can keep syncing it.`
+                  ? unavailableMessage
+                    ? `${source.name} reconnects are not available yet. Your existing history is still available.`
+                    : `${source.name} needs attention from the connected app before Murph can keep syncing it.`
                   : `Please reconnect ${source.name} to resume syncing.`}
               </p>
             ) : historicalResetIncomplete ? (
@@ -253,7 +255,7 @@ export function SourceCard({
                   : `The last reset for ${source.name} did not finish. Remove the old connection in your wearable provider account. Reconnecting through Murph is temporarily unavailable.`}
               </p>
             ) : null}
-            {unavailableMessage ? (
+            {unavailableMessage && !requiresReconnect ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-muted-foreground">
                 {unavailableMessage}
               </p>
@@ -297,14 +299,8 @@ export function SourceCard({
               >
                 {setupGuideActionLabel}
               </Button>
-            ) : !authenticated ? (
-              <AuthButton
-                aria-label={`Sign in to connect ${source.name}`}
-                className="self-end"
-              >
-                Sign in
-              </AuthButton>
-            ) : unavailableMessage && source.unavailableActionLabel ? (
+            ) : unavailableMessage
+              && source.unavailableActionLabel ? (
               <Button
                 type="button"
                 disabled
@@ -313,6 +309,13 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
+            ) : !authenticated ? (
+              <AuthButton
+                aria-label={`Sign in to connect ${source.name}`}
+                className="self-end"
+              >
+                Sign in
+              </AuthButton>
             ) : reconnectUnavailable
               || requiresConnectionReset
               || historicalReconnectUnavailable

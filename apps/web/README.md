@@ -1087,6 +1087,12 @@ Callback auth contract:
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
+- The generic hosted-mailbox append validates a durable dedupe replay before
+  crypto preparation, then warms the exact active ingress root before opening
+  its transaction. Its prepared transaction surface locks and re-reads root
+  authority and seals only from that scoped cache entry, with one full retry on
+  typed root drift. Legacy transaction append surfaces remain for separately
+  migrated callers and are not the transaction-safe generic entrypoint.
 - `POST /api/internal/hosted-runtime/owner-released` is the payload-free
   completion handoff. Web accepts a zero-byte body and either no query or the
   exact signature-bound `immediateRecheckRequested=1` positive edge, binds the

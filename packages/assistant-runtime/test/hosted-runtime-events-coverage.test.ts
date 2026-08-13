@@ -213,8 +213,8 @@ describe("hosted runtime event coverage", () => {
 
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
       expect.objectContaining({
-        signal,
         shouldYieldDeviceSync,
+        signal,
       }),
     );
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();

@@ -157,7 +157,7 @@ test("reconnect targets deduplicate exact member-owned coordinates but retain Ju
   );
 });
 
-test("Strava remains configured for status and self-hosted routing while its offer gate is disabled", () => {
+test("member-owned and product-gated offers preserve their distinct connection paths", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -170,6 +170,11 @@ test("Strava remains configured for status and self-hosted routing while its off
 
   assert.ok(configs.strava);
   assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
+  assert.equal(isDeviceConnectSourceAvailableForConnection("dexcom"), false);
+  assert.equal(
+    isDeviceConnectSourceAvailableForConnection("dexcom-g6-and-older"),
+    true,
+  );
   assert.deepEqual(listMemberOwnedDeviceSyncConnectTargets(), [{
     connectSourceId: "strava",
     connectTarget: "strava",
