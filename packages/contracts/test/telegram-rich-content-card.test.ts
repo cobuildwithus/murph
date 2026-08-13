@@ -33,17 +33,6 @@ describe("Telegram rich content card", () => {
     ["attribute", '<h2 class="title">Guide</h2>'],
     ["entity", "<h2>Guide &copy;</h2>"],
     ["invalid numeric entity", "<h2>Guide &#0;</h2>"],
-    ["visible URL", "<h2>Guide</h2><p>See https://example.test</p>"],
-    ["mixed-case URL", "<h2>Guide</h2><p>See HtTpS://example.test</p>"],
-    [
-      "entity-obfuscated URL",
-      "<h2>Guide</h2><p>See https&#58;//example.test</p>",
-    ],
-    [
-      "whitespace-obfuscated URL",
-      "<h2>Guide</h2><p>See https : / / example.test</p>",
-    ],
-    ["www URL", "<h2>Guide</h2><p>See www.example.test</p>"],
     ["wrong closing order", "<h2><b>Guide</h2></b>"],
     ["missing details summary", "<details><p>Hidden</p></details>"],
     [
@@ -91,10 +80,4 @@ describe("Telegram rich content card", () => {
     expect(parseHtml(`<h2>${"x".repeat(4_097)}</h2>`).success).toBe(false);
   });
 
-  it("keeps ordinary punctuation that does not form a URL", () => {
-    expect(
-      parseHtml("<h2>Guide</h2><p>Use HTTP status 200: ready / stable.</p>")
-        .success,
-    ).toBe(true);
-  });
 });

@@ -198,7 +198,8 @@ default destination for every goal or the definition of activation.
   safety limits visible. Generic Rich HTML must not reproduce nutrition totals
   or targets, tracked-workout state, compact tables that fit the semantic card,
   or catalog-backed routines. If that owner cannot attach, use ordinary text.
-  The contract rejects links, visible URLs, remote media, unsupported
+  The contract rejects explicit links and remote media, while Telegram's
+  automatic detection stays disabled for this generic card. It also rejects unsupported
   tags or attributes, deep nesting, and content that cannot fit one text
   fallback. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
 - iMessage presentation can use the Murph Messages extension's interactive

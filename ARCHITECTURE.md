@@ -1694,9 +1694,11 @@ complete structured answer does not fit the nutrition, compact-table, workout,
 or catalog exercise contracts. Those semantic cards keep exclusive ownership
 and remain unchanged. If an owning semantic card cannot attach, the reply stays
 ordinary text. The new card stores only bounded Rich HTML from a closed
-presentation-only subset. Contract parsing rejects links, visible URLs, remote media,
+presentation-only subset. Contract parsing rejects explicit links and remote media,
 provider fetches, unknown tags or attributes, malformed nesting, oversized
 tables, and content whose derived text exceeds one Telegram fallback message.
+and its Telegram projection sets `skip_entity_detection` so plain domains,
+email addresses, mentions, hashtags, commands, and phone numbers stay text.
 Trusted code derives that fallback from the accepted HTML, so the model cannot
 provide a different fallback copy. The card then uses the existing response-card
 effect, Telegram projection, provider entry, and outbox lifecycle. The tool is

@@ -223,19 +223,11 @@ function appendTelegramRichText(
     throw new TypeError("Telegram rich content contains a control character.");
   }
   validateTelegramRichEntities(value);
-  validateTelegramRichVisibleText(value);
   const parent = stack.at(-1);
   if (!parent) {
     throw new TypeError("Telegram rich content has no text parent.");
   }
   parent.children.push({ kind: "text", value });
-}
-
-function validateTelegramRichVisibleText(value: string): void {
-  const decoded = decodeTelegramRichEntities(value);
-  if (/(?:https?)\s*:\s*\/\s*\/|\bwww\s*\./iu.test(decoded)) {
-    throw new TypeError("Telegram rich content cannot include visible URLs.");
-  }
 }
 
 function validateTelegramRichAttributes(name: string, source: string): void {

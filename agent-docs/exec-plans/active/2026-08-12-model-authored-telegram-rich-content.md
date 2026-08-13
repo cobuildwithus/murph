@@ -50,9 +50,12 @@ Updated: 2026-08-13
   HTML compete with nutrition and other owning cards. The corrected prompt
   makes those owners exclusive and keeps all three approved cards as routing
   examples, not HTML templates.
-- Preliminary specialists found that rejecting anchor tags did not reject
-  visible URLs. The corrected parser rejects HTTP, HTTPS, and `www` text after
-  entity decoding, including mixed-case and whitespace-obfuscated forms.
+- Preliminary specialists found that rejecting anchor tags did not stop
+  Telegram from creating clickable entities from plain text. The final review
+  showed that a parser regex still split ownership. The corrected provider
+  projection sets `skip_entity_detection` only for the generic card and removes
+  the partial text detector. Existing semantic cards keep their current entity
+  behavior.
 - Competitive real-model coverage now exposes the generic and semantic tools
   together for compact-table and catalog-routine selection. Local execution
   remains at the expected provider-credential gate.

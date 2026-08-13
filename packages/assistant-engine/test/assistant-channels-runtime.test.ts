@@ -7,6 +7,7 @@ import type {
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   assistantResponseCardSchema,
+  buildTelegramRichMessage,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -1051,6 +1052,37 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('forwards disabled automatic entities for generic Telegram rich content', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2502 },
+      }),
+    ])
+
+    await sendTelegramRichMessage({
+      fallbackMessage: TELEGRAM_RICH_CONTENT_CARD_TEXT,
+      idempotencyKey: 'generic-rich-content',
+      replyToMessageId: null,
+      richMessage: buildTelegramRichMessage(TELEGRAM_RICH_CONTENT_CARD),
+      target: '123',
+    }, {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    })
+
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toEqual({
+      chat_id: '123',
+      rich_message: {
+        html: TELEGRAM_RICH_CONTENT_CARD.html,
+        skip_entity_detection: true,
+      },
+    })
+  })
+
   it('falls back to text only after a definitive rich-message rejection', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1411,6 +1443,7 @@ describe('assistant channels runtime seam', () => {
       replyToMessageId: '42',
       richMessage: expect.objectContaining({
         html: TELEGRAM_RICH_CONTENT_CARD.html,
+        skip_entity_detection: true,
       }),
       target: '123',
     }))

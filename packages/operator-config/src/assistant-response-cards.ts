@@ -234,6 +234,7 @@ export function renderAssistantResponseCardTranscriptText(
 
 export type TelegramRichMessage = {
   html: string
+  skip_entity_detection?: true
 }
 
 /** Build one Telegram-native rich message from a frozen response card. */
@@ -249,7 +250,7 @@ export function buildTelegramRichMessage(
     case 'exercise_routine':
       return { html: renderTelegramExerciseRoutineCardHtml(parsed) }
     case 'telegram_rich_content':
-      return { html: parsed.html }
+      return { html: parsed.html, skip_entity_detection: true }
     case 'challenge_standings':
       return { html: renderTelegramChallengeStandingsCardHtml(parsed) }
   }
