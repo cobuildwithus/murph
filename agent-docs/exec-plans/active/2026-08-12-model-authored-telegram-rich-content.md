@@ -56,6 +56,18 @@ Updated: 2026-08-13
   projection sets `skip_entity_detection` only for the generic card and removes
   the partial text detector. Existing semantic cards keep their current entity
   behavior.
+- A later final review found that definitive Rich Message rejection restored
+  automatic Telegram entities in the ordinary text fallback. The current
+  provider adapter carries the generic card policy into that fallback and sends
+  its full visible text as one explicit `pre` entity. This keeps URLs, emails,
+  mentions, hashtags, commands, and phone numbers non-interactive. Monospace is
+  accepted as the rare recovery experience. The existing delivery and fallback
+  owners remain unchanged.
+- The completed retrospective accepts one provider-boundary entity-policy owner
+  for both rich and fallback representations. It rejects another parser-side
+  detector, queue, retry loop, state owner, or fallback copy. The disclosed
+  missing live canary remains accepted, with provider-boundary tests and a
+  post-deploy smoke check required instead.
 - Competitive real-model coverage now exposes the generic and semantic tools
   together for compact-table and catalog-routine selection. Local execution
   remains at the expected provider-credential gate.
