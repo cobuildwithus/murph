@@ -4018,7 +4018,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('reports a structured failure when a generated image exceeds the media limit', async () => {
+  it('stops synchronous image generation before exceeding the media limit', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-limit-work-')
     const vaultRoot = await createTempDir('assistant-codex-image-limit-vault-')
     await initializeVault({ vaultRoot })
@@ -4035,7 +4035,7 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
+    const attachedMedia = Array.from({ length: 7 }, (_, index) => ({
       kind: 'image' as const,
       url: `https://cdn.example.test/assistant/full-${index}.png`,
       alt: `Image ${index}`,
@@ -4097,14 +4097,31 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 93,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render one image after the limit is full.',
+                },
+              },
+            }),
+          )
 
-          const messages = await waitForRpcMessages(child, 6)
+          const messages = await waitForRpcMessages(child, 7)
           expect(messages[4]).toMatchObject({
             id: 91,
             result: { success: true },
           })
-          expect(messages[5]).toEqual({
+          expect(messages[5]).toMatchObject({
             id: 92,
+            result: { success: true },
+          })
+          expect(messages[6]).toEqual({
+            id: 93,
             result: {
               success: false,
               contentItems: [
@@ -4158,8 +4175,8 @@ describe('assistant codex runtime', () => {
     })
 
     expect(result.finalMessage).toBe('Media limit handled')
-    expect(result.responseMedia).toHaveLength(40)
-    // The image was generated and paid for, so its usage is still recorded.
+    expect(result.responseMedia).toHaveLength(8)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(result.additionalUsages).toMatchObject([
       { provider: 'openai-images' },
     ])

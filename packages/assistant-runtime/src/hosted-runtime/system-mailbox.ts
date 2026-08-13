@@ -5,6 +5,9 @@ import {
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+} from "@murphai/hosted-execution/vault-share";
+import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -57,6 +60,12 @@ import {
 
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
+const HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_PROJECTION_DEFERRED";
+const HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS = 5 * 60_000;
+const HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_PROJECTION_CONTINUE";
+const HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_RETRY_MS = 1_000;
 
 export {
   resolveHostedSystemMailboxNextWakeAt,
@@ -652,6 +661,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       record: input.item.postCheckpointRecord,
       runtime: input.runtime,
       signal: input.signal ?? null,
+      vaultRoot: input.vaultRoot,
     });
     const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
     if (retainUntil) {
@@ -691,20 +701,29 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       throw input.signal.reason instanceof Error ? input.signal.reason : error;
     }
     const normalized = normalizeHostedSystemMailboxError(error);
-    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    let retryMs = 60_000;
+    if (normalized.code === HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_ERROR_CODE) {
+      retryMs = HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_RETRY_MS;
+    } else if (normalized.code === HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE) {
+      retryMs = HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS;
+    }
+    const retryAt = new Date(Date.now() + retryMs).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
         ...input.item,
         lastErrorCode: normalized.code,
         lastErrorMessage: normalized.message,
-        nextAttemptAt: nextWakeAt,
+        nextAttemptAt: retryAt,
         status: "recording",
       },
       vaultRoot: input.vaultRoot,
     });
+    const nextWakeAt = await resolveHostedSystemMailboxNextWakeAt({
+      vaultRoot: input.vaultRoot,
+    });
     return {
       failed: 1,
-      nextWakeAt,
+      nextWakeAt: nextWakeAt ?? retryAt,
       nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
       recorded: 0,
     };
@@ -923,6 +942,7 @@ export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {
   return await recordHostedSystemMailboxPostCheckpointRecord({
     ...input,
     operatorHomeRoot: null,
+    vaultRoot: null,
   });
 }
 
@@ -931,8 +951,48 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
   signal?: AbortSignal | null;
+  vaultRoot: string | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
+    case "vault-share.projection": {
+      if (!input.vaultRoot) {
+        throw new Error(
+          "Hosted vault-share projection checkpoint requires a vault root.",
+        );
+      }
+      const { offerHostedVaultShareProjectionBestEffort } = await import(
+        "./vault-share-projection.ts"
+      );
+      const result = await offerHostedVaultShareProjectionBestEffort({
+        projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        vaultRoot: input.vaultRoot,
+        vaultSharePort: input.runtime.platform.vaultSharePort,
+      });
+      if (result.outcome === "deferred") {
+        throw Object.assign(new Error(
+          "Hosted vault-share projection checkpoint has deferred approved work.",
+        ), {
+          code: HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE,
+        });
+      }
+      if (result.outcome === "continued") {
+        throw Object.assign(new Error(
+          "Hosted vault-share projection checkpoint has more bounded work.",
+        ), {
+          code: HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_ERROR_CODE,
+        });
+      }
+      if (result.outcome === "error" || result.outcome === "no-port") {
+        throw new Error(
+          "Hosted vault-share projection checkpoint did not complete.",
+        );
+      }
+      return {
+        nextWakeAt: null,
+        recorded: result.outcome === "delivered" ? 1 : 0,
+        stillDirty: false,
+      };
+    }
     case "clinical-records.outcome-recorded": {
       const port = input.runtime.platform.clinicalRecordsPort;
       if (!port) {

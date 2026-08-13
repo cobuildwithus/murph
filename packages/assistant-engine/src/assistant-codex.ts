@@ -160,6 +160,7 @@ import type {
   AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   normalizeAssistantResponseMediaList,
 } from './assistant/response-media.js'
 import type {
@@ -3827,6 +3828,12 @@ async function runCodexAppServerTurnOnProcess(
     const nextMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
+    if (nextMedia.length > ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_LIMIT_EXCEEDED',
+        `Assistant responses may attach at most ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} media items.`,
+      )
+    }
     if (responseCard !== null && nextMedia.length > 0) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',

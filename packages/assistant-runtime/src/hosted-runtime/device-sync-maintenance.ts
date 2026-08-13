@@ -62,6 +62,9 @@ import {
   hasHostedRuntimeJunctionPlatformEnv,
   resolveHostedRuntimeDeviceSyncProviderConfigs,
 } from "./device-sync-provider-configs.ts";
+import {
+  createHostedBackgroundMaintenanceCancellation,
+} from "./background-maintenance-cancellation.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 100;
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
@@ -466,13 +469,23 @@ function isHostedDeviceSyncAbortError(error: unknown, signal: AbortSignal | null
   if (!signal?.aborted) {
     return false;
   }
-  if (error === signal.reason) {
-    return true;
+
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (current === signal.reason) {
+      return true;
+    }
+    if (current instanceof Error && current.name === "AbortError") {
+      return true;
+    }
+    current = "cause" in current
+      ? (current as { cause?: unknown }).cause
+      : null;
   }
-  if (error instanceof DOMException && error.name === "AbortError") {
-    return true;
-  }
-  return error instanceof Error && error.name === "AbortError";
+
+  return false;
 }
 
 function buildHostedDeviceSyncPreServiceYieldedPassResult(
@@ -822,43 +835,53 @@ export async function runHostedDeviceSyncWakeLane(input: {
   timeoutMs: number | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
-  const deviceSyncResult = await runHostedDeviceSyncPass(
-    input.wake,
-    input.vaultRoot,
-    input.resolvedConfig.deviceSync,
-    input.deviceSyncPort,
-    input.timeoutMs,
-    {
-      platformEnv: input.platformEnv ?? {},
-      runtimeLogPlatform: input.runtimeLogPlatform ?? null,
-      shouldYield: input.shouldYieldDeviceSync ?? null,
-      signal: input.signal ?? null,
-      skipDirtyPendingFetch: input.skipDirtyPendingFetch ?? false,
-      stagedDirtyAcks: input.stagedDirtyAcks ?? null,
-    },
-  );
-  const nextWake = selectHostedRuntimeWakeCandidate([
-    createHostedRuntimeWakeCandidate(
-      deviceSyncResult.nextWakeAt,
-      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-    ),
-    createHostedRuntimeWakeCandidate(
-      deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
-      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-    ),
-  ]);
+  const cancellation = createHostedBackgroundMaintenanceCancellation({
+    signal: input.signal ?? null,
+    shouldYield: input.shouldYieldDeviceSync ?? null,
+    timeoutMs: input.timeoutMs,
+  });
 
-  return {
-    deviceSyncProcessed: deviceSyncResult.processedJobs,
-    deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: nextWake.at,
-    ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
-    parserProcessed: 0,
-    postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
-    ...(deviceSyncResult.stagedDirtyAcks
-      ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
-      : {}),
-  };
+  try {
+    const deviceSyncResult = await runHostedDeviceSyncPass(
+      input.wake,
+      input.vaultRoot,
+      input.resolvedConfig.deviceSync,
+      input.deviceSyncPort,
+      input.timeoutMs,
+      {
+        platformEnv: input.platformEnv ?? {},
+        runtimeLogPlatform: input.runtimeLogPlatform ?? null,
+        shouldYield: input.shouldYieldDeviceSync ?? null,
+        signal: cancellation.signal,
+        skipDirtyPendingFetch: input.skipDirtyPendingFetch ?? false,
+        stagedDirtyAcks: input.stagedDirtyAcks ?? null,
+      },
+    );
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      createHostedRuntimeWakeCandidate(
+        deviceSyncResult.nextWakeAt,
+        HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+      ),
+      createHostedRuntimeWakeCandidate(
+        deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
+        HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+      ),
+    ]);
+
+    return {
+      deviceSyncProcessed: deviceSyncResult.processedJobs,
+      deviceSyncSkipped: deviceSyncResult.skipped,
+      nextWakeAt: nextWake.at,
+      ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
+      parserProcessed: 0,
+      postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
+      ...(deviceSyncResult.stagedDirtyAcks
+        ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
+        : {}),
+    };
+  } finally {
+    cancellation.dispose();
+  }
 }
 
 function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {

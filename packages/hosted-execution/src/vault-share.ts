@@ -64,6 +64,16 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
 const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
 const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
 const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
+const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
+  "deferredProjectionWork";
+export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
+export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
+  "first-materialization";
+export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
+
+export type HostedVaultShareProjectionMode =
+  typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
 
 export type HostedVaultShareDailyMetricProjectionKind =
   (typeof HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS)[number];
@@ -317,8 +327,42 @@ export function isHostedVaultShareCurrentStateProjectionKind(
   return kinds.includes(kind);
 }
 
+/**
+ * Kinds whose consent promise and producer contract are both bounded to recent
+ * member-local civil dates. Reaffirming one of these permissions starts a fresh
+ * projection generation so an older materialized window cannot be reused under
+ * the new consent decision.
+ */
+export function isHostedVaultShareRecentDateProjectionKind(
+  kind: HostedVaultShareProjectionKind,
+): boolean {
+  return kind !== "profile-name.v0"
+    && kind !== "time-zone.v0"
+    && kind !== "group-email.v0"
+    && kind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND;
+}
+
+export function isHostedVaultShareRuntimeProjectedKind(
+  kind: HostedVaultShareProjectionKind,
+): boolean {
+  return kind !== "group-email.v0"
+    && kind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND;
+}
+
+export const HOSTED_VAULT_SHARE_RECENT_DATE_PROJECTION_KINDS =
+  Object.freeze(
+    HOSTED_VAULT_SHARE_PROJECTION_KINDS.filter(
+      isHostedVaultShareRecentDateProjectionKind,
+    ),
+  );
+
 export type HostedVaultShareProjectionKind =
   (typeof HOSTED_VAULT_SHARE_PROJECTION_KINDS)[number];
+
+/** Maximum active destinations one grantor may authorize for one exact scope. */
+export const HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX = 25;
+/** Maximum snapshot replacements one durable first-materialization pass may attempt. */
+export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX = 25;
 
 export interface HostedVaultShareFixedProjectionScope {
   projectionKind: HostedVaultShareFixedProjectionKind;
@@ -607,6 +651,13 @@ export interface HostedVaultShareDeliveryRecord {
 }
 
 export interface HostedVaultShareDeliverRequest {
+  /**
+   * Opaque digest of the active share generations resolved immediately before
+   * the runtime begins reading this scope. Web accepts delivery only while the
+   * digest still matches, so a rotated consent cannot receive stale records.
+   */
+  expectedGenerationToken: string;
+  projectionMode?: HostedVaultShareProjectionMode;
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   records: HostedVaultShareDeliveryRecord[];
@@ -622,8 +673,16 @@ export interface HostedVaultShareDeliverResponse {
 }
 
 export interface HostedVaultShareActiveProjectionKindsResponse {
+  /**
+   * Fixed-width control-plane signal that at least one approved runtime projection
+   * is not currently deliverable and still lacks its first snapshot. Older Web
+   * deployments omit the field, which runners interpret as false.
+   */
+  hasDeferredProjectionWork?: boolean;
+  projectionMode?: HostedVaultShareProjectionMode;
   projectionKinds: HostedVaultShareProjectionKind[];
   projectionScopes: HostedVaultShareProjectionScope[];
+  generationTokensByProjectionScopeKey?: Record<string, string>;
 }
 
 export interface HostedVaultShareDeliveryPayload {
@@ -2054,6 +2113,19 @@ export function parseHostedVaultShareDeliverRequest(
     );
   }
   const records = requireArray(request.records, "Vault share deliver request records");
+  const expectedGenerationToken = requireString(
+    request.expectedGenerationToken,
+    "Vault share deliver request expectedGenerationToken",
+  );
+  const projectionMode = parseHostedVaultShareProjectionMode(
+    request.projectionMode,
+    "Vault share deliver request projectionMode",
+  );
+  if (!HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(expectedGenerationToken)) {
+    throw new TypeError(
+      "Vault share deliver request expectedGenerationToken must be a SHA-256 base64url digest.",
+    );
+  }
 
   if (records.length > HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
     throw new TypeError(
@@ -2083,6 +2155,8 @@ export function parseHostedVaultShareDeliverRequest(
   }
 
   return {
+    expectedGenerationToken,
+    ...(projectionMode ? { projectionMode } : {}),
     projectionKind,
     projectionScope,
     records: parsedRecords,
@@ -2108,6 +2182,16 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
   value: unknown,
 ): HostedVaultShareActiveProjectionKindsResponse {
   const record = requireObject(value, "Vault share active projection kinds response");
+  const hasDeferredProjectionWork = record.hasDeferredProjectionWork === undefined
+    ? false
+    : requireBoolean(
+        record.hasDeferredProjectionWork,
+        "Vault share active projection kinds response hasDeferredProjectionWork",
+      );
+  const projectionMode = parseHostedVaultShareProjectionMode(
+    record.projectionMode,
+    "Vault share active projection kinds response projectionMode",
+  );
   const projectionKinds = record.projectionKinds === undefined
     ? []
     : requireArray(
@@ -2152,10 +2236,66 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
     uniqueProjectionScopes.push(scope);
   }
 
+  const generationTokensByProjectionScopeKey =
+    record.generationTokensByProjectionScopeKey === undefined
+    ? undefined
+    : parseHostedVaultShareGenerationTokensByProjectionScopeKey(
+        record.generationTokensByProjectionScopeKey,
+        uniqueScopeKeys,
+      );
+
   return {
+    hasDeferredProjectionWork,
+    ...(projectionMode ? { projectionMode } : {}),
     projectionKinds: uniqueProjectionKinds,
     projectionScopes: uniqueProjectionScopes,
+    ...(generationTokensByProjectionScopeKey
+      ? { generationTokensByProjectionScopeKey }
+      : {}),
   };
+}
+
+function parseHostedVaultShareProjectionMode(
+  value: unknown,
+  label: string,
+): HostedVaultShareProjectionMode | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const mode = requireString(value, label);
+  if (mode !== HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE) {
+    throw new TypeError(`${label} must be ${HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE}.`);
+  }
+  return mode;
+}
+
+function parseHostedVaultShareGenerationTokensByProjectionScopeKey(
+  value: unknown,
+  activeScopeKeys: ReadonlySet<string>,
+): Record<string, string> {
+  const record = requireObject(
+    value,
+    "Vault share active projection kinds response generationTokensByProjectionScopeKey",
+  );
+  const result: Record<string, string> = {};
+  for (const [scopeKey, generationToken] of Object.entries(record)) {
+    if (!activeScopeKeys.has(scopeKey)) {
+      throw new TypeError(
+        "Vault share active projection generation tokens contain an inactive scope key.",
+      );
+    }
+    const token = requireString(
+      generationToken,
+      "Vault share active projection generation token",
+    );
+    if (!HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(token)) {
+      throw new TypeError(
+        "Vault share active projection generation token must be a SHA-256 base64url digest.",
+      );
+    }
+    result[scopeKey] = token;
+  }
+  return result;
 }
 
 export function parseHostedVaultShareDeliveryPayload(

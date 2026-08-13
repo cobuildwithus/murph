@@ -124,6 +124,7 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
@@ -309,7 +310,7 @@ const attachExerciseRoutineCardArgumentsSchema = z
 
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(40),
+    media: z.array(z.unknown()).max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -2730,13 +2731,24 @@ export async function executeMurphDynamicToolRequest(input: {
         acceptedInvocationSessionId ??
         userActionScope?.originSessionId ??
         null
+      const usesDetachedImageGeneration = Boolean(
+        imageGenerationLauncher && originAssistantInputId,
+      )
+      if (
+        !usesDetachedImageGeneration
+        && (input.currentResponseMedia?.length ?? 0)
+          >= ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS
+      ) {
+        return toolTextResult(false, 'response media limit reached')
+      }
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
       const generateImageArgs = input.request.args
       if (
-        imageGenerationLauncher
+        usesDetachedImageGeneration
+        && imageGenerationLauncher
         && originAssistantInputId
       ) {
         const launch = imageGenerationLauncher.launch({
@@ -3468,24 +3480,22 @@ function groupSharedUnavailableToolResult(
 /**
  * One read returns every member crossed with every requested scope. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one three-state status. Non-workout record arrays remain
+ * is collapsed to one four-state status. Non-workout record arrays remain
  * byte-identical. `workouts.v0` additionally compacts repeated day identity,
  * time semantics, completion watermark, and activity kinds because its
  * per-workout lists are the one record payload dense enough to need that extra
  * reduction. Encrypted stored records and the complete Web response retain
  * their validated shapes.
- */
-/**
- * `grantStatus` and `dataStatus` only ever encode three states between them, so
- * the model reads one field instead of decoding a pair.
+ * The model reads the four collapsed states from one field instead of decoding
+ * the grant/data pair.
  */
 function groupSharedProjectionStatus(
   projection: AssistantHostedGroupSharedProjection,
-): 'available' | 'missing' | 'not_granted' {
+): 'available' | 'missing' | 'not_granted' | 'pending' {
   if (projection.grantStatus === 'not_granted') {
     return 'not_granted'
   }
-  return projection.dataStatus === 'missing' ? 'missing' : 'available'
+  return projection.dataStatus
 }
 
 function groupSharedWorkoutsModelProjection(

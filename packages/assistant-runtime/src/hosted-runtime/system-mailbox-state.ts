@@ -45,6 +45,13 @@ const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID_PREFIX =
   "system_mailbox_item_device_sync_dense_raw_retention";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY =
   "device-sync.wake:dense-raw-retention";
+const HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX =
+  "runtime-control:group-share-projection:";
+
+type HostedSystemMailboxSerializationKey =
+  | HostedSystemMailboxRouteAction
+  | "apply-vault-share-projection"
+  | `run-device-sync-wake:${string}`;
 
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
@@ -337,19 +344,19 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
-  const blockedOrderingKeys = new Set<string>();
+  const blockedSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   for (const item of input.state.pending) {
     if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
     }
-    const orderingKey = resolveHostedSystemMailboxOrderingKey(item);
-    if (blockedOrderingKeys.has(orderingKey)) {
+    const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
+    if (blockedSerializationKeys.has(serializationKey)) {
       continue;
     }
     if (systemMailboxItemIsDue(item, input.now)) {
       return item;
     }
-    blockedOrderingKeys.add(orderingKey);
+    blockedSerializationKeys.add(serializationKey);
   }
 
   return null;
@@ -516,6 +523,15 @@ function parseHostedSystemMailboxRecordRequest(
     throw new TypeError("hosted system mailbox postCheckpointRecord must be an object.");
   }
   const record = value as Record<string, unknown>;
+
+  if (record.kind === "vault-share.projection") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["kind"],
+      "hosted system mailbox vault-share projection postCheckpointRecord",
+    );
+    return { kind: "vault-share.projection" };
+  }
 
   if (record.kind === "clinical-records.outcome-recorded") {
     assertHostedSystemMailboxRecordKeys(
@@ -701,25 +717,40 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
-  const seenOrderingKeys = new Set<string>();
+  const seenSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   const items: HostedSystemMailboxPendingItem[] = [];
   for (const item of input.state.pending) {
     if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
     }
-    const orderingKey = resolveHostedSystemMailboxOrderingKey(item);
-    if (seenOrderingKeys.has(orderingKey)) {
+    const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
+    if (seenSerializationKeys.has(serializationKey)) {
       continue;
     }
-    seenOrderingKeys.add(orderingKey);
+    seenSerializationKeys.add(serializationKey);
     items.push(item);
   }
   return items;
 }
 
-function resolveHostedSystemMailboxOrderingKey(
+function systemMailboxItemRouteActionAllowed(
   item: HostedSystemMailboxPendingItem,
-): string {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
+): boolean {
+  return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
+}
+
+function resolveHostedSystemMailboxSerializationKey(
+  item: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxSerializationKey {
+  if (
+    item.postCheckpointRecord?.kind === "vault-share.projection"
+    || item.mailboxDedupeKey.startsWith(
+      HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX,
+    )
+  ) {
+    return "apply-vault-share-projection";
+  }
   if (
     item.routeAction === "run-device-sync-wake"
     && item.wake.kind === "device-sync.wake"
@@ -728,13 +759,6 @@ function resolveHostedSystemMailboxOrderingKey(
     return `${item.routeAction}:${item.wake.connectionId}`;
   }
   return item.routeAction;
-}
-
-function systemMailboxItemRouteActionAllowed(
-  item: HostedSystemMailboxPendingItem,
-  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
-): boolean {
-  return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
 }
 
 function systemMailboxItemIsDue(

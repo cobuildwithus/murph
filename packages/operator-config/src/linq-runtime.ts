@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { isIP } from 'node:net'
 
 import {
@@ -71,6 +72,7 @@ const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
 const LINQ_CHAT_NOT_FOUND_MESSAGES = new Set(['Chat not found'])
 const LINQ_MAX_MESSAGE_PARTS = 100
 const LINQ_MAX_MEDIA_PARTS = 40
+const LINQ_MAX_TEXT_PART_LENGTH = 10_000
 const LINQ_SUPPORTED_ATTACHMENT_CONTENT_TYPES = [
   'image/jpeg',
   'image/png',
@@ -236,11 +238,20 @@ type LinqSafeRequestDetails = {
   requestAttachmentContentType?: string
   requestAttachmentHeaderCount?: number
   requestBodyShape?: string
+  requestAttachmentMediaPartCount?: number
+  requestMediaPartCount?: number
   requestMessageLength?: number
   requestMessagePartCount?: number
+  requestPublicUrlMediaPartCount?: number
+  requestTextPartCount?: number
+  providerErrorCode?: string
+  providerRequestId?: string
   responseBodyKeyCount?: number
   responseBodyKind?: string
+  responseBodyKeySummary?: string
   responseBodyKeys?: string[]
+  responseBodySha256?: string
+  responseBodyStringFieldSummary?: string
   responseBodyStringFields?: string[]
   responseBodyStringFieldCount?: number
   responseBodyTextLength?: number
@@ -532,6 +543,7 @@ async function sendLinqChatMessageParts(
     idempotencyKey: input.idempotencyKey,
     media: input.media ?? [],
     message,
+    operation: 'send_message',
     ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
     replyToMessageId,
   })
@@ -1276,6 +1288,7 @@ async function createLinqChatWithPrimaryMessage(
     idempotencyKey: input.idempotencyKey,
     media: input.media ?? [],
     message: input.message,
+    operation: 'create_chat',
   })
   const body: ChatCreateParams = {
     from,
@@ -1734,6 +1747,10 @@ async function createLinqHttpError(
 ): Promise<VaultCliError> {
   const { payload, rawText } = await readJsonErrorResponse(response)
   const responseDiagnostics = buildLinqErrorResponseDiagnostics(payload, rawText)
+  const responseTraceId = readSafeLinqResponseHeader(
+    response.headers,
+    'x-trace-id',
+  )
   const linqFailureKind = classifyLinqFailureKind(payload)
 
   return new VaultCliError(
@@ -1742,6 +1759,9 @@ async function createLinqHttpError(
     {
       ...details,
       ...responseDiagnostics,
+      ...(!responseDiagnostics.providerRequestId && responseTraceId
+        ? { providerRequestId: responseTraceId }
+        : {}),
       failureStage: 'http',
       ...(linqFailureKind ? { linqFailureKind } : {}),
       method,
@@ -1756,6 +1776,20 @@ async function createLinqHttpError(
       status: response.status,
     },
   )
+}
+
+function readSafeLinqResponseHeader(
+  headers: ResponseHeadersLike | null | undefined,
+  name: string,
+): string | null {
+  if (!headers) {
+    return null
+  }
+  const rawValue = typeof headers.get === 'function'
+    ? headers.get(name)
+    : Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1]
+  const value = typeof rawValue === 'string' ? rawValue.trim() : ''
+  return /^[A-Za-z0-9_.:-]{1,120}$/u.test(value) ? value : null
 }
 
 function buildLinqRequestBodyDiagnostics(
@@ -1773,15 +1807,23 @@ function buildLinqRequestBodyDiagnostics(
 
   const message = readRecord(record.message)
   const parts = Array.isArray(message?.parts) ? message.parts : []
+  const partRecords = parts.map(readRecord).filter((part) => part !== null)
+  const mediaParts = partRecords.filter((part) => part.type === 'media')
   const requestMessageLength = parts.reduce((total, part) => {
     const record = readRecord(part)
     return total + (typeof record?.value === 'string' ? record.value.length : 0)
   }, 0)
 
   return {
+    requestAttachmentMediaPartCount:
+      mediaParts.filter((part) => typeof part.attachment_id === 'string').length,
     requestBodyShape: summarizeLinqJsonObjectShape(record),
+    requestMediaPartCount: mediaParts.length,
     requestMessageLength,
     requestMessagePartCount: parts.length,
+    requestPublicUrlMediaPartCount:
+      mediaParts.filter((part) => typeof part.url === 'string').length,
+    requestTextPartCount: partRecords.filter((part) => part.type === 'text').length,
   }
 }
 
@@ -1792,6 +1834,7 @@ function buildLinqErrorResponseDiagnostics(
   if (rawText !== null) {
     return {
       responseBodyKind: 'text',
+      responseBodySha256: hashLinqDiagnosticBody(rawText),
       responseBodyTextLength: rawText.length,
     }
   }
@@ -1807,6 +1850,7 @@ function buildLinqErrorResponseDiagnostics(
   if (Array.isArray(payload)) {
     return {
       responseBodyKind: 'json_array',
+      responseBodySha256: hashLinqDiagnosticBody(serialized),
       responseBodyTextLength: serialized.length,
     }
   }
@@ -1815,22 +1859,57 @@ function buildLinqErrorResponseDiagnostics(
     const record = payload as Record<string, unknown>
     const keys = Object.keys(record).sort()
     const safeKeys = keys.filter(isSafeLinqResponseBodyKey)
+    const safeStringFields = safeKeys.filter((key) => typeof record[key] === 'string')
+    const providerError = readRecord(record.error)
+    const providerErrorCode = readSafeLinqDiagnosticToken(
+      providerError ?? record,
+      ['code', 'type'],
+    )
+    const providerRequestId = readSafeLinqDiagnosticToken(record, ['request_id', 'trace_id'])
     return {
+      ...(providerErrorCode ? { providerErrorCode } : {}),
+      ...(providerRequestId ? { providerRequestId } : {}),
       responseBodyKind: 'json_object',
       responseBodyKeyCount: keys.length,
+      ...(safeKeys.length > 0 ? { responseBodyKeySummary: safeKeys.join(',') } : {}),
       responseBodyKeys: safeKeys,
+      responseBodySha256: hashLinqDiagnosticBody(serialized),
       responseBodyStringFieldCount:
         keys.filter((key) => typeof record[key] === 'string').length,
-      responseBodyStringFields:
-        safeKeys.filter((key) => typeof record[key] === 'string'),
+      ...(safeStringFields.length > 0
+        ? { responseBodyStringFieldSummary: safeStringFields.join(',') }
+        : {}),
+      responseBodyStringFields: safeStringFields,
       responseBodyTextLength: serialized.length,
     }
   }
 
   return {
     responseBodyKind: `json_${typeof payload}`,
+    responseBodySha256: hashLinqDiagnosticBody(serialized),
     responseBodyTextLength: serialized.length,
   }
+}
+
+function hashLinqDiagnosticBody(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function readSafeLinqDiagnosticToken(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = readStringField(record, key)?.trim() ?? ''
+    if (/^[A-Za-z0-9_.:-]{1,120}$/u.test(value)) {
+      return value
+    }
+    const numericValue = record[key]
+    if (typeof numericValue === 'number' && Number.isSafeInteger(numericValue)) {
+      return String(numericValue)
+    }
+  }
+  return null
 }
 
 function resolveLinqReactionType(
@@ -2379,6 +2458,7 @@ function buildLinqMessageBody(input: {
   media?: readonly LinqMessageMediaInput[] | null
   message: string
   nativeReplyRequested?: true
+  operation: 'create_chat' | 'send_message'
   replyToMessageId?: string | null
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -2387,17 +2467,17 @@ function buildLinqMessageBody(input: {
     : null
   const media = normalizeLinqMediaList(input.media ?? [])
   const normalizedMessage = normalizeNullableString(input.message)
-  let textPart: TextPart | null = null
-  if (normalizedMessage !== null) {
-    const renderedText = renderMarkdownMessageText(normalizedMessage)
-    textPart = {
-      type: 'text',
-      value: renderedText.text,
-    }
-    if (renderedText.decorations.length > 0) {
-      textPart.text_decorations = renderedText.decorations
-    }
-  }
+  const textPart = normalizedMessage === null
+    ? null
+    : buildLinqTextPartWithinLimit({
+        message: normalizedMessage,
+        operation: input.operation,
+        requestAttachmentMediaPartCount:
+          media.filter((part) => 'attachment_id' in part).length,
+        requestMediaPartCount: media.length,
+        requestPublicUrlMediaPartCount:
+          media.filter((part) => 'url' in part).length,
+      })
   const parts: MessageContent['parts'] = textPart ? [textPart, ...media] : media
   if (parts.length === 0) {
     throw new VaultCliError(
@@ -2419,6 +2499,63 @@ function buildLinqMessageBody(input: {
     message.reply_to = { message_id: replyToMessageId }
   }
   return { message }
+}
+
+export function assertLinqMessageTextPartWithinLimit(input: {
+  message: string
+  operation: 'create_chat' | 'send_message'
+  requestAttachmentMediaPartCount: number
+  requestMediaPartCount: number
+  requestPublicUrlMediaPartCount: number
+}): void {
+  const normalizedMessage = normalizeNullableString(input.message)
+  if (normalizedMessage === null) {
+    return
+  }
+  buildLinqTextPartWithinLimit({
+    ...input,
+    message: normalizedMessage,
+  })
+}
+
+function buildLinqTextPartWithinLimit(input: {
+  message: string
+  operation: 'create_chat' | 'send_message'
+  requestAttachmentMediaPartCount: number
+  requestMediaPartCount: number
+  requestPublicUrlMediaPartCount: number
+}): TextPart {
+  const renderedText = renderMarkdownMessageText(input.message)
+  if (renderedText.text.length > LINQ_MAX_TEXT_PART_LENGTH) {
+    throw Object.assign(new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      `Linq text parts may contain at most ${LINQ_MAX_TEXT_PART_LENGTH} characters.`,
+      {
+        failureStage: 'configuration',
+        operation: input.operation,
+        provider: 'linq',
+        requestAttachmentMediaPartCount: input.requestAttachmentMediaPartCount,
+        requestMediaPartCount: input.requestMediaPartCount,
+        requestMessageLength: renderedText.text.length,
+        requestMessagePartCount: input.requestMediaPartCount + 1,
+        requestPublicUrlMediaPartCount: input.requestPublicUrlMediaPartCount,
+        requestTextPartCount: 1,
+        retryable: false,
+      },
+    ), {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: false as const,
+    })
+  }
+
+  const textPart: TextPart = {
+    type: 'text',
+    value: renderedText.text,
+  }
+  if (renderedText.decorations.length > 0) {
+    textPart.text_decorations = renderedText.decorations
+  }
+  return textPart
 }
 
 function normalizeLinqMediaList(

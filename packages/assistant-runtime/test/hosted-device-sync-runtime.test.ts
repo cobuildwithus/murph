@@ -19,6 +19,7 @@ import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
@@ -786,7 +787,7 @@ describe("hosted device-sync runtime", () => {
     );
   });
 
-  test("reconciliation sends oversized legitimate updates as sequential bounded batches", async () => {
+  test("reconciliation sends source-heavy oversized updates as sequential count-bounded batches", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -818,6 +819,22 @@ describe("hosted device-sync runtime", () => {
         localToHostedAccountIds.set(account.id, hostedConnectionId);
         hostedToLocalAccountIds.set(hostedConnectionId, account.id);
         observedTokenVersions.set(hostedConnectionId, null);
+        for (let sourceIndex = 0; sourceIndex < 64; sourceIndex += 1) {
+          store.upsertConnectionSource({
+            connectionId: account.id,
+            displayName: null,
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastSeenAt: "2026-04-06T10:05:00.000Z",
+            resourceAvailabilitySummary: {
+              activity: true,
+              heartrate: true,
+            },
+            sourceInstanceKey:
+              `source_${String(index).padStart(3, "0")}_${String(sourceIndex).padStart(2, "0")}_${"x".repeat(80)}`,
+            sourceProviderSlug: `source_${sourceIndex}`,
+            status: "connected",
+          });
+        }
       }
 
       let activeApplyCalls = 0;
@@ -855,7 +872,12 @@ describe("hosted device-sync runtime", () => {
           observedTokenVersions,
           pendingDirtyAcks: [],
           pendingDirtyPayloadJobs: [],
-          snapshot: buildEmptyRuntimeSnapshot(),
+          snapshot: {
+            ...buildEmptyRuntimeSnapshot(),
+            capabilities: {
+              connectionSourceApply: true,
+            },
+          },
         },
         wake: buildCronWake("2026-04-06T09:10:00.000Z"),
       });
@@ -867,6 +889,16 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(appliedRequests[1]?.updates.length, 1);
       assert.equal(maxActiveApplyCalls, 1);
+      assert.equal(
+        appliedRequests[0]?.updates.every((update) => update.sources?.length === 64),
+        true,
+      );
+      assert.ok(
+        new TextEncoder().encode(JSON.stringify({
+          updates: appliedRequests[0]?.updates,
+          userId: "member_123",
+        })).byteLength > HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
+      );
       assert.deepEqual(
         appliedRequests.flatMap((request) => request.updates.map((update) => update.connectionId)),
         Array.from({ length: updateCount }, (_, index) => `hosted_conn_${index}`),
