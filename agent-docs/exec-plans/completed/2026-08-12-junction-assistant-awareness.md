@@ -1,6 +1,6 @@
 # Improve Murph awareness of expanded Junction data
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -12,13 +12,15 @@ Updated: 2026-08-12
 
 ## Success criteria
 
-- The system prompt names the expanded data families and routes reads through
-  existing normalized wearable commands.
+- The system prompt names the expanded data families and routes global
+  observations through the existing lossless measurement-entry command while
+  preserving the narrower wearable-summary catalog.
 - The smallest relevant assistant skills use the new signals when they answer
   the member's question while preserving missing-data and health-safety bounds.
 - Focused assistant-engine tests and typecheck pass.
-- The exact pushed PR head passes the required preliminary ReviewGPT prompt,
-  product-experience, and coverage lenses plus required GitHub checks.
+- The required preliminary ReviewGPT prompt, product-experience, and coverage
+  findings are resolved, and the exact final PR head passes required GitHub
+  checks.
 
 ## Scope
 
@@ -30,8 +32,8 @@ Updated: 2026-08-12
 ## Constraints
 
 - Technical constraints: stack on the Junction configurable-resources branch;
-  reuse `vault-cli wearables metric latest|trend` and existing category reads;
-  do not imply that every source supplies every metric.
+  reuse existing normalized query commands and category reads; do not imply
+  that every source supplies every metric.
 - Product/process constraints: keep member-facing behavior concise, treat
   alerts and ECG summaries as clues rather than diagnoses, and use the
   prompt-primary worktree/PR completion lane.
@@ -69,11 +71,39 @@ Updated: 2026-08-12
   reach production before its importing and query contracts.
 - Reuse the existing execution-plan helper Frog entries; do not create a
   duplicate friction report for its `--help` behavior.
+- ReviewGPT proved that most named resource aliases are global observations,
+  not wearable-summary aliases. Route them through bounded
+  `vault-cli measurement entry list` reads instead of broadening the curated
+  wearable catalog.
+- Device observations may intentionally be query-only. Use the source and event
+  ID returned by the measurement-entry result as provenance instead of assuming
+  `vault-cli show` can expose the event.
+- Keep the always-on route layer below its established size ratchet; the final
+  catalog and resolver distinction fit without raising the ceiling.
+
+## Review resolution
+
+- The preliminary `completion-specialists` pass returned two accepted findings:
+  eleven of fifteen named aliases were sent to the narrower wearable resolver,
+  and string-presence tests could not detect that failure.
+- Both findings are resolved in the existing prompt and skill owners. All
+  fifteen public aliases now have an executable in-process CLI contract test,
+  including an absent date, and production-prompt scripted App Server scenarios
+  cover daylight, workout duration, body-fat trend, missing coverage, compact
+  ECG/workout-only access, and incomplete carbohydrate intake.
+- Parent product-purpose revalidation: Murph can now answer an ordinary question
+  about a newly imported fact by checking its canonical record without setup or
+  overclaiming. This remains the smallest complete experience because it adds no
+  command, state owner, or user-visible configuration and uses only the existing
+  canonical query path.
 
 ## Verification
 
-- Commands to run: focused Vitest files for the prompt and edited skills;
-  assistant-engine typecheck; exact-head GitHub checks; ReviewGPT specialist
-  pass; `git merge-tree --write-tree` against the stacked PR base.
-- Expected outcomes: all commands pass, ReviewGPT has no unresolved accepted
-  findings, and the final diff contains no new runtime surface or state owner.
+- Passed: assistant prompt/skill/body-composition/prompt-size/App Server focused
+  suite (13 tests); full measurement-entry CLI file (14 tests); focused query
+  alias tests (2 tests); assistant-engine and CLI typechecks; `git diff --check`.
+- ReviewGPT specialist artifact: `SPECIALIST_OUTCOME: FINDINGS`, with both
+  accepted findings resolved and no patch artifact.
+- Pending after the final push: exact-head GitHub checks and
+  `git merge-tree --write-tree` against the stacked PR base.
+Completed: 2026-08-12

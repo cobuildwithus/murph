@@ -34,27 +34,30 @@ describe('expanded wearable awareness', () => {
   it('advertises normalized coverage without promising source support or raw streams', () => {
     const prompt = buildPrompt()
 
-    expect(prompt).toContain('Connected health-data coverage can include body composition')
-    expect(prompt).toContain('respiratory readings')
-    expect(prompt).toContain('ECG recording summaries')
-    expect(prompt).toContain('workout duration, distance, stroke, and heart-rate summaries')
-    expect(prompt).toContain("not proof that the member's source supplies one")
-    expect(prompt).toContain('report missing coverage as unavailable')
+    expect(prompt).toContain('Connected health data can include body-composition')
+    expect(prompt).toContain('respiratory, metabolic, treatment, alert, accessibility, environmental')
+    expect(prompt).toContain('ECG-summary, and workout-summary observations')
+    expect(prompt).toContain('Read these global observations with bounded `vault-cli measurement entry list`')
+    expect(prompt).toContain('reserve `wearables metric` for catalog aliases')
+    expect(prompt).toContain('not proof a source supplied it')
+    expect(prompt).toContain('missing means unavailable, not zero')
     expect(prompt).toContain(
-      'Raw ECG voltage samples and workout stream points are deliberately not stored or exposed',
+      'Raw ECG voltages and workout stream points are not stored or exposed',
     )
     expect(prompt).toContain(
-      'connected health data can include carbohydrate observations',
+      'burned calories, carbohydrate observations, and complete meal intake distinct',
     )
     expect(prompt).toContain(
-      'neither supplies complete eaten-calorie or meal totals',
+      'use meal totals or meal records for eaten calories',
     )
   })
 
-  it('routes expanded activity signals through the existing normalized metric surface', async () => {
+  it('routes expanded activity signals through the lossless global metric surface', async () => {
     const skill = await readSkill('daily-activity')
 
-    expect(skill).toContain('vault-cli wearables metric latest <metric> --format json')
+    expect(skill).toContain(
+      'vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json',
+    )
     for (const metric of [
       'daylight_exposure',
       'fall',
@@ -70,14 +73,18 @@ describe('expanded wearable awareness', () => {
     ]) {
       expect(skill).toContain(`\`${metric}\``)
     }
-    expect(skill).toContain('A missing metric is missing coverage, not zero')
+    expect(skill).toMatch(/global\s+metric index, not the narrower `wearables metric`/u)
+    expect(skill).toMatch(/No returned entries\s+means missing coverage, not zero/u)
+    expect(skill).toContain('returned source and event ID as provenance')
+    expect(skill).toContain('query-only and unavailable through `vault-cli show`')
   })
 
   it('uses connected body metrics as source-aware trends rather than ground truth', async () => {
     const skill = await readSkill('body-composition')
 
-    expect(skill).toContain('vault-cli wearables metric latest <metric> --format json')
-    expect(skill).toContain('vault-cli wearables metric trend <metric> --format json')
+    expect(skill).toContain(
+      'vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json',
+    )
     for (const metric of [
       'body_mass_index',
       'fat',
@@ -86,7 +93,9 @@ describe('expanded wearable awareness', () => {
     ]) {
       expect(skill).toContain(`\`${metric}\``)
     }
-    expect(skill).toMatch(/repeated readings from consistent sources and\s+conditions/u)
-    expect(skill).toMatch(/missing coverage rather than no\s+change/u)
+    expect(skill).toMatch(/compare repeated readings for a trend\. Keep sources and measurement\s+conditions consistent/u)
+    expect(skill).toMatch(/No returned entries means missing coverage rather than no\s+change/u)
+    expect(skill).toContain('returned source and event ID as provenance')
+    expect(skill).toMatch(/query-only and unavailable through\s+`vault-cli show`/u)
   })
 })
