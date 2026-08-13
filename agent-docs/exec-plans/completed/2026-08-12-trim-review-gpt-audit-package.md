@@ -1,6 +1,6 @@
 # Trim ReviewGPT audit packages
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -81,3 +81,4 @@ Updated: 2026-08-12
     predicate now uses a no-renames diff, falls back to retaining the corpus when
     local history is incomplete, and has real-ZIP proof that an unchanged corpus
     sibling remains present after a Health Commons file is renamed elsewhere.
+Completed: 2026-08-12
