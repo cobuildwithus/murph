@@ -1115,7 +1115,8 @@ Last verified: 2026-08-12
   branch ahead of `origin/main` may resume before its first push. When remote-
   tracking evidence exists but no PR does, resume additionally requires the
   retained validated parent-local PR body to bind its immutable first-reviewed
-  head to the exact local head. That exact provenance preserves a legitimate
+  head to the exact local head and carry the originally admitted task path and
+  digest. That exact provenance preserves a legitimate
   push-before-PR interruption without trusting a deterministic branch seeded by
   another repository writer. An interrupted dirty diff can resume only
   when the one open parent-owned PR, remote branch, and local committed head
@@ -1139,7 +1140,11 @@ Last verified: 2026-08-12
   cannot request a second implementation patch. Both implementation and
   canonical-review archives contain one parent-materialized task blob read
   directly from its exact `origin/main` friction path, plus a path/digest
-  manifest. They include neither the whole friction tree nor a candidate copy.
+  manifest. The parent stores that same identity only in trusted local/PR
+  metadata and revalidates it after every long wait and at both final merge
+  fences. Any edit, move, deletion, replacement, or binding drift revokes
+  unattended authority. They include neither the whole friction tree nor a
+  candidate copy.
 - The child may edit only the issue worktree and a private ignored PR draft. It
   cannot run Git, GitHub, ReviewGPT, browser automation, or network clients and
   cannot author readiness, response, model-verification, or GitHub-state
@@ -1169,11 +1174,21 @@ Last verified: 2026-08-12
   Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
   controls produce the same exact-head human handoff; review prose is never
   delegated to another autonomous editing turn.
+- Missing or rejected implementation output/patches and edit-only child
+  timeout, nonzero exit, or invalid output are graceful terminal pre-PR
+  dispositions, not authorization for another implementation. The parent
+  deletes candidate bytes, resets to `origin/main`, creates a neutral
+  parent-only empty commit with the same tree, and publishes only the fixed
+  draft body, admitted task identity when available, bounded failure class, and
+  exact-head review-findings handoff. Model prose never enters that PR.
+  ReviewGPT/browser/command/GitHub infrastructure unavailability remains
+  retryable and does not manufacture a terminal classification.
 - Automatic merge authority is narrower than change authority. The parent
   requires valid preliminary/final ReviewGPT evidence, the exact open PR,
   nonempty green required checks, and a clean current-base merge. It then
-  re-fetches and revalidates App author, open state, label, exactly one committed
-  binding, PR head, exact body digest/editor/non-closing issue binding, checks,
+  re-fetches and revalidates App author, open state, label, the exact admitted
+  committed task path/content digest and sole binding, PR head, exact body
+  digest/editor/non-closing issue binding, checks,
   and the exact-head scope classifier immediately before an ordinary
   `--match-head-commit` squash merge. Only the enumerated Frog autofix
   implementation/launcher/worker/test files, the exact Frog package script,

@@ -13,6 +13,7 @@ import {
 } from "./frog-autofix-lib.ts";
 import {
   FROG_AUTOFIX_PR_BODY_PATH,
+  extractFrogTaskIdentity,
   extractFirstReviewedHead,
   readBoundedParentFile,
   validatePullRequestBody,
@@ -323,6 +324,9 @@ function requireExactParentLocalPullRequestBody(
     );
     if (extractFirstReviewedHead(body) !== localHead) {
       throw new Error("parent-local PR body is not bound to the exact head");
+    }
+    if (!extractFrogTaskIdentity(body)) {
+      throw new Error("parent-local PR body lacks immutable task provenance");
     }
   } catch {
     throw new Error(

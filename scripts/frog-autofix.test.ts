@@ -42,6 +42,7 @@ import {
 } from "./frog-autofix-lib.ts";
 import {
   acquireRunLock,
+  applyImplementationPatch,
   assertExpectedPullRequestBody,
   bodyHasExactReviewPass,
   bodyHandoff,
@@ -52,6 +53,8 @@ import {
   closedPullRequestHandoffBody,
   completedHandoffIssueNumbers,
   committedFrictionTask,
+  committedFrictionTaskMatches,
+  createEmptyRepairHandoffCommit,
   discoverEligibleIssues,
   expectedPullRequestBodyDisposition,
   materializeCommittedFrictionTask,
@@ -61,10 +64,14 @@ import {
   recoverablePullRequestBody,
   recoveredReviewHandoffBody,
   requiredCheckWatchHandoff,
+  requireImplementationCompletion,
   requiredPullRequestCheckState,
+  renderTerminalRepairHandoffBody,
   resolveReviewBaselineState,
   reusableRepairPhase,
   restoreRecoveredHandoffBeforeWorktreeRecovery,
+  TerminalPrePullRequestFailure,
+  terminalWorkerFailureClass,
   trustedReviewControlPaths,
 } from "./frog-autofix.ts";
 import {
@@ -81,8 +88,10 @@ import {
 } from "./frog-autofix-finalize.ts";
 import {
   FROG_AUTOFIX_PR_BODY_PATH,
+  extractFrogTaskIdentity,
   extractFirstReviewedHead,
   extractSingleConversationUrl,
+  extractTerminalPrePullRequestFailure,
   publishDraftRepair,
   renderImplementationPrompt,
   renderRecoveredPullRequestBody,
@@ -102,6 +111,10 @@ const repositoryRoot = path.resolve(
 );
 const authenticatedOperator = "automation-operator";
 const authoritativeBodySha256 = "d".repeat(64);
+const taskIdentity = {
+  path: ".agents/friction-log/selected/friction.md",
+  sha256: "f".repeat(64),
+};
 const pullRequestAuthority = (branch: string) => ({
   author: { login: authenticatedOperator },
   baseRefName: "main",
@@ -534,6 +547,55 @@ describe("Frog autofix guards", () => {
       .not.toThrow();
   });
 
+  it("round-trips only exact parent-owned task and terminal metadata", () => {
+    const head = "a".repeat(40);
+    const body = renderTerminalRepairHandoffBody({
+      failure: "implementation-patch",
+      head,
+      issueNumber: 42,
+      task: taskIdentity,
+    });
+    expect(extractFrogTaskIdentity(body)).toEqual(taskIdentity);
+    expect(extractTerminalPrePullRequestFailure(body))
+      .toBe("implementation-patch");
+    expect(bodyHandoff(body, head)).toBe("review-findings");
+    expect(() => validatePullRequestBody(body, 42, "<HOME>", "<USER>"))
+      .not.toThrow();
+
+    for (const malformed of [
+      `${body}Frog autofix task path: ${taskIdentity.path}\n`,
+      body.replace(taskIdentity.sha256, "not-a-digest"),
+      `${body}Frog autofix terminal failure: worker-timeout\n`,
+      body.replace("implementation-patch", "unknown-failure"),
+    ]) {
+      expect(() => validatePullRequestBody(malformed, 42, "<HOME>", "<USER>"))
+        .toThrow();
+    }
+
+    const terminalHandoff = {
+      ...pullRequestAuthority("agent/frog-autofix-42"),
+      body,
+      headRefOid: head,
+      isDraft: true,
+      number: 99,
+      state: "OPEN" as const,
+    };
+    expect(completedHandoffIssueNumbers(
+      [terminalHandoff],
+      authenticatedOperator,
+    )).toEqual(new Set([42]));
+    expect(discoverEligibleIssues("<ROOT>", {
+      authenticatedOperator: () => authenticatedOperator,
+      assertRepository: () => undefined,
+      bindingCount: () => 1,
+      fetchDefaultBranch: () => undefined,
+      listOpenIssues: () => JSON.stringify([trustedIssue(42), trustedIssue(43)]),
+      listIssuePullRequests: (_root, issueNumber) => issueNumber === 42
+        ? [terminalHandoff]
+        : [],
+    }).map((issue) => issue.number)).toEqual([43]);
+  });
+
   it("preserves parent-local review ancestry and handoffs after a foreign body edit", () => {
     const root = mkdtempSync(path.join(tmpdir(), "frog-review-baseline-"));
     const git = (...args: string[]) => {
@@ -892,6 +954,12 @@ describe("Frog autofix guards", () => {
       "utf8",
     );
     const runOnce = source.slice(source.indexOf("async function runOnce()"));
+    const localNoPullRequestHandoff = runOnce.indexOf(
+      'if (bodyHandoff(localBody, currentHead))',
+    );
+    expect(localNoPullRequestHandoff).toBeGreaterThanOrEqual(0);
+    expect(localNoPullRequestHandoff)
+      .toBeLessThan(runOnce.indexOf("const transientRoot"));
     const handoff = runOnce.indexOf("const recoveredHandoffBody =");
     expect(handoff).toBeGreaterThanOrEqual(0);
     expect(handoff).toBeLessThan(runOnce.indexOf("ensureWorkerTooling("));
@@ -909,6 +977,12 @@ describe("Frog autofix guards", () => {
     expect(restamp).not.toContain("!hasParentOwnedPullRequestBody(");
     expect(restamp.indexOf("!samePullRequestProjection"))
       .toBeLessThan(restamp.indexOf("updateParentPullRequestBody("));
+    const terminalHandoff = source.slice(
+      source.indexOf("function persistRepairHandoff"),
+      source.indexOf("function persistClosedPullRequestHandoff"),
+    );
+    expect(terminalHandoff).toContain("firstHead: head");
+    expect(terminalHandoff).toContain("handoffTree !== mainTree");
   });
 
   it("restamps foreign-edited exact and ancestor handoffs before worktree recovery", () => {
@@ -1158,7 +1232,14 @@ describe("Frog autofix guards", () => {
         path: selected,
         sha256: createHash("sha256").update(content).digest("hex"),
       });
-      const alwaysPaths = materializeCommittedFrictionTask(root, checkout, 42);
+      const expectedTask = committedFrictionTask(root, 42);
+      expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(true);
+      const alwaysPaths = materializeCommittedFrictionTask(
+        root,
+        checkout,
+        42,
+        expectedTask,
+      );
       expect(alwaysPaths).toEqual([
         "audit-packages/frog-autofix-task.md",
         "audit-packages/frog-autofix-task.json",
@@ -1185,6 +1266,45 @@ describe("Frog autofix guards", () => {
         source.indexOf("function runCanonicalPullRequestReview"),
         source.indexOf("function downloadImplementationPatch"),
       )).toContain("materializeCommittedFrictionTask(");
+
+      const updated = content.replace("Trusted task.", "Updated task.");
+      writeFileSync(path.join(root, selected), updated);
+      git("add", selected);
+      git("commit", "--quiet", "-m", "edit task");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(false);
+
+      const moved = ".agents/friction-log/moved/friction.md";
+      mkdirSync(path.join(root, path.dirname(moved)), { recursive: true });
+      git("mv", selected, moved);
+      git("commit", "--quiet", "-m", "move task");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(false);
+
+      writeFileSync(
+        path.join(root, moved),
+        updated.replace("cobuildwithus/murph#42", "cobuildwithus/murph#43"),
+      );
+      git("add", moved);
+      git("commit", "--quiet", "-m", "replace task binding");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(false);
+
+      git("rm", moved);
+      git("commit", "--quiet", "-m", "delete task");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(false);
+
+      const replacement = ".agents/friction-log/replacement/friction.md";
+      mkdirSync(path.join(root, path.dirname(replacement)), { recursive: true });
+      writeFileSync(
+        path.join(root, replacement),
+        "---\nissue: 'cobuildwithus/murph#42'\n---\n\nReplacement task.\n",
+      );
+      git("add", replacement);
+      git("commit", "--quiet", "-m", "replace task");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(false);
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -1258,6 +1378,7 @@ describe("Frog autofix guards", () => {
             ? renderRecoveredPullRequestBody(42)
             : bodyWithParentMetadata(renderRecoveredPullRequestBody(42), {
               firstHead: options.localBodyHead,
+              task: taskIdentity,
             });
           writeFileSync(bodyPath, body);
         }
@@ -1661,6 +1782,8 @@ describe("Frog autofix guards", () => {
       head: "a".repeat(40),
       issueNumber: 42,
       pullRequest: 99,
+      taskPath: taskIdentity.path,
+      taskSha256: taskIdentity.sha256,
     };
     const events: string[] = [];
     let closed = false;
@@ -1695,6 +1818,10 @@ describe("Frog autofix guards", () => {
         events.push("checks");
         return true;
       },
+      taskAuthorityMatches: () => {
+        events.push("task");
+        return true;
+      },
     };
 
     finalizeReadyRepair(identity, dependencies);
@@ -1702,11 +1829,13 @@ describe("Frog autofix guards", () => {
       "pr",
       "checks",
       "verify-issue",
+      "task",
       "pr",
       "checks",
       "merge-tree",
       "scope",
       "verify-issue",
+      "task",
       "pr",
       "checks",
       "scope",
@@ -1785,6 +1914,8 @@ describe("Frog autofix guards", () => {
       head: "a".repeat(40),
       issueNumber: 42,
       pullRequest: 99,
+      taskPath: taskIdentity.path,
+      taskSha256: taskIdentity.sha256,
     };
     for (const failure of [
       "authority",
@@ -1827,6 +1958,7 @@ describe("Frog autofix guards", () => {
           if (failure === "authority") throw new Error("revoked Frog authority");
         },
         requiredChecksPass: () => failure !== "checks",
+        taskAuthorityMatches: () => true,
       };
       expect(() => finalizeReadyRepair(identity, dependencies)).toThrow();
       expect(mergeCalls).toBe(0);
@@ -1850,7 +1982,39 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => false,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      taskAuthorityMatches: () => true,
     })).toBe("awaiting-human-conflict");
+
+    for (const driftAt of [1, 2]) {
+      let taskChecks = 0;
+      let mergeCalls = 0;
+      const result = finalizeReadyRepair(identity, {
+        autoMergeAllowed: () => true,
+        closeIssue: () => undefined,
+        currentPullRequest: () => ({
+          bodyAuthoritative: true,
+          bodySha256: identity.bodySha256,
+          head: identity.head,
+          issueBound: true,
+          pullRequest: identity.pullRequest,
+        }),
+        issueIsClosed: () => false,
+        merge: () => {
+          mergeCalls += 1;
+        },
+        mergeTreePasses: () => true,
+        pullRequestIsMerged: () => false,
+        refreshAndVerifyIssue: () => undefined,
+        requiredChecksPass: () => true,
+        taskAuthorityMatches: () => {
+          taskChecks += 1;
+          return taskChecks !== driftAt;
+        },
+      });
+      expect(result).toBe("awaiting-human-authority");
+      expect(mergeCalls).toBe(0);
+      expect(taskChecks).toBe(driftAt);
+    }
   });
 
   it("hands off every broader authority class and merges exact Frog script scope", () => {
@@ -1860,6 +2024,8 @@ describe("Frog autofix guards", () => {
       head: "a".repeat(40),
       issueNumber: 42,
       pullRequest: 99,
+      taskPath: taskIdentity.path,
+      taskSha256: taskIdentity.sha256,
     };
     for (const broaderPath of [
       "AGENTS.md",
@@ -1894,6 +2060,7 @@ describe("Frog autofix guards", () => {
         pullRequestIsMerged: () => false,
         refreshAndVerifyIssue: () => undefined,
         requiredChecksPass: () => true,
+        taskAuthorityMatches: () => true,
       });
       expect(outcome, broaderPath).toBe("awaiting-human-product");
       expect(mergeCalls, broaderPath).toBe(0);
@@ -1924,6 +2091,7 @@ describe("Frog autofix guards", () => {
       pullRequestIsMerged: () => merged,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
+      taskAuthorityMatches: () => true,
     })).toBe("merged");
     expect(merged).toBe(true);
     expect(closed).toBe(true);
@@ -2205,6 +2373,16 @@ describe("Frog autofix guards", () => {
     expect(() => validatePatchText(`${patch}GIT binary patch\n`)).toThrow(
       "unsupported payload",
     );
+    expect(() => requireImplementationCompletion("No attachment marker.\n"))
+      .toThrow(TerminalPrePullRequestFailure);
+    expect(() => requireImplementationCompletion(
+      "Done.\nIMPLEMENTATION_PATCH_COMPLETE\n",
+    )).not.toThrow();
+    expect(terminalWorkerFailureClass({ status: 0, timedOut: false })).toBeNull();
+    expect(terminalWorkerFailureClass({ status: 7, timedOut: false }))
+      .toBe("worker-failed");
+    expect(terminalWorkerFailureClass({ status: 7, timedOut: true }))
+      .toBe("worker-timeout");
     expect(extractSingleConversationUrl(
       "Created https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     )).toContain("chatgpt.com/c/");
@@ -2242,6 +2420,18 @@ describe("Frog autofix guards", () => {
     expect(implementationSource).not.toContain(
       'args.push("--connector", options.connector)',
     );
+    const parentReviewSource = implementationSource.slice(
+      implementationSource.indexOf("function runParentReview"),
+      implementationSource.indexOf("export function assertExpectedPullRequestBody"),
+    );
+    expect(parentReviewSource.lastIndexOf("review.status !== 0"))
+      .toBeLessThan(parentReviewSource.indexOf("requireImplementationCompletion"));
+    const patchDownloadSource = implementationSource.slice(
+      implementationSource.indexOf("function downloadImplementationPatch"),
+      implementationSource.indexOf("export function applyImplementationPatch"),
+    );
+    expect(patchDownloadSource.indexOf("wake.status !== 0"))
+      .toBeLessThan(patchDownloadSource.indexOf("parseSinglePatchArtifact"));
     const reviewedHead = "a".repeat(40);
     expect(extractFirstReviewedHead(
       `Body\n\nReviewGPT first-reviewed head: ${reviewedHead}\n`,
@@ -2306,6 +2496,41 @@ describe("Frog autofix guards", () => {
       "<HOME>",
       "<USER>",
     )).not.toThrow();
+  });
+
+  it("rejects unusable patches and publishes an empty neutral handoff tree", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "frog-empty-handoff-"));
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    try {
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      writeFileSync(path.join(root, "tracked.txt"), "main\n");
+      git("add", "tracked.txt");
+      git("commit", "--quiet", "-m", "main");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      writeFileSync(path.join(root, "tracked.txt"), "candidate\n");
+      writeFileSync(path.join(root, "candidate.txt"), "must not persist\n");
+      const rejectedPatch = path.join(root, "rejected.patch");
+      writeFileSync(rejectedPatch, "not a patch\n");
+      expect(() => applyImplementationPatch(root, rejectedPatch))
+        .toThrow(TerminalPrePullRequestFailure);
+
+      const head = createEmptyRepairHandoffCommit(root, 42);
+      expect(git("rev-parse", `${head}^{tree}`))
+        .toBe(git("rev-parse", "origin/main^{tree}"));
+      expect(git("status", "--porcelain")).toBe("");
+      expect(git("show", "-s", "--format=%an <%ae>", head))
+        .toBe("Frog Autofix <frog-autofix@users.noreply.github.com>");
+      expect(existsSync(path.join(root, "candidate.txt"))).toBe(false);
+      expect(readFileSync(path.join(root, "tracked.txt"), "utf8")).toBe("main\n");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   it("recovers only dead or PID-reused locks and preserves live ownership", () => {

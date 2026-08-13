@@ -4,6 +4,8 @@ export interface ReadyRepairIdentity {
   head: string;
   issueNumber: number;
   pullRequest: number;
+  taskPath: string;
+  taskSha256: string;
 }
 
 export interface ReadyRepairRemoteState {
@@ -24,6 +26,7 @@ export interface ReadyRepairFinalizationDependencies {
   pullRequestIsMerged: (identity: ReadyRepairIdentity) => boolean;
   refreshAndVerifyIssue: () => void;
   requiredChecksPass: (identity: ReadyRepairIdentity) => boolean;
+  taskAuthorityMatches: (identity: ReadyRepairIdentity) => boolean;
 }
 
 function assertRemoteIdentity(
@@ -46,12 +49,21 @@ function assertRemoteIdentity(
 export function finalizeReadyRepair(
   identity: ReadyRepairIdentity,
   dependencies: ReadyRepairFinalizationDependencies,
-): "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
+): "awaiting-human-authority" | "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
+  if (
+    !/^\.agents\/friction-log\/[^/\r\n]+\/friction\.md$/u.test(identity.taskPath)
+    || !/^[0-9a-f]{64}$/u.test(identity.taskSha256)
+  ) {
+    throw new Error("repair task identity is invalid");
+  }
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   if (!dependencies.requiredChecksPass(identity)) {
     throw new Error("required pull request checks are not green");
   }
   dependencies.refreshAndVerifyIssue();
+  if (!dependencies.taskAuthorityMatches(identity)) {
+    return "awaiting-human-authority";
+  }
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   if (!dependencies.requiredChecksPass(identity)) {
     throw new Error("required pull request checks changed before merge");
@@ -65,6 +77,9 @@ export function finalizeReadyRepair(
   if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
 
   dependencies.refreshAndVerifyIssue();
+  if (!dependencies.taskAuthorityMatches(identity)) {
+    return "awaiting-human-authority";
+  }
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   if (!dependencies.requiredChecksPass(identity)) {
     throw new Error("required pull request checks changed before merge");

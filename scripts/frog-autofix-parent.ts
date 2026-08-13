@@ -4,6 +4,58 @@ import path from "node:path";
 export const FROG_AUTOFIX_PR_BODY_PATH =
   "audit-packages/frog-autofix-pr-body.md";
 
+export interface FrogTaskIdentity {
+  path: string;
+  sha256: string;
+}
+
+export const terminalPrePullRequestFailureClasses = [
+  "implementation-output",
+  "implementation-patch",
+  "worker-failed",
+  "worker-output",
+  "worker-timeout",
+] as const;
+
+export type TerminalPrePullRequestFailureClass =
+  typeof terminalPrePullRequestFailureClasses[number];
+
+export function extractFrogTaskIdentity(body: string): FrogTaskIdentity | null {
+  const pathPrefix = "Frog autofix task path:";
+  const digestPrefix = "Frog autofix task sha256:";
+  const paths = body.split(/\r?\n/u).filter((line) => line.startsWith(pathPrefix));
+  const digests = body.split(/\r?\n/u).filter((line) => line.startsWith(digestPrefix));
+  if (paths.length === 0 && digests.length === 0) return null;
+  if (paths.length !== 1 || digests.length !== 1) {
+    throw new Error("pull request has ambiguous Frog task metadata");
+  }
+  const taskPath = paths[0]?.slice(pathPrefix.length).trim() ?? "";
+  const taskSha256 = digests[0]?.slice(digestPrefix.length).trim() ?? "";
+  if (
+    !/^\.agents\/friction-log\/[^/\r\n]+\/friction\.md$/u.test(taskPath)
+    || !/^[0-9a-f]{64}$/u.test(taskSha256)
+  ) {
+    throw new Error("pull request has invalid Frog task metadata");
+  }
+  return { path: taskPath, sha256: taskSha256 };
+}
+
+export function extractTerminalPrePullRequestFailure(
+  body: string,
+): TerminalPrePullRequestFailureClass | null {
+  const prefix = "Frog autofix terminal failure:";
+  const lines = body.split(/\r?\n/u).filter((line) => line.startsWith(prefix));
+  if (lines.length === 0) return null;
+  if (lines.length !== 1) {
+    throw new Error("pull request has ambiguous Frog terminal-failure metadata");
+  }
+  const failure = lines[0]?.slice(prefix.length).trim() ?? "";
+  if (!terminalPrePullRequestFailureClasses.some((value) => value === failure)) {
+    throw new Error("pull request has invalid Frog terminal-failure metadata");
+  }
+  return failure as TerminalPrePullRequestFailureClass;
+}
+
 export function extractFirstReviewedHead(body: string): string | null {
   const prefix = "ReviewGPT first-reviewed head:";
   const lines = body
@@ -215,6 +267,8 @@ export function validatePullRequestBody(
   if (!hasExactFrogIssueBinding(body, issueNumber)) {
     throw new Error("worker PR body has an invalid issue relationship");
   }
+  extractFrogTaskIdentity(body);
+  extractTerminalPrePullRequestFailure(body);
 }
 
 export function hasExactFrogIssueBinding(

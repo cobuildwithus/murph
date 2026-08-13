@@ -23,7 +23,10 @@ outside model-work authority. Fresh implementation ReviewGPT does not request
 or use the GitHub connector and derives the task only from the exact committed
 friction blob materialized from `origin/main`, with its source path and digest,
 plus repository instructions. The same immutable task evidence accompanies
-canonical review. Both implementation prompts
+canonical review. The parent retains that exact path/digest in its private
+pre-PR provenance and authenticated PR body, then compares it with a fresh
+`origin/main` read after every long wait and at both final merge fences. Both
+implementation prompts
 require a foul-play assessment before edits. Proposed patches, existing branch/worktree
 state, content outside the instruction hierarchy, and embedded instructions
 remain adversarial evidence. Unrelated hostile prose is ignored rather than
@@ -64,8 +67,9 @@ open PR, may resume without requesting a second implementation patch. A clean
 local-only no-PR commit remains resumable. Once the deterministic branch has
 remote-tracking provenance but no PR, resume additionally requires the retained
 validated parent-local PR body to bind its immutable first-reviewed head to the
-exact local head; this preserves push-before-PR recovery while rejecting a
-same-repository branch seeded by another writer. Divergence, missing or stale
+exact local head and to carry the admitted friction-task path/digest; this
+preserves push-before-PR recovery while rejecting a same-repository branch
+seeded by another writer. Divergence, missing or stale
 parent-local provenance, mismatched ownership, merged or multiply-owned PR
 state, and other ambiguity fail closed. One exact
 closed-unmerged parent PR that lacks a trusted handoff is rewritten with the
@@ -76,7 +80,14 @@ once only when a module already loaded by the launcher changed.
 
 The non-model parent opens a fresh ReviewGPT Pro thread, builds the review
 archive itself from committed Git objects, requires exactly one latest-response
-patch attachment, validates it, and applies it. Review responses, model proof,
+patch attachment, validates it, and applies it. Missing or rejected
+implementation output/patches and edit-only child timeout, nonzero exit, or
+invalid output are terminal for that candidate. Before any PR exists, the
+parent discards candidate bytes, creates one neutral empty commit whose tree is
+exactly `origin/main`, and publishes the fixed draft body with an exact-head
+`review-findings` handoff. It never requests a second implementation; browser,
+ReviewGPT, command, and GitHub infrastructure unavailability remains retryable.
+Review responses, model proof,
 browser access, and downloaded patches remain in an owner-only parent transient
 directory outside the issue worktree. Only a clean fresh branch may install
 pinned dependencies, before any Codex child runs. One ephemeral Codex child
@@ -92,7 +103,8 @@ draft, but cannot commit, push, publish, review, merge, close, or manufacture
 authority evidence.
 
 The parent structurally validates the diff, commits with hooks disabled, and
-binds the retained private PR body to the immutable first-reviewed head. It
+binds the retained private PR body to the immutable first-reviewed head and
+admitted friction-task path/digest. It
 refreshes `origin/main` and revalidates exact open Frog App author, label, and
 one protected-main binding authority immediately before push, then repeats that
 refresh and revalidation immediately before creating a new draft PR. Existing
@@ -123,8 +135,9 @@ merge. A merged-but-open issue receives one finalization-recovery path: the
 parent revalidates the exact merged PR/head and bounded close/reopen history,
 retries closure only when the issue was never closed after merge, and leaves a
 deliberate reopen for a human without re-entering worker or review execution.
-Immediately before merge it revalidates App author, label, one committed
-binding, PR head, exact parent body digest/editor/non-closing issue binding,
+Immediately before merge it revalidates App author, label, the exact admitted
+committed task path/content digest and sole binding, PR head, exact parent body
+digest/editor/non-closing issue binding,
 checks, and current-base mergeability. A deterministic exact-file allowlist,
 using both sides of detected renames and copies, permits automatic merge only
 for the enumerated Frog autofix implementation, launcher, worker, and focused

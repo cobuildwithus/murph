@@ -22,7 +22,8 @@ implement/resume recovery state including clean
 post-commit/pre-first-push continuation and exact parent-local body/head
 provenance for remote-no-PR continuation, dual pre-push/pre-create issue
 authority refresh, exact immutable `origin/main` friction-task blob/path/digest
-packaging for implementation and canonical review without the mutable
+packaging plus trusted local/PR identity retention and post-wait/final-merge
+revalidation for implementation and canonical review without the mutable
 GitHub-content connector, mandatory
 foul-play assessment in both implementation prompts without hostile-comment
 queue veto, no historical
@@ -36,7 +37,9 @@ friction tasks, general documentation, and GitHub Actions helpers, one
 non-closing issue binding with parent-only post-merge
 closure and bounded never-closed recovery that refuses a deliberate reopen, durable
 descendant/closed-unmerged findings/retrospective
-handoffs for terminal checks and conflicts, one absolute process-group-bounded
+handoffs for terminal checks and conflicts, fixed-body empty-tree human
+handoff for terminal pre-PR implementation/worker outcomes without a second
+implementation, one absolute process-group-bounded
 invocation, a native-advisory-serialized two-hour LaunchAgent, and bounded
 metadata-only local state. Its ownership and proof are jointly
 specified by

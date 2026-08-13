@@ -62,8 +62,10 @@ import {
 import { finalizeReadyRepair } from "./frog-autofix-finalize.ts";
 import {
   FROG_AUTOFIX_PR_BODY_PATH,
+  extractFrogTaskIdentity,
   extractFirstReviewedHead,
   extractSingleConversationUrl,
+  extractTerminalPrePullRequestFailure,
   hasExactFrogIssueBinding,
   parseSinglePatchArtifact,
   publishDraftRepair,
@@ -72,6 +74,8 @@ import {
   renderRecoveredPullRequestBody,
   validatePatchText,
   validatePullRequestBody,
+  type FrogTaskIdentity,
+  type TerminalPrePullRequestFailureClass,
 } from "./frog-autofix-parent.ts";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -315,10 +319,41 @@ function committedBindingCount(root: string, issueNumber: number): number {
   return committedBindingPaths(root, issueNumber).length;
 }
 
-export interface CommittedFrictionTask {
+export interface CommittedFrictionTask extends FrogTaskIdentity {
   content: string;
-  path: string;
-  sha256: string;
+}
+
+class TaskAuthorityChangedError extends Error {
+  constructor() {
+    super("committed Frog task authority changed");
+    this.name = "TaskAuthorityChangedError";
+  }
+}
+
+export class TerminalPrePullRequestFailure extends Error {
+  readonly failureClass: TerminalPrePullRequestFailureClass;
+
+  constructor(failureClass: TerminalPrePullRequestFailureClass) {
+    super(`terminal pre-PR repair failure: ${failureClass}`);
+    this.name = "TerminalPrePullRequestFailure";
+    this.failureClass = failureClass;
+  }
+}
+
+export function terminalWorkerFailureClass(result: {
+  status: number;
+  timedOut: boolean;
+}): "worker-failed" | "worker-timeout" | null {
+  if (result.timedOut) return "worker-timeout";
+  return result.status === 0 ? null : "worker-failed";
+}
+
+export function requireImplementationCompletion(response: string): void {
+  if (!response.split(/\r?\n/u).some(
+    (line) => line.trim() === "IMPLEMENTATION_PATCH_COMPLETE",
+  )) {
+    throw new TerminalPrePullRequestFailure("implementation-output");
+  }
 }
 
 export function committedFrictionTask(
@@ -340,6 +375,35 @@ export function committedFrictionTask(
     throw new Error("committed Frog task blob has an invalid issue binding");
   }
   return { content: blob.stdout, path: taskPath, sha256: sha256(blob.stdout) };
+}
+
+export function committedFrictionTaskMatches(
+  root: string,
+  issueNumber: number,
+  expected: FrogTaskIdentity,
+): boolean {
+  const paths = committedBindingPaths(root, issueNumber);
+  if (paths.length !== 1 || paths[0] !== expected.path) return false;
+  const blob = runCommand("git", ["show", `origin/main:${expected.path}`], root);
+  if (blob.status !== 0) throw new Error(`git failed with status ${blob.status}`);
+  const needle = `issue: '${FROG_AUTOFIX_REPOSITORY}#${issueNumber}'`;
+  return Boolean(
+    blob.stdout
+    && Buffer.byteLength(blob.stdout) <= 64 * 1024
+    && blob.stdout.split(needle).length === 2
+    && sha256(blob.stdout) === expected.sha256
+  );
+}
+
+function requireCommittedFrictionTask(
+  root: string,
+  issueNumber: number,
+  expected: FrogTaskIdentity,
+): CommittedFrictionTask {
+  if (!committedFrictionTaskMatches(root, issueNumber, expected)) {
+    throw new TaskAuthorityChangedError();
+  }
+  return committedFrictionTask(root, issueNumber);
 }
 
 export interface DiscoveryDependencies {
@@ -613,7 +677,7 @@ export function advanceCleanPrimary(primary: string): {
   return { advanced: true, loadedRunnerChanged };
 }
 
-function verifyExactIssue(root: string, issueNumber: number) {
+function verifyIssueAuthority(root: string, issueNumber: number) {
   const issue = parseIssueList(
     `[${requireCommand(
       "gh",
@@ -629,14 +693,30 @@ function verifyExactIssue(root: string, issueNumber: number) {
       root,
     )}]`,
   )[0];
-  if (!issue || !isTrustedFrogIssue(issue) || committedBindingCount(root, issueNumber) !== 1) {
+  if (!issue || !isTrustedFrogIssue(issue)) {
     throw new Error("issue no longer satisfies the trusted Frog boundary");
   }
 }
 
-function refreshAndVerifyExactIssue(root: string, issueNumber: number) {
+function verifyExactIssue(root: string, issueNumber: number) {
+  verifyIssueAuthority(root, issueNumber);
+  if (committedBindingCount(root, issueNumber) !== 1) {
+    throw new Error("issue no longer satisfies the trusted Frog boundary");
+  }
+}
+
+function refreshAndVerifyExactIssue(
+  root: string,
+  issueNumber: number,
+  expectedTask?: FrogTaskIdentity,
+) {
   fetchMain(root);
-  verifyExactIssue(root, issueNumber);
+  verifyIssueAuthority(root, issueNumber);
+  if (expectedTask) {
+    requireCommittedFrictionTask(root, issueNumber, expectedTask);
+  } else if (committedBindingCount(root, issueNumber) !== 1) {
+    throw new Error("issue no longer satisfies the trusted Frog boundary");
+  }
 }
 
 function findBranchWorktree(root: string, branch: string): string | null {
@@ -1554,8 +1634,9 @@ export function materializeCommittedFrictionTask(
   primary: string,
   checkout: string,
   issueNumber: number,
+  expectedTask: FrogTaskIdentity,
 ): string[] {
-  const task = committedFrictionTask(primary, issueNumber);
+  const task = requireCommittedFrictionTask(primary, issueNumber, expectedTask);
   const taskRelative = "audit-packages/frog-autofix-task.md";
   writePrivateFileAtomically(
     path.join(checkout, taskRelative),
@@ -1592,6 +1673,7 @@ export function buildParentReviewArchive(
   transient: string,
   label: string,
   issueNumber: number,
+  task: FrogTaskIdentity,
 ) {
   const reviewRoot = path.join(transient, label);
   mkdirSync(reviewRoot, { mode: 0o700, recursive: true });
@@ -1608,6 +1690,7 @@ export function buildParentReviewArchive(
       primary,
       checkout,
       issueNumber,
+      task,
     );
     requireCommand(
       "bash",
@@ -1651,18 +1734,16 @@ export function reviewGptEntry(primary: string): string {
 }
 
 function runParentReview(options: {
-  head?: string;
   issueNumber: number;
-  kind?: "final" | "specialist";
   label: string;
   marker: string;
   primary: string;
   prompt: string;
+  task: FrogTaskIdentity;
   transient: string;
   worktree: string;
 }): {
   chatUrl: string;
-  outcome?: "findings" | "pass" | "retrospective-required";
   response: string;
 } {
   const { config, reviewRoot } = buildParentReviewArchive(
@@ -1671,6 +1752,7 @@ function runParentReview(options: {
     options.transient,
     options.label,
     options.issueNumber,
+    options.task,
   );
   const promptPath = path.join(reviewRoot, "prompt.md");
   const responsePath = path.join(reviewRoot, "response.md");
@@ -1694,41 +1776,32 @@ function runParentReview(options: {
     "--response-file",
     responsePath,
   ];
-  const output = requireCommand(
+  const review = runCommand(
     process.execPath,
     args,
     options.worktree,
     {},
     3 * 60 * 60 * 1_000,
   );
-  const response = readBoundedParentFile(responsePath, 1024 * 1024);
-  const chatUrl = extractSingleConversationUrl(output);
-  if (options.kind && options.head) {
-    const modelVerification = readBoundedParentFile(
-      `${responsePath}.model-verification.json`,
-      16 * 1024,
-    );
-    if (!reviewEvidenceIsValid({
-      expectedHash: sha256(response),
-      head: options.head,
-      issueNumber: options.issueNumber,
-      kind: options.kind,
-      modelVerification,
-      response,
-    })) {
-      throw new Error(`${options.kind} ReviewGPT evidence is invalid`);
+  let response: string;
+  try {
+    response = readBoundedParentFile(responsePath, 1024 * 1024);
+  } catch {
+    if (review.status !== 0) {
+      throw new Error(`ReviewGPT failed with status ${review.status}`);
     }
-    const outcome = reviewOutcome(response, options.kind);
-    if (outcome === "invalid") {
-      throw new Error(`${options.kind} ReviewGPT response is invalid`);
-    }
-    return { chatUrl, outcome, response };
+    throw new TerminalPrePullRequestFailure("implementation-output");
   }
-  if (!response.split(/\r?\n/u).some(
-    (line) => line.trim() === "IMPLEMENTATION_PATCH_COMPLETE",
-  )) {
-    throw new Error("implementation ReviewGPT response is incomplete");
+  requireCommittedFrictionTask(
+    options.primary,
+    options.issueNumber,
+    options.task,
+  );
+  if (review.status !== 0) {
+    throw new Error(`ReviewGPT failed with status ${review.status}`);
   }
+  requireImplementationCompletion(response);
+  const chatUrl = extractSingleConversationUrl(review.stdout);
   return { chatUrl, response };
 }
 
@@ -1803,6 +1876,7 @@ function runCanonicalPullRequestReview(options: {
   primary: string;
   prompt: string;
   pullRequest: number;
+  task: FrogTaskIdentity;
   transient: string;
   worktree: string;
 }): "findings" | "operator-handoff" | "pass" | "retrospective-required" {
@@ -1838,6 +1912,7 @@ function runCanonicalPullRequestReview(options: {
     options.primary,
     checkout,
     options.issueNumber,
+    options.task,
   );
   const marker = options.kind === "specialist"
     ? "SPECIALIST_REVIEW_COMPLETE"
@@ -1875,6 +1950,11 @@ function runCanonicalPullRequestReview(options: {
       checkout,
       environment,
       3 * 60 * 60 * 1_000,
+    );
+    requireCommittedFrictionTask(
+      options.primary,
+      options.issueNumber,
+      options.task,
     );
     postReviewDisposition = expectedPullRequestBodyDisposition({
       authenticatedOperator: recoveryCommands.authenticatedOperator(options.primary),
@@ -1921,9 +2001,11 @@ function downloadImplementationPatch(
   worktree: string,
   reviewRoot: string,
   chatUrl: string,
+  issueNumber: number,
+  task: FrogTaskIdentity,
 ): string {
   const outputDirectory = path.join(reviewRoot, "wake");
-  requireCommand(
+  const wake = runCommand(
     process.execPath,
     [
       reviewGptEntry(primary),
@@ -1953,11 +2035,33 @@ function downloadImplementationPatch(
     {},
     30 * 60 * 1_000,
   );
-  const status = readBoundedParentFile(
-    path.join(outputDirectory, "status.json"),
-    64 * 1024,
-  );
-  return parseSinglePatchArtifact(status, outputDirectory);
+  requireCommittedFrictionTask(primary, issueNumber, task);
+  const statusPath = path.join(outputDirectory, "status.json");
+  if (wake.status !== 0) {
+    throw new Error(`ReviewGPT wake failed with status ${wake.status}`);
+  }
+  try {
+    const status = readBoundedParentFile(
+      statusPath,
+      64 * 1024,
+    );
+    return parseSinglePatchArtifact(status, outputDirectory);
+  } catch {
+    throw new TerminalPrePullRequestFailure("implementation-patch");
+  }
+}
+
+export function applyImplementationPatch(worktree: string, patchPath: string) {
+  try {
+    const patch = readBoundedParentFile(patchPath, 2 * 1024 * 1024);
+    validatePatchText(patch);
+    requireCommand("git", ["apply", "--stat", patchPath], worktree);
+    requireCommand("git", ["apply", "--check", patchPath], worktree);
+    requireCommand("git", ["apply", patchPath], worktree);
+  } catch (error) {
+    if (error instanceof TaskAuthorityChangedError) throw error;
+    throw new TerminalPrePullRequestFailure("implementation-patch");
+  }
 }
 
 function sha256(content: string): string {
@@ -1972,7 +2076,11 @@ function runParentVerification(worktree: string) {
   requireCommand("git", ["diff", "--check"], worktree);
 }
 
-function validatedWorkerPrBody(worktree: string, issueNumber: number): string {
+function validatedWorkerPrBody(
+  worktree: string,
+  issueNumber: number,
+  allowParentMetadata = true,
+): string {
   const body = readBoundedParentFile(
     path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH),
     32 * 1024,
@@ -1983,7 +2091,23 @@ function validatedWorkerPrBody(worktree: string, issueNumber: number): string {
     homedir(),
     userInfo().username,
   );
+  if (
+    !allowParentMetadata
+    && (extractFrogTaskIdentity(body) || extractTerminalPrePullRequestFailure(body))
+  ) {
+    throw new Error("worker PR body contains parent-owned metadata");
+  }
   return body;
+}
+
+function requiredBodyTaskIdentity(body: string): FrogTaskIdentity {
+  try {
+    const task = extractFrogTaskIdentity(body);
+    if (task) return task;
+  } catch {
+    // Missing or malformed parent provenance cannot authorize a resumed repair.
+  }
+  throw new TaskAuthorityChangedError();
 }
 
 export function recoverablePullRequestBody(
@@ -2035,6 +2159,7 @@ function publishPullRequest(
   worktree: string,
   branch: string,
   issueNumber: number,
+  expectedTask?: FrogTaskIdentity,
 ): number {
   const head = requireCommand("git", ["rev-parse", "HEAD"], worktree);
   return publishDraftRepair(head, {
@@ -2098,6 +2223,7 @@ function publishPullRequest(
     refreshAndVerifyIssue: () => refreshAndVerifyExactIssue(
       primary,
       issueNumber,
+      expectedTask,
     ),
   });
 }
@@ -2123,6 +2249,301 @@ function updateParentPullRequestBody(
     ],
     primary,
   );
+}
+
+export function renderTerminalRepairHandoffBody(options: {
+  failure?: TerminalPrePullRequestFailureClass;
+  firstHead?: string;
+  head: string;
+  issueNumber: number;
+  task?: FrogTaskIdentity;
+}): string {
+  return bodyWithParentMetadata(
+    renderRecoveredPullRequestBody(options.issueNumber),
+    {
+      firstHead: options.firstHead,
+      handoff: "review-findings",
+      handoffHead: options.head,
+      task: options.task,
+      terminalFailure: options.failure,
+    },
+  );
+}
+
+export function createEmptyRepairHandoffCommit(
+  worktree: string,
+  issueNumber: number,
+): string {
+  requireCommand("git", ["reset", "--hard", "origin/main"], worktree);
+  requireCommand("git", ["clean", "-ffdx"], worktree);
+  if (requireCommand("git", ["status", "--porcelain"], worktree)) {
+    throw new Error("terminal repair handoff did not recover a clean worktree");
+  }
+  const neutralIdentity: NodeJS.ProcessEnv = {
+    GIT_AUTHOR_EMAIL: "frog-autofix@users.noreply.github.com",
+    GIT_AUTHOR_NAME: "Frog Autofix",
+    GIT_COMMITTER_EMAIL: "frog-autofix@users.noreply.github.com",
+    GIT_COMMITTER_NAME: "Frog Autofix",
+  };
+  requireCommand(
+    "git",
+    [
+      "-c",
+      "commit.gpgSign=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "--allow-empty",
+      "--no-verify",
+      "-m",
+      `Hand off Frog issue #${issueNumber}`,
+    ],
+    worktree,
+    neutralIdentity,
+  );
+  const head = requireCommand("git", ["rev-parse", "HEAD"], worktree);
+  const handoffTree = requireCommand("git", ["rev-parse", "HEAD^{tree}"], worktree);
+  const mainTree = requireCommand(
+    "git",
+    ["rev-parse", "origin/main^{tree}"],
+    worktree,
+  );
+  if (
+    handoffTree !== mainTree
+    || requireCommand("git", ["status", "--porcelain"], worktree)
+  ) {
+    throw new Error("terminal repair handoff commit contains candidate bytes");
+  }
+  return head;
+}
+
+function remoteIssueBranchHead(worktree: string, branch: string): string | null {
+  const result = runCommand(
+    "git",
+    ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`],
+    worktree,
+  );
+  if (result.status === 2) return null;
+  if (result.status !== 0) throw new Error(`git failed with status ${result.status}`);
+  const lines = result.stdout.trim().split("\n").filter(Boolean);
+  const match = /^([0-9a-f]{40})\trefs\/heads\/(.+)$/u.exec(lines[0] ?? "");
+  if (lines.length !== 1 || !match || match[2] !== branch) {
+    throw new Error("remote issue branch lookup was ambiguous");
+  }
+  return match[1] ?? null;
+}
+
+function persistRepairHandoff(options: {
+  branch: string;
+  failure?: TerminalPrePullRequestFailureClass;
+  issueNumber: number;
+  primary: string;
+  recoveredExistingBody: string | null;
+  task?: FrogTaskIdentity;
+  worktree: string;
+}): number {
+  const operator = parseAuthenticatedGitHubOperator(
+    recoveryCommands.authenticatedOperator(options.primary),
+  );
+  const existing = branchOpenPullRequest(
+    options.primary,
+    options.branch,
+    options.issueNumber,
+    recoveryCommands,
+  );
+
+  if (existing) {
+    fetchMain(options.primary);
+    verifyIssueAuthority(options.primary, options.issueNumber);
+    const head = requireCommand("git", ["rev-parse", "HEAD"], options.worktree);
+    if (
+      existing.headRefOid !== head
+      || !isParentOwnedPullRequest(existing, operator, options.branch)
+    ) {
+      throw new Error("terminal repair handoff lost exact pull request authority");
+    }
+    let firstHead: string | undefined;
+    if (options.recoveredExistingBody) {
+      try {
+        firstHead = extractFirstReviewedHead(options.recoveredExistingBody)
+          ?? undefined;
+      } catch {
+        // The fixed handoff body does not carry ambiguous review provenance.
+      }
+    }
+    const body = renderTerminalRepairHandoffBody({
+      failure: options.failure,
+      firstHead,
+      head,
+      issueNumber: options.issueNumber,
+      task: options.task,
+    });
+    validatePullRequestBody(
+      body,
+      options.issueNumber,
+      homedir(),
+      userInfo().username,
+    );
+    const current = branchOpenPullRequest(
+      options.primary,
+      options.branch,
+      options.issueNumber,
+      recoveryCommands,
+    );
+    if (!current || !samePullRequestProjection(current, existing)) {
+      throw new Error("pull request authority changed before terminal handoff");
+    }
+    updateParentPullRequestBody(
+      options.primary,
+      options.worktree,
+      existing.number,
+      body,
+    );
+    const record = branchOpenPullRequest(
+      options.primary,
+      options.branch,
+      options.issueNumber,
+      recoveryCommands,
+    );
+    assertExpectedPullRequestBody({
+      authenticatedOperator: operator,
+      branch: options.branch,
+      expectedBody: body,
+      head,
+      issueNumber: options.issueNumber,
+      pullRequest: existing.number,
+      record,
+    });
+    if (
+      !record
+      || bodyHandoff(record.body, head) !== "review-findings"
+      || !completedHandoffIssueNumbers([record], operator).has(options.issueNumber)
+    ) {
+      throw new Error("terminal repair handoff did not persist");
+    }
+    return existing.number;
+  }
+
+  fetchMain(options.primary);
+  verifyIssueAuthority(options.primary, options.issueNumber);
+  const priorRemoteHead = remoteIssueBranchHead(options.worktree, options.branch);
+  const head = createEmptyRepairHandoffCommit(
+    options.worktree,
+    options.issueNumber,
+  );
+  const body = renderTerminalRepairHandoffBody({
+    failure: options.failure,
+    firstHead: head,
+    head,
+    issueNumber: options.issueNumber,
+    task: options.task,
+  });
+  validatePullRequestBody(
+    body,
+    options.issueNumber,
+    homedir(),
+    userInfo().username,
+  );
+  writePrivateFileAtomically(
+    path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH),
+    body,
+    0o600,
+  );
+  const pullRequest = publishDraftRepair(head, {
+    createPullRequest: () => requireCommand(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--repo",
+        FROG_AUTOFIX_REPOSITORY,
+        "--base",
+        "main",
+        "--head",
+        options.branch,
+        "--draft",
+        "--title",
+        `Hand off Frog issue #${options.issueNumber}`,
+        "--body-file",
+        path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH),
+      ],
+      options.primary,
+    ),
+    currentOpenPullRequest: () => {
+      const current = branchOpenPullRequest(
+        options.primary,
+        options.branch,
+        options.issueNumber,
+        recoveryCommands,
+      );
+      return current
+        ? { headRefOid: current.headRefOid, number: current.number }
+        : null;
+    },
+    editPullRequest: (number) => updateParentPullRequestBody(
+      options.primary,
+      options.worktree,
+      number,
+      body,
+    ),
+    pushExactHead: () => requireCommand(
+      "git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "push",
+        "--set-upstream",
+        ...(priorRemoteHead
+          ? [`--force-with-lease=refs/heads/${options.branch}:${priorRemoteHead}`]
+          : []),
+        "origin",
+        `${head}:refs/heads/${options.branch}`,
+      ],
+      options.worktree,
+      {},
+      30 * 60 * 1_000,
+    ),
+    refreshAndVerifyIssue: () => {
+      fetchMain(options.primary);
+      verifyIssueAuthority(options.primary, options.issueNumber);
+      const handoffTree = requireCommand(
+        "git",
+        ["rev-parse", `${head}^{tree}`],
+        options.worktree,
+      );
+      const mainTree = requireCommand(
+        "git",
+        ["rev-parse", "origin/main^{tree}"],
+        options.worktree,
+      );
+      if (handoffTree !== mainTree) {
+        throw new Error("default branch changed during terminal repair handoff");
+      }
+    },
+  });
+  const record = branchOpenPullRequest(
+    options.primary,
+    options.branch,
+    options.issueNumber,
+    recoveryCommands,
+  );
+  assertExpectedPullRequestBody({
+    authenticatedOperator: operator,
+    branch: options.branch,
+    expectedBody: body,
+    head,
+    issueNumber: options.issueNumber,
+    pullRequest,
+    record,
+  });
+  if (
+    !record
+    || bodyHandoff(record.body, head) !== "review-findings"
+    || !completedHandoffIssueNumbers([record], operator).has(options.issueNumber)
+  ) {
+    throw new Error("terminal repair handoff did not persist");
+  }
+  return pullRequest;
 }
 
 function persistClosedPullRequestHandoff(
@@ -2177,13 +2598,22 @@ export function bodyWithParentMetadata(
     handoff?: "product-runtime" | "review-findings";
     handoffHead?: string;
     specialistHead?: string;
+    task?: FrogTaskIdentity;
+    terminalFailure?: TerminalPrePullRequestFailureClass;
   },
 ): string {
+  const task = metadata.task ?? extractFrogTaskIdentity(body) ?? undefined;
+  const terminalFailure = metadata.terminalFailure
+    ?? extractTerminalPrePullRequestFailure(body)
+    ?? undefined;
   const prefixes = [
     "ReviewGPT first-reviewed head:",
     "Frog autofix specialist review:",
     "Frog autofix final review:",
     "Frog autofix handoff:",
+    "Frog autofix task path:",
+    "Frog autofix task sha256:",
+    "Frog autofix terminal failure:",
   ];
   const lines = body
     .split(/\r?\n/u)
@@ -2206,6 +2636,19 @@ export function bodyWithParentMetadata(
       ?? metadata.specialistHead;
     if (!head) throw new Error("handoff metadata requires a reviewed head");
     additions.push(`Frog autofix handoff: ${metadata.handoff} at ${head}`);
+  }
+  if (task) {
+    if (
+      !/^\.agents\/friction-log\/[^/\r\n]+\/friction\.md$/u.test(task.path)
+      || !/^[0-9a-f]{64}$/u.test(task.sha256)
+    ) {
+      throw new Error("Frog task metadata is invalid");
+    }
+    additions.push(`Frog autofix task path: ${task.path}`);
+    additions.push(`Frog autofix task sha256: ${task.sha256}`);
+  }
+  if (terminalFailure) {
+    additions.push(`Frog autofix terminal failure: ${terminalFailure}`);
   }
   return `${lines}\n\n${additions.join("\n")}\n`;
 }
@@ -2367,6 +2810,7 @@ async function runEditOnlyCycle(options: {
   mode: "implement" | "resume";
   phase: string;
   primary: string;
+  task: FrogTaskIdentity;
   transient: string;
   worktree: string;
 }) {
@@ -2396,22 +2840,45 @@ async function runEditOnlyCycle(options: {
     options.lock.setWorker,
   );
   if (existsSync(outputDirectory)) rmSync(outputDirectory, { force: true, recursive: true });
-  if (result.timedOut) {
-    recordEvent("worker_timed_out", options.issueNumber, result.status);
-    throw new Error("edit-only worker exceeded its bounded runtime");
+  const workerFailure = terminalWorkerFailureClass(result);
+  if (workerFailure) {
+    recordEvent(
+      workerFailure === "worker-timeout" ? "worker_timed_out" : "worker_failed",
+      options.issueNumber,
+      result.status,
+    );
+    throw new TerminalPrePullRequestFailure(workerFailure);
   }
-  if (result.status !== 0) {
-    recordEvent("worker_failed", options.issueNumber, result.status);
-    throw new Error(`edit-only worker failed with status ${result.status}`);
+  try {
+    requireCommittedFrictionTask(
+      options.primary,
+      options.issueNumber,
+      options.task,
+    );
+    const workerBody = validatedWorkerPrBody(
+      options.worktree,
+      options.issueNumber,
+      false,
+    );
+    runParentVerification(options.worktree);
+    closeRepairPlan(options.worktree, options.issueNumber, phase);
+    writePrivateFileAtomically(
+      path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH),
+      bodyWithParentMetadata(workerBody, { task: options.task }),
+      0o600,
+    );
+    commitParentOwnedChanges(
+      options.primary,
+      options.worktree,
+      options.issueNumber,
+    );
+  } catch (error) {
+    if (
+      error instanceof TaskAuthorityChangedError
+      || error instanceof TerminalPrePullRequestFailure
+    ) throw error;
+    throw new TerminalPrePullRequestFailure("worker-output");
   }
-  validatedWorkerPrBody(options.worktree, options.issueNumber);
-  runParentVerification(options.worktree);
-  closeRepairPlan(options.worktree, options.issueNumber, phase);
-  commitParentOwnedChanges(
-    options.primary,
-    options.worktree,
-    options.issueNumber,
-  );
 }
 
 function issueIsClosed(root: string, issueNumber: number): boolean {
@@ -2669,7 +3136,8 @@ function finalizeReviewedRepair(
   pullRequest: number,
   head: string,
   body: string,
-): "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
+  task: FrogTaskIdentity,
+): "awaiting-human-authority" | "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
   const operator = parseAuthenticatedGitHubOperator(
     recoveryCommands.authenticatedOperator(primary),
   );
@@ -2679,6 +3147,8 @@ function finalizeReviewedRepair(
     issueNumber,
     pullRequest,
     head,
+    taskPath: task.path,
+    taskSha256: task.sha256,
   }, {
     autoMergeAllowed: (identity) => exactHeadIsLocalAgentOnly(
       primary,
@@ -2748,13 +3218,18 @@ function finalizeReviewedRepair(
       recoveryCommands,
       identity,
     ),
-    refreshAndVerifyIssue: () => refreshAndVerifyExactIssue(
-      primary,
-      issueNumber,
-    ),
+    refreshAndVerifyIssue: () => {
+      fetchMain(primary);
+      verifyIssueAuthority(primary, issueNumber);
+    },
     requiredChecksPass: (identity) => requiredPullRequestChecksPass(
       primary,
       identity.pullRequest,
+    ),
+    taskAuthorityMatches: (identity) => committedFrictionTaskMatches(
+      primary,
+      identity.issueNumber,
+      { path: identity.taskPath, sha256: identity.taskSha256 },
     ),
   });
 }
@@ -2764,6 +3239,7 @@ async function reviewPublishAndFinalize(options: {
   issueNumber: number;
   primary: string;
   recoveredExistingBody: string | null;
+  task: FrogTaskIdentity;
   transient: string;
   worktree: string;
 }): Promise<"awaiting-human" | "merged"> {
@@ -2807,6 +3283,7 @@ async function reviewPublishAndFinalize(options: {
     handoff: handoff ?? undefined,
     handoffHead: handoff ? head : undefined,
     specialistHead: specialistPassed ? head : undefined,
+    task: options.task,
   });
   writePrivateFileAtomically(
     path.join(options.worktree, FROG_AUTOFIX_PR_BODY_PATH),
@@ -2818,9 +3295,15 @@ async function reviewPublishAndFinalize(options: {
     options.worktree,
     options.branch,
     options.issueNumber,
+    options.task,
   );
 
   const persistMetadata = (): boolean => {
+    requireCommittedFrictionTask(
+      options.primary,
+      options.issueNumber,
+      options.task,
+    );
     const expectedBody = body;
     const disposition = expectedPullRequestBodyDisposition({
       authenticatedOperator: recoveryCommands.authenticatedOperator(options.primary),
@@ -2843,6 +3326,7 @@ async function reviewPublishAndFinalize(options: {
       handoff: handoff ?? undefined,
       handoffHead: handoff ? head : undefined,
       specialistHead: specialistPassed ? head : undefined,
+      task: options.task,
     });
     updateParentPullRequestBody(
       options.primary,
@@ -2888,6 +3372,7 @@ async function reviewPublishAndFinalize(options: {
       primary: options.primary,
       prompt: `Review PR #${pullRequest} for the repair bound to Frog issue #${options.issueNumber} at exact head ${head}. Apply every preliminary lens declared in the PR body. Include #${options.issueNumber} and ${head.slice(0, 12)} in the response, then end with SPECIALIST_REVIEW_COMPLETE and exactly one SPECIALIST_OUTCOME marker.`,
       pullRequest,
+      task: options.task,
       transient: options.transient,
       worktree: options.worktree,
     });
@@ -2911,6 +3396,7 @@ async function reviewPublishAndFinalize(options: {
       primary: options.primary,
       prompt: `Review PR #${pullRequest} for the repair bound to Frog issue #${options.issueNumber} at exact head ${head}. The preliminary specialist gate passed this same head. Perform final substantive round 1 from the canonical full snapshot. Include #${options.issueNumber} and ${head.slice(0, 12)} in the response, then end with REVIEW_COMPLETE and exactly one ROUND_OUTCOME marker.`,
       pullRequest,
+      task: options.task,
       transient: options.transient,
       worktree: options.worktree,
     });
@@ -2989,7 +3475,11 @@ async function reviewPublishAndFinalize(options: {
     pullRequest,
     head,
     body,
+    options.task,
   );
+  if (result === "awaiting-human-authority") {
+    throw new TaskAuthorityChangedError();
+  }
   if (result === "awaiting-human-conflict") {
     handoff = "review-findings";
     if (!persistMetadata()) return "awaiting-human";
@@ -3050,6 +3540,7 @@ async function runOnce() {
       return;
     }
     verifyExactIssue(primary, issue.number);
+    const admittedTask = committedFrictionTask(primary, issue.number);
     const branch = `${FROG_AUTOFIX_BRANCH_PREFIX}${issue.number}`;
     const repairPullRequests = branchPullRequests(
       primary,
@@ -3114,6 +3605,31 @@ async function runOnce() {
         existingPullRequest,
       )
       : null;
+    const localBodyPath = path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH);
+    if (
+      !existingPullRequest
+      && workerMode === "resume"
+      && existsSync(localBodyPath)
+    ) {
+      const localBody = validatedWorkerPrBody(worktree, issue.number);
+      const currentHead = requireCommand("git", ["rev-parse", "HEAD"], worktree);
+      if (bodyHandoff(localBody, currentHead)) {
+        persistRepairHandoff({
+          branch,
+          failure: extractTerminalPrePullRequestFailure(localBody) ?? undefined,
+          issueNumber: issue.number,
+          primary,
+          recoveredExistingBody: localBody,
+          task: extractFrogTaskIdentity(localBody) ?? undefined,
+          worktree,
+        });
+        recordEvent("awaiting_human_merge", issue.number);
+        console.log(
+          "Repair reached a durable human-review handoff; continuing with later issues on the next run.",
+        );
+        return;
+      }
+    }
     const authenticatedOperator = parseAuthenticatedGitHubOperator(
       recoveryCommands.authenticatedOperator(primary),
     );
@@ -3170,7 +3686,26 @@ async function runOnce() {
     const transientRoot = path.join(supportRoot, "transient");
     mkdirSync(transientRoot, { mode: 0o700, recursive: true });
     const transient = mkdtempSync(path.join(transientRoot, "run-"));
+    let repairTaskIdentity: FrogTaskIdentity | undefined;
     try {
+      if (workerMode === "implement") {
+        repairTaskIdentity = admittedTask;
+      } else {
+        let provenanceBody: string;
+        try {
+          provenanceBody = recoveredExistingBody
+            ?? validatedWorkerPrBody(worktree, issue.number);
+        } catch {
+          throw new TaskAuthorityChangedError();
+        }
+        repairTaskIdentity = requiredBodyTaskIdentity(provenanceBody);
+      }
+      const repairTask = requireCommittedFrictionTask(
+        primary,
+        issue.number,
+        repairTaskIdentity,
+      );
+
       if (workerMode === "implement") {
         ensureWorkerTooling(worktree, true);
         const implementation = runParentReview({
@@ -3179,6 +3714,7 @@ async function runOnce() {
           marker: "IMPLEMENTATION_PATCH_COMPLETE",
           primary,
           prompt: renderImplementationPrompt(issue.number),
+          task: repairTask,
           transient,
           worktree,
         });
@@ -3188,12 +3724,11 @@ async function runOnce() {
           worktree,
           reviewRoot,
           implementation.chatUrl,
+          issue.number,
+          repairTask,
         );
-        const patch = readBoundedParentFile(patchPath, 2 * 1024 * 1024);
-        validatePatchText(patch);
-        requireCommand("git", ["apply", "--stat", patchPath], worktree);
-        requireCommand("git", ["apply", "--check", patchPath], worktree);
-        requireCommand("git", ["apply", patchPath], worktree);
+        applyImplementationPatch(worktree, patchPath);
+        requireCommittedFrictionTask(primary, issue.number, repairTask);
       }
 
       const cleanExistingResume = Boolean(
@@ -3220,6 +3755,7 @@ async function runOnce() {
             mode: workerMode,
             phase: workerMode === "implement" ? "implementation" : "resume",
             primary,
+            task: repairTask,
             transient,
             worktree,
           });
@@ -3230,6 +3766,7 @@ async function runOnce() {
         issueNumber: issue.number,
         primary,
         recoveredExistingBody,
+        task: repairTask,
         transient,
         worktree,
       });
@@ -3243,6 +3780,29 @@ async function runOnce() {
       recordEvent("repair_closed_issue", issue.number);
       retireMergedWorktree(primary, worktree, branch, issue.number);
       return;
+    } catch (error) {
+      if (
+        error instanceof TaskAuthorityChangedError
+        || error instanceof TerminalPrePullRequestFailure
+      ) {
+        persistRepairHandoff({
+          branch,
+          failure: error instanceof TerminalPrePullRequestFailure
+            ? error.failureClass
+            : undefined,
+          issueNumber: issue.number,
+          primary,
+          recoveredExistingBody,
+          task: repairTaskIdentity,
+          worktree,
+        });
+        recordEvent("awaiting_human_merge", issue.number);
+        console.log(
+          "Repair reached a durable human-review handoff; continuing with later issues on the next run.",
+        );
+        return;
+      }
+      throw error;
     } finally {
       if (existsSync(transient)) {
         safeRemoveTransientDirectory(transientRoot, transient);

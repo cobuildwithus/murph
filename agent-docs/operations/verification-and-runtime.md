@@ -636,6 +636,11 @@ remote-only PASS recovery, fixed-body handoff when no trusted baseline remains,
 implementation prompts whose archives contain only the exact immutable
 `origin/main` friction task blob and path/digest manifest, and do not request or
 use a mutable GitHub-content connector,
+task edit/move/delete/replacement/binding-drift rejection after long waits and
+at both merge fences, trusted remote-no-PR task provenance, terminal missing or
+rejected patch/response and edit-only worker outcomes that publish a fixed-body
+empty-tree handoff without candidate bytes or a second implementation, plus
+retryable infrastructure separation and next-issue advancement,
 100-plus-record
 cursor pagination before parent cardinality, clean post-commit/pre-first-push
 resume without a second implementation request or child, exact parent-local

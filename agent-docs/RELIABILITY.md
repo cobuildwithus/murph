@@ -215,10 +215,16 @@ Last verified: 2026-08-12
   The runner sends `SIGTERM`, then a bounded `SIGKILL` only to a group it created
   and still owns, and retains cleanup/lock ownership until the group—not merely
   its leader—disappears. ReviewGPT and CI instructions impose their own
-  three-hour waits; an individual Codex child is bounded to two hours. Timeout,
-  browser unavailability, missing patch, ambiguous worktree state, pending or
-  indeterminate CI, and failed issue closure leave recoverable GitHub/worktree
-  state for a later pass. Definitive failed/cancelled required checks and a
+  three-hour waits; an individual Codex child is bounded to two hours.
+  ReviewGPT, browser, command, or GitHub infrastructure unavailability,
+  ambiguous worktree state, pending or indeterminate CI, and failed issue
+  closure leave recoverable GitHub/worktree state for a later pass. Missing or
+  rejected implementation output/patches and edit-only child timeout, nonzero
+  exit, or invalid output are terminal for that candidate. The parent replaces
+  any pre-PR candidate tree with a neutral empty commit equal to `origin/main`,
+  publishes the fixed draft body plus exact-head review-findings handoff, and
+  never requests a second implementation. Definitive failed/cancelled required
+  checks and a
   current-base conflict instead publish the existing review-findings handoff so
   the oldest issue cannot pin later work.
 - Both implementation prompts require an explicit foul-play assessment before
@@ -234,8 +240,9 @@ Last verified: 2026-08-12
   boundaries stops the run rather than becoming PR state.
   A successful child leaves only uncommitted code/docs/tests and a private PR
   draft. The parent applies implementation patches, closes plans, commits,
-  binds the local body to the immutable review baseline, refreshes `origin/main`
-  and exact issue authority immediately before push, and repeats that refresh
+  binds the local body to the immutable review baseline plus the exact admitted
+  friction-task path/digest, refreshes `origin/main` and exact issue/task
+  authority immediately before push, and repeats that refresh
   immediately before creating a new draft PR. It then runs the canonical
   preliminary and final ReviewGPT gates from a trusted parent checkout. Each
   archive copies the validated parent-local body, while one current PR
@@ -257,8 +264,11 @@ Last verified: 2026-08-12
   trusted baseline without a handoff restores presentation and reruns review; a
   newer remote descendant preserves the older baseline and receives the
   existing review-findings handoff, while missing trusted baseline evidence
-  receives the fixed-body handoff without autonomous rebaselining. Before merge
-  it revalidates live issue authority, PR head, exact parent body digest/editor/
+  receives the fixed-body handoff without autonomous rebaselining. The same
+  task path/digest must still resolve to the sole issue binding after every
+  long model wait and at both final merge fences; edit, move, replacement,
+  deletion, or binding drift produces the fixed human handoff. Before merge it
+  revalidates live issue authority, PR head, exact parent body digest/editor/
   issue binding, required checks, current-base mergeability, and both old and
   new paths of any rename or copy. Only the enumerated Frog autofix script files,
   semantic package and architecture exceptions, and one canonical
