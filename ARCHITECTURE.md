@@ -1797,10 +1797,29 @@ boundary, not a device-sync lifecycle boundary. `POST
 time zone, delegates canonical identity creation/recovery, historical launch
 consent, untouched-member starter-usage enrollment, and active-access assertion
 to the existing companion member-access owner, and returns only the fixed
-non-identifying success response. This account-only caller suppresses the
-ordinary signup welcome while preserving the canonical starter activation and
-internal `member.activated` fact, so admission neither assigns a Linq home line
-nor queues or emails a welcome. On failure it preserves the stable native
+non-identifying success response. A consented fresh companion activation with a
+verified phone may enter the canonical signup-welcome path. Exact-member
+binding, signup idempotency, home-line health, and proactive capacity remain
+owned by the existing starter enrollment, line reservation, and welcome
+services. Exhausted proactive capacity does not block activation: Web still
+assigns an eligible home line without a proactive welcome, preserving the
+inbound-first messaging path. If no line is currently assignable, activation
+still succeeds without assigning a line. A later provider-attested direct
+message from the exact active member may bind the contacted managed line when
+the existing reply-egress policy permits it, even when that line is in the
+at-risk or delivery-warning posture that excludes proactive outreach. The
+binding and encrypted conversation mailbox append remain one Web-owned
+transaction; unmanaged, ambiguous, disabled, flagged, critical, unhealthy, or
+structurally unavailable recipient lines cannot establish this exact-line
+authority, and ordinary fallback selection remains fail-closed when no eligible
+line exists. Successful welcome delivery seeds the existing finite
+unfinished-onboarding automation, with at most one low-pressure opportunity on
+each of the next three local days and the existing completion, decline,
+response, suspension, and expiry stops. The companion path does not send the
+separate signup welcome email. A committed activation whose runtime wake is not
+accepted returns a retryable admission result; replay re-signals only that
+member's exact still-pending Starter activation mailbox item. On failure it
+preserves the stable native
 login, consent, access, suspension, and alternate-sign-in identity-conflict
 outcomes. Every other retryable owner failure becomes
 `COMPANION_ADMISSION_RETRYABLE`, while every remaining terminal setup failure
