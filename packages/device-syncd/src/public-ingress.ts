@@ -1398,7 +1398,6 @@ export class DeviceSyncPublicIngress {
     // Provider registration remains live authority. The prepared event freezes
     // only the authenticated envelope interpretation, never whether Murph
     // still recognizes and permits this provider at dequeue.
-    const provider = this.requireProvider(prepared.provider);
     const now = prepared.receivedAt;
     const traceId = prepared.traceId;
     const claimToken = generateStateCode();
@@ -1409,7 +1408,7 @@ export class DeviceSyncPublicIngress {
     });
 
     const claimWebhookTrace = () => this.store.claimWebhookTrace({
-      provider: provider.provider,
+      provider: prepared.provider,
       traceId,
       claimedAt,
       claimToken,
@@ -1427,7 +1426,7 @@ export class DeviceSyncPublicIngress {
       return {
         accepted: true,
         duplicate: true,
-        provider: provider.provider,
+        provider: prepared.provider,
         eventType: webhook.eventType,
         traceId,
       };
@@ -1440,6 +1439,21 @@ export class DeviceSyncPublicIngress {
         retryable: true,
         httpStatus: 503,
       });
+    }
+
+    // Queue delay can outlive a provider registration. The prepared meaning is
+    // already authenticated, so a removed provider is a terminal authority
+    // loss rather than a reason to retain encrypted work forever.
+    const provider = this.registry.get(prepared.provider);
+    if (!provider) {
+      await completeClaimedWebhookTrace(this.store, prepared.provider, traceId, claimToken);
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: prepared.provider,
+        eventType: webhook.eventType,
+        traceId,
+      };
     }
 
     let account;
@@ -1561,6 +1575,11 @@ export class DeviceSyncPublicIngress {
               || !("sourceAdmissionCommitted" in sourceObservation)
               || sourceObservation.sourceAdmissionCommitted !== true
             )
+            && !(
+              sourceObservation
+              && "sourceAdmissionDeferred" in sourceObservation
+              && sourceObservation.sourceAdmissionDeferred === true
+            )
           ) {
             throw deviceSyncError({
               code: "WEBHOOK_SOURCE_NOT_READY",
@@ -1657,6 +1676,7 @@ export class DeviceSyncPublicIngress {
     }
 
     const onWebhookAccepted = this.hooks.onWebhookAccepted;
+    let receiptStateOwned = false;
 
     try {
       const acceptedResult = await onWebhookAccepted?.({
@@ -1667,6 +1687,7 @@ export class DeviceSyncPublicIngress {
         provider,
         now,
       });
+      receiptStateOwned = acceptedResult?.receiptStateOwned === true;
 
       if (!onWebhookAccepted) {
         await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
@@ -1684,7 +1705,9 @@ export class DeviceSyncPublicIngress {
     }
 
     try {
-      await this.store.markWebhookReceived(account.id, now);
+      if (!receiptStateOwned) {
+        await this.store.markWebhookReceived(account.id, now);
+      }
     } catch (error) {
       this.logger.warn?.("Failed to record last webhook receipt time after durable acceptance.", {
         provider: provider.provider,
@@ -1701,7 +1724,7 @@ export class DeviceSyncPublicIngress {
     // arrival against the source the provider named. Like the receipt stamp,
     // this runs after durable acceptance and never fails the webhook.
     const dataSourceProviderSlug = webhook.dataSourceProviderSlug ?? null;
-    if (dataSourceProviderSlug) {
+    if (dataSourceProviderSlug && !receiptStateOwned) {
       try {
         await this.store.markConnectionSourceDataReceived({
           connectionId: account.id,

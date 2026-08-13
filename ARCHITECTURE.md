@@ -2287,7 +2287,16 @@ sole trace, consent, connection-lifecycle, dirty-state, mailbox, and device-sync
 control owner. This Queue transport is separate from hosted runtime wake
 execution and is never a second device-sync authority. Dequeue revalidates
 current provider registration, connection epoch/status, consent, source
-lifecycle, and provider-application authority. Every emitted prepared-event
+lifecycle, and provider-application authority before delayed provider access.
+Apple Health registration observation uses two passes through that existing
+admission owner: the first returns an ephemeral exact connection, source, and
+stored-account proof; provider access runs with no database transaction open;
+the second revalidates that proof and atomically commits source activation,
+receipt state, dirty work, mailbox/signal effects, and trace completion.
+Revoked consent, removed provider registration, a private-application rebind,
+or a superseded connection/source epoch terminally completes only the trace.
+An unresolved canonical read, credential change across provider access, or
+provider registration not yet active stays retryable. Every emitted prepared-event
 schema decoder remains readable until all main-Queue and DLQ retention plus
 redrive exposure to that schema is proven drained, matching the decrypt-only
 transport-key retirement floor.

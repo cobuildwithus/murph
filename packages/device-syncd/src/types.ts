@@ -633,7 +633,8 @@ export interface DeviceSyncPublicIngressConnectionEstablishedResult {
 
 export type DeviceSyncPublicIngressConnectionSourceObservedResult =
   | { sourceAdmissionCommitted: true }
-  | { sourceRegistrationRemoved: true };
+  | { sourceRegistrationRemoved: true }
+  | { sourceAdmissionDeferred: true };
 
 export interface DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput {
   account: PublicDeviceSyncAccount;
@@ -663,6 +664,8 @@ export interface DeviceSyncPublicIngressWebhookAcceptedInput {
 
 export interface DeviceSyncPublicIngressWebhookAcceptedResult {
   webhookTraceCompleted: true;
+  /** The runtime owned receipt/source disposition inside its authority boundary. */
+  receiptStateOwned?: true;
 }
 
 export interface DeviceSyncPublicIngressWebhookAlreadySatisfiedInput {

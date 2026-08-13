@@ -56,7 +56,6 @@ import {
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
   prepareHostedDeviceSyncConnectionSourceStart,
-  reconcileHostedDeviceSyncConnectionSourceRegistration,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
@@ -102,6 +101,17 @@ export class HostedDeviceSyncPublicIngressService {
       registry: input.registry,
       store: input.store,
       hooks: {
+        // Hosted source lifecycle is admitted under the same consent/app/
+        // connection transaction as receipt, dirty state, and trace completion.
+        onConnectionSourceObserved: ({ eventType, sourceProviderSlug }) =>
+          normalizeJunctionProviderSlug(sourceProviderSlug)
+            === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
+            && (
+              eventType === "provider.connection.created"
+              || eventType === "provider.connection.updated"
+            )
+            ? { sourceAdmissionDeferred: true }
+            : undefined,
         onConnectionEstablished: async ({
           account,
           connection,
@@ -148,36 +158,6 @@ export class HostedDeviceSyncPublicIngressService {
             store: this.context.store,
           });
         },
-        onConnectionSourceObserved: async ({
-          account,
-          eventType,
-          sourceProviderSlug,
-        }) => {
-          if (
-            normalizeJunctionProviderSlug(sourceProviderSlug)
-              !== COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-          ) {
-            return;
-          }
-          if (
-            eventType === "provider.connection.created"
-            || eventType === "provider.connection.updated"
-          ) {
-            const reconciliation = await reconcileHostedDeviceSyncConnectionSourceRegistration({
-              account,
-              registry: input.registry,
-              sourceProviderSlug,
-              store: this.context.store,
-            });
-            if (reconciliation === "admitted") {
-              return { sourceAdmissionCommitted: true };
-            }
-            return reconciliation === "removed"
-              ? { sourceRegistrationRemoved: true }
-              : undefined;
-          }
-          return;
-        },
         onWebhookAccepted: async ({
           account,
           claimToken,
@@ -187,36 +167,20 @@ export class HostedDeviceSyncPublicIngressService {
           now,
         }) => {
           const ownerId = await this.context.store.getConnectionOwnerId(account.id);
-          if (
-            ownerId
-            && await this.hasWithdrawnHealthDataConsentForMember(ownerId)
-          ) {
-            const completed = await this.context.store.completeWebhookTrace(
-              provider.provider,
-              traceId,
-              claimToken,
-            );
-            if (!completed) {
-              throw deviceSyncError({
-                code: "WEBHOOK_TRACE_CLAIM_LOST",
-                message: "Webhook trace claim was lost before durable acceptance completed.",
-                retryable: true,
-                httpStatus: 503,
-              });
-            }
-            return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
-          }
-
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             claimToken,
             now,
             ownerId,
+            registry: input.registry,
             store: this.context.store,
             traceId,
             webhook,
           });
-          return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
+          return {
+            ...DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
+            receiptStateOwned: true,
+          };
         },
         onUnknownWebhook: handleHostedDeviceSyncUnknownWebhook,
       },

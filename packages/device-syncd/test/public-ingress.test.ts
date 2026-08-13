@@ -2969,15 +2969,18 @@ test("public ingress revalidates current provider and connection authority for p
     registry: createDeviceSyncRegistry([]),
     store,
   });
-  await assert.rejects(
-    () => providerRemoved.handlePreparedWebhook(prepared),
-    (error: unknown) =>
-      error instanceof DeviceSyncError
-      && error.code === "PROVIDER_NOT_REGISTERED",
-  );
+  const removed = await providerRemoved.handlePreparedWebhook(prepared);
+  assert.equal(removed.accepted, true);
+  assert.equal(removed.duplicate, false);
 
+  const currentStore = new InMemoryPublicIngressStore();
+  const currentIngress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store: currentStore,
+  });
   await assert.rejects(
-    () => ingress.handlePreparedWebhook(prepared),
+    () => currentIngress.handlePreparedWebhook(prepared),
     (error: unknown) =>
       error instanceof DeviceSyncError
       && error.code === "WEBHOOK_ACCOUNT_NOT_READY",

@@ -801,6 +801,17 @@ Last verified: 2026-08-13
   results retain only that encrypted message for retry and DLQ recovery.
   Current provider registration, connection epoch/status, consent, source
   lifecycle, and provider-application authority are revalidated at admission.
+  Apple Health source-registration observation first captures an ephemeral
+  exact authority proof under the existing member-plus-connection admission
+  lock, releases the transaction before provider I/O, then re-enters the same
+  owner to exact-match connection, public application, stored-account, and
+  source epochs before committing source activation, receipt state, dirty
+  work, mailbox/signal effects, and trace completion together. Determinate
+  authority loss consumes only the trace; missing or ambiguous reads, a
+  credential change during provider I/O, and provider registration that is not
+  yet active remain retryable without mutation.
+  No provider call runs inside a database transaction and no additional
+  authority owner or durable fence is introduced.
   Every emitted prepared-event schema decoder remains readable through the
   maximum Queue/DLQ retention and redrive horizon, just as old transport keys
   remain decrypt-only until those encrypted envelopes are proven drained.

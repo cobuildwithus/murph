@@ -258,8 +258,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.webhookTraces.releaseWebhookTrace(provider, traceId, claimToken);
   }
 
-  async markWebhookReceived(accountId: string, now: string): Promise<void> {
-    return this.connections.markWebhookReceived(accountId, now);
+  async markWebhookReceived(
+    accountId: string,
+    now: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
+    return this.connections.markWebhookReceived(accountId, now, tx);
   }
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {

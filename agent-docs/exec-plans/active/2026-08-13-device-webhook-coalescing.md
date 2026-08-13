@@ -49,7 +49,8 @@ Updated: 2026-08-13
 
 - Existing Postgres `device_sync_dirty_connection` remains the downstream coalescing/product-control owner; the new store may own only accepted transport envelopes awaiting batch admission.
 - ReviewGPT selected Cloudflare Queues as encrypted, non-canonical burst transport. Postgres remains the only device-sync authority; Durable Objects, Workflows, Temporal ingress state, a second database, and raw-body Postgres staging were rejected as unnecessary owners.
-- Provider verification freezes the original receipt instant before enqueue because Junction, Oura, Strava, and WHOOP all enforce replay windows. Queue replay re-verifies against that trusted receipt instant rather than wall-clock dequeue time.
+- Provider verification and parsing run once before enqueue because Junction, Oura, Strava, and WHOOP enforce replay windows. Queue replay consumes only the strict prepared meaning and never reruns a provider verifier; the original receipt instant remains immutable evidence while all mutable provider registration, consent, application, connection, and source authority is revalidated at dequeue.
+- Delayed Junction source-registration work uses the existing health-data admission owner on both sides of its provider status read. The first short transaction establishes current authority and an exact ephemeral source/account proof, the provider read runs outside Postgres, and the second short transaction revalidates that proof before source activation and canonical webhook admission commit together. Terminal authority loss completes only the trace; indeterminate provider/account state remains retryable.
 
 ## Verification
 

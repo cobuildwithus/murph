@@ -62,6 +62,7 @@ import { readHostedHealthDataConsentState } from "../legal/consent";
 import {
   buildHostedDeviceSyncWake,
 } from "./wake";
+import { COMPANION_APPLE_HEALTH_SOURCE_PROVIDER } from "./companion";
 import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -73,6 +74,7 @@ import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient }
 import {
   normalizeHostedDeviceSyncLifecycleStatus,
   normalizeHostedDeviceSyncSetupPhase,
+  type HostedConnectionRecord,
 } from "./prisma-store/connection-records";
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
@@ -424,125 +426,6 @@ function hostedConnectionSourceMatchesReconnectProof(
     && expected.lastSeenAt === current.lastSeenAt
     && expected.sourceInstanceKey === current.sourceInstanceKey
     && expected.status === current.status;
-}
-
-/**
- * Reconciles a signed Junction source-registration event against live provider
- * state. The source row is captured before the provider read and revalidated
- * before either admission or target-only cleanup.
- */
-export async function reconcileHostedDeviceSyncConnectionSourceRegistration(input: {
-  account: PublicDeviceSyncAccount;
-  registry: DeviceSyncRegistry;
-  sourceProviderSlug: string;
-  store: PrismaDeviceSyncControlPlaneStore;
-}): Promise<"admitted" | "not_ready" | "removed"> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
-  const userId = await input.store.getConnectionOwnerId(input.account.id);
-  if (!sourceProviderSlug || !userId) {
-    return "not_ready";
-  }
-
-  const target = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
-    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
-    const source = await findHostedConnectionSource({
-      connectionId: input.account.id,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
-    const storedAccount = await input.store.getStoredConnectionAccountForUser(
-      userId,
-      input.account.id,
-      tx,
-    );
-    const handler = input.registry.get("junction")?.connectionHandler;
-    if (
-      !connection
-      || !publicAccountMatchesDisconnectTarget(input.account, connection)
-      || !source
-      || !storedAccount
-      || !handler?.isSourceAccessActive
-    ) {
-      throw sourceRegistrationReconciliationUnavailableError();
-    }
-    return { connection, source, storedAccount, isSourceAccessActive: handler.isSourceAccessActive };
-  });
-
-  const sourceAccessActive = await target.isSourceAccessActive(
-    target.storedAccount,
-    sourceProviderSlug,
-  );
-
-  const outcome = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
-    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
-    const source = await findHostedConnectionSource({
-      connectionId: input.account.id,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
-    const storedAccount = await input.store.getStoredConnectionAccountForUser(
-      userId,
-      input.account.id,
-      tx,
-    );
-    if (
-      !connection
-      || !publicAccountMatchesDisconnectTarget(target.connection, connection)
-      || !storedAccountMatchesDisconnectTarget(target.storedAccount, storedAccount)
-      || !source
-      || source.id !== target.source.id
-    ) {
-      connectionChangedDuringDisconnectError();
-    }
-
-    if (
-      sourceAccessActive
-      && isEstablishedDeviceSyncConnection(connection)
-      && hostedConnectionSourceMatchesReconnectProof(target.source, source)
-    ) {
-      if (source.status === "connected" && !isHostedSourceDisconnectFenced(source)) {
-        return "admitted" as const;
-      }
-      if (source.status === "disconnected" && source.lastErrorCode === null) {
-        await input.store.upsertConnectionSource({
-          connectionId: input.account.id,
-          sourceInstanceKey: source.sourceInstanceKey,
-          sourceProviderSlug,
-          status: "connected",
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt),
-          tx,
-        });
-        return "admitted" as const;
-      }
-    }
-
-    if (
-      !isEstablishedDeviceSyncConnection(connection)
-      || isHostedSourceDisconnectFenced(source)
-    ) {
-      return "cleanup" as const;
-    }
-    return "stale" as const;
-  });
-
-  if (outcome === "admitted") {
-    return "admitted";
-  }
-  if (outcome === "cleanup") {
-    await cleanupRejectedHostedDeviceSyncConnectionSource({
-      account: input.account,
-      connectionStartedAt: "1970-01-01T00:00:00.000Z",
-      registry: input.registry,
-      sourceProviderSlug,
-      store: input.store,
-    });
-    return "removed";
-  }
-  return "not_ready";
 }
 
 /**
@@ -1567,15 +1450,6 @@ function sourceAdmissionCleanupUnavailableError(): never {
   });
 }
 
-function sourceRegistrationReconciliationUnavailableError(): never {
-  throw deviceSyncError({
-    code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
-    message: "Current device source registration could not be reconciled. Retry shortly.",
-    retryable: true,
-    httpStatus: 503,
-  });
-}
-
 function sourceStartCleanupUnavailableError(): never {
   throw deviceSyncError({
     cause: {
@@ -1655,6 +1529,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   claimToken: string;
   now: string;
   ownerId: string | null;
+  registry?: DeviceSyncRegistry;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
   webhook: DeviceSyncIngressWebhook;
@@ -1686,6 +1561,21 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
+  const sourceObservation = await prepareHostedWebhookSourceObservation({
+    ...input,
+    ownerId,
+    provider: input.account.provider,
+    traceId,
+  });
+  if (sourceObservation.kind === "terminal") {
+    return;
+  }
+  const resolvedSourceObservation = sourceObservation.kind === "provider_read"
+      ? await resolveHostedWebhookSourceObservation({
+          preparation: sourceObservation,
+          store: input.store,
+        })
+    : null;
   await persistHostedDeviceSyncWebhookAccepted({
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
@@ -1700,11 +1590,177 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     provider: input.account.provider,
     resourceCategory,
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
+    sourceObservation: resolvedSourceObservation,
     store: input.store,
     claimToken: input.claimToken,
     traceId,
     userId: ownerId,
   });
+}
+
+type HostedWebhookSourceObservationPreparation =
+  | { kind: "not_required" }
+  | { kind: "terminal" }
+  | {
+      isSourceAccessActive: NonNullable<DeviceConnectionHandler["isSourceAccessActive"]>;
+      kind: "provider_read";
+      source: HostedDeviceConnectionSource;
+      storedConnection: HostedConnectionRecord;
+    };
+
+async function prepareHostedWebhookSourceObservation(input: {
+  account: { connectedAt: string; id: string; provider: string };
+  claimToken: string;
+  now: string;
+  ownerId: string;
+  provider: string;
+  registry?: DeviceSyncRegistry;
+  store: PrismaDeviceSyncControlPlaneStore;
+  traceId: string | null;
+  webhook: DeviceSyncIngressWebhook;
+}): Promise<HostedWebhookSourceObservationPreparation> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.webhook.sourceProviderSlug);
+  const isSourceRegistrationEvent = input.provider === "junction"
+    && sourceProviderSlug === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
+    && (
+      input.webhook.eventType === "provider.connection.created"
+      || input.webhook.eventType === "provider.connection.updated"
+    );
+  if (!isSourceRegistrationEvent || !sourceProviderSlug) {
+    return { kind: "not_required" };
+  }
+
+  try {
+    return await input.store.withHealthDataAdmissionLock(
+      input.ownerId,
+      input.account.id,
+      async (tx) => {
+        // One raw record is both current authority and the encrypted credential
+        // epoch carried across provider I/O. Materialization happens only
+        // after this transaction releases.
+        const current = await input.store.getConnectionRecordForUser(
+          input.ownerId,
+          input.account.id,
+          tx,
+        );
+        if (
+          !current
+          || current.userId !== input.ownerId
+          || current.provider !== input.provider
+          || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
+          || current.connectedAt.toISOString() !== input.account.connectedAt
+          || current.connectedAt.getTime() > Date.parse(input.now)
+          || current.providerApplicationId !== null
+          || current.providerApplicationRevision !== null
+        ) {
+          await completeHostedWebhookTraceTx(input, tx);
+          return { kind: "terminal" };
+        }
+        if (isDeviceSyncConnectionSetupPending({
+          setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
+        })) {
+          throw deviceSyncError({
+            code: "WEBHOOK_ACCOUNT_NOT_READY",
+            message: "Device sync setup changed before webhook work could be admitted.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
+
+        const matchingSources = await input.store.listConnectionSources({
+          connectionId: input.account.id,
+          sourceProviderSlug,
+        }, tx);
+        if (matchingSources.length !== 1) {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source authority could not be resolved. Retry shortly.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
+        const source = matchingSources[0];
+        if (!source) {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source authority could not be resolved. Retry shortly.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
+        if (isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
+          return { kind: "not_required" };
+        }
+        if (
+          source.status !== "disconnected"
+          || source.lastErrorCode !== null
+          || Date.parse(source.lastSeenAt) > Date.parse(input.now)
+        ) {
+          await completeHostedWebhookTraceTx(input, tx);
+          return { kind: "terminal" };
+        }
+        const isSourceAccessActive = input.registry
+          ?.get("junction")
+          ?.connectionHandler
+          ?.isSourceAccessActive;
+        if (!isSourceAccessActive) {
+          throw deviceSyncError({
+            code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
+            message: "Current device source registration could not be reconciled. Retry shortly.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
+        return {
+          isSourceAccessActive,
+          kind: "provider_read",
+          source,
+          storedConnection: current,
+        };
+      },
+      { memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS },
+    );
+  } catch (error) {
+    if (
+      isDeviceSyncError(error)
+      && error.code === "HEALTH_DATA_CONSENT_REQUIRED"
+      && !error.retryable
+    ) {
+      await completeHostedWebhookTrace(input);
+      return { kind: "terminal" };
+    }
+    throw error;
+  }
+}
+
+async function resolveHostedWebhookSourceObservation(input: {
+  preparation: Extract<HostedWebhookSourceObservationPreparation, { kind: "provider_read" }>;
+  store: PrismaDeviceSyncControlPlaneStore;
+}): Promise<{
+  source: HostedDeviceConnectionSource;
+  sourceAccessActive: boolean;
+  storedConnection: HostedConnectionRecord;
+}> {
+  const storedAccount = await input.store.materializeStoredConnectionAccount(
+    input.preparation.storedConnection,
+  );
+  if (!storedAccount) {
+    throw deviceSyncError({
+      code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
+      message: "Current device source registration could not be reconciled. Retry shortly.",
+      retryable: true,
+      httpStatus: 503,
+    });
+  }
+
+  return {
+    source: input.preparation.source,
+    sourceAccessActive: await input.preparation.isSourceAccessActive(
+      storedAccount,
+      input.preparation.source.sourceProviderSlug,
+    ),
+    storedConnection: input.preparation.storedConnection,
+  };
 }
 
 /**
@@ -2208,36 +2264,51 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   provider: string;
   resourceCategory?: string | null;
   sourceProviderSlug: string | null;
+  sourceObservation: {
+    source: HostedDeviceConnectionSource;
+    sourceAccessActive: boolean;
+    storedConnection: HostedConnectionRecord;
+  } | null;
   store: PrismaDeviceSyncControlPlaneStore;
   claimToken: string;
   traceId: string | null;
   userId: string;
 }): Promise<void> {
-  const result = await retryHostedDirtyStateContention(async () =>
-    input.store.withHealthDataAdmissionLock(
+  let result: { wakeMailboxItemId: string | null };
+  try {
+    result = await retryHostedDirtyStateContention(async () =>
+      input.store.withHealthDataAdmissionLock(
       input.userId,
       input.connectionId,
       async (tx) => {
-      const current = await tx.deviceConnection.findUnique({
-        where: {
-          id: input.connectionId,
-        },
-        select: {
-          connectedAt: true,
-          provider: true,
-          providerApplicationId: true,
-          providerApplicationRevision: true,
-          setupPhase: true,
-          status: true,
-          userId: true,
-        },
-      });
+      let sourceCredentialCurrent: HostedConnectionRecord | null = null;
+      const current = input.sourceObservation
+        ? (sourceCredentialCurrent = await input.store.getConnectionRecordForUser(
+            input.userId,
+            input.connectionId,
+            tx,
+          ))
+        : await tx.deviceConnection.findUnique({
+            where: {
+              id: input.connectionId,
+            },
+            select: {
+              connectedAt: true,
+              provider: true,
+              providerApplicationId: true,
+              providerApplicationRevision: true,
+              setupPhase: true,
+              status: true,
+              userId: true,
+            },
+          });
       if (
         !current
         || current.userId !== input.userId
         || current.provider !== input.provider
         || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
         || current.connectedAt.toISOString() !== input.expectedConnectedAt
+        || current.connectedAt.getTime() > Date.parse(input.acceptedAt)
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
@@ -2275,13 +2346,80 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           connectionId: input.connectionId,
           sourceProviderSlug,
         }, tx);
-        if (!isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
+        if (matchingSources.length === 0) {
           throw deviceSyncError({
             code: "WEBHOOK_SOURCE_NOT_READY",
-            message: "Device source setup changed before webhook work could be committed.",
+            message: "Device source setup is not visible yet. Retry shortly.",
             retryable: true,
             httpStatus: 503,
           });
+        }
+        const source = matchingSources[0];
+        if (!source || matchingSources.length !== 1) {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source authority could not be resolved. Retry shortly.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
+
+        if (input.sourceObservation) {
+          if (!sourceCredentialCurrent) {
+            await completeHostedWebhookTraceTx(input, tx);
+            return { wakeMailboxItemId: null };
+          }
+          if (!hostedStoredConnectionCredentialEpochMatches(
+            input.sourceObservation.storedConnection,
+            sourceCredentialCurrent,
+          )) {
+            throw deviceSyncError({
+              code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
+              message: "Device source credentials changed while registration was checked. Retry shortly.",
+              retryable: true,
+              httpStatus: 503,
+            });
+          }
+          if (!hostedConnectionSourceMatchesReconnectProof(input.sourceObservation.source, source)) {
+            await completeHostedWebhookTraceTx(input, tx);
+            return { wakeMailboxItemId: null };
+          }
+          if (input.sourceObservation.sourceAccessActive) {
+            await input.store.upsertConnectionSource({
+              connectionId: input.connectionId,
+              sourceInstanceKey: source.sourceInstanceKey,
+              sourceProviderSlug,
+              status: "connected",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: input.acceptedAt,
+              tx,
+            });
+          } else {
+            throw deviceSyncError({
+              code: "WEBHOOK_SOURCE_NOT_READY",
+              message: "Current device source registration is not active yet. Retry shortly.",
+              retryable: true,
+              httpStatus: 503,
+            });
+          }
+        } else if (!isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
+          const sourceEpochMs = Date.parse(source.lastSeenAt);
+          if (
+            source.status === "disconnected"
+            && source.lastErrorCode === null
+            && Number.isFinite(sourceEpochMs)
+            && sourceEpochMs <= Date.parse(input.acceptedAt)
+          ) {
+            throw deviceSyncError({
+              code: "WEBHOOK_SOURCE_NOT_READY",
+              message: "Device source registration is still settling. Retry shortly.",
+              retryable: true,
+              httpStatus: 503,
+            });
+          }
+          await completeHostedWebhookTraceTx(input, tx);
+          return { wakeMailboxItemId: null };
         }
       }
 
@@ -2298,6 +2436,15 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         tx,
         userId: input.userId,
       });
+      await input.store.markWebhookReceived(input.connectionId, input.acceptedAt, tx);
+      if (input.dataSourceProviderSlug) {
+        await input.store.markConnectionSourceDataReceived({
+          connectionId: input.connectionId,
+          now: input.acceptedAt,
+          sourceProviderSlug: input.dataSourceProviderSlug,
+          tx,
+        });
+      }
       await completeHostedWebhookTraceTx(input, tx);
 
       let wakeMailboxItemId: string | null = null;
@@ -2368,11 +2515,101 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       {
         memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
       },
-    ));
+      ));
+  } catch (error) {
+    if (
+      isDeviceSyncError(error)
+      && error.code === "HEALTH_DATA_CONSENT_REQUIRED"
+      && !error.retryable
+    ) {
+      await completeHostedWebhookTrace(input);
+      return;
+    }
+    throw error;
+  }
 
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
       failureMode: "best_effort",
+    });
+  }
+}
+
+function hostedStoredConnectionCredentialEpochMatches(
+  expected: HostedConnectionRecord,
+  current: HostedConnectionRecord | null,
+): boolean {
+  return current !== null
+    && expected.id === current.id
+    && expected.userId === current.userId
+    && expected.provider === current.provider
+    && expected.connectedAt.getTime() === current.connectedAt.getTime()
+    && expected.credentialKind === current.credentialKind
+    && expected.providerConfigKey === current.providerConfigKey
+    && expected.providerAccountBlindIndex === current.providerAccountBlindIndex
+    && expected.externalAccountIdEncrypted === current.externalAccountIdEncrypted
+    && expected.accessTokenEncrypted === current.accessTokenEncrypted
+    && expected.refreshTokenEncrypted === current.refreshTokenEncrypted
+    && sameHostedConnectionTimestamp(
+      expected.accessTokenExpiresAt,
+      current.accessTokenExpiresAt,
+    )
+    && expected.keyVersion === current.keyVersion
+    && expected.tokenVersion === current.tokenVersion
+    && sameHostedConnectionJson(
+      expected.credentialMetadataJson,
+      current.credentialMetadataJson,
+    );
+}
+
+function sameHostedConnectionTimestamp(
+  left: Date | string | null | undefined,
+  right: Date | string | null | undefined,
+): boolean {
+  const normalize = (value: Date | string | null | undefined): string | null =>
+    value instanceof Date ? value.toISOString() : value ?? null;
+  return normalize(left) === normalize(right);
+}
+
+function sameHostedConnectionJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(canonicalizeHostedConnectionJson(left))
+    === JSON.stringify(canonicalizeHostedConnectionJson(right));
+}
+
+function canonicalizeHostedConnectionJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeHostedConnectionJson);
+  }
+  if (!value || typeof value !== "object" || value instanceof Date) {
+    return value ?? null;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalizeHostedConnectionJson(entry)]),
+  );
+}
+
+async function completeHostedWebhookTrace(input: {
+  claimToken: string;
+  provider: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  traceId: string | null;
+}): Promise<void> {
+  if (!input.traceId) {
+    return;
+  }
+  const completed = await input.store.completeWebhookTrace(
+    input.provider,
+    input.traceId,
+    input.claimToken,
+  );
+  if (!completed) {
+    throw deviceSyncError({
+      code: "WEBHOOK_TRACE_CLAIM_LOST",
+      message: "Webhook trace claim was lost before durable acceptance completed.",
+      retryable: true,
+      httpStatus: 503,
     });
   }
 }
