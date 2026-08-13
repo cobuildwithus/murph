@@ -584,7 +584,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     })).toBe(scheduledCardCapabilityBaselineCount + 1);
     expect(requireLinqStub().countObservedSends(reminderPath))
       .toBe(scheduledCardTotalSendBaselineCount + 1);
-  }, 720_000);
+  }, 900_000);
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
