@@ -3888,7 +3888,7 @@ const JUNCTION_PROFILE_BIRTH_DATE_PATHS = [
   "date_of_birth",
   "dob",
 ] as const;
-const JUNCTION_PROFILE_GENDER_PATHS = ["gender"] as const;
+const JUNCTION_PROFILE_GENDER_PATHS = ["gender", "reportedGender"] as const;
 // `gender` is deliberately not a fallback: Junction documents it as a
 // distinct enum from biological sex, so each lands under its own label and
 // the reported gender also receives its own typed canonical field.
