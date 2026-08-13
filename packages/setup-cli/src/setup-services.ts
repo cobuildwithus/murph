@@ -17,6 +17,7 @@ import {
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveEffectiveTopLevelToken } from '@murphai/operator-config/command-helpers'
+import { clearAssistantSelfDeliveryTargets } from '@murphai/operator-config/operator-config'
 import {
   type SetupChannel,
   type SetupConfiguredAssistant,
@@ -229,6 +230,7 @@ export function createSetupServices(
     let localEmailCleanupSummary: string | null = null
     let pausedLocalEmailAutomationCount = 0
     let removedLocalEmailAutoReply = false
+    let removedLocalEmailSelfDeliveryTargetCount = 0
     const vaultMetadataPath = path.join(vault, 'vault.json')
     const hasExistingVault = await fileExists(vaultMetadataPath)
 
@@ -279,6 +281,9 @@ export function createSetupServices(
       removedLocalEmailAutoReply = (
         await removeRetiredLocalEmailAutoReplyChannel({ vault })
       ).changed
+      removedLocalEmailSelfDeliveryTargetCount = (
+        await clearAssistantSelfDeliveryTargets('email', homeDirectory)
+      ).length
 
       bootstrap = await inboxServices.bootstrap({
         ffmpegCommand: tools.ffmpegCommand ?? undefined,
@@ -309,10 +314,11 @@ export function createSetupServices(
       if (
         removedLocalEmailConnectorCount > 0 ||
         removedLocalEmailAutoReply ||
+        removedLocalEmailSelfDeliveryTargetCount > 0 ||
         pausedLocalEmailAutomationCount > 0
       ) {
         localEmailCleanupSummary =
-          `Removed ${removedLocalEmailConnectorCount} retired local email inbox source${removedLocalEmailConnectorCount === 1 ? '' : 's'} and ${removedLocalEmailAutoReply ? 1 : 0} retired local email auto-reply setting${removedLocalEmailAutoReply ? '' : 's'}, and paused ${pausedLocalEmailAutomationCount} local email automation${pausedLocalEmailAutomationCount === 1 ? '' : 's'}. Use Telegram for local inbox messaging, and retarget paused automations to Telegram or Linq before reactivating them.`
+          `Removed ${removedLocalEmailConnectorCount} retired local email inbox source${removedLocalEmailConnectorCount === 1 ? '' : 's'}, ${removedLocalEmailAutoReply ? 1 : 0} retired local email auto-reply setting${removedLocalEmailAutoReply ? '' : 's'}, and ${removedLocalEmailSelfDeliveryTargetCount} saved local email self-delivery target${removedLocalEmailSelfDeliveryTargetCount === 1 ? '' : 's'}; paused ${pausedLocalEmailAutomationCount} local email automation${pausedLocalEmailAutomationCount === 1 ? '' : 's'}. Use Telegram for local inbox messaging, and retarget paused automations to Telegram or Linq before reactivating them.`
         notes.push(localEmailCleanupSummary)
       }
 

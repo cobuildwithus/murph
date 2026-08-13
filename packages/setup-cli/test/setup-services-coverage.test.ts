@@ -85,6 +85,11 @@ import type {
 } from '@murphai/operator-config/setup-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  listAssistantSelfDeliveryTargets,
+  saveAssistantSelfDeliveryTarget,
+  saveDefaultVaultConfig,
+} from '@murphai/operator-config/operator-config'
+import {
   incurErrorBridge,
 } from '../src/incur-error-bridge.ts'
 import {
@@ -1612,6 +1617,27 @@ test('createSetupServices reconciles the prior local email state through real se
       title: 'Retired local email reminder',
       vaultRoot: vaultPath,
     })
+    await saveDefaultVaultConfig(vaultPath, homeDirectory)
+    for (const [channel, deliveryTarget] of [
+      ['email', 'retired@example.test'],
+      ['linq', 'retained-linq-thread'],
+      ['telegram', 'retained-telegram-thread'],
+    ] as const) {
+      await saveAssistantSelfDeliveryTarget(
+        {
+          channel,
+          deliverySource: null,
+          deliveryTarget,
+          identityId: null,
+          participantId: null,
+          threadId: deliveryTarget,
+        },
+        homeDirectory,
+      )
+    }
+    const retainedSelfDeliveryTargetsBeforeSetup = (
+      await listAssistantSelfDeliveryTargets(homeDirectory)
+    ).filter((target) => target.channel !== 'email')
 
     const runtime = {
       close() {},
@@ -1704,7 +1730,7 @@ test('createSetupServices reconciles the prior local email state through real se
     }
 
     const cleanupSummaryPattern =
-      /Removed 2 retired local email inbox sources and 1 retired local email auto-reply setting, and paused 2 local email automations/u
+      /Removed 2 retired local email inbox sources, 1 retired local email auto-reply setting, and 1 saved local email self-delivery target; paused 2 local email automations/u
     await assert.rejects(
       () => services.setupHost({
         assistant,
@@ -1742,8 +1768,14 @@ test('createSetupServices reconciles the prior local email state through real se
       }).autoReply.map((entry) => entry.channel).sort(),
       ['custom', 'linq', 'telegram'],
     )
+    assert.deepEqual(
+      await listAssistantSelfDeliveryTargets(homeDirectory),
+      retainedSelfDeliveryTargetsBeforeSetup,
+    )
 
     const afterFailedSetup = await readFile(paths.inboxConfigPath, 'utf8')
+    const operatorConfigPath = path.join(homeDirectory, '.murph', 'config.json')
+    const afterFailedOperatorConfig = await readFile(operatorConfigPath, 'utf8')
     assert.equal(JSON.parse(afterFailedSetup).schemaVersion, 2)
     const second = await services.setupHost({
       assistant,
@@ -1764,6 +1796,7 @@ test('createSetupServices reconciles the prior local email state through real se
     assert.equal(await readFile(paths.inboxConfigPath, 'utf8'), afterFailedSetup)
     assert.equal(await readFile(automationStatePath, 'utf8'), afterFirstAutomationState)
     assert.equal(await readFile(cronPaths.cronJobsPath, 'utf8'), afterFirstCronStore)
+    assert.equal(await readFile(operatorConfigPath, 'utf8'), afterFailedOperatorConfig)
     assert.equal(
       (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
       'paused',

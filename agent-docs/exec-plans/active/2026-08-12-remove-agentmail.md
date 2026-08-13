@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -157,6 +157,26 @@ Updated: 2026-08-12
   one-provider setup and doctor registries and the unused channel setup hook
   have been deleted in favor of direct Telegram paths, removing more production
   code than the correction adds.
+- Final ReviewGPT round 7 found the remaining retired local-email persisted
+  owner: an `assistant.selfDeliveryTargets.email` entry could survive setup and
+  still participate in implicit local routing, while the narrowed CLI no longer
+  allowed selective removal. The accepted correction reuses the operator-config
+  owner to delete only that entry during setup, excludes it from implicit
+  fallback before setup, retains explicit generic hosted-email resolution, and
+  permits `assistant self-target clear email` only as a negative cleanup path.
+  Mixed-map, email-only fallback, explicit-email non-regression, schema, strict
+  failure, retained-target, and corrected-rerun proof cover the correction.
+- Corrected-head product-purpose revalidation: the irreducible purpose is that
+  an upgraded operator reaches a supported local route without stale email
+  state choosing an action they did not request. The smallest complete journey
+  uses the existing setup cleanup, default-resolution, and clear-command owners:
+  setup removes only the retired entry and reports it, local implicit routing
+  ignores it even before setup, and one negative-only clear command repairs a
+  mixed map without deleting retained targets. Hosted managed automation
+  explicitly retains its provider-neutral email fallback. No additional
+  screen, provider, prompt, state owner, or recovery step is introduced, and
+  the production-path setup, CLI, cron, managed-automation, and hosted-route
+  scenarios leave no material product-experience finding or evidence gap.
 
 ## Change-shape retrospective
 
@@ -178,11 +198,19 @@ Updated: 2026-08-12
   apps, and transactional or newsletter email. Those have separate owners and
   remain required by supported hosted behavior.
 - Concepts added: bounded deletion-only transitions for inbox schema, canonical
-  local automations, and legacy local auto-reply state, plus a permanent
-  negative secret-prefix tombstone at existing trust boundaries. No new owner,
-  service, dependency, provider compatibility layer, or replacement delivery
-  path was added; local validation rejects email and generic hosted delivery
-  fails closed without an injected transport.
+  local automations, legacy local auto-reply state, and the retired email
+  self-delivery target, plus permanent negative tombstones at existing trust
+  boundaries. No new owner, service, dependency, provider compatibility layer,
+  or replacement delivery path was added; local validation rejects email and
+  generic hosted delivery fails closed without an injected transport.
+- Hard-cap decision: round 7 identified one final persisted-state owner missed
+  by the original inventory. The correction deletes that state through its
+  existing owner and narrows an existing fallback, so it does not change the
+  indivisible hard-cut rationale or add review machinery. Per the seven-round
+  cap, the ReviewGPT loop pauses after this fix. A substantive round 8 requires
+  an explicit continuation decision after local verification, the parent final
+  review, and exact-head CI status are recorded; no green non-ReviewGPT gate is
+  treated as a substitute for a later `PASS`.
 - Required continuation proof: zero active AgentMail code/config/current-doc
   references, local rejection coverage, retained Telegram/Linq and hosted email
   suites, generated-schema and deploy-policy checks, docs/legal/changelog
@@ -212,6 +240,13 @@ Updated: 2026-08-12
   setup-cli and inbox-services suites, the full CLI setup/channel slice, and the
   assistant channel suite. Final ReviewGPT and exact-head GitHub Actions remain
   required before closure.
+- The round-7 correction passes the complete operator-config (308), setup-cli
+  (110), and assistant-cli (128) suites; 104 focused assistant-engine tests;
+  50 production-built CLI assistant/cron tests; the generated CLI skill-hash
+  test; all five touched-package typechecks; docs drift; diff hygiene; active
+  residue classification; and privacy scanning. The parent final review found
+  no additional code, product-purpose, architecture, privacy, or proof gap.
+  Exact-head CI remains to be recorded after the correction is committed.
 - The base branch advanced again after the single permitted refresh and now
   conflicts in the generated skill hash and plan index. Per the repository
   moving-base rule, no second refresh is attempted; closure remains blocked on

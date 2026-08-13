@@ -244,6 +244,29 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
   assert.deepEqual(
     await applyAssistantSelfDeliveryTargetDefaults(
       {
+        channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      {
+        allowSingleSavedTargetFallback: true,
+      },
+      homeDirectory,
+    ),
+    {
+      channel: 'telegram',
+      deliveryTarget: 'chat-123',
+      identityId: 'identity-1',
+      participantId: 'person-1',
+      threadId: 'source-1',
+    },
+  )
+
+  assert.deepEqual(
+    await applyAssistantSelfDeliveryTargetDefaults(
+      {
         channel: 'telegram',
         deliveryTarget: '  explicit-target  ',
         identityId: '  ',
@@ -274,6 +297,51 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
     await applyAssistantSelfDeliveryTargetDefaults(
       {
         channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      {
+        allowSingleSavedTargetFallback: true,
+      },
+      homeDirectory,
+    ),
+    {
+      channel: null,
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    },
+  )
+  assert.deepEqual(
+    await applyAssistantSelfDeliveryTargetDefaults(
+      {
+        channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      {
+        allowSingleSavedTargetFallback: true,
+        includeEmailInSingleSavedTargetFallback: true,
+      },
+      homeDirectory,
+    ),
+    {
+      channel: 'email',
+      deliveryTarget: 'person@example.test',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    },
+  )
+  assert.deepEqual(
+    await applyAssistantSelfDeliveryTargetDefaults(
+      {
+        channel: 'email',
         deliveryTarget: null,
         identityId: null,
         participantId: null,
