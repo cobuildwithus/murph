@@ -614,6 +614,8 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
       time: "12:02",
       timeZone: "UTC",
     });
+    expect(() => resolveScheduledReminderLocalAt("2026-06-18T12:02:30.000Z"))
+      .toThrow("Expected a minute-aligned scheduled reminder timestamp");
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
   });
 });
