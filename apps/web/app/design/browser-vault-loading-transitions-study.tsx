@@ -20,6 +20,7 @@ import {
   BiomarkerPrivateTrendCardView,
   type BiomarkerPrivateTrendState,
 } from "@/src/components/biomarkers/biomarker-detail/biomarker-private-trend-card";
+import { BiomarkerDetailSkeleton } from "@/src/components/biomarkers/lab-biomarker-detail-skeleton";
 import {
   ResultsSummary,
   ResultsSummarySkeleton,
@@ -299,6 +300,16 @@ export function BrowserVaultLoadingTransitionsStudy() {
             </StudyState>
           </div>
         </div>
+      </TransitionStudy>
+
+      <TransitionStudy
+        description="The private result route reserves the latest reading, chart, and year-grouped ledger so the page keeps its shape while saved labs arrive."
+        title="Biomarker result detail"
+        transition="biomarker-result-detail"
+      >
+        <StudyState label="Loading" state="loading">
+          <BiomarkerDetailSkeleton />
+        </StudyState>
       </TransitionStudy>
     </div>
   );

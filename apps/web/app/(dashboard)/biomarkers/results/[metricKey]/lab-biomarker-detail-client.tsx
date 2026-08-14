@@ -20,6 +20,7 @@ import {
   type LabBiomarkerChartRange,
   type LabBiomarkerReferenceRangeTone,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
+import { BiomarkerDetailSkeleton } from "@/src/components/biomarkers/lab-biomarker-detail-skeleton";
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
@@ -33,7 +34,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/src/components/ui/card";
-import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   formatLabDate,
   formatLabFlag,
@@ -73,7 +73,6 @@ export function LabBiomarkerDetailClient({
 }: LabBiomarkerDetailClientProps) {
   const {
     error,
-    freshness,
     refresh,
     refreshPending,
     status,
@@ -116,20 +115,11 @@ export function LabBiomarkerDetailClient({
     );
   } else if (!detail) {
     content = (
-      <>
-        {freshness === "stale" && !refreshPending ? (
-          <BiomarkerStaleAlert
-            hasResults={false}
-            onRefresh={() => void refresh()}
-            refreshPending={refreshPending}
-          />
-        ) : null}
-        <EmptyBiomarkerDetailCard
-          authRequired={authRequired}
-          preparing={refreshPending}
-          uploadLabsAction={uploadLabsAction}
-        />
-      </>
+      <EmptyBiomarkerDetailCard
+        authRequired={authRequired}
+        preparing={refreshPending}
+        uploadLabsAction={uploadLabsAction}
+      />
     );
   } else {
     visibleDetail = detail;
@@ -137,9 +127,6 @@ export function LabBiomarkerDetailClient({
       <BiomarkerDetailContent
         detail={detail}
         fallbackRanges={fallbackRanges}
-        onRefresh={() => void refresh()}
-        refreshPending={refreshPending}
-        stale={freshness === "stale"}
       />
     );
   }
@@ -191,15 +178,9 @@ function BiomarkerDetailShell({
 function BiomarkerDetailContent({
   detail,
   fallbackRanges,
-  onRefresh,
-  refreshPending,
-  stale,
 }: {
   detail: BrowserVaultLabBiomarkerDetail;
   fallbackRanges: readonly BiomarkerFallbackRangeForDisplay[];
-  onRefresh: () => void;
-  refreshPending: boolean;
-  stale: boolean;
 }) {
   const yearGroups = groupRowsByYear(detail.rows);
   const chartPoints: LabBiomarkerChartPoint[] = detail.chartSeries.map((point) => ({
@@ -217,14 +198,6 @@ function BiomarkerDetailContent({
 
   return (
     <>
-      {stale ? (
-        <BiomarkerStaleAlert
-          hasResults
-          onRefresh={onRefresh}
-          refreshPending={refreshPending}
-        />
-      ) : null}
-
       <section
         aria-labelledby="biomarker-latest-result-heading"
         className="overflow-hidden rounded-xl border border-border/70 bg-card/70"
@@ -480,79 +453,6 @@ function EmptyBiomarkerDetailCard({
         <CardFooter>{uploadLabsAction}</CardFooter>
       ) : null}
     </Card>
-  );
-}
-
-function BiomarkerStaleAlert({
-  hasResults,
-  onRefresh,
-  refreshPending,
-}: {
-  hasResults: boolean;
-  onRefresh: () => void;
-  refreshPending: boolean;
-}) {
-  return (
-    <Alert aria-live="polite">
-      <AlertTitle>
-        {refreshPending ? "Refreshing this history" : "This history may be out of date"}
-      </AlertTitle>
-      <AlertDescription>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <span>
-            {refreshPending
-              ? hasResults
-                ? "Your last saved results remain visible while Murph checks for newer data."
-                : "Murph is checking for newer saved results."
-              : hasResults
-                ? "These are your last saved results and may not include newer lab data."
-                : "This saved view may not include newer lab data. Refresh to check again."}
-          </span>
-          <Button
-            disabled={refreshPending}
-            onClick={onRefresh}
-            size="sm"
-            variant="outline"
-          >
-            {refreshPending ? "Refreshing…" : "Refresh"}
-          </Button>
-        </div>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-function BiomarkerDetailSkeleton() {
-  return (
-    <div aria-label="Loading biomarker history" className="flex flex-col gap-8" role="status">
-      <section aria-hidden="true" className="border-y border-border/70 py-8 sm:py-10">
-        <Skeleton className="h-7 w-36 motion-reduce:animate-none" />
-        <div className="mt-4 flex items-center gap-3">
-          <Skeleton className="size-3 rounded-full motion-reduce:animate-none" />
-          <Skeleton className="h-12 w-36 motion-reduce:animate-none" />
-          <Skeleton className="h-6 w-14 motion-reduce:animate-none" />
-        </div>
-        <Skeleton className="mt-4 h-4 w-28 motion-reduce:animate-none" />
-        <div className="mt-9 border-t border-border/70 pt-5">
-          <Skeleton className="h-72 w-full motion-reduce:animate-none sm:h-80" />
-        </div>
-      </section>
-      <section aria-hidden="true" className="flex flex-col gap-5">
-        <Skeleton className="h-8 w-28 motion-reduce:animate-none" />
-        <div className="overflow-hidden rounded-xl border border-border/70">
-          {[0, 1, 2].map((item) => (
-            <div
-              className="flex items-center justify-between gap-4 border-b border-border/60 px-4 py-5 last:border-b-0 sm:px-5"
-              key={item}
-            >
-              <Skeleton className="h-6 w-32 motion-reduce:animate-none" />
-              <Skeleton className="h-4 w-24 motion-reduce:animate-none" />
-            </div>
-          ))}
-        </div>
-      </section>
-      <span className="sr-only">Loading this biomarker&apos;s saved results.</span>
-    </div>
   );
 }
 
