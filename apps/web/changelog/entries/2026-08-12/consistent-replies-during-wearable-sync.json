@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 250,
+  "item": {
+    "id": "consistent-replies-during-wearable-sync",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More consistent replies during wearable sync",
+    "summary": "Murph now keeps new messages in front of background wearable catch-up work, reducing avoidable reply delays while a connected device syncs.",
+    "details": "Wearable catch-up remains retryable and resumes automatically, while normal connection checks keep their regular schedule.",
+    "relevanceTags": ["assistant", "wearables", "reliability"],
+    "sourcePullRequests": [1736, 1771]
+  }
+}

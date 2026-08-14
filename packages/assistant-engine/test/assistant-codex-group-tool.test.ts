@@ -29,7 +29,11 @@ import {
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
 } from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
 
@@ -116,6 +120,70 @@ const SIGNED_PRIVATE_JPEG_URL =
   SIGNED_PRIVATE_IMAGE_URL.replace("group-avatar.png", "group-avatar.jpg");
 const GROUP_TOOL_INPUT_PROPERTIES =
   MURPH_GROUP_TOOL.inputSchema.allOf[0].properties;
+
+function maximumEscapedHeartRateZoneRecords() {
+  const sources = Array.from({ length: 8 }, (_, index) => ({
+    label: `${"x".repeat(78)}-${index}`,
+    source: `${"x".repeat(78)}-${index}`,
+  }));
+  const records = Array.from({ length: 7 * sources.length }, (_, recordIndex) => {
+    const dayIndex = Math.floor(recordIndex / sources.length);
+    const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+    const source = sources[recordIndex % sources.length];
+    if (!source) {
+      throw new Error("Missing bounded public source fixture.");
+    }
+    return {
+      data: {
+        date,
+        zones: Array.from(
+          { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+          (_, zone) => ({
+            durationMinutes: 0.0000030024105450300988,
+            label: '"'.repeat(
+              HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+            ),
+            zone,
+          }),
+        ),
+      },
+      occurredAt: `${date}T00:00:00.000Z`,
+      recordKey: `${date}.${source.source}`,
+      source,
+    };
+  });
+  return records;
+}
+
+function maximumSourceTaggedWorkoutRecords() {
+  const date = "2026-07-18";
+  const workouts = Array.from(
+    { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+    (_, sourceIndex) => {
+      const source = `source-${sourceIndex}`;
+      return Array.from(
+        { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+        (_, workoutIndex) => ({
+          kind: "running",
+          minutes: 5,
+          source: { label: source, source },
+          startLocalMs: sourceIndex * 60_000 + workoutIndex,
+        }),
+      );
+    },
+  ).flat();
+
+  return [{
+    data: {
+      calendarClosedThroughDate: date,
+      date,
+      timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+      workouts,
+    },
+    occurredAt: `${date}T00:00:00.000Z`,
+    recordKey: date,
+  }];
+}
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -1394,7 +1462,8 @@ describe("murph.group dynamic tool", () => {
                   value: 8_001,
                 },
                 occurredAt: "2026-07-18T00:00:00.000Z",
-                recordKey: "2026-07-18",
+                recordKey: "2026-07-18.garmin",
+                source: { label: "Garmin", source: "garmin" },
               }],
             },
             {
@@ -1419,6 +1488,7 @@ describe("murph.group dynamic tool", () => {
                   workouts: [{
                     kind: "running",
                     minutes: 45,
+                    source: { label: "Garmin", source: "garmin" },
                     startLocalMs: 23_400_000,
                   }],
                 },
@@ -1547,7 +1617,8 @@ describe("murph.group dynamic tool", () => {
                     value: 8_001,
                   },
                   occurredAt: "2026-07-18T00:00:00.000Z",
-                  recordKey: "2026-07-18",
+                  recordKey: "2026-07-18.garmin",
+                  source: { label: "Garmin", source: "garmin" },
                 }],
                 status: "available",
               },
@@ -1558,6 +1629,7 @@ describe("murph.group dynamic tool", () => {
                   "2026-07-18": [{
                     kindIndex: 0,
                     minutes: 45,
+                    source: { label: "Garmin", source: "garmin" },
                     startLocalMs: 23_400_000,
                   }],
                 },
@@ -1590,7 +1662,7 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
-  it("passes source-aware sleep values and freshness through the model boundary", async () => {
+  it("passes every tagged sleep source through the model boundary", async () => {
     const groupSharedReadRequest = vi.fn(async () => ({
       members: [{
         currentTurnHandles: [],
@@ -1604,42 +1676,54 @@ describe("murph.group dynamic tool", () => {
             projectionKind: "deep-sleep-sources-days.v1" as const,
           },
           projectionScopeKey: "deep-sleep-sources-days.v1",
-          records: [{
-            data: {
-              date: "2026-07-18",
-              metricKey: "deep-sleep-minutes",
-              projectedAt: "2026-07-18T12:00:00.000Z",
-              sources: [
-                {
-                  label: "Fitbit",
-                  recordedAt: "2026-07-18T06:58:00.000Z",
-                  source: "fitbit",
-                  unit: "minutes",
-                  value: 64,
-                },
-                {
-                  label: "Garmin",
-                  recordedAt: "2026-07-18T07:01:00.000Z",
-                  selected: true as const,
-                  source: "garmin",
-                  unit: "minutes",
-                  value: 88,
-                },
-                {
-                  label: "Oura",
-                  recordedAt: null,
-                  source: "oura",
-                  unit: "minutes",
-                  value: 112,
-                },
-              ],
-              sourcesDisagree: true,
-              unit: "minutes",
-              value: 88,
+          records: [
+            {
+              data: {
+                date: "2026-07-17",
+                metricKey: "deep-sleep-minutes",
+                unit: "minutes",
+                value: 55,
+              },
+              occurredAt: "2026-07-17T00:00:00.000Z",
+              recordKey: "2026-07-17",
             },
-            occurredAt: "2026-07-18T00:00:00.000Z",
-            recordKey: "2026-07-18",
-          }],
+            {
+              data: {
+                date: "2026-07-18",
+                metricKey: "deep-sleep-minutes",
+                recordedAt: "2026-07-18T06:58:00.000Z",
+                unit: "minutes",
+                value: 64,
+              },
+              occurredAt: "2026-07-18T00:00:00.000Z",
+              recordKey: "2026-07-18.fitbit",
+              source: { label: "fitbit", source: "fitbit" },
+            },
+            {
+              data: {
+                date: "2026-07-18",
+                metricKey: "deep-sleep-minutes",
+                recordedAt: "2026-07-18T07:01:00.000Z",
+                unit: "minutes",
+                value: 88,
+              },
+              occurredAt: "2026-07-18T00:00:00.000Z",
+              recordKey: "2026-07-18.garmin",
+              source: { label: "Garmin", source: "garmin" },
+            },
+            {
+              data: {
+                date: "2026-07-18",
+                metricKey: "deep-sleep-minutes",
+                recordedAt: null,
+                unit: "minutes",
+                value: 112,
+              },
+              occurredAt: "2026-07-18T00:00:00.000Z",
+              recordKey: "2026-07-18.oura",
+              source: { label: "Oura", source: "oura" },
+            },
+          ],
         }],
       }],
       requestedProjectionScopeKeys: ["deep-sleep-sources-days.v1"],
@@ -1674,18 +1758,27 @@ describe("murph.group dynamic tool", () => {
           participantId: "participant_sleep_sources",
           projections: {
             "deep-sleep-sources-days.v1": {
-              records: [{
-                data: {
-                  projectedAt: "2026-07-18T12:00:00.000Z",
-                  sources: [
-                    { source: "fitbit", value: 64 },
-                    { selected: true, source: "garmin", value: 88 },
-                    { source: "oura", value: 112 },
-                  ],
-                  sourcesDisagree: true,
-                  value: 88,
-                },
-              }],
+              records: [
+                expect.not.objectContaining({ source: expect.anything() }),
+                expect.objectContaining({
+                  data: expect.objectContaining({
+                    recordedAt: "2026-07-18T06:58:00.000Z",
+                    value: 64,
+                  }),
+                  source: { label: "fitbit", source: "fitbit" },
+                }),
+                expect.objectContaining({
+                  data: expect.objectContaining({
+                    recordedAt: "2026-07-18T07:01:00.000Z",
+                    value: 88,
+                  }),
+                  source: { label: "Garmin", source: "garmin" },
+                }),
+                expect.objectContaining({
+                  data: expect.objectContaining({ recordedAt: null, value: 112 }),
+                  source: { label: "Oura", source: "oura" },
+                }),
+              ],
               status: "available",
             },
           },
@@ -1694,6 +1787,77 @@ describe("murph.group dynamic tool", () => {
       },
     });
     expect(JSON.stringify(payload)).not.toContain("member_internal_sleep_sources");
+  });
+
+  it("keeps the escaped maximum heart-rate-zone source set within the model boundary", async () => {
+    const records = maximumEscapedHeartRateZoneRecords();
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_heart_rate_zones",
+        participantId: "participant_heart_rate_zones",
+        projections: [{
+          dataStatus: "available" as const,
+          grantedAt: "2026-07-25T12:00:00.000Z",
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "heart-rate-zones-days.v0" as const,
+          },
+          projectionScopeKey: "heart-rate-zones-days.v0",
+          records,
+        }],
+      }],
+      requestedProjectionScopeKeys: ["heart-rate-zones-days.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "heart-rate-zones-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      result: {
+        members: [{
+          projections: {
+            "heart-rate-zones-days.v0": {
+              records: expect.any(Array),
+              status: "available",
+            },
+          },
+        }],
+        status: "ok",
+      },
+    });
+    const modelText = JSON.stringify(payload);
+    // Each of the 56 records has both a source tag property and its source key.
+    expect(modelText.match(/"source":/gu)).toHaveLength(112);
+    expect(modelText.match(/"recordKey":/gu)).toHaveLength(56);
+    expect(modelText.match(/"zone":/gu)).toHaveLength(
+      56 * HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+    );
+    expect(modelText).not.toContain("omittedParticipantIds");
+    expect(modelText).not.toContain("sourceRevision");
+    expect(modelText.length).toBeGreaterThan(200 * 1024);
+    expect(modelText.length).toBeLessThanOrEqual(
+      ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+    );
   });
 
   it("passes bounded workout arrays through the model-facing boundary", async () => {
@@ -1718,6 +1882,7 @@ describe("murph.group dynamic tool", () => {
               workouts: [{
                 kind: "running",
                 minutes: 45,
+                source: { label: "Garmin", source: "garmin" },
                 startLocalMs: 64_800_001,
               }],
             },
@@ -1767,6 +1932,7 @@ describe("murph.group dynamic tool", () => {
                 "2026-07-18": [{
                   kindIndex: 0,
                   minutes: 45,
+                  source: { label: "Garmin", source: "garmin" },
                   startLocalMs: 64_800_001,
                 }],
               },
@@ -1791,6 +1957,67 @@ describe("murph.group dynamic tool", () => {
     expect(serialized.match(/2026-07-18/gu)).toHaveLength(1);
     expect(serialized.match(/canonical-event-zone-or-vault-zone\.v0/gu))
       .toHaveLength(1);
+  });
+
+  it("keeps thirteen workouts from each of eight sources in ordinary group reads", async () => {
+    const records = maximumSourceTaggedWorkoutRecords();
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_maximum_workouts",
+        participantId: "participant_maximum_workouts",
+        projections: [{
+          dataStatus: "available" as const,
+          grantedAt: "2026-07-18T12:00:00.000Z",
+          grantStatus: "granted" as const,
+          projectionScope: { projectionKind: "workouts.v0" as const },
+          projectionScopeKey: "workouts.v0",
+          records,
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workouts.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "workouts.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const projection = readFirstProjection(readGroupToolPayload(result));
+    const workouts = projection.days?.["2026-07-18"];
+    expect(workouts).toHaveLength(
+      HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
+        * HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+    );
+    const serialized = JSON.stringify(workouts);
+    for (
+      let sourceIndex = 0;
+      sourceIndex < HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
+      sourceIndex += 1
+    ) {
+      expect(serialized.match(new RegExp(
+        `"source":"source-${sourceIndex}"`,
+        "gu",
+      ))).toHaveLength(HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY);
+    }
+    expect(serialized).not.toContain("member_internal_maximum_workouts");
   });
 
   it("keeps every workouts day value an array and hoists its completion watermark", async () => {
@@ -2064,6 +2291,7 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("names omitted members instead of failing an oversized shared read", async () => {
+    const oversizedMemberCount = 200;
     const dates = [
       "2026-07-24",
       "2026-07-23",
@@ -2076,11 +2304,11 @@ describe("murph.group dynamic tool", () => {
     const workoutKinds = Array.from({ length: 13 }, (_unused, index) =>
       `activity-${String(index).padStart(2, "0")}-${"x".repeat(65)}`
     );
-    // This uses the production roster, day, workout-count, and activity-kind
+    // This uses the production member, day, workout-count, and activity-kind
     // bounds. A dense but valid roster must not cost everyone their standings,
     // while capacity-omitted members must remain explicitly current.
     const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
-      members: Array.from({ length: 32 }, (_unused, index) => ({
+      members: Array.from({ length: oversizedMemberCount }, (_unused, index) => ({
         currentTurnHandles: [],
         displayName: `Member ${index}`,
         memberId: `member_oversized_${index}`,
@@ -2135,18 +2363,20 @@ describe("murph.group dynamic tool", () => {
     expect(payload.result.status).toBe("partial");
     // Whole members only: whoever remains is complete.
     expect(payload.result.members.length).toBeGreaterThan(0);
-    expect(payload.result.members.length).toBeLessThan(32);
+    expect(payload.result.members.length).toBeLessThan(oversizedMemberCount);
     for (const member of payload.result.members) {
       expect(Object.keys(member.projections)).toEqual(["workouts.v0"]);
       expect(member.projections["workouts.v0"].days)
         .toHaveProperty("2026-07-24");
     }
     expect(payload.result.omittedParticipantIds.length)
-      .toBe(32 - payload.result.members.length);
+      .toBe(oversizedMemberCount - payload.result.members.length);
     for (const omitted of payload.result.omittedParticipantIds) {
       expect(omitted).toMatch(/^participant_oversized_\d+$/u);
     }
-    expect(JSON.stringify(payload).length).toBeLessThanOrEqual(64_000);
+    expect(JSON.stringify(payload).length).toBeLessThanOrEqual(
+      ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+    );
   });
 
   it("parses one bounded group ask without accepting model-supplied authority", () => {
@@ -5535,6 +5765,7 @@ describe("murph.group email actions", () => {
     const requestedScopes = [
       { projectionKind: "steps-days.v0" as const },
       { projectionKind: "sleep-times.v0" as const },
+      { projectionKind: "deep-sleep-sources-days.v1" as const },
     ];
     const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
       if (request.action !== "prepare_email") {
@@ -5563,6 +5794,10 @@ describe("murph.group email actions", () => {
                 {
                   projectionScopeKey: "sleep-times.v0",
                   shareId: "share-eligible-sleep-hidden",
+                },
+                {
+                  projectionScopeKey: "deep-sleep-sources-days.v1",
+                  shareId: "share-eligible-deep-sleep-hidden",
                 },
               ],
               hasEmail: true,
@@ -5607,7 +5842,11 @@ describe("murph.group email actions", () => {
           values: { steps: 9_100, workouts: 3 },
         }),
       ],
-      requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+      requestedProjectionScopeKeys: [
+        "steps-days.v0",
+        "sleep-times.v0",
+        "deep-sleep-sources-days.v1",
+      ],
       status: "ok",
     }));
     const request = readMurphDynamicToolRequest(groupToolCall({
@@ -5653,6 +5892,36 @@ describe("murph.group email actions", () => {
           {
             participantId: "participant_eligible",
             projections: {
+              "deep-sleep-sources-days.v1": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [
+                  {
+                    data: {
+                      date: "2026-08-09",
+                      metricKey: "deep-sleep-minutes",
+                      recordedAt: "2026-08-09T06:58:00.000Z",
+                      unit: "minutes",
+                      value: 64,
+                    },
+                    occurredAt: "2026-08-09T00:00:00.000Z",
+                    recordKey: "2026-08-09.fitbit",
+                    source: { label: "fitbit", source: "fitbit" },
+                  },
+                  {
+                    data: {
+                      date: "2026-08-09",
+                      metricKey: "deep-sleep-minutes",
+                      recordedAt: "2026-08-09T07:01:00.000Z",
+                      unit: "minutes",
+                      value: 88,
+                    },
+                    occurredAt: "2026-08-09T00:00:00.000Z",
+                    recordKey: "2026-08-09.garmin",
+                    source: { label: "Garmin", source: "garmin" },
+                  },
+                ],
+                status: "available",
+              },
               "sleep-times.v0": {
                 grantedAt: "2026-08-01T12:00:00.000Z",
                 records: [{
@@ -5662,22 +5931,40 @@ describe("murph.group email actions", () => {
                     sleepStartAt: "2026-08-09T00:00:00.000Z",
                   },
                   occurredAt: "2026-08-09T07:00:00.000Z",
-                  recordKey: "2026-08-09",
+                  recordKey: "2026-08-09.garmin",
+                  source: { label: "Garmin", source: "garmin" },
                 }],
                 status: "available",
               },
               "steps-days.v0": {
                 grantedAt: "2026-08-01T12:00:00.000Z",
-                records: [{
-                  data: {
-                    date: "2026-08-09",
-                    metricKey: "steps",
-                    unit: "count",
-                    value: 8_400,
+                records: [
+                  {
+                    data: {
+                      date: "2026-08-09",
+                      metricKey: "steps",
+                      unit: "count",
+                      value: 8_400,
+                    },
+                    occurredAt: "2026-08-09T00:00:00.000Z",
+                    recordKey: "2026-08-09.garmin",
+                    source: { label: "Garmin", source: "garmin" },
                   },
-                  occurredAt: "2026-08-09T00:00:00.000Z",
-                  recordKey: "2026-08-09",
-                }],
+                  {
+                    data: {
+                      date: "2026-08-09",
+                      metricKey: "steps",
+                      unit: "count",
+                      value: 7_900,
+                    },
+                    occurredAt: "2026-08-09T00:00:00.000Z",
+                    recordKey: "2026-08-09.apple-health-kit",
+                    source: {
+                      label: "Apple Health",
+                      source: "apple-health-kit",
+                    },
+                  },
+                ],
                 status: "available",
               },
             },
@@ -5687,16 +5974,19 @@ describe("murph.group email actions", () => {
             projections: {
               "steps-days.v0": {
                 grantedAt: "2026-08-01T12:00:00.000Z",
-                records: [{
-                  data: {
-                    date: "2026-08-09",
-                    metricKey: "steps",
-                    unit: "count",
-                    value: 9_100,
-                  },
-                  occurredAt: "2026-08-09T00:00:00.000Z",
-                  recordKey: "2026-08-09",
-                }],
+                records: [
+                  expect.objectContaining({
+                    data: expect.objectContaining({ value: 9_100 }),
+                    source: { label: "Garmin", source: "garmin" },
+                  }),
+                  expect.objectContaining({
+                    data: expect.objectContaining({ value: 8_600 }),
+                    source: {
+                      label: "Apple Health",
+                      source: "apple-health-kit",
+                    },
+                  }),
+                ],
                 status: "available",
               },
             },
@@ -5705,7 +5995,11 @@ describe("murph.group email actions", () => {
         missingVerifiedEmailCount: 1,
         recipientCount: 2,
         referenceAt: "2026-08-10T13:00:00.000Z",
-        requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+        requestedProjectionScopeKeys: [
+          "steps-days.v0",
+          "sleep-times.v0",
+          "deep-sleep-sources-days.v1",
+        ],
         status: "ok",
       },
     });
@@ -5718,6 +6012,7 @@ describe("murph.group email actions", () => {
       "member_partial_scope",
       "share-eligible-steps-hidden",
       "share-eligible-sleep-hidden",
+      "share-eligible-deep-sleep-hidden",
       "share-missing-email-hidden",
       "share-partial-steps-hidden",
       "participant_missing_email",
@@ -5725,6 +6020,213 @@ describe("murph.group email actions", () => {
     ]) {
       expect(modelText).not.toContain(hidden);
     }
+  });
+
+  it("keeps thirteen workouts from each of eight sources in group-email reads", async () => {
+    const projectionScope = { projectionKind: "workouts.v0" as const };
+    const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
+      if (request.action !== "prepare_email") {
+        throw new Error("Expected group email preparation.");
+      }
+      return {
+        action: "prepare_email",
+        result: {
+          authorizationProof: "authorization-proof-hidden",
+          groupId: "group-id-hidden",
+          missingEmailParticipants: [],
+          participants: [{
+            authorizedShares: [{
+              projectionScopeKey: "workouts.v0",
+              shareId: "share-workouts-hidden",
+            }],
+            hasEmail: true,
+            memberId: "member_maximum_workouts_email",
+          }],
+          status: "ok",
+        },
+      };
+    });
+    const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_maximum_workouts_email",
+        participantId: "participant_maximum_workouts_email",
+        projections: [{
+          dataStatus: "available" as const,
+          grantedAt: "2026-07-18T12:00:00.000Z",
+          grantStatus: "granted" as const,
+          projectionScope,
+          projectionScopeKey: "workouts.v0",
+          records: maximumSourceTaggedWorkoutRecords(),
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workouts.v0"],
+      status: "ok",
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      audience: "group_email",
+      projectionScopes: [projectionScope],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group email shared-read request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentScheduledAutomationAuthority: () => ({
+          automationId: "automation-maximum-workouts-update",
+          occurrenceAt: "2026-07-18T13:00:00.000Z",
+        }),
+        groupEmailRequest,
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      audience: "group_email",
+      result: {
+        recipientCount: 1,
+        status: "ok",
+      },
+    });
+    const projection = readFirstProjection(payload);
+    const workouts = projection.days?.["2026-07-18"];
+    expect(workouts).toHaveLength(
+      HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES
+        * HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+    );
+    const serialized = JSON.stringify(payload);
+    for (
+      let sourceIndex = 0;
+      sourceIndex < HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
+      sourceIndex += 1
+    ) {
+      expect(serialized.match(new RegExp(
+        `"source":"source-${sourceIndex}"`,
+        "gu",
+      ))).toHaveLength(HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY);
+    }
+    expect(serialized).not.toContain("authorization-proof-hidden");
+    expect(serialized).not.toContain("member_maximum_workouts_email");
+    expect(serialized).not.toContain("share-workouts-hidden");
+  });
+
+  it("keeps the escaped maximum heart-rate-zone source set in group-email reads", async () => {
+    const projectionScope = {
+      projectionKind: "heart-rate-zones-days.v0" as const,
+    };
+    const records = maximumEscapedHeartRateZoneRecords();
+    const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
+      if (request.action !== "prepare_email") {
+        throw new Error("Expected group email preparation.");
+      }
+      return {
+        action: "prepare_email",
+        result: {
+          authorizationProof: "authorization-proof-hidden",
+          groupId: "group-id-hidden",
+          missingEmailParticipants: [],
+          participants: [{
+            authorizedShares: [{
+              projectionScopeKey: "heart-rate-zones-days.v0",
+              shareId: "share-heart-rate-zones-hidden",
+            }],
+            hasEmail: true,
+            memberId: "member_heart_rate_zones_email",
+          }],
+          status: "ok",
+        },
+      };
+    });
+    const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_heart_rate_zones_email",
+        participantId: "participant_heart_rate_zones_email",
+        projections: [{
+          dataStatus: "available" as const,
+          grantedAt: "2026-07-25T12:00:00.000Z",
+          grantStatus: "granted" as const,
+          projectionScope,
+          projectionScopeKey: "heart-rate-zones-days.v0",
+          records,
+        }],
+      }],
+      requestedProjectionScopeKeys: ["heart-rate-zones-days.v0"],
+      status: "ok",
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      audience: "group_email",
+      projectionScopes: [projectionScope],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group email shared-read request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentScheduledAutomationAuthority: () => ({
+          automationId: "automation-heart-rate-zones-update",
+          occurrenceAt: "2026-07-25T13:00:00.000Z",
+        }),
+        groupEmailRequest,
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    const payload = readGroupToolPayload(result);
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      audience: "group_email",
+      result: {
+        members: [{
+          participantId: "participant_heart_rate_zones_email",
+          projections: {
+            "heart-rate-zones-days.v0": {
+              grantedAt: "2026-07-25T12:00:00.000Z",
+              records: expect.any(Array),
+              status: "available",
+            },
+          },
+        }],
+        recipientCount: 1,
+        status: "ok",
+      },
+    });
+    const modelText = JSON.stringify(payload);
+    expect(modelText.match(/"source":/gu)).toHaveLength(112);
+    expect(modelText.match(/"recordKey":/gu)).toHaveLength(56);
+    expect(modelText.match(/"zone":/gu)).toHaveLength(
+      56 * HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+    );
+    expect(modelText).not.toContain("omittedParticipantIds");
+    expect(modelText).not.toContain("sourceRevision");
+    expect(modelText).not.toContain("authorization-proof-hidden");
+    expect(modelText.length).toBeGreaterThan(200 * 1024);
+    expect(modelText.length).toBeLessThanOrEqual(
+      ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+    );
   });
 });
 
@@ -5743,18 +6245,67 @@ function sharedEmailMember(input: {
         dataStatus: "available" as const,
         grantedAt: "2026-08-01T12:00:00.000Z",
         grantStatus: "granted" as const,
+        projectionScope: {
+          projectionKind: "deep-sleep-sources-days.v1" as const,
+        },
+        projectionScopeKey: "deep-sleep-sources-days.v1",
+        records: [
+          {
+            data: {
+              date: "2026-08-09",
+              metricKey: "deep-sleep-minutes" as const,
+              recordedAt: "2026-08-09T06:58:00.000Z",
+              unit: "minutes",
+              value: 64,
+            },
+            occurredAt: "2026-08-09T00:00:00.000Z",
+            recordKey: "2026-08-09.fitbit",
+            source: { label: "fitbit", source: "fitbit" },
+          },
+          {
+            data: {
+              date: "2026-08-09",
+              metricKey: "deep-sleep-minutes" as const,
+              recordedAt: "2026-08-09T07:01:00.000Z",
+              unit: "minutes",
+              value: 88,
+            },
+            occurredAt: "2026-08-09T00:00:00.000Z",
+            recordKey: "2026-08-09.garmin",
+            source: { label: "Garmin", source: "garmin" },
+          },
+        ],
+      },
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
         projectionScope: { projectionKind: "steps-days.v0" as const },
         projectionScopeKey: "steps-days.v0",
-        records: [{
-          data: {
-            date: "2026-08-09",
-            metricKey: "steps" as const,
-            unit: "count",
-            value: input.values.steps,
+        records: [
+          {
+            data: {
+              date: "2026-08-09",
+              metricKey: "steps" as const,
+              unit: "count",
+              value: input.values.steps,
+            },
+            occurredAt: "2026-08-09T00:00:00.000Z",
+            recordKey: "2026-08-09.garmin",
+            source: { label: "Garmin", source: "garmin" },
           },
-          occurredAt: "2026-08-09T00:00:00.000Z",
-          recordKey: "2026-08-09",
-        }],
+          {
+            data: {
+              date: "2026-08-09",
+              metricKey: "steps" as const,
+              unit: "count",
+              value: input.values.steps - 500,
+            },
+            occurredAt: "2026-08-09T00:00:00.000Z",
+            recordKey: "2026-08-09.apple-health-kit",
+            source: { label: "Apple Health", source: "apple-health-kit" },
+          },
+        ],
       },
       {
         dataStatus: "available" as const,
@@ -5769,7 +6320,8 @@ function sharedEmailMember(input: {
             sleepStartAt: "2026-08-09T00:00:00.000Z",
           },
           occurredAt: "2026-08-09T07:00:00.000Z",
-          recordKey: "2026-08-09",
+          recordKey: "2026-08-09.garmin",
+          source: { label: "Garmin", source: "garmin" },
         }],
       },
       {
@@ -5785,7 +6337,12 @@ function sharedEmailMember(input: {
             timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
             workouts: Array.from(
               { length: input.values.workouts },
-              () => ({ kind: "running", minutes: 30, startLocalMs: 64_800_000 }),
+              () => ({
+                kind: "running",
+                minutes: 30,
+                source: { label: "Garmin", source: "garmin" },
+                startLocalMs: 64_800_000,
+              }),
             ),
           },
           occurredAt: "2026-08-09T18:00:00.000Z",

@@ -1,6 +1,7 @@
 ---
 title: 'open-exec-plan treats --help as a plan name'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1711'
 ---
 
 ## Expected Behavior

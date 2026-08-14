@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 100,
+  "item": {
+    "id": "automation-verification-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Reminder updates verify themselves",
+    "summary": "After Murph saves or changes a timed reminder, it now checks an inconclusive scheduler read once before replying instead of asking you to request the check.",
+    "details": "If timing still cannot be confirmed, Murph tells you the reminder is saved and avoids claiming the next run. It does not repeat the write or create a duplicate reminder.",
+    "relevanceTags": ["assistant", "reminders", "reliability"],
+    "sourcePullRequests": [1763]
+  }
+}

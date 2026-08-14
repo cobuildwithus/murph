@@ -1519,6 +1519,20 @@ The gradual container rollout keeps the production `RunnerContainer` `rollout_ac
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
+The Junction scalar-timeseries continuation cutover is runner-only and requires
+`container_rollout=immediate`. The preceding production bundle could persist a
+canonical v1 `{v,a,i}` resource envelope in a hosted wake hint or local
+`device_job`; the compatible runner validates that exact envelope, projects
+only `a` into the existing scalar resource coordinate, and writes scalar
+successors. It does not restore phase or completed-resource state. Require
+managed-container smoke to report the compatible runner-bundle fingerprint
+before considering the fleet converged. Once any scalar successor has been
+written, that bundle is the rollback floor because the preceding runner cannot
+read the scalar shape. Keep the narrow v1 reader until separate aggregate proof
+shows no retained hosted wake hint or local device job can contain the envelope;
+without that proof, retain the reader rather than adding a migration or another
+state owner. Vercel/Web has no deployment ordering dependency for this cutover.
+
 The non-expiring Starter plan-usage schema was a bidirectional hard cut between
 Web and the runner bundle. Its production rollout is complete: compatible Web
 and Cloudflare code from the same current public `main` deployed without an

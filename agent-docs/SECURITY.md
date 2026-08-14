@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Non-Negotiable Rules
 
@@ -106,7 +106,7 @@ Last verified: 2026-08-11
   - A scheduled occurrence remains one ordinary Codex turn: start every selected ask, then use ordinary shell waits and exact replay to poll each accepted ask until it returns completed or unavailable. The existing request expiry bounds the loop. The cron owner revalidates the current canonical automation and non-direct route immediately before each Murph tool call; Web then revalidates the exact request, completion, and live disclosure authority before returning a completed result. Scheduled completion never wakes the group runtime, starts another provider turn, creates an outbox delivery, or holds a callback open while the member runtime works.
   - There is no incoming model reviewer. The personal read-only candidate receives the exact permission context. One fresh outgoing reviewer receives only that permission, the question, and candidate; it has an empty workspace and no shell, personal workspace, application tools, network, delivery route, or persistence. It may only allow or deny. An allowed answer enters only its target-bound completion adapter: the caller group's isolated output-only continuation for group disclosure, or the exact personal notification described below for private continuation. Denied candidates do not enter Murph durable state, operational logs, errors, or delivery.
   - Treat every reviewed answer as untrusted data, not authority for another action. The caller continuation receives no personal vault, target tools, shell, web, apps, plugins, or native provider resume authority and must not infer private facts beyond the reviewed answer. Do not add roster fan-out, broad vault mounts, member fallback, candidate/reviewer write tools, a rewrite loop, a policy engine, a second scheduler, a queue, or continuation lifecycle.
-- Treat AgentMail inbox ids, message metadata, attachment download URLs, and outbound email thread bindings as high-sensitivity operator data; never log or fixture real mailbox details or API keys.
+- Treat email addresses, message metadata, attachment download URLs, and outbound email thread bindings as high-sensitivity data; never log or fixture real mailbox details or transport credentials.
 
 ## Dependency Supply Chain Rules
 
@@ -295,8 +295,19 @@ Last verified: 2026-08-11
   field explicitly; this preserves excess-property checking that TypeScript
   otherwise loses across composed objects. `pnpm provider-requests:guard`
   enforces the registered Composio, Stripe, Kernel, Linq, Retell, Temporal,
-  OpenAI, and Junction boundaries across production apps, packages, and
-  scripts. Register each new official SDK boundary when it is introduced. The opt-in
+  OpenAI, Resend, Junction, ElevenLabs, Exa, Lob, and Google Cloud client
+  boundaries across production apps, packages, and JavaScript/TypeScript
+  scripts. It also rejects direct `fetch`/`Request` construction when a known
+  provider origin is statically visible through local literals, templates,
+  URL objects, or variables. A detected official-SDK transport adapter may use
+  `provider-request-boundary-allow-next-line: sdk-transport-adapter` only when
+  the matching SDK is imported; a Linq SDK owner may use the
+  `linq-presigned-bytes` reason only for an `uploadUrl` or `downloadUrl` byte
+  transfer. The guard cannot prove the destination of imported or otherwise
+  runtime-computed URLs, and it does not inspect every possible HTTP library,
+  so it remains a focused boundary check rather than blanket proof that raw
+  provider HTTP is absent. Register each new official SDK and provider origin
+  when it is introduced. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode secret key and calls the real resume endpoint with a synthetic
   missing Subscription, so parameter drift fails without creating, charging,
@@ -617,7 +628,7 @@ Last verified: 2026-08-11
   when `Content-Length` is absent or underreported. Logs may include only a
   normalized error code/type and booleans/counts, never callback state/code,
   tokens, patient ids, URLs, or provider response bodies.
-- AgentMail-backed email polling and delivery must keep API keys in environment variables only, must not write raw Authorization headers to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. A signed group route is routing authority, not SMTP sender authentication, and must never authorize any assistant-style mutation, whether personal or room-owned.
+- Hosted email ingress and delivery credentials must remain platform-managed, must not write raw authorization material to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. A signed group route is routing authority, not SMTP sender authentication, and must never authorize any assistant-style mutation, whether personal or room-owned.
 - The companion legal-consent route is shared by the iOS and Android apps. It
   records the generic server-owned `native-companion` audit source because
   member authentication does not attest the client platform; a request's
@@ -627,11 +638,29 @@ Last verified: 2026-08-11
   account boundary. Its Privy bearer may create or recover the canonical hosted
   member through the existing consent, untouched-member trial, and access
   owner, but the closed request accepts only an optional validated IANA time
-  zone and the response is always the non-identifying `{ "ok": true }`. The
-  route requests the existing signup-welcome suppression policy so account
-  admission cannot reserve a Linq home line, queue a signup welcome, or send a
-  welcome email; canonical trial activation and its internal
-  `member.activated` fact remain unchanged. The route must not import or invoke
+  zone and the response is always the non-identifying `{ "ok": true }`. A
+  consented fresh companion activation with a verified phone may enter the
+  canonical signup-welcome path. Exact-member binding, signup idempotency,
+  home-line health, and proactive capacity remain governed by the existing
+  starter enrollment, line reservation, and welcome owners. Exhausted proactive
+  capacity must not block activation: Web still assigns an eligible home line
+  without a proactive welcome, and inbound-first messaging remains available.
+  If no line is assignable, activation still succeeds without creating route
+  authority. The ordinary route owner may later bind the exact active member's
+  provider-attested direct message to the contacted managed line when the
+  existing reply-egress policy permits it, including at-risk and delivery-
+  warning postures that cannot start proactive outreach. That narrow inbound
+  authority does not admit pending-contact or inactive-member claims. Unmanaged,
+  ambiguous, disabled, flagged, critical, unhealthy, or structurally
+  unavailable recipient lines cannot establish exact-line authority; the
+  ordinary fallback pool remains unchanged and fails closed when empty. Successful
+  welcome delivery may seed the existing finite three-local-day unfinished-
+  onboarding continuation, but companion admission must not add a second
+  scheduler or send the separate signup welcome email. If the committed
+  activation's runtime wake is not accepted, return the closed retryable
+  outcome and let replay re-signal only the exact unconsumed Starter activation
+  mailbox item for that member.
+  The route must not import or invoke
   device-sync public ingress, mint Junction authority, or create, resume,
   reactivate, or otherwise mutate a device connection. Validate the complete
   bounded body before acquiring Prisma or running member admission. Its

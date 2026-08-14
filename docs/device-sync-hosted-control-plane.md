@@ -222,11 +222,28 @@ remaining terminal setup failures normalize to
 `COMPANION_ADMISSION_SUPPORT_REQUIRED`. The client may retry only the former
 and must stop automatic admission attempts on the latter, while internal
 hosted lifecycle codes remain private. The route's static dependency graph is
-kept outside device-sync public ingress, and this account-only caller uses the
-existing signup-welcome suppression policy. Admission therefore preserves
-trial activation and the internal `member.activated` fact without assigning a
-Linq home line, queueing or emailing a welcome, or creating, resuming,
-reactivating, or otherwise mutating a Junction connection.
+kept outside device-sync public ingress. A consented fresh companion activation
+with a verified phone may enter the canonical signup-welcome path under the
+existing exact-member binding, signup idempotency, home-line health, and
+proactive-capacity owners. A healthy line sends the normal conversational
+welcome and keeps its existing bounded three-day unfinished-setup continuation;
+the companion does not also send the separate Web signup email. If no line is
+assignable or proactive capacity cannot be reserved, companion activation
+completes without a route and
+inbound-first messaging remains available on a contacted managed line whose
+existing reply-egress policy permits the exact active member's provider-attested
+direct message. That path binds the home route and appends the encrypted input
+atomically even when at-risk or delivery-warning posture excluded proactive
+outreach; unmanaged, disabled, ambiguous, and unsafe lines cannot establish that
+exact-line authority, and ordinary fallback selection fails closed when empty.
+Web activation keeps its existing fail-closed requirement. The activation mailbox item is the durable retry
+authority: a failed companion runtime wake returns the public retryable outcome,
+and later admission or sign-in-token requests signal that exact unconsumed item
+instead of creating a second activation or welcome. Sign-in-token is both a
+direct companion entry point and a retry after committed activation, so it
+returns the underlying retryable runtime-wake code and does not create a
+Junction session until the wake passes. Admission creates, resumes, reactivates,
+or otherwise mutates no Junction connection.
 
 ### Cloudflare execution state
 
@@ -334,8 +351,8 @@ full accepted window and intentionally retaining new-format rows for one extra
 
 All are Privy-bearer-authenticated and consent-gated. Admission validates its
 complete bounded optional-time-zone body before canonical member mutation and
-suppresses signup-welcome routing and delivery without suppressing canonical
-trial activation; it does not enter device sync. Sign-in honors the
+uses the canonical signup-welcome route without suppressing trial activation;
+it does not enter device sync. Sign-in honors the
 resume, omitted-intent inference, and future explicit-connect authority split
 above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or

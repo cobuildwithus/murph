@@ -3778,10 +3778,12 @@ describe('assistant codex runtime', () => {
       0x00, 0x00, 0x00, 0x00,
       0x57, 0x45, 0x42, 0x50,
     ])
+    const imageFetchStarted = createDeferred<void>()
     let fetchAborted = false
     const fetchImpl = vi.fn(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((resolve) => {
+          imageFetchStarted.resolve()
           // Settle only after the failing turn aborts in-flight dynamic tools,
           // proving the drain waits for completed image usage.
           const respond = () => {
@@ -3844,6 +3846,7 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          await imageFetchStarted.promise
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',

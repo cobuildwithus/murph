@@ -1,6 +1,7 @@
 ---
 title: 'Changelog guide omits the list marker required by CI'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1742'
 ---
 
 ## Expected Behavior

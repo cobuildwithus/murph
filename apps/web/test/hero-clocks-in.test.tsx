@@ -89,7 +89,7 @@ test("HeroClocksIn renders the solo exchange without animation for reduced motio
   assert.ok(composer);
   assert.ok(topic);
   assert.ok(member);
-  assert.ok(topic.classList.contains("text-[#756c5a]"));
+  assert.ok(topic.classList.contains("text-[#c1baae]"));
   assert.ok(topic.classList.contains("focus-visible:ring-2"));
   assert.ok(member.classList.contains("text-[#736a58]"));
   const phoneFrame = [...view.container.querySelectorAll("div")].find(

@@ -1,3 +1,11 @@
+import LinqAPIV3, { APIError } from "@linqapp/sdk";
+import type {
+  Chat,
+  MessageCreateParams,
+  PhoneNumberListResponse,
+} from "@linqapp/sdk/resources";
+
+const OPERATOR_ALERT_LINQ_SDK_BASE_URL = "https://linq-sdk.invalid";
 const OPERATOR_ALERT_FETCH_TIMEOUT_MS = 10_000;
 const LINQ_HEALTH_BODY_LIMIT_BYTES = 256 * 1_024;
 
@@ -109,56 +117,27 @@ async function resolveOperatorLinqDestination(input: {
   chatId: string;
   fetchImplementation: OperatorAlertFetch;
 }): Promise<{ recipient: string; sendable: boolean }> {
-  const authorization = `Bearer ${input.apiToken}`;
-  const chatUrl = new URL(
-    `chats/${encodeURIComponent(input.chatId)}`,
-    ensureTrailingSlash(input.apiBaseUrl),
-  );
-  const phoneNumbersUrl = new URL(
-    "phone_numbers",
-    ensureTrailingSlash(input.apiBaseUrl),
-  );
-  const [chatResponseResult, phoneNumbersResponseResult] =
-    await Promise.allSettled([
-      fetchWithTimeout(input.fetchImplementation, chatUrl, {
-        headers: { authorization },
-        method: "GET",
-      }),
-      fetchWithTimeout(input.fetchImplementation, phoneNumbersUrl, {
-        headers: { authorization },
-        method: "GET",
-      }),
-    ]);
-  if (
-    chatResponseResult.status === "rejected"
-    || !chatResponseResult.value.ok
-  ) {
+  const client = createOperatorLinqClient(input);
+  const [chatResult, phoneNumbersResult] = await Promise.allSettled([
+    client.chats.retrieve(input.chatId),
+    client.phoneNumbers.list(),
+  ]);
+  if (chatResult.status === "rejected") {
     throw new OperatorAlertLinqError("linq_health_unavailable");
   }
-  const chatBody = await readBoundedResponseText(
-    chatResponseResult.value,
-    LINQ_HEALTH_BODY_LIMIT_BYTES,
-  ).catch(() => {
-    throw new OperatorAlertLinqError("linq_health_unavailable");
-  });
-  const chatIdentity = resolveLinqDirectChatIdentity(chatBody);
-  if (
-    phoneNumbersResponseResult.status === "rejected"
-    || !phoneNumbersResponseResult.value.ok
-  ) {
-    return { recipient: chatIdentity.recipient, sendable: false };
+  const chatIdentity = resolveLinqDirectChatIdentity(chatResult.value);
+  if (phoneNumbersResult.status === "rejected") {
+    return {
+      recipient: chatIdentity.recipient,
+      sendable: false,
+    };
   }
-  const phoneNumbersBody = await readBoundedResponseText(
-    phoneNumbersResponseResult.value,
-    LINQ_HEALTH_BODY_LIMIT_BYTES,
-  ).catch(() => null);
   return {
     recipient: chatIdentity.recipient,
     sendable:
       chatIdentity.chatHealthy
-      && phoneNumbersBody !== null
       && hasHealthyLinqSenderLine({
-        phoneNumbersBody,
+        phoneNumbers: phoneNumbersResult.value,
         sender: chatIdentity.sender,
       }),
   };
@@ -172,45 +151,243 @@ async function sendOperatorLinqMessage(input: {
   message: string;
   recipient: string;
 }): Promise<void> {
-  const response = await fetchWithTimeout(
-    input.fetchImplementation,
-    new URL("messages", ensureTrailingSlash(input.apiBaseUrl)),
-    {
-      body: JSON.stringify({
-        message: {
-          idempotency_key: input.idempotencyKey,
-          parts: [{ type: "text", value: input.message }],
+  const body: MessageCreateParams = {
+    "Idempotency-Key": input.idempotencyKey,
+    message: {
+      idempotency_key: input.idempotencyKey,
+      parts: [
+        {
+          type: "text",
+          value: input.message,
         },
-        to: [input.recipient],
-      }),
-      headers: {
-        authorization: `Bearer ${input.apiToken}`,
-        "content-type": "application/json",
-        "idempotency-key": input.idempotencyKey,
-      },
-      method: "POST",
+      ],
     },
-  );
-  if (!response.ok) {
-    throw new OperatorAlertLinqError(
-      response.status === 429 || response.status >= 500
-        ? "linq_retryable_response"
-        : "linq_rejected_response",
-    );
+    to: [input.recipient],
+  };
+  try {
+    await createOperatorLinqClient(input, {
+      discardResponseBody: true,
+    }).messages.create(body).asResponse();
+  } catch (error) {
+    const status = readOperatorLinqErrorStatus(error);
+    if (status !== null) {
+      throw new OperatorAlertLinqError(
+        status === 429 || status >= 500
+          ? "linq_retryable_response"
+          : "linq_rejected_response",
+      );
+    }
+    throw error;
   }
 }
 
-function resolveLinqDirectChatIdentity(chatBody: string): {
+function readOperatorLinqErrorStatus(error: unknown): number | null {
+  let current: unknown = error;
+  let depth = 0;
+  while (current !== null && current !== undefined && depth < 8) {
+    if (current instanceof APIError && typeof current.status === "number") {
+      return current.status;
+    }
+    if (current instanceof OperatorAlertLinqResponseTooLargeError) {
+      return current.status;
+    }
+    current = typeof current === "object"
+        && current !== null
+        && "cause" in current
+      ? current.cause
+      : undefined;
+    depth += 1;
+  }
+  return null;
+}
+
+function createOperatorLinqClient(
+  input: {
+    apiBaseUrl: string;
+    apiToken: string;
+    fetchImplementation: OperatorAlertFetch;
+  },
+  options: { discardResponseBody?: boolean } = {},
+): LinqAPIV3 {
+  return new LinqAPIV3({
+    apiKey: input.apiToken,
+    baseURL: OPERATOR_ALERT_LINQ_SDK_BASE_URL,
+    fetch: createOperatorLinqFetch(
+      normalizeOperatorLinqApiRoot(input.apiBaseUrl),
+      input.fetchImplementation,
+      options,
+    ),
+    logLevel: "off",
+    maxRetries: 0,
+    timeout: OPERATOR_ALERT_FETCH_TIMEOUT_MS,
+  });
+}
+
+function createOperatorLinqFetch(
+  apiRoot: string,
+  fetchImplementation: OperatorAlertFetch,
+  options: { discardResponseBody?: boolean },
+): (
+  request: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response> {
+  return async (request, init) => {
+    const target = mapOperatorLinqSdkUrl(request, apiRoot);
+    const headers = new Headers(init?.headers);
+    const providerHeaders = new Headers();
+    for (const name of ["authorization", "content-type", "idempotency-key"]) {
+      const value = headers.get(name);
+      if (value !== null) {
+        providerHeaders.set(name, value);
+      }
+    }
+    const response = await fetchImplementation(target, {
+      ...init,
+      headers: providerHeaders,
+      // Preserve the fail-closed redirect policy so the SDK bearer token is
+      // never replayed to a provider-controlled redirect target.
+      redirect: "manual",
+    });
+    if (options.discardResponseBody === true) {
+      await response.body?.cancel().catch(() => undefined);
+      return new Response(null, {
+        headers: response.headers,
+        status: response.status,
+        statusText: response.statusText,
+      });
+    }
+    return await bufferOperatorLinqResponse(response);
+  };
+}
+
+function mapOperatorLinqSdkUrl(
+  request: string | URL | Request,
+  apiRoot: string,
+): URL {
+  const source = new URL(
+    typeof request === "string"
+      ? request
+      : request instanceof URL
+        ? request.toString()
+        : request.url,
+  );
+  const sdkBase = new URL(OPERATOR_ALERT_LINQ_SDK_BASE_URL);
+  if (
+    source.origin !== sdkBase.origin
+    || !/^\/v3(?:\/|$)/u.test(source.pathname)
+  ) {
+    throw new TypeError("Linq SDK emitted an unexpected operator-alert URL.");
+  }
+
+  const relativePath = encodeOperatorLinqSdkPath(
+    source.pathname.replace(/^\/v3\/?/u, ""),
+  );
+  const target = new URL(
+    relativePath,
+    ensureTrailingSlash(apiRoot),
+  );
+  target.search = source.search;
+  return target;
+}
+
+function encodeOperatorLinqSdkPath(pathname: string): string {
+  return pathname
+    .split("/")
+    .map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+    .join("/");
+}
+
+function normalizeOperatorLinqApiRoot(value: string): string {
+  const normalized = value.trim().replace(/\/+$/u, "");
+  if (!normalized) {
+    throw new TypeError("Operator alert Linq API base URL is required.");
+  }
+  const url = new URL(normalized);
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/u, "");
+}
+
+async function bufferOperatorLinqResponse(
+  response: Response,
+): Promise<Response> {
+  const headers = new Headers(response.headers);
+  const declaredLength = Number(headers.get("content-length"));
+  if (
+    Number.isFinite(declaredLength)
+    && declaredLength > LINQ_HEALTH_BODY_LIMIT_BYTES
+  ) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new OperatorAlertLinqResponseTooLargeError(response.status);
+  }
+  const bytes = response.body
+    ? await readBoundedOperatorLinqStream(response.body, response.status)
+    : new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > LINQ_HEALTH_BODY_LIMIT_BYTES) {
+    throw new OperatorAlertLinqResponseTooLargeError(response.status);
+  }
+  if (bytes.byteLength > 0) {
+    headers.set("content-type", "application/json");
+  }
+  const body = bytes.byteLength === 0
+      || response.status === 204
+      || response.status === 205
+      || response.status === 304
+    ? null
+    : copyOperatorLinqResponseBytes(bytes);
+  return new Response(body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function copyOperatorLinqResponseBytes(bytes: Uint8Array): ArrayBuffer {
+  const body = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(body).set(bytes);
+  return body;
+}
+
+async function readBoundedOperatorLinqStream(
+  stream: ReadableStream<Uint8Array>,
+  status: number,
+): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      }
+      total += next.value.byteLength;
+      if (total > LINQ_HEALTH_BODY_LIMIT_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new OperatorAlertLinqResponseTooLargeError(status);
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function resolveLinqDirectChatIdentity(
+  chatValue: Chat,
+): {
   chatHealthy: boolean;
   recipient: string;
   sender: string;
 } {
-  let chatValue: unknown;
-  try {
-    chatValue = JSON.parse(chatBody);
-  } catch {
-    throw new OperatorAlertLinqError("linq_health_unavailable");
-  }
   if (
     !isObjectRecord(chatValue)
     || chatValue.is_group !== false
@@ -218,13 +395,22 @@ function resolveLinqDirectChatIdentity(chatBody: string): {
   ) {
     throw new OperatorAlertLinqError("linq_health_suppressed");
   }
-  const activeHandles = chatValue.handles.filter(
-    (candidate): candidate is Record<string, unknown> =>
+
+  const activeHandles: Record<string, unknown>[] = [];
+  for (const candidate of chatValue.handles) {
+    if (
       isObjectRecord(candidate)
-      && (candidate.status === undefined || candidate.status === "active"),
+      && (candidate.status === undefined || candidate.status === "active")
+    ) {
+      activeHandles.push(candidate);
+    }
+  }
+  const senderHandles = activeHandles.filter(
+    (candidate) => candidate.is_me === true,
   );
-  const senderHandles = activeHandles.filter((candidate) => candidate.is_me === true);
-  const recipientHandles = activeHandles.filter((candidate) => candidate.is_me === false);
+  const recipientHandles = activeHandles.filter(
+    (candidate) => candidate.is_me === false,
+  );
   if (senderHandles.length !== 1 || recipientHandles.length !== 1) {
     throw new OperatorAlertLinqError("linq_health_suppressed");
   }
@@ -244,75 +430,44 @@ function resolveLinqDirectChatIdentity(chatBody: string): {
 }
 
 function hasHealthyLinqSenderLine(input: {
-  phoneNumbersBody: string;
+  phoneNumbers: PhoneNumberListResponse;
   sender: string;
 }): boolean {
-  let phoneNumbersValue: unknown;
-  try {
-    phoneNumbersValue = JSON.parse(input.phoneNumbersBody);
-  } catch {
-    return false;
-  }
+  const phoneNumbersValue = input.phoneNumbers;
   if (
     !isObjectRecord(phoneNumbersValue)
     || !Array.isArray(phoneNumbersValue.phone_numbers)
   ) {
     return false;
   }
-  const currentLines = phoneNumbersValue.phone_numbers.filter(
-    (candidate) =>
+  const currentLines: Record<string, unknown>[] = [];
+  for (const candidate of phoneNumbersValue.phone_numbers) {
+    if (
       isObjectRecord(candidate)
-      && normalizeLinqPhoneNumber(candidate.phone_number) === input.sender,
-  );
+      && normalizeLinqPhoneNumber(candidate.phone_number) === input.sender
+    ) {
+      currentLines.push(candidate);
+    }
+  }
   const currentLine = currentLines[0];
   const reputation = isObjectRecord(currentLine?.reputation)
     ? currentLine.reputation
     : null;
-  const reputationStatus = normalizeLinqHealthStatus(reputation?.status)
+  const reputationStatus =
+    normalizeLinqHealthStatus(reputation?.status)
     ?? normalizeLinqHealthStatus(currentLine?.health_status);
-  return currentLines.length === 1
-    && isObjectRecord(currentLine)
-    && reputationStatus === "HEALTHY";
+  return !(
+    currentLines.length !== 1
+    || !isObjectRecord(currentLine)
+    || reputationStatus !== "HEALTHY"
+  );
 }
 
-async function fetchWithTimeout(
-  fetchImplementation: OperatorAlertFetch,
-  input: RequestInfo | URL,
-  init: RequestInit,
-): Promise<Response> {
-  return await fetchImplementation(input, {
-    ...init,
-    // Workers fetch rejects redirect: "error" before network I/O. Manual
-    // redirects remain fail-closed because every caller requires response.ok.
-    redirect: "manual",
-    signal: AbortSignal.timeout(OPERATOR_ALERT_FETCH_TIMEOUT_MS),
-  });
-}
-
-async function readBoundedResponseText(
-  response: Response,
-  limitBytes: number,
-): Promise<string> {
-  const contentLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > limitBytes) {
-    throw new Error("Response exceeded the operator alert body limit.");
+class OperatorAlertLinqResponseTooLargeError extends Error {
+  constructor(readonly status: number) {
+    super("Linq operator-alert response exceeded the configured byte limit.");
+    this.name = "OperatorAlertLinqResponseTooLargeError";
   }
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let bytesRead = 0;
-  let body = "";
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    bytesRead += chunk.value.byteLength;
-    if (bytesRead > limitBytes) {
-      await reader.cancel();
-      throw new Error("Response exceeded the operator alert body limit.");
-    }
-    body += decoder.decode(chunk.value, { stream: true });
-  }
-  return body + decoder.decode();
 }
 
 function ensureTrailingSlash(value: string): string {

@@ -1,6 +1,7 @@
 ---
 title: 'Committer turns an active merge into a one-parent commit and leaves MERGE_HEAD open'
 severity: 'major'
+issue: 'cobuildwithus/murph#1666'
 ---
 
 ## Expected Behavior

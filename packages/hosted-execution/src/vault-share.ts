@@ -16,18 +16,24 @@ import {
   requireString,
 } from "./parsers/assertions.ts";
 import {
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
+  HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
 } from "./vault-share-limits.ts";
 
 export {
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
+  HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
 };
 
@@ -516,11 +522,13 @@ export const HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS =
   "canonical-workout-day" as const;
 export const HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS =
   "canonical-event-zone-or-vault-zone.v0" as const;
-// With seven maximum-size day records, 13 workouts/day serialize to a 16,090-byte
-// delivery request and a 16,067-byte snapshot. A 14-workout/day request is 17,147
-// bytes and cannot cross the 16 KiB ingress ceiling. Parsers reject overflow rather
-// than truncating a day.
+// Legacy unsourced snapshots retain the original thirteen-workout daily bound.
+// Source-tagged snapshots apply that same bound independently to each admitted
+// public source; parsers reject overflow rather than truncating a day or source.
 export const HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY = 13;
+export const HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY =
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY
+  * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
 export const HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH = 80;
 /**
  * Providers can emit a real workout with no usable sport name; WHOOP maps an
@@ -538,23 +546,66 @@ export interface HostedVaultShareDailyMetricData {
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
   projectedAt?: string;
   provisional?: true;
+  recordedAt?: string | null;
   sources?: HostedVaultShareSleepMetricSource[];
   sourcesDisagree?: boolean;
   unit: string | null;
   value: number;
 }
 
+export const HOSTED_VAULT_SHARE_DATA_SOURCE_KEY_MAX_LENGTH = 80;
+export const HOSTED_VAULT_SHARE_DATA_SOURCE_LABEL_MAX_LENGTH = 80;
+const HOSTED_VAULT_SHARE_DATA_SOURCE_KEY_PATTERN =
+  /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const HOSTED_VAULT_SHARE_PUBLIC_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  "apple-health": "Apple Health",
+  "apple-health-kit": "Apple Health",
+};
+
+/** Canonical public provenance for one shared health observation. */
+export interface HostedVaultShareDataSource {
+  label: string;
+  source: string;
+}
+
+export function resolveHostedVaultShareDataSource(
+  source: string,
+): HostedVaultShareDataSource | null {
+  const sourceKey = source.trim();
+  if (
+    sourceKey.length === 0
+    || sourceKey.length > HOSTED_VAULT_SHARE_DATA_SOURCE_KEY_MAX_LENGTH
+    || !HOSTED_VAULT_SHARE_DATA_SOURCE_KEY_PATTERN.test(sourceKey)
+    || sourceKey === "junction"
+    || sourceKey === "unknown"
+  ) {
+    return null;
+  }
+  const providerDescriptor = resolveWearableProviderDescriptor(sourceKey);
+  return {
+    label: sourceKey === "manual"
+      ? "Manual"
+      : sourceKey === "murph"
+        ? "Murph"
+        : providerDescriptor?.displayName
+          ?? HOSTED_VAULT_SHARE_PUBLIC_SOURCE_LABELS[sourceKey]
+          ?? sourceKey,
+    source: sourceKey,
+  };
+}
+
 export const HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES = 4;
 export const HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES =
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES + 1;
-export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_KEY_MAX_LENGTH = 80;
-export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_LABEL_MAX_LENGTH = 80;
+export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_KEY_MAX_LENGTH =
+  HOSTED_VAULT_SHARE_DATA_SOURCE_KEY_MAX_LENGTH;
+export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_LABEL_MAX_LENGTH =
+  HOSTED_VAULT_SHARE_DATA_SOURCE_LABEL_MAX_LENGTH;
 
-export interface HostedVaultShareSleepMetricSource {
-  label: string;
+export interface HostedVaultShareSleepMetricSource
+  extends HostedVaultShareDataSource {
   recordedAt: string | null;
   selected?: true;
-  source: string;
   unit: string | null;
   value: number;
 }
@@ -569,6 +620,7 @@ export interface HostedVaultShareWorkoutDayData {
 export interface HostedVaultShareWorkout {
   kind: string;
   minutes: number;
+  source?: HostedVaultShareDataSource;
   startLocalMs: number;
 }
 
@@ -577,6 +629,32 @@ export interface HostedVaultShareWorkoutsDayData {
   date: string;
   timeSemantics: typeof HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS;
   workouts: HostedVaultShareWorkout[];
+}
+
+export function hostedVaultShareWorkoutsFitDailyCapacity(
+  workouts: readonly HostedVaultShareWorkout[],
+): boolean {
+  if (
+    workouts.length
+      > HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
+  ) {
+    return false;
+  }
+
+  const countsBySource = new Map<string, number>();
+  for (const workout of workouts) {
+    const source = workout.source?.source;
+    if (!source) {
+      return workouts.length <= HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY;
+    }
+    const count = (countsBySource.get(source) ?? 0) + 1;
+    if (count > HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY) {
+      return false;
+    }
+    countsBySource.set(source, count);
+  }
+
+  return countsBySource.size <= HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
 }
 
 export interface HostedVaultShareActivityMinutesDayData {
@@ -604,6 +682,11 @@ export interface HostedVaultShareHeartRateZoneBucket {
   label?: string;
   zone?: number;
 }
+
+// The query projection supports zone indices 0-20. Delivery and snapshot byte
+// ceilings are proven against this full cardinality and the longest legal text.
+export const HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY = 21;
+export const HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH = 80;
 
 export interface HostedVaultShareHeartRateZoneDayData {
   date: string;
@@ -661,6 +744,7 @@ export interface HostedVaultShareDeliveryRecord {
   data: HostedVaultShareDeliveryRecordData;
   occurredAt: string;
   recordKey: string;
+  source?: HostedVaultShareDataSource;
   sourceRevision?: string;
 }
 
@@ -748,6 +832,30 @@ export function getHostedVaultShareDailyMetricProjectionSpec(
   return HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.find(
     (spec) => spec.projectionKind === projectionKind,
   ) ?? null;
+}
+
+export function getHostedVaultShareProjectionMaxRecords(
+  projectionScope: HostedVaultShareProjectionScope,
+): number {
+  if (isHostedVaultShareActivitySelectorProjectionKind(projectionScope.projectionKind)) {
+    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+  }
+  if (
+    projectionScope.projectionKind === "sleep-times.v0"
+    || projectionScope.projectionKind === "workout-days.v0"
+    || projectionScope.projectionKind === "heart-rate-zones-days.v0"
+  ) {
+    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+  }
+  const spec = getHostedVaultShareDailyMetricProjectionSpec(
+    projectionScope.projectionKind,
+  );
+  if (
+    spec?.source.kind === "metric-series"
+  ) {
+    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+  }
+  return HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS;
 }
 
 function parseHostedVaultShareProjectionKind(
@@ -1055,6 +1163,12 @@ export function parseHostedVaultShareDeliveryRecord(
     record.occurredAt,
     "Vault share delivery record occurredAt",
   );
+  const source = record.source === undefined
+    ? undefined
+    : parseHostedVaultShareDataSource(
+        record.source,
+        "Vault share delivery record source",
+      );
   const provisional = requireObject(record.data, "Vault share delivery record data").provisional;
   const completedDateScope = projectionScope.projectionKind === "deep-sleep-days.v0"
     || projectionScope.projectionKind === "deep-sleep-sources-days.v1"
@@ -1068,14 +1182,58 @@ export function parseHostedVaultShareDeliveryRecord(
     projectionKind: projectionScope.projectionKind,
     projectionScope,
     recordKey,
+    source,
   });
+  if ("date" in data) {
+    const expectedRecordKey = source
+      ? `${data.date}.${source.source}`
+      : data.date;
+    if (recordKey !== expectedRecordKey) {
+      throw new TypeError(
+        `Vault share ${projectionScope.projectionKind} recordKey must identify its date and public source.`,
+      );
+    }
+  }
 
   return {
     data: provisional === true ? { ...data, provisional } : data,
     occurredAt,
     recordKey,
+    ...(source === undefined ? {} : { source }),
     ...parseHostedVaultShareSourceRevision(record.sourceRevision),
   };
+}
+
+function parseHostedVaultShareDataSource(
+  value: unknown,
+  label: string,
+): HostedVaultShareDataSource {
+  const source = requireObject(value, label);
+  assertObjectKeys(source, label, ["label", "source"]);
+
+  const sourceKey = requireString(source.source, `${label} source`).trim();
+  const canonicalSource = resolveHostedVaultShareDataSource(sourceKey);
+  if (!canonicalSource) {
+    throw new TypeError(
+      `${label} source keys must be canonical public provider slugs.`,
+    );
+  }
+
+  const sourceLabel = requireString(source.label, `${label} label`).trim();
+  if (
+    sourceLabel.length === 0
+    || sourceLabel.length > HOSTED_VAULT_SHARE_DATA_SOURCE_LABEL_MAX_LENGTH
+    || /[\u0000-\u001f\u007f]/u.test(sourceLabel)
+  ) {
+    throw new TypeError(`${label} label must be bounded text without control characters.`);
+  }
+  if (sourceLabel !== canonicalSource.label) {
+    throw new TypeError(
+      `${label} must use canonical public provider keys and labels.`,
+    );
+  }
+
+  return canonicalSource;
 }
 
 function parseHostedVaultShareSourceRevision(value: unknown): { sourceRevision?: string } {
@@ -1106,6 +1264,7 @@ function parseHostedVaultShareDeliveryRecordData(
     projectionKind: HostedVaultShareProjectionKind;
     projectionScope: HostedVaultShareProjectionScope;
     recordKey: string;
+    source?: HostedVaultShareDataSource;
   },
 ): HostedVaultShareDeliveryRecordData {
   const dailyMetricSpec = getHostedVaultShareDailyMetricProjectionSpec(
@@ -1355,7 +1514,11 @@ function parseHostedVaultShareProfileNameData(
 
 function parseHostedVaultShareDailyMetricData(
   value: unknown,
-  context: { occurredAt: string; recordKey: string },
+  context: {
+    occurredAt: string;
+    recordKey: string;
+    source?: HostedVaultShareDataSource;
+  },
   spec: HostedVaultShareDailyMetricProjectionSpec,
 ): HostedVaultShareDailyMetricData {
   const data = requireObject(
@@ -1422,7 +1585,13 @@ function parseHostedVaultShareDailyMetricData(
     );
   }
 
-  const sourceAware = spec.sourceMode === "all-public-sleep-sources";
+  const sourceAware = spec.sourceMode === "all-public-sleep-sources"
+    && context.source === undefined;
+  const sourceTaggedSleepStage = context.source !== undefined
+    && (
+      spec.metricKey === "deep-sleep-minutes"
+      || spec.metricKey === "rem-sleep-minutes"
+    );
   if (sourceAware) {
     assertObjectKeys(
       data,
@@ -1450,6 +1619,27 @@ function parseHostedVaultShareDailyMetricData(
       );
     }
   }
+  if (
+    sourceTaggedSleepStage
+    && !Object.prototype.hasOwnProperty.call(data, "recordedAt")
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} source-tagged data recordedAt must be a timestamp or null.`,
+    );
+  }
+  if (!sourceTaggedSleepStage && data.recordedAt !== undefined) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} does not accept recordedAt.`,
+    );
+  }
+  const recordedAt = sourceTaggedSleepStage
+    ? data.recordedAt === null
+      ? null
+      : requireHostedVaultShareNonFutureTimestamp(
+          data.recordedAt,
+          `Vault share ${spec.projectionKind} data recordedAt`,
+        )
+    : undefined;
 
   const sourceAwareData = sourceAware
     ? parseHostedVaultShareSleepMetricSources(data, spec, {
@@ -1462,6 +1652,7 @@ function parseHostedVaultShareDailyMetricData(
     date,
     metricKey,
     ...(metricSemantics === undefined ? {} : { metricSemantics }),
+    ...(sourceTaggedSleepStage ? { recordedAt } : {}),
     ...sourceAwareData,
     unit,
     value: valueNumber,
@@ -1564,37 +1755,10 @@ function parseHostedVaultShareSleepMetricSource(
     "unit",
     "value",
   ]);
-
-  const sourceKey = requireString(source.source, `${label} source`).trim();
-  if (
-    sourceKey.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_KEY_MAX_LENGTH
-    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(sourceKey)
-  ) {
-    throw new TypeError(
-      `Vault share ${spec.projectionKind} source keys must be canonical public provider slugs.`,
-    );
-  }
-
-  const sourceLabel = requireString(source.label, `${label} label`).trim();
-  if (
-    sourceLabel.length === 0
-    || sourceLabel.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_LABEL_MAX_LENGTH
-    || /[\u0000-\u001f\u007f]/u.test(sourceLabel)
-  ) {
-    throw new TypeError(
-      `Vault share ${spec.projectionKind} source labels must be bounded text without control characters.`,
-    );
-  }
-  const providerDescriptor = resolveWearableProviderDescriptor(sourceKey);
-  const hasCanonicalPublicIdentity = sourceKey === "manual"
-    ? sourceLabel === "Manual"
-    : sourceKey !== "junction"
-      && (providerDescriptor?.displayName ?? sourceKey) === sourceLabel;
-  if (!hasCanonicalPublicIdentity) {
-    throw new TypeError(
-      `Vault share ${spec.projectionKind} sources must use canonical public provider keys and labels.`,
-    );
-  }
+  const publicSource = parseHostedVaultShareDataSource(
+    { label: source.label, source: source.source },
+    label,
+  );
 
   const recordedAt = source.recordedAt === null
     ? null
@@ -1624,10 +1788,10 @@ function parseHostedVaultShareSleepMetricSource(
   }
 
   return {
-    label: sourceLabel,
+    label: publicSource.label,
     recordedAt,
     ...(selected === true ? { selected } : {}),
-    source: sourceKey,
+    source: publicSource.source,
     unit,
     value: metricValue,
   };
@@ -1716,14 +1880,22 @@ function parseHostedVaultShareWorkoutsDayData(
     data.workouts,
     "Vault share workouts data workouts",
   );
-  if (rawWorkouts.length > HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY) {
+  if (
+    rawWorkouts.length
+      > HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
+  ) {
     throw new TypeError(
-      `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries.`,
+      `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY} source-tagged entries.`,
     );
   }
   const workouts = rawWorkouts.map((workout, index) =>
     parseHostedVaultShareWorkout(workout, index)
   );
+  if (!hostedVaultShareWorkoutsFitDailyCapacity(workouts)) {
+    throw new TypeError(
+      `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries per public source, across at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} sources; legacy unsourced data remains limited to ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries.`,
+    );
+  }
   const timeSemantics = requireString(
     data.timeSemantics,
     "Vault share workouts data timeSemantics",
@@ -1746,7 +1918,7 @@ function parseHostedVaultShareWorkout(
 ): HostedVaultShareWorkout {
   const label = `Vault share workouts data workouts[${index}]`;
   const workout = requireObject(value, label);
-  assertObjectKeys(workout, label, ["kind", "minutes", "startLocalMs"]);
+  assertObjectKeys(workout, label, ["kind", "minutes", "source", "startLocalMs"]);
 
   const kind = requireString(workout.kind, `${label} kind`);
   if (
@@ -1780,7 +1952,16 @@ function parseHostedVaultShareWorkout(
     );
   }
 
-  return { kind, minutes, startLocalMs };
+  const source = workout.source === undefined
+    ? undefined
+    : parseHostedVaultShareDataSource(workout.source, `${label} source`);
+
+  return {
+    kind,
+    minutes,
+    ...(source === undefined ? {} : { source }),
+    startLocalMs,
+  };
 }
 
 function parseHostedVaultShareActivityMinutesDayData(
@@ -1955,9 +2136,12 @@ function parseHostedVaultShareHeartRateZoneDayData(
     parseHostedVaultShareHeartRateZoneBucket(entry, index, "heart-rate-zones-days")
   );
 
-  if (zones.length === 0 || zones.length > 20) {
+  if (
+    zones.length === 0
+    || zones.length > HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY
+  ) {
     throw new TypeError(
-      "Vault share heart-rate-zones-days zones must contain 1-20 entries.",
+      `Vault share heart-rate-zones-days zones must contain 1-${HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY} entries.`,
     );
   }
 
@@ -1981,7 +2165,7 @@ function parseHostedVaultShareHeartRateZoneBucket(
     : parseHostedVaultShareBoundedText(
         data.label,
         `Vault share ${projectionKind} zones[${index}] label`,
-        80,
+        HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
       );
   const durationMinutes = requireNumber(
     data.durationMinutes,
@@ -2031,7 +2215,10 @@ function parseHostedVaultShareDailyDate(
     );
   }
 
-  if (context.recordKey !== date) {
+  if (
+    context.recordKey !== date
+    && !context.recordKey.startsWith(`${date}.`)
+  ) {
     throw new TypeError(
       `${context.dataLabel.replace(" data", "")} recordKey must equal the data date.`,
     );
@@ -2077,7 +2264,10 @@ function parseHostedVaultShareSleepTimesData(
 
   // The record's identity is its night date; rejecting any drift keeps the dedupe key and
   // the destination vault path derived from recordKey byte-identical to the night itself.
-  if (context.recordKey !== date) {
+  if (
+    context.recordKey !== date
+    && !context.recordKey.startsWith(`${date}.`)
+  ) {
     throw new TypeError(
       "Vault share sleep-times recordKey must equal the data date.",
     );
@@ -2145,15 +2335,41 @@ export function parseHostedVaultShareDeliverRequest(
     );
   }
 
-  if (records.length > HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
+  const maxRecords = getHostedVaultShareProjectionMaxRecords(projectionScope);
+  if (records.length > maxRecords) {
     throw new TypeError(
-      `Vault share deliver request records must contain at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS} records.`,
+      `Vault share deliver request records must contain at most ${maxRecords} records.`,
     );
   }
 
   const parsedRecords = records.map((record) =>
     parseHostedVaultShareDeliveryRecord(record, projectionScope)
   );
+  const publicSources = new Set<string>();
+  for (const record of parsedRecords) {
+    if (record.source) {
+      publicSources.add(record.source.source);
+    }
+    if ("workouts" in record.data) {
+      for (const workout of record.data.workouts) {
+        if (workout.source) {
+          publicSources.add(workout.source.source);
+        }
+      }
+    }
+    if ("sources" in record.data && record.data.sources) {
+      for (const source of record.data.sources) {
+        if ("source" in source) {
+          publicSources.add(source.source);
+        }
+      }
+    }
+  }
+  if (publicSources.size > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
+    throw new TypeError(
+      `Vault share deliver request must contain at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} public sources.`,
+    );
+  }
   if (projectionKind === "workouts.v0") {
     let calendarClosedThroughDate: string | undefined;
     for (const record of parsedRecords) {

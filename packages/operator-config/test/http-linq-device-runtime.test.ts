@@ -3024,6 +3024,43 @@ test('linq runtime records safe request and response diagnostics for provider ht
   )
 })
 
+test('linq runtime retains hashed text diagnostics from bounded response streams', async () => {
+  const providerText = 'Plain Linq failure'
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'private-chat-route',
+        message: 'private message body',
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => new Response(providerText, {
+          headers: { 'content-type': 'text/plain' },
+          status: 400,
+        }),
+      },
+    ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+      const serialized = JSON.stringify({
+        context: error.context,
+        message: error.message,
+      })
+      return error.code === 'LINQ_API_REQUEST_FAILED'
+        && error.context?.responseBodyKind === 'text'
+        && error.context?.responseBodySha256 ===
+          'da7d00e0c46925b2155166ece27e101541b4a22b97ac223cd4749b880e59a0da'
+        && error.context?.responseBodyTextLength === providerText.length
+        && !serialized.includes(providerText)
+        && !serialized.includes('private-chat-route')
+        && !serialized.includes('private message body')
+    },
+  )
+})
+
 test('linq runtime rejects oversized rendered text before provider entry', async () => {
   const fetchImplementation = vi.fn(async () => createJsonResponse({}))
 
@@ -3281,6 +3318,89 @@ test('stopLinqChatTypingIndicator does not inherit delete-message retries', asyn
   )
 
   assert.equal(transientAttempts, 1)
+})
+
+test('linq runtime leaves all control-plane retries to the Murph policy', async () => {
+  vi.useFakeTimers()
+  const requestUrls: string[] = []
+  const send = sendLinqChatMessage(
+    {
+      chatId: 'chat-sdk-retry-owner',
+      idempotencyKey: 'sdk-retry-owner-key',
+      message: 'hello',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/custom/partner/v3/',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (url) => {
+        requestUrls.push(url)
+        return createJsonResponse(
+          { error: { message: 'temporarily unavailable' } },
+          { status: 503 },
+        )
+      },
+    },
+  )
+  const rejection = assert.rejects(
+    send,
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.retryable === true &&
+      error.context?.status === 503,
+  )
+
+  await vi.runAllTimersAsync()
+  await rejection
+
+  assert.equal(requestUrls.length, 3)
+  assert.deepEqual(requestUrls, Array(3).fill(
+    'https://linq.example.test/custom/partner/v3/chats/chat-sdk-retry-owner/messages',
+  ))
+})
+
+test.each([
+  {
+    buildResponse: () => new Response('{"phone_numbers":[]}', {
+      headers: { 'content-length': String(256 * 1024 + 1) },
+      status: 200,
+    }),
+    label: 'declared',
+  },
+  {
+    buildResponse: () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(200 * 1024))
+        controller.enqueue(new Uint8Array(64 * 1024 + 1))
+      },
+    }), { status: 200 }),
+    label: 'chunked',
+  },
+])('linq runtime caps $label SDK responses before parsing', async ({
+  buildResponse,
+}) => {
+  let attempts = 0
+  await assert.rejects(
+    () => probeLinqApi({
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: async () => {
+        attempts += 1
+        return buildResponse()
+      },
+    }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.operation === 'list_phone_numbers' &&
+      error.context?.responseBodyKind === 'oversize' &&
+      error.context?.retryable === false &&
+      error.context?.status === 200,
+  )
+  assert.equal(attempts, 1)
 })
 
 test('linq runtime covers optional payload omissions, fallback http messages, and timeout transport errors', async () => {

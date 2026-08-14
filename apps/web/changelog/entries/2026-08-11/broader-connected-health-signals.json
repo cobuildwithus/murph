@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "broader-connected-health-signals",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Understand more connected-health signals",
+    "summary": "Murph can now recognize and use more body-composition, respiratory, metabolic, cardiac, safety, accessibility, and workout signals from connected health data.",
+    "details": "Murph checks the available normalized facts instead of assuming a source supplied them. ECG waveforms and workout streams remain compact summaries, and missing coverage stays unknown rather than becoming zero.",
+    "relevanceTags": ["wearables", "health-data", "accessibility"],
+    "sourcePullRequests": [1708, 1723, 1725, 1757]
+  }
+}

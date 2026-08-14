@@ -2622,7 +2622,7 @@ test("device sync store clears tokens for fresh hosted disconnects after local t
   }
 });
 
-test("device sync store failJob requeues retryable jobs, dead-letters terminal jobs, and ignores missing work", async () => {
+test("device sync store failure transitions requeue, replace only owned progress, and preserve it at exhaustion", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-fail-job");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
@@ -2645,7 +2645,8 @@ test("device sync store failJob requeues retryable jobs, dead-letters terminal j
       accountId: account.id,
       availableAt: "2026-04-07T00:00:00.000Z",
       kind: "retryable",
-      payload: {},
+      maxAttempts: 3,
+      payload: { phase: "original" },
       provider: "demo",
     });
     const claimedRetryableJob = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
@@ -2712,6 +2713,69 @@ test("device sync store failJob requeues retryable jobs, dead-letters terminal j
       null,
       false,
     );
+
+    assert.equal(
+      store.claimDueJob("worker-a", "2026-04-07T00:05:00.000Z", 60_000)?.id,
+      retryableJob.id,
+    );
+    assert.equal(
+      store.failJobIfOwned(
+        retryableJob.id,
+        "worker-b",
+        "2026-04-07T00:05:10.000Z",
+        "FOREIGN_FAILURE",
+        "foreign worker must not replace progress",
+        "2026-04-07T00:05:20.000Z",
+        true,
+        false,
+        { phase: "foreign" },
+      ),
+      false,
+    );
+    assert.deepEqual(store.getJobById(retryableJob.id)?.payload, { phase: "original" });
+
+    assert.equal(
+      store.failJobIfOwned(
+        retryableJob.id,
+        "worker-a",
+        "2026-04-07T00:05:10.000Z",
+        "TEMPORARY_FAILURE",
+        "retry with bounded progress",
+        "2026-04-07T00:05:20.000Z",
+        true,
+        false,
+        { phase: "bounded-progress" },
+      ),
+      true,
+    );
+    const ownedRetry = store.getJobById(retryableJob.id);
+    assert.equal(ownedRetry?.status, "queued");
+    assert.equal(ownedRetry?.attempts, 2);
+    assert.equal(ownedRetry?.availableAt, "2026-04-07T00:05:20.000Z");
+    assert.deepEqual(ownedRetry?.payload, { phase: "bounded-progress" });
+
+    assert.equal(
+      store.claimDueJob("worker-b", "2026-04-07T00:05:20.000Z", 60_000)?.id,
+      retryableJob.id,
+    );
+    assert.equal(
+      store.failJobIfOwned(
+        retryableJob.id,
+        "worker-b",
+        "2026-04-07T00:05:30.000Z",
+        "EXHAUSTED",
+        "retry budget exhausted",
+        null,
+        true,
+        false,
+        { phase: "must-not-replace-on-dead" },
+      ),
+      true,
+    );
+    const exhausted = store.getJobById(retryableJob.id);
+    assert.equal(exhausted?.status, "dead");
+    assert.equal(exhausted?.attempts, 3);
+    assert.deepEqual(exhausted?.payload, { phase: "bounded-progress" });
   } finally {
     store.close();
     await rm(tempDir, {
@@ -3935,10 +3999,13 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
         "stale worker should not transition expired leases",
         "2026-04-07T01:05:00.000Z",
         true,
+        false,
+        { windowStart: "2026-04-08T00:00:00.000Z" },
       ),
       false,
     );
     assert.equal(store.getJobById(job.id)?.status, "running");
+    assert.deepEqual(store.getJobById(job.id)?.payload, {});
     assert.equal(store.readNextJobWakeAt(), "2026-04-07T01:01:00.000Z");
 
     const reclaimed = store.claimDueJob("worker-b", "2026-04-07T01:01:01.000Z", 60_000);

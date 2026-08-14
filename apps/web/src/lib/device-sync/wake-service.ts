@@ -7,6 +7,9 @@ import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
+import {
+  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -100,9 +103,8 @@ import {
 } from "./shared";
 
 const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
-const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v2";
+const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v3";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
-
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
@@ -425,6 +427,12 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    await resetHostedJunctionWeightHistoryCoverageForSource({
+      connection,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
   });
 }
 
@@ -441,6 +449,125 @@ function hostedConnectionSourceMatchesReconnectProof(
     && expected.lastSeenAt === current.lastSeenAt
     && expected.sourceInstanceKey === current.sourceInstanceKey
     && expected.status === current.status;
+}
+
+/**
+ * Reconciles a signed Junction source-registration event against live provider
+ * state. The source row is captured before the provider read and revalidated
+ * before either admission or target-only cleanup.
+ */
+export async function reconcileHostedDeviceSyncConnectionSourceRegistration(input: {
+  account: PublicDeviceSyncAccount;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+}): Promise<"admitted" | "not_ready" | "removed"> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const userId = await input.store.getConnectionOwnerId(input.account.id);
+  if (!sourceProviderSlug || !userId) {
+    return "not_ready";
+  }
+
+  const target = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
+    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
+    const source = await findHostedConnectionSource({
+      connectionId: input.account.id,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      userId,
+      input.account.id,
+      tx,
+    );
+    const handler = input.registry.get("junction")?.connectionHandler;
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(input.account, connection)
+      || !source
+      || !storedAccount
+      || !handler?.isSourceAccessActive
+    ) {
+      throw sourceRegistrationReconciliationUnavailableError();
+    }
+    return { connection, source, storedAccount, isSourceAccessActive: handler.isSourceAccessActive };
+  });
+
+  const sourceAccessActive = await target.isSourceAccessActive(
+    target.storedAccount,
+    sourceProviderSlug,
+  );
+
+  const outcome = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
+    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
+    const source = await findHostedConnectionSource({
+      connectionId: input.account.id,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      userId,
+      input.account.id,
+      tx,
+    );
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(target.connection, connection)
+      || !storedAccountMatchesDisconnectTarget(target.storedAccount, storedAccount)
+      || !source
+      || source.id !== target.source.id
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+
+    if (
+      sourceAccessActive
+      && isEstablishedDeviceSyncConnection(connection)
+      && hostedConnectionSourceMatchesReconnectProof(target.source, source)
+    ) {
+      if (source.status === "connected" && !isHostedSourceDisconnectFenced(source)) {
+        return "admitted" as const;
+      }
+      if (source.status === "disconnected" && source.lastErrorCode === null) {
+        await input.store.upsertConnectionSource({
+          connectionId: input.account.id,
+          sourceInstanceKey: source.sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt),
+          tx,
+        });
+        return "admitted" as const;
+      }
+    }
+
+    if (
+      !isEstablishedDeviceSyncConnection(connection)
+      || isHostedSourceDisconnectFenced(source)
+    ) {
+      return "cleanup" as const;
+    }
+    return "stale" as const;
+  });
+
+  if (outcome === "admitted") {
+    return "admitted";
+  }
+  if (outcome === "cleanup") {
+    await cleanupRejectedHostedDeviceSyncConnectionSource({
+      account: input.account,
+      connectionStartedAt: "1970-01-01T00:00:00.000Z",
+      registry: input.registry,
+      sourceProviderSlug,
+      store: input.store,
+    });
+    return "removed";
+  }
+  return "not_ready";
 }
 
 /**
@@ -585,6 +712,20 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             lastSeenAt: sourceStartedAt,
             tx,
           });
+          const connection = await input.store.getConnectionForUser(
+            input.userId,
+            input.connectionId,
+            tx,
+          );
+          if (!connection) {
+            connectionChangedDuringDisconnectError();
+          }
+          await resetHostedJunctionWeightHistoryCoverageForSource({
+            connection,
+            sourceProviderSlug,
+            store: input.store,
+            tx,
+          });
           return { complete: true as const, source: preparedSource };
         },
       );
@@ -645,6 +786,12 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    await resetHostedJunctionWeightHistoryCoverageForSource({
+      connection,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
     return {
       connectionId: input.connectionId,
       lastSeenAt: preparedSource.lastSeenAt,
@@ -652,6 +799,28 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       sourceProviderSlug,
     };
   });
+}
+
+async function resetHostedJunctionWeightHistoryCoverageForSource(input: {
+  connection: PublicDeviceSyncAccount;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata: input.connection.metadata,
+    providerSlug: input.sourceProviderSlug,
+    resource: "weight",
+    version: 1,
+  });
+  if (!metadata) {
+    return;
+  }
+
+  await input.store.syncDurableConnectionState({
+    ...input.connection,
+    metadata,
+  }, input.tx);
 }
 
 /**
@@ -1460,6 +1629,15 @@ function sourceAdmissionCleanupUnavailableError(): never {
     },
     code: "CONNECTION_SOURCE_CLEANUP_FAILED",
     message: "Murph could not finish cleaning up this source. Start the connection again.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function sourceRegistrationReconciliationUnavailableError(): never {
+  throw deviceSyncError({
+    code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
+    message: "Current device source registration could not be reconciled. Retry shortly.",
     retryable: true,
     httpStatus: 503,
   });
