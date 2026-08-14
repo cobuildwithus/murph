@@ -630,14 +630,19 @@ label row's `serving_grams` when it is available instead of storing manual
 product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
-The current search path uses built-in Postgres full-text search only. No
-extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for
-supplement label lookup. Food label lookup additionally applies `pg_trgm` in
-`sql/foods/schema.sql` for name search support. Generic label search admits at
-most 5,000 indexed matches from either its full-text arm or its trigram fallback
-before similarity scoring, canonical-key deduplication, and window sorting; the
-public projection then narrows that set to 250 candidates before its final
-projection.
+The current search path uses built-in Postgres full-text search plus the
+`pg_trgm` extension for indexed name similarity. Both label tables keep GIN
+indexes for full-text/trigram filtering, a GiST trigram index for bounded
+nearest-name admission, and a canonical-rank btree for deterministic source
+representatives. Generic label search admits at most 5,000 nearest-name matches
+plus 5,000 deterministic canonical
+representatives from either its full-text arm or its trigram fallback before
+similarity scoring, canonical-key deduplication, and window sorting. An exact
+query-phrase lane protects the highest-ranked phrase matches within the same
+bounded query.
+
+For an existing labels database, create the GiST name-rank and canonical-rank
+indexes concurrently before deploying web code that uses this query shape.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new

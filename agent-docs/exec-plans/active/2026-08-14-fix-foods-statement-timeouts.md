@@ -86,6 +86,13 @@ Completed during implementation:
   public candidate bound was also canceled because similarity scoring still
   preceded that bound.
 - The corrected source query completed the same broad synthetic lookup in 206
-  ms through `createFoodsQueries` with the real pool statement timeout.
+  ms through `createFoodsQueries` with the real pool statement timeout. The
+  first bounded implementation was rejected because unordered admission could
+  exclude ranking winners and collapse canonical diversity.
+- The corrected ranked-admission query completed a cold two-million-row search
+  through `createFoodsQueries` in about 4.4 seconds under the real eight-second
+  statement timeout, returning the exact phrase winner and 50 unique results.
 - Focused food route/query/pool coverage passed 103 tests. The opt-in local
-  PostgreSQL search regression passed 128 tests.
+  PostgreSQL search regression passed 133 tests, including greater-than-5,000
+  FTS and trigram paths for private foods, private supplements, and the public
+  projection.

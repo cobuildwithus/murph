@@ -21,7 +21,7 @@ const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
 const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 5_000;
-const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
+const PRODUCT_LABEL_SEARCH_PHRASE_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
   number
@@ -2039,18 +2039,6 @@ async function searchGenericProductLabels(
   input: GenericProductLabelSearchInput,
 ): Promise<ProductLabelSearchRow[] | PublicProductLabelSearchRow[]> {
   const stemmed = input.stemmedSearch;
-  const candidateBoundSql = input.projection === "public"
-    ? `
-            ORDER BY
-              name_phrase_match DESC,
-              stemmed_name_match DESC,
-              name_similarity DESC,
-              search_rank DESC,
-              data_origin_priority ASC,
-              name ASC,
-              id ASC
-            LIMIT ${PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT}`
-    : "";
   const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
     "data_origin",
     input.excludedDataOrigins,
@@ -2062,7 +2050,37 @@ async function searchGenericProductLabels(
             websearch_to_tsquery('simple', $1) AS tsq${stemmed ? `,
             websearch_to_tsquery('english', $1) AS stemmed_tsq` : ""}
         ),
-        fts_matches AS MATERIALIZED (
+        query_words AS (
+          SELECT
+            query.*,
+            regexp_split_to_array(query.raw_q, '\\s+') AS words
+          FROM query
+        ),
+        query_phrases AS MATERIALIZED (
+          SELECT phrase
+          FROM (
+            SELECT query.raw_q AS phrase
+            FROM query
+
+            UNION
+
+            SELECT array_to_string(
+              query_words.words[start_index:end_index],
+              ' '
+            ) AS phrase
+            FROM query_words
+            CROSS JOIN LATERAL
+              generate_subscripts(query_words.words, 1) AS starts(start_index)
+            CROSS JOIN LATERAL generate_series(
+              start_index,
+              LEAST(array_length(query_words.words, 1), start_index + 15)
+            ) AS ends(end_index)
+          ) phrases
+          WHERE phrase <> ''
+          ORDER BY char_length(phrase) DESC, phrase ASC
+          LIMIT 256
+        ),
+        fts_phrase_matches AS MATERIALIZED (
           SELECT
             id,
             canonical_key,
@@ -2074,7 +2092,55 @@ async function searchGenericProductLabels(
             off_market,
             search_text,
             data_origin_priority
-          FROM ${tableSql}, query
+          FROM (
+            SELECT DISTINCT ON (canonical_key)
+              id,
+              canonical_key,
+              data_origin,
+              data_origin_id,
+              name,
+              brand,
+              upc,
+              off_market,
+              search_text,
+              data_origin_priority
+            FROM ${tableSql}, query_phrases
+            WHERE
+              name ILIKE query_phrases.phrase
+              AND ${stemmed ? `(
+                to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+                OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+              )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
+              AND ($2::boolean OR off_market = false)
+              AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+              AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+              AND ${excludedDataOriginsSql}
+            ORDER BY
+              canonical_key ASC,
+              data_origin_priority ASC,
+              name ASC,
+              id ASC
+          ) canonical_phrase_matches
+          ORDER BY
+            char_length(name) DESC,
+            data_origin_priority ASC,
+            name ASC,
+            id ASC
+          LIMIT ${PRODUCT_LABEL_SEARCH_PHRASE_LIMIT}
+        ),
+        fts_nearest_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority
+          FROM ${tableSql}
           WHERE
             -- With stemming on, match both dictionaries: 'simple' keeps
             -- exact tokens that 'english' would drop or mangle
@@ -2082,14 +2148,54 @@ async function searchGenericProductLabels(
             -- singular/plural queries reach rows indexed under the other
             -- form. Both arms are GIN-indexed.
             ${stemmed ? `(
-              to_tsvector('simple', search_text) @@ query.tsq
-              OR to_tsvector('english', search_text) @@ query.stemmed_tsq
-            )` : `to_tsvector('simple', search_text) @@ query.tsq`}
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
+          -- The GiST trigram index admits the closest names without scoring
+          -- and sorting the entire FTS match set.
+          ORDER BY name <->>> $1::text
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        fts_canonical_matches AS MATERIALIZED (
+          SELECT DISTINCT ON (canonical_key)
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            ${stemmed ? `(
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          -- The canonical-rank btree keeps this diversity lane deterministic
+          -- and selects the highest-priority representative for each key.
+          ORDER BY
+            canonical_key ASC,
+            data_origin_priority ASC,
+            id ASC
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        fts_matches AS MATERIALIZED (
+          SELECT * FROM fts_phrase_matches
+          UNION
+          SELECT * FROM fts_nearest_matches
+          UNION
+          SELECT * FROM fts_canonical_matches
         ),
         fts_candidates AS MATERIALIZED (
           SELECT
@@ -2120,9 +2226,8 @@ async function searchGenericProductLabels(
             END` : "0"} AS stemmed_name_match,
             data_origin_priority
           FROM fts_matches, query
-          ${candidateBoundSql}
         ),
-        trigram_matches AS MATERIALIZED (
+        trigram_nearest_matches AS MATERIALIZED (
           SELECT
             id,
             canonical_key,
@@ -2133,15 +2238,46 @@ async function searchGenericProductLabels(
             upc,
             off_market,
             data_origin_priority
-          FROM ${tableSql}, query
+          FROM ${tableSql}
           WHERE
             NOT EXISTS (SELECT 1 FROM fts_matches)
-            AND name % query.raw_q
+            AND name % $1::text
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
+          ORDER BY name <->>> $1::text
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        trigram_canonical_matches AS MATERIALIZED (
+          SELECT DISTINCT ON (canonical_key)
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            NOT EXISTS (SELECT 1 FROM fts_matches)
+            AND name % $1::text
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          ORDER BY
+            canonical_key ASC,
+            data_origin_priority ASC,
+            id ASC
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        trigram_matches AS MATERIALIZED (
+          SELECT * FROM trigram_nearest_matches
+          UNION
+          SELECT * FROM trigram_canonical_matches
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -2169,7 +2305,6 @@ async function searchGenericProductLabels(
             END` : "0"} AS stemmed_name_match,
             data_origin_priority
           FROM trigram_matches, query
-          ${candidateBoundSql}
         ),
         candidates AS (
           SELECT * FROM fts_candidates

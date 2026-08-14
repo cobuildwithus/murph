@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -26,6 +28,24 @@ function isProductTestsQuery(text: string): boolean {
 }
 
 describe("foods query helpers", () => {
+  it("keeps the indexes required by bounded ranked search", async () => {
+    const schemaSql = await readFile(
+      new URL("../sql/foods/schema.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS foods_name_rank_idx",
+    );
+    expect(schemaSql).toContain("USING GIST (name gist_trgm_ops)");
+    expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS foods_canonical_rank_idx",
+    );
+    expect(schemaSql).toContain(
+      "ON foods (canonical_key, data_origin_priority, id)",
+    );
+  });
+
   it("projects meal nutrition and bounded contaminant evidence without unrelated payloads", () => {
     const projected = toFoodNutritionSearchItem({
       id: "fdc:123",
@@ -313,14 +333,21 @@ describe("foods query helpers", () => {
       "NOT EXISTS (SELECT 1 FROM fts_matches)",
     );
     expect(searchCall?.text).toMatch(
-      /fts_matches AS MATERIALIZED \([\s\S]*?FROM foods, query[\s\S]*?LIMIT 5000[\s\S]*?\),\s*fts_candidates AS MATERIALIZED \([\s\S]*?FROM fts_matches, query/u,
+      /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
     );
     expect(searchCall?.text).toMatch(
-      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM foods, query[\s\S]*?LIMIT 5000[\s\S]*?\),\s*trigram_candidates AS MATERIALIZED \([\s\S]*?FROM trigram_matches, query/u,
+      /fts_canonical_matches AS MATERIALIZED \([\s\S]*?DISTINCT ON \(canonical_key\)[\s\S]*?ORDER BY\s*canonical_key ASC,\s*data_origin_priority ASC,\s*id ASC\s*LIMIT 5000/u,
     );
-    expect(searchCall?.text).toContain("name % query.raw_q");
-    expect(searchCall?.text).not.toContain("OR name % query.raw_q");
-    expect(searchCall?.text).toContain("FROM foods, query");
+    expect(searchCall?.text).toMatch(
+      /trigram_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
+    );
+    expect(searchCall?.text).toContain("fts_phrase_matches AS MATERIALIZED");
+    expect(searchCall?.text).toMatch(
+      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_phrase_matches[\s\S]*?SELECT \* FROM fts_nearest_matches[\s\S]*?SELECT \* FROM fts_canonical_matches/u,
+    );
+    expect(searchCall?.text).toContain("name % $1::text");
+    expect(searchCall?.text).not.toContain("OR name % $1::text");
+    expect(searchCall?.text).toContain("FROM foods");
     expect(searchCall?.text).toContain(productTestSourceDataOriginFilter);
     expect(searchCall?.text).not.toContain(
       "murph_product_test_legacy_source_backed_origin",

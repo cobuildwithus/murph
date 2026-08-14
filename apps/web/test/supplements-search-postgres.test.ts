@@ -718,8 +718,15 @@ describe.runIf(Boolean(testDatabaseUrl))(
         return { rows: result.rows };
       },
     };
+    const publicQueryClient = {
+      async query<T>(text: string, values: unknown[]) {
+        const result = await client.query(text, values);
+        return { rows: result.rows as T[] };
+      },
+    };
     const queries = createSupplementsQueries(queryClient);
     const foodQueries = createFoodsQueries(queryClient);
+    const publicQueries = createPublicSupplementsQueries(publicQueryClient);
 
     beforeAll(async () => {
       await client.connect();
@@ -734,6 +741,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
           canonical_key TEXT NOT NULL,
           data_origin TEXT NOT NULL,
           data_origin_id TEXT NOT NULL,
+          data_origin_url TEXT,
           data_origin_priority SMALLINT NOT NULL,
           name TEXT NOT NULL,
           brand TEXT,
@@ -741,7 +749,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
           off_market BOOLEAN NOT NULL,
           search_text TEXT NOT NULL,
           label JSONB NOT NULL,
-          serving_grams NUMERIC
+          serving_grams NUMERIC,
+          imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
         ) ON COMMIT DROP
       `);
       await client.query(
@@ -803,6 +812,130 @@ describe.runIf(Boolean(testDatabaseUrl))(
           ),
         ],
       );
+      await client.query(`
+        INSERT INTO supplements (
+          id,
+          canonical_key,
+          data_origin,
+          data_origin_id,
+          data_origin_priority,
+          name,
+          brand,
+          upc,
+          off_market,
+          search_text,
+          label
+        )
+        SELECT
+          CASE WHEN seed = 6000
+            THEN 'zz-boundary-fts-alias-priority'
+            ELSE 'boundary-fts-alias-' || seed::text
+          END,
+          'boundary-fts-alias',
+          'brand_site',
+          'boundary-fts-alias-' || seed::text,
+          CASE WHEN seed = 6000 THEN 1 ELSE 100 END,
+          'Boundaryfts Alias',
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts Alias',
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 6000) AS aliases(seed)
+
+        UNION ALL
+
+        SELECT
+          'boundary-fts-distinct-' || seed::text,
+          'boundary-fts-distinct-' || seed::text,
+          'brand_site',
+          'boundary-fts-distinct-' || seed::text,
+          50,
+          'Boundaryfts Distinct ' || seed::text,
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts Distinct ' || seed::text,
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 60) AS distinct_rows(seed)
+
+        UNION ALL
+
+        SELECT
+          'zz-boundary-fts-winner',
+          'zz-boundary-fts-winner',
+          'brand_site',
+          'zz-boundary-fts-winner',
+          1,
+          'Boundaryfts',
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts',
+          '{"fixture":true}'::jsonb
+      `);
+      await client.query(`
+        INSERT INTO supplements (
+          id,
+          canonical_key,
+          data_origin,
+          data_origin_id,
+          data_origin_priority,
+          name,
+          brand,
+          upc,
+          off_market,
+          search_text,
+          label
+        )
+        SELECT
+          CASE WHEN seed = 6000
+            THEN 'zz-boundary-trigram-alias-priority'
+            ELSE 'boundary-trigram-alias-' || seed::text
+          END,
+          'boundary-trigram-alias',
+          'brand_site',
+          'boundary-trigram-alias-' || seed::text,
+          CASE WHEN seed = 6000 THEN 1 ELSE 100 END,
+          'Trgmwiner',
+          NULL,
+          NULL,
+          false,
+          'Trgmwiner',
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 6000) AS aliases(seed)
+
+        UNION ALL
+
+        SELECT
+          'boundary-trigram-distinct-' || seed::text,
+          'boundary-trigram-distinct-' || seed::text,
+          'brand_site',
+          'boundary-trigram-distinct-' || seed::text,
+          50,
+          'Trgmwinabc',
+          NULL,
+          NULL,
+          false,
+          'Trgmwinabc',
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 60) AS distinct_rows(seed)
+
+        UNION ALL
+
+        SELECT
+          'zz-boundary-trigram-winner',
+          'zz-boundary-trigram-winner',
+          'brand_site',
+          'zz-boundary-trigram-winner',
+          1,
+          'Trgmwinna',
+          NULL,
+          NULL,
+          false,
+          'Trgmwinna',
+          '{"fixture":true}'::jsonb
+      `);
       await client.query(
         "CREATE INDEX supplements_fixture_search_idx ON supplements USING GIN (to_tsvector('simple', search_text))",
       );
@@ -812,6 +945,12 @@ describe.runIf(Boolean(testDatabaseUrl))(
       await client.query(
         "CREATE INDEX supplements_fixture_name_trgm_idx ON supplements USING GIN (name gin_trgm_ops)",
       );
+      await client.query(
+        "CREATE INDEX supplements_fixture_name_rank_idx ON supplements USING GIST (name gist_trgm_ops)",
+      );
+      await client.query(
+        "CREATE INDEX supplements_fixture_canonical_rank_idx ON supplements (canonical_key, data_origin_priority, id)",
+      );
       await client.query("ANALYZE supplements");
       await client.query(`
         CREATE TEMP TABLE foods (
@@ -819,6 +958,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
           canonical_key TEXT NOT NULL,
           data_origin TEXT NOT NULL,
           data_origin_id TEXT NOT NULL,
+          data_origin_url TEXT,
           data_origin_priority SMALLINT NOT NULL,
           name TEXT NOT NULL,
           brand TEXT,
@@ -826,7 +966,8 @@ describe.runIf(Boolean(testDatabaseUrl))(
           off_market BOOLEAN NOT NULL,
           search_text TEXT NOT NULL,
           label JSONB NOT NULL,
-          serving_grams NUMERIC
+          serving_grams NUMERIC,
+          imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
         ) ON COMMIT DROP
       `);
       await client.query(
@@ -859,12 +1000,89 @@ describe.runIf(Boolean(testDatabaseUrl))(
         )
         `,
       );
+      await client.query(`
+        INSERT INTO foods (
+          id,
+          canonical_key,
+          data_origin,
+          data_origin_id,
+          data_origin_priority,
+          name,
+          brand,
+          upc,
+          off_market,
+          search_text,
+          label
+        )
+        SELECT
+          CASE WHEN seed = 6000
+            THEN 'zz-food-boundary-fts-alias-priority'
+            ELSE 'food-boundary-fts-alias-' || seed::text
+          END,
+          'food-boundary-fts-alias',
+          'usda_branded',
+          'food-boundary-fts-alias-' || seed::text,
+          CASE WHEN seed = 6000 THEN 1 ELSE 100 END,
+          'Boundaryfts Alias',
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts Alias',
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 6000) AS aliases(seed)
+
+        UNION ALL
+
+        SELECT
+          'food-boundary-fts-distinct-' || seed::text,
+          'food-boundary-fts-distinct-' || seed::text,
+          'usda_branded',
+          'food-boundary-fts-distinct-' || seed::text,
+          50,
+          'Boundaryfts Distinct ' || seed::text,
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts Distinct ' || seed::text,
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 60) AS distinct_rows(seed)
+
+        UNION ALL
+
+        SELECT
+          'zz-food-boundary-fts-winner',
+          'zz-food-boundary-fts-winner',
+          'usda_branded',
+          'zz-food-boundary-fts-winner',
+          1,
+          'Boundaryfts',
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts',
+          '{"fixture":true}'::jsonb
+      `);
       await client.query(
         "CREATE INDEX foods_fixture_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
       );
       await client.query(
         "CREATE INDEX foods_fixture_name_trgm_idx ON foods USING GIN (name gin_trgm_ops)",
       );
+      await client.query(
+        "CREATE INDEX foods_fixture_name_rank_idx ON foods USING GIST (name gist_trgm_ops)",
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_canonical_rank_idx ON foods (canonical_key, data_origin_priority, id)",
+      );
+      await client.query(`
+        CREATE TEMP TABLE product_tests (
+          id TEXT PRIMARY KEY,
+          food_id TEXT,
+          supplement_id TEXT,
+          source_key TEXT NOT NULL,
+          report_date DATE
+        ) ON COMMIT DROP
+      `);
       await client.query("ANALYZE foods");
     });
 
@@ -901,6 +1119,87 @@ describe.runIf(Boolean(testDatabaseUrl))(
         });
 
         expect(rows.map((row) => row.id)).toContain("trader-joes:099032");
+      },
+      20_000,
+    );
+
+    it.each([
+      {
+        aliasId: "zz-boundary-fts-alias-priority",
+        expectedTopId: "zz-boundary-fts-winner",
+        q: "boundaryfts",
+      },
+      {
+        aliasId: "zz-boundary-trigram-alias-priority",
+        expectedTopId: "zz-boundary-trigram-winner",
+        q: "trgmwinnr",
+      },
+    ])(
+      "keeps supplement ranking and canonical diversity beyond the match cap for $q",
+      async ({ aliasId, expectedTopId, q }) => {
+        const first = await queries.searchSupplements({
+          includeOffMarket: false,
+          limit: 50,
+          q,
+        });
+        const repeated = await queries.searchSupplements({
+          includeOffMarket: false,
+          limit: 50,
+          q,
+        });
+
+        expect(first).toHaveLength(50);
+        expect(first[0]?.id).toBe(expectedTopId);
+        expect(first.map((row) => row.id)).toContain(aliasId);
+        expect(repeated.map((row) => row.id)).toEqual(
+          first.map((row) => row.id),
+        );
+      },
+      20_000,
+    );
+
+    it("keeps food ranking and canonical diversity beyond the match cap", async () => {
+      const first = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
+        q: "boundaryfts",
+      });
+      const repeated = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
+        q: "boundaryfts",
+      });
+
+      expect(first).toHaveLength(50);
+      expect(first[0]?.id).toBe("zz-food-boundary-fts-winner");
+      expect(first.map((row) => row.id)).toContain(
+        "zz-food-boundary-fts-alias-priority",
+      );
+      expect(repeated.map((row) => row.id)).toEqual(
+        first.map((row) => row.id),
+      );
+    }, 20_000);
+
+    it.each([
+      { expectedTopId: "zz-boundary-fts-winner", q: "boundaryfts" },
+      { expectedTopId: "zz-boundary-trigram-winner", q: "trgmwinnr" },
+    ])(
+      "keeps public supplement ranking and result count beyond the match cap for $q",
+      async ({ expectedTopId, q }) => {
+        const first = await publicQueries.searchPublicSupplements({
+          limit: 50,
+          q,
+        });
+        const repeated = await publicQueries.searchPublicSupplements({
+          limit: 50,
+          q,
+        });
+
+        expect(first).toHaveLength(50);
+        expect(first[0]?.id).toBe(expectedTopId);
+        expect(repeated.map((row) => row.id)).toEqual(
+          first.map((row) => row.id),
+        );
       },
       20_000,
     );

@@ -86,6 +86,10 @@ CREATE INDEX IF NOT EXISTS supplements_name_trgm_idx
   ON supplements
   USING GIN (name gin_trgm_ops);
 
+CREATE INDEX IF NOT EXISTS supplements_name_rank_idx
+  ON supplements
+  USING GIST (name gist_trgm_ops);
+
 CREATE INDEX IF NOT EXISTS supplements_brand_idx
   ON supplements (brand)
   WHERE brand IS NOT NULL;
@@ -94,5 +98,5 @@ CREATE INDEX IF NOT EXISTS supplements_upc_idx
   ON supplements (upc)
   WHERE upc IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS supplements_canonical_key_idx
-  ON supplements (canonical_key);
+CREATE INDEX IF NOT EXISTS supplements_canonical_rank_idx
+  ON supplements (canonical_key, data_origin_priority, id);

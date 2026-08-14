@@ -132,10 +132,17 @@ describe("supplements query helpers", () => {
       "CREATE INDEX IF NOT EXISTS supplements_name_trgm_idx",
     );
     expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS supplements_name_rank_idx",
+    );
+    expect(schemaSql).toContain("USING GIST (name gist_trgm_ops)");
+    expect(schemaSql).toContain(
       "CREATE INDEX IF NOT EXISTS supplements_brand_idx",
     );
     expect(schemaSql).toContain(
-      "CREATE INDEX IF NOT EXISTS supplements_canonical_key_idx",
+      "CREATE INDEX IF NOT EXISTS supplements_canonical_rank_idx",
+    );
+    expect(schemaSql).toContain(
+      "ON supplements (canonical_key, data_origin_priority, id)",
     );
     expect(schemaSql).toContain("supplements_payload_format_check");
     expect(schemaSql).toContain("char_length(search_text) <= 6000");
@@ -242,7 +249,7 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).toContain("websearch_to_tsquery('simple', $1)");
     expect(searchCall?.text).toContain("websearch_to_tsquery('english', $1)");
     expect(searchCall?.text).toContain(
-      "OR to_tsvector('english', search_text) @@ query.stemmed_tsq",
+      "OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)",
     );
     expect(searchCall?.text).toContain("$1::text AS raw_q");
     expect(searchCall?.text).toContain(
@@ -256,17 +263,24 @@ describe("supplements query helpers", () => {
       "NOT EXISTS (SELECT 1 FROM fts_matches)",
     );
     expect(searchCall?.text).toMatch(
-      /fts_matches AS MATERIALIZED \([\s\S]*?FROM supplements, query[\s\S]*?LIMIT 5000[\s\S]*?\),\s*fts_candidates AS MATERIALIZED \([\s\S]*?FROM fts_matches, query/u,
+      /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM supplements[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
     );
     expect(searchCall?.text).toMatch(
-      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM supplements, query[\s\S]*?LIMIT 5000[\s\S]*?\),\s*trigram_candidates AS MATERIALIZED \([\s\S]*?FROM trigram_matches, query/u,
+      /fts_canonical_matches AS MATERIALIZED \([\s\S]*?DISTINCT ON \(canonical_key\)[\s\S]*?ORDER BY\s*canonical_key ASC,\s*data_origin_priority ASC,\s*id ASC\s*LIMIT 5000/u,
     );
-    expect(searchCall?.text).toContain("name % query.raw_q");
-    expect(searchCall?.text).not.toContain("OR name % query.raw_q");
+    expect(searchCall?.text).toMatch(
+      /trigram_nearest_matches AS MATERIALIZED \([\s\S]*?FROM supplements[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
+    );
+    expect(searchCall?.text).toContain("fts_phrase_matches AS MATERIALIZED");
+    expect(searchCall?.text).toMatch(
+      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_phrase_matches[\s\S]*?SELECT \* FROM fts_nearest_matches[\s\S]*?SELECT \* FROM fts_canonical_matches/u,
+    );
+    expect(searchCall?.text).toContain("name % $1::text");
+    expect(searchCall?.text).not.toContain("OR name % $1::text");
     expect(searchCall?.text).toContain("name_phrase_match DESC");
     expect(searchCall?.text).toContain("name_phrase_length DESC");
     expect(searchCall?.text).toContain("name_similarity DESC");
-    expect(searchCall?.text).toContain("FROM supplements, query");
+    expect(searchCall?.text).toContain("FROM supplements");
     expect(searchCall?.text).toContain(productTestSourceDataOriginFilter);
     expect(searchCall?.text).not.toContain(
       "murph_product_test_legacy_source_backed_origin",
@@ -2093,7 +2107,7 @@ describe("supplements query helpers", () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.text).toContain("fts_candidates AS MATERIALIZED");
-    expect(calls[0]?.text).toContain("LIMIT 250");
+    expect(calls[0]?.text).toContain("fts_canonical_matches AS MATERIALIZED");
     expect(calls[0]?.text).toContain(
       "product_tests.supplement_id = selected.id",
     );
