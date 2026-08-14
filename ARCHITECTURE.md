@@ -1033,7 +1033,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   which owns its cleanup. If browser creation may already be in flight, the run
   retains its deterministic `cleanup_pending` claim and the setup remains
   `canceling`; a late creator deletes the exact returned browser, and a lost
-  response reuses the existing stale-provisioning delete-by-name boundary.
+  response or client timeout without an exact handle reuses the existing
+  stale-provisioning delete-by-name boundary. Fresh acquisition cannot clear
+  that claim or admit a successor before the boundary.
   `/connect` keeps polling that existing setup owner and reports `canceled` only
   after cleanup is proven. Once an exact application binding is
   durable, setup finishes that exact browser run and compare-and-set clears its

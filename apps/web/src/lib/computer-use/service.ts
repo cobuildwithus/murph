@@ -460,6 +460,9 @@ export class ComputerUseService {
         store,
       });
       if (activeRun.status === "cleanup_pending") {
+        if (isFreshProviderBrowserCreateCleanupRun(activeRun, now)) {
+          throw browserProvisioningInProgressError();
+        }
         const cleanup = await this.expireRunAndDeleteBrowserBestEffort(
           activeRun,
           now,
@@ -544,6 +547,9 @@ export class ComputerUseService {
           store,
         });
         if (createResult.run.status === "cleanup_pending") {
+          if (isFreshProviderBrowserCreateCleanupRun(createResult.run, now)) {
+            throw browserProvisioningInProgressError();
+          }
           const cleanup = await this.expireRunAndDeleteBrowserBestEffort(
             createResult.run,
             now,
@@ -609,6 +615,12 @@ export class ComputerUseService {
     } catch (caughtError) {
       let error = caughtError;
       let skipCompensation = false;
+      const browserCreateOutcomeAmbiguous = Boolean(
+        browserDeleteName
+        && !browser
+        && !attachAttempt
+        && !attachedSessionId,
+      );
       if (
         browser &&
         attachAttempt &&
@@ -640,7 +652,13 @@ export class ComputerUseService {
         browserCleanupFailed = true;
       }
       if (reservedRun && !skipCompensation) {
-        if (browserCleanupFailed) {
+        if (browserCreateOutcomeAmbiguous) {
+          await this.retainAmbiguousBrowserCreateCleanup({
+            now,
+            run: reservedRun,
+            store,
+          });
+        } else if (browserCleanupFailed) {
           if (!attachedSessionId) {
             await store.markRunCleanupPending({
               expectedKernelSessionId: reservedRun.kernelSessionId,
@@ -3770,6 +3788,34 @@ export class ComputerUseService {
     }
   }
 
+  private async retainAmbiguousBrowserCreateCleanup(input: {
+    now: Date;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<void> {
+    try {
+      await input.store.markRunCleanupPending({
+        expectedKernelSessionId: null,
+        expectedRunStatus: "running",
+        expectedRunUpdatedAt: input.run.updatedAt,
+        memberId: input.run.memberId,
+        now: input.now,
+        runId: input.run.id,
+      });
+    } catch (error) {
+      if (!isStaleRunStateConflict(error)) {
+        throw error;
+      }
+      const run = await input.store.requireOwnedRun({
+        memberId: input.run.memberId,
+        runId: input.run.id,
+      });
+      if (run.status !== "cleanup_pending" && !isTerminalRunStatus(run.status)) {
+        throw error;
+      }
+    }
+  }
+
   private async recoverStaleBrowserlessProvisioningRun(input: {
     now: Date;
     run: ComputerRunRecord;
@@ -5575,6 +5621,16 @@ function isStaleCleanupPendingRun(
 ): boolean {
   return run.status === "cleanup_pending" &&
     run.updatedAt.getTime() <= now.getTime() - COMPUTER_BROWSER_PROVISIONING_STALE_MS;
+}
+
+function isFreshProviderBrowserCreateCleanupRun(
+  run: ComputerRunRecord,
+  now: Date,
+): boolean {
+  return run.status === "cleanup_pending" &&
+    run.kernelSessionId === null &&
+    run.ownerPurpose === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE &&
+    !isStaleCleanupPendingRun(run, now);
 }
 
 function isComputerHandoffCheckpointingError(error: unknown): boolean {

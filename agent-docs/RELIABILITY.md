@@ -973,8 +973,10 @@ Last verified: 2026-08-13
   browserless bound run whose remote create may be in flight moves to the
   existing `cleanup_pending` state and leaves the setup truthfully `canceling`.
   Delete-by-name before materialization retains that claim; a late create result
-  deletes the returned exact browser, while a lost response converges through
-  the existing two-minute stale-provisioning cleanup. Setup polling finalizes
+  deletes the returned exact browser, while a lost response or client timeout
+  without an exact handle converges through the existing two-minute
+  stale-provisioning cleanup. A fresh retry remains blocked until that cleanup
+  runs. Setup polling finalizes
   `canceled` only after one of those paths proves cleanup, and navigation remains
   impossible because attach revalidates the now-ineligible setup.
   Re-entering an awaiting setup rotates or

@@ -205,6 +205,82 @@ function createInFlightProviderSetupKernel(input: {
   };
 }
 
+function createTimedOutProviderSetupKernel(input: {
+  createBrowserReached: Deferred<void>;
+  rejectCreateBrowser: Deferred<void>;
+}): ComputerKernelClient & {
+  browserLive: boolean;
+  createCalls: number;
+  deleteCalls: string[];
+  materializeTimedOutBrowser: () => void;
+  navigationCalls: number;
+} {
+  return {
+    browserLive: false,
+    createCalls: 0,
+    deleteCalls: [],
+    materializeTimedOutBrowser() {
+      this.browserLive = true;
+    },
+    navigationCalls: 0,
+    async createBrowser() {
+      this.createCalls += 1;
+      if (this.createCalls === 1) {
+        input.createBrowserReached.resolve();
+        await input.rejectCreateBrowser.promise;
+        throw new Error("Kernel browser creation timed out without a handle.");
+      }
+      this.browserLive = true;
+      return {
+        liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/provider-setup-successor",
+        sessionId: "kernel-provider-setup-successor",
+      };
+    },
+    async deleteBrowserByIdOrName(idOrName) {
+      this.deleteCalls.push(idOrName);
+      this.browserLive = false;
+    },
+    async deleteManagedAuthConnection() {},
+    async deleteProfile() {},
+    async ensureManagedAuthConnection(managedInput) {
+      return {
+        browserSessionId: null,
+        domain: managedInput.domain,
+        flowExpiresAt: null,
+        flowStatus: null,
+        hostedUrl: null,
+        id: "managed-auth-provider-setup",
+        profileName: managedInput.profileName,
+        status: "NEEDS_AUTH" as const,
+      };
+    },
+    async ensureProfile() {},
+    async executePlaywright() {
+      this.navigationCalls += 1;
+      return {
+        result: {
+          title: "Provider applications",
+          url: "https://www.strava.com/settings/api",
+          visibleText: "Provider applications",
+        },
+      };
+    },
+    async findManagedAuthConnection() {
+      return null;
+    },
+    async listManagedAuthConnections() {
+      return [];
+    },
+    async osControl() {},
+    async startManagedAuthLogin() {
+      return {
+        flowExpiresAt: new Date("2026-08-13T12:30:00.000Z"),
+        hostedUrl: "https://auth.onkernel.com/login/provider-setup",
+      };
+    },
+  };
+}
+
 async function bounded<T>(
   promise: Promise<T>,
   label: string,
@@ -609,6 +685,197 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       } finally {
         materializeBrowser.resolve();
         releaseCreateBrowser.resolve();
+        if (begin) {
+          await begin;
+        }
+        vi.unstubAllEnvs();
+        await prisma.hostedComputerHandoff.deleteMany({ where: { memberId } });
+        await prisma.deviceProviderSetup.deleteMany({ where: { memberId } });
+        await prisma.hostedComputerRun.deleteMany({ where: { memberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    }, 30_000);
+
+    it("retains cancel cleanup when browser creation times out without a handle", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_provider_create_timeout_cancel_${suffix}`;
+      const setupId = `dps_provider_create_timeout_cancel_${suffix}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const createBrowserReached = createDeferred();
+      const rejectCreateBrowser = createDeferred();
+      const kernel = createTimedOutProviderSetupKernel({
+        createBrowserReached,
+        rejectCreateBrowser,
+      });
+      let now = new Date("2026-08-13T12:00:00.000Z");
+      const computer = new ComputerUseService({
+        env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
+        kernel,
+        now: () => now,
+        store: new PrismaComputerUseStore(prisma),
+      });
+      const service = new MemberOwnedProviderSetupService("strava", {
+        computer,
+        now: () => now,
+        store: new PrismaDeviceProviderSetupStore(prisma),
+      });
+      let begin: Promise<PromiseSettledResult<unknown>[]> | null = null;
+      vi.stubEnv("HOSTED_WEB_BASE_URL", "https://web.example.test");
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceProviderSetup.create({
+          data: {
+            active: true,
+            connectSourceId: "strava",
+            connectTarget: "strava",
+            id: setupId,
+            memberId,
+            provider: "strava",
+            status: "authorized",
+            version: 1,
+          },
+        });
+
+        begin = Promise.allSettled([service.beginBrowserSetup(memberId)]);
+        await bounded(createBrowserReached.promise, "timed-out browser create");
+        await expect(service.cancel(memberId, setupId)).resolves.toMatchObject({
+          status: "canceling",
+        });
+
+        rejectCreateBrowser.resolve();
+        const [beginResult] = await bounded(begin, "browser create timeout rejection");
+        expect(beginResult.status).toBe("rejected");
+        await expect(prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          kernelSessionId: null,
+          status: "cleanup_pending",
+        });
+        await expect(service.read(memberId)).resolves.toMatchObject({
+          status: "canceling",
+        });
+
+        kernel.materializeTimedOutBrowser();
+        expect(kernel.browserLive).toBe(true);
+        const cleanupClaim = await prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        });
+        now = new Date(cleanupClaim.updatedAt.getTime() + 120_001);
+        await expect(service.read(memberId)).resolves.toMatchObject({
+          status: "canceled",
+        });
+        expect(kernel.browserLive).toBe(false);
+        expect(kernel.navigationCalls).toBe(0);
+        await expect(prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          kernelSessionId: null,
+          status: "expired",
+        });
+      } finally {
+        rejectCreateBrowser.resolve();
+        if (begin) {
+          await begin;
+        }
+        vi.unstubAllEnvs();
+        await prisma.hostedComputerHandoff.deleteMany({ where: { memberId } });
+        await prisma.deviceProviderSetup.deleteMany({ where: { memberId } });
+        await prisma.hostedComputerRun.deleteMany({ where: { memberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    }, 30_000);
+
+    it("blocks a successor until a no-handle create timeout reaches stale cleanup", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_provider_create_timeout_retry_${suffix}`;
+      const setupId = `dps_provider_create_timeout_retry_${suffix}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const createBrowserReached = createDeferred();
+      const rejectCreateBrowser = createDeferred();
+      const kernel = createTimedOutProviderSetupKernel({
+        createBrowserReached,
+        rejectCreateBrowser,
+      });
+      let now = new Date("2026-08-13T12:00:00.000Z");
+      const computer = new ComputerUseService({
+        env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
+        kernel,
+        now: () => now,
+        store: new PrismaComputerUseStore(prisma),
+      });
+      const service = new MemberOwnedProviderSetupService("strava", {
+        computer,
+        now: () => now,
+        store: new PrismaDeviceProviderSetupStore(prisma),
+      });
+      let begin: Promise<PromiseSettledResult<unknown>[]> | null = null;
+      vi.stubEnv("HOSTED_WEB_BASE_URL", "https://web.example.test");
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceProviderSetup.create({
+          data: {
+            active: true,
+            connectSourceId: "strava",
+            connectTarget: "strava",
+            id: setupId,
+            memberId,
+            provider: "strava",
+            status: "authorized",
+            version: 1,
+          },
+        });
+
+        begin = Promise.allSettled([service.beginBrowserSetup(memberId)]);
+        await bounded(createBrowserReached.promise, "timed-out browser create without cancel");
+        rejectCreateBrowser.resolve();
+        const [beginResult] = await bounded(begin, "no-cancel create timeout rejection");
+        expect(beginResult.status).toBe("rejected");
+        const cleanupClaim = await prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        });
+        expect(cleanupClaim).toMatchObject({
+          kernelSessionId: null,
+          status: "cleanup_pending",
+        });
+
+        kernel.materializeTimedOutBrowser();
+        await expect(service.beginBrowserSetup(memberId)).rejects.toMatchObject({
+          code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+        });
+        expect(kernel.browserLive).toBe(true);
+        expect(kernel.createCalls).toBe(1);
+        expect(kernel.navigationCalls).toBe(0);
+
+        now = new Date(cleanupClaim.updatedAt.getTime() + 120_001);
+        await expect(computer.cleanupExpiredRuns()).resolves.toMatchObject({
+          expiredRuns: 1,
+        });
+        expect(kernel.browserLive).toBe(false);
+        await expect(prisma.hostedComputerRun.findUniqueOrThrow({
+          where: { id: cleanupClaim.id },
+        })).resolves.toMatchObject({
+          kernelSessionId: null,
+          status: "expired",
+        });
+
+        const successor = await service.beginBrowserSetup(memberId);
+        expect(successor.setup.setupId).toBe(setupId);
+        const reboundSetup = await prisma.deviceProviderSetup.findUniqueOrThrow({
+          where: { id: setupId },
+        });
+        expect(reboundSetup).toMatchObject({
+          browserRunId: expect.any(String),
+          status: "browser_setup",
+        });
+        expect(reboundSetup.browserRunId).not.toBe(cleanupClaim.id);
+        expect(kernel.createCalls).toBe(2);
+        expect(kernel.navigationCalls).toBe(1);
+      } finally {
+        rejectCreateBrowser.resolve();
         if (begin) {
           await begin;
         }

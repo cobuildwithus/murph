@@ -89,6 +89,9 @@ provider-specific automation layer.
 14. [x] Keep a bound browserless run and its setup nonterminal while remote
     creation may be in flight, then prove late-response and lost-response cleanup
     through the existing exact creator and stale-provisioning owners.
+15. [x] Treat a provider-client create rejection without an exact browser handle
+    as ambiguous, block fresh acquisition, and prove Cancel and no-Cancel timeout
+    convergence through the same stale-provisioning owner.
 
 ## Decisions
 
@@ -129,7 +132,9 @@ provider-specific automation layer.
   delete reports absence while remote creation is in flight. Cancel reuses
   `cleanup_pending`, remains visible as `canceling`, and retains the exact browser
   name until the returning creator deletes its session or the existing
-  stale-provisioning boundary repeats cleanup. The setup read owner alone then
+  stale-provisioning boundary repeats cleanup. A provider-client timeout without
+  an exact returned handle is the same ambiguity and cannot admit a successor
+  before that boundary. The setup read owner alone then
   finalizes `canceled`; no queue, scheduler, state, or cleanup owner was added.
 
 ## Verification
@@ -155,6 +160,11 @@ provider-specific automation layer.
   lets visible setup polling finalize only after cleanup. Direct setup/computer/
   Connect proof passes 321 tests; real PostgreSQL covers late and lost create
   responses in addition to the prior races, with all 7 cases passing.
+- ReviewGPT round 12 found the production client-timeout branch omitted by the
+  deferred fake. The correction retains `cleanup_pending` when create rejects
+  without an exact handle and blocks a fresh retry until stale deterministic
+  cleanup. The real-PostgreSQL file reproduces both Cancel and no-Cancel timeout
+  orderings; all 9 cases pass.
 - Coupled-state audit: every reported setup/browser finding was confirmed and
   corrected; no additional unresolved state inconsistency remains in the
   affected owner.

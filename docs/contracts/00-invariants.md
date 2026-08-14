@@ -304,7 +304,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   remote browser creation may already be in flight, cancellation persists the
   existing cleanup claim and remains `canceling`: an early delete-by-name
   `NotFound` is not quiescence. The returning creator deletes its exact browser,
-  or the existing stale-provisioning boundary repeats deterministic cleanup;
+  or the existing stale-provisioning boundary repeats deterministic cleanup. A
+  provider-client rejection without an exact browser handle remains ambiguous,
+  and no fresh acquisition may clear its claim before that boundary;
   only that proof may clear the claim and report `canceled`.
   Successful application deletion deactivates the terminal setup only after its exact
   browser run is released, so a fresh setup never overlaps owned browser work.
