@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
+import { JunctionError } from "@junction-api/sdk";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import {
   importDeviceProviderSnapshot,
@@ -7314,6 +7315,29 @@ test("Junction optional user lookup cancels unread 404 response bodies", async (
 
   assert.equal(await client.resolveUser("missing-client-user"), null);
   assert.equal(bodyCancelled, true);
+});
+
+test("Junction optional user lookup survives minified SDK error names", async () => {
+  const originalName = Object.getOwnPropertyDescriptor(JunctionError, "name");
+  Object.defineProperty(JunctionError, "name", {
+    configurable: true,
+    value: "r",
+  });
+
+  try {
+    const client = new JunctionClient({
+      apiKey: "sk_us_test_123",
+      environment: "sandbox",
+      region: "us",
+      fetchImpl: async () => new Response(null, { status: 404 }),
+    });
+
+    assert.equal(await client.resolveUser("missing-client-user"), null);
+  } finally {
+    if (originalName) {
+      Object.defineProperty(JunctionError, "name", originalName);
+    }
+  }
 });
 
 test("Junction client deregisters provider connections by normalized provider slug", async () => {
