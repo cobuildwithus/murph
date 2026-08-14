@@ -1,8 +1,8 @@
-import { createJunctionDeviceSyncProvider } from "@murphai/device-syncd";
 import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
+import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
@@ -1126,16 +1126,19 @@ describe("hosted device-sync wakes", () => {
     })).resolves.toBe("admitted");
     expect(currentSource.status).toBe("connected");
 
-    const provider = createJunctionDeviceSyncProvider({
-      apiKey: "sk_us_junction-test",
-      clientUserIdSecret: "junction-client-user-id-secret",
-      environment: "sandbox",
-      fetchImpl: vi.fn(async () => {
-        throw new Error("Unexpected Junction request while scheduling.");
-      }),
-      region: "us",
-      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_junction-test",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: vi.fn(async () => {
+          throw new Error("Unexpected Junction request while scheduling.");
+        }),
+        region: "us",
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      },
     });
+    expect(provider).toBeDefined();
     const createScheduledJobs = provider.jobExecutor?.createScheduledJobs;
     expect(createScheduledJobs).toBeDefined();
     const scheduledAccount = {

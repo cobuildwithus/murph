@@ -3,7 +3,8 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { pathToFileURL } from "node:url";
 
-import LinqAPIV3, { APIError, type MessageSendParams } from "@linqapp/sdk";
+import LinqAPIV3, { APIError } from "@linqapp/sdk";
+import type { MessageSendParams } from "@linqapp/sdk/resources/chats";
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OBSERVATION_MS = 5 * 60_000;
@@ -538,7 +539,7 @@ async function stopTypingPhase(input: {
 
 async function requestLinqApi(input: {
   baseUrl: URL;
-  body?: Record<string, unknown>;
+  body?: MessageSendParams;
   chatId: string;
   dependencies: ReproDependencies;
   method: "DELETE" | "POST";
@@ -560,10 +561,13 @@ async function requestLinqApi(input: {
   });
 
   try {
+    if (input.pathTemplate === "/chats/{chatId}/messages" && !input.body) {
+      throw new Error("Linq message requests require an SDK message body.");
+    }
     const operation = input.pathTemplate === "/chats/{chatId}/messages"
       ? client.chats.messages.send(
           input.chatId,
-          input.body as MessageSendParams,
+          input.body!,
           { signal: controller.signal },
         )
       : input.method === "POST"
