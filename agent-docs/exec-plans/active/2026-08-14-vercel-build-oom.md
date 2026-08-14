@@ -31,9 +31,10 @@ Updated: 2026-08-14
   prefer the runtime layout so image routes never reach outside their function.
 - Preview deployments are suppressed twice: the checked-in branch allowlist
   permits only `main`, and the Vercel project Ignored Build Step cancels every
-  non-production deployment. The cold proof therefore needs both one exact
-  task-branch allowance and Vercel's explicit force-deploy commit override;
-  the branch allowance must be removed after the proof.
+  non-production deployment. A force-deploy commit does not override that
+  command. The cold proof therefore needs both one exact task-branch allowance
+  and one deployment-scoped `ignoreCommand` override; both temporary settings
+  must be removed after the proof.
 
 ## Protected invariants
 
