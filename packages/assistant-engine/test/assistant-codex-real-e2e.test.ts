@@ -3626,6 +3626,87 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
   )
 })
 
+describeRealCodex('real Codex repeated-set resolution e2e', () => {
+  it(
+    'logs every repeated set against the member-local alternating target and rereads canonical totals',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('success')
+      const alphaWrites = result.commandLog.filter((command) =>
+        command.includes('experiment session log exp-alpha')
+      )
+
+      expect(result.commandLog).toEqual(expect.arrayContaining([
+        expect.stringContaining('experiment list'),
+        expect.stringContaining('regimen show regimen-alternating'),
+        expect.stringContaining('experiment show exp-alpha'),
+        expect.stringContaining('experiment show exp-beta'),
+      ]))
+      expect(alphaWrites).toHaveLength(3)
+      expect(alphaWrites.every((command) =>
+        command.replaceAll(/['"]/gu, '').includes('--field repetitions=8')
+      )).toBe(true)
+      expect(result.commandLog.some((command) =>
+        command.includes('experiment session log exp-beta')
+      )).toBe(false)
+
+      const reversedCommands = [...result.commandLog].reverse()
+      const finalWriteIndex = result.commandLog.length - 1
+        - reversedCommands.findIndex((command) =>
+          command.includes('experiment session log exp-alpha')
+        )
+      const progressIndex = result.commandLog.length - 1
+        - reversedCommands.findIndex((command) =>
+          command.includes('experiment progress exp-alpha')
+        )
+      const linkedSessionReadIndex = result.commandLog.length - 1
+        - reversedCommands.findIndex((command) =>
+          /intervention show event-alpha-/u.test(command)
+        )
+      expect(progressIndex).toBeGreaterThan(finalWriteIndex)
+      expect(linkedSessionReadIndex).toBeGreaterThan(finalWriteIndex)
+      for (const eventId of [1, 2, 3, 4, 5]) {
+        expect(result.commandLog.some((command) =>
+          command.includes(`intervention show event-alpha-${eventId}`)
+          || command.includes(`event show event-alpha-${eventId}`)
+        )).toBe(true)
+      }
+      expect(result.finalMessage).toMatch(/Movement Alpha/iu)
+      expect(result.finalMessage).toMatch(/(?:40\s*(?:reps?|repetitions?)|(?:reps?|repetitions?)[^\n]*40)/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'asks one narrow question and writes nothing when the canonical owner is ambiguous',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('ambiguous')
+      const mutations = result.commandLog.filter((command) =>
+        /(?:experiment session log|experiment edit|regimen (?:add|edit)|automation (?:add|create|edit|reconcile))/u.test(command)
+      )
+
+      expect(mutations).toEqual([])
+      expect(result.finalMessage).toMatch(/Movement Alpha|Movement Beta|exercise|target/iu)
+      expect(result.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
+    },
+    360_000,
+  )
+
+  it(
+    'keeps a group repeated-set report out of private vault state and hands off privately',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('group')
+
+      expect(result.commandLog).toEqual([])
+      expect(result.actions.some((action) =>
+        action.kind === 'command' && action.command.includes('vault-cli')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/private|one[- ]on[- ]one|direct/iu)
+      expect(result.finalMessage.length).toBeLessThan(280)
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex Health Commons knowledge e2e', () => {
   it(
     'keeps the full broad health question in one knowledge search',
@@ -7422,6 +7503,284 @@ async function materializeAssistantSkill(input: {
     ),
     'utf8',
   )
+}
+
+type RepeatedSetResolutionMode = 'ambiguous' | 'group' | 'success'
+
+async function runRepeatedSetResolutionProbe(
+  mode: RepeatedSetResolutionMode,
+) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), `murph-repeated-set-${mode}-e2e-`),
+  )
+
+  try {
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    await Promise.all([
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'behavior-followthrough',
+      }),
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'experiment-onboarding',
+      }),
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'strength-training',
+      }),
+      materializeRepeatedSetVaultCli({
+        binDirectory,
+        mode,
+      }),
+      writeFile(commandLogPath, '', 'utf8'),
+    ])
+
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: buildRepeatedSetDeveloperInstructions(
+        mode === 'group' ? 'group' : 'direct',
+      ),
+      env: {
+        ...config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        MURPH_REPEATED_SET_E2E_COMMAND_LOG: commandLogPath,
+        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+      },
+      excludeResumeTurns: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt: mode === 'group'
+        ? [
+            'Trusted group transcript:',
+            'A participant says: “Sets 1 through 3 are done. Log them to my saved alternating routine and tell me the total.”',
+            'Respond to that participant without exposing or changing private member state.',
+          ].join('\n')
+        : [
+            'I completed sets 1 through 3.',
+            'Use my saved alternating routine and today\'s member-local date.',
+            mode === 'success'
+              ? 'Log the completions and tell me the all-time recorded repetition total for that exercise across every linked canonical session.'
+              : 'If the saved records do not uniquely identify today\'s exercise, ask only the one clarification needed and do not change any saved plan.',
+          ].join(' '),
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+    const commandLog = (await readFile(commandLogPath, 'utf8'))
+      .split('\n')
+      .map((command) => command.trim())
+      .filter((command) => command.length > 0)
+
+    return {
+      ...result,
+      actions: readCapabilityRoutingActions(result.jsonEvents),
+      commandLog,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+function buildRepeatedSetDeveloperInstructions(
+  conversationScope: 'direct' | 'group',
+): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope,
+    currentLocalDate: '2030-01-15',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+async function materializeRepeatedSetVaultCli(input: {
+  binDirectory: string
+  mode: RepeatedSetResolutionMode
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const regimen = input.mode === 'ambiguous'
+    ? {
+        regimen: {
+          id: 'regimen-alternating',
+          kind: 'habit',
+          linkedExperimentIds: ['exp-alpha', 'exp-beta'],
+          note: 'Alternate Movement Alpha and Movement Beta daily. The anchor date and first movement were not saved.',
+          status: 'active',
+          title: 'Alternating strength routine',
+        },
+      }
+    : {
+        regimen: {
+          id: 'regimen-alternating',
+          kind: 'habit',
+          linkedExperimentIds: ['exp-alpha', 'exp-beta'],
+          note: 'Alternate daily. The anchor is 2030-01-14 with Movement Beta, so 2030-01-15 is Movement Alpha.',
+          rotation: {
+            anchorDate: '2030-01-14',
+            anchorExercise: 'Movement Beta',
+            cadence: 'daily',
+            order: ['Movement Beta', 'Movement Alpha'],
+          },
+          standards: {
+            'Movement Alpha': { repetitionsPerSet: 8 },
+            'Movement Beta': { repetitionsPerSet: 5 },
+          },
+          status: 'active',
+          title: 'Alternating strength routine',
+        },
+      }
+  const experimentList = {
+    experiments: [
+      {
+        id: 'exp-beta',
+        linkedRegimenId: 'regimen-alternating',
+        mostRecentSessionAt: '2030-01-14T21:00:00-05:00',
+        status: 'active',
+        title: 'Movement Beta sets',
+      },
+      {
+        id: 'exp-alpha',
+        linkedRegimenId: 'regimen-alternating',
+        mostRecentSessionAt: '2030-01-13T21:00:00-05:00',
+        status: 'active',
+        title: 'Movement Alpha sets',
+      },
+    ],
+  }
+  const alphaExperiment = {
+    experiment: {
+      id: 'exp-alpha',
+      linkedRegimenId: 'regimen-alternating',
+      progress: {
+        adherence: {
+          completedSessions: 2,
+          evidence: { eventKind: 'intervention_session' },
+          sessionEventIds: ['event-alpha-1', 'event-alpha-2'],
+        },
+      },
+      protocol: {
+        exercise: 'Movement Alpha',
+        sessionFieldIds: ['repetitions'],
+        standard: { repetitions: 8 },
+      },
+      status: 'active',
+      title: 'Movement Alpha sets',
+    },
+  }
+  const betaExperiment = {
+    experiment: {
+      id: 'exp-beta',
+      linkedRegimenId: 'regimen-alternating',
+      progress: {
+        adherence: {
+          completedSessions: 4,
+          evidence: { eventKind: 'intervention_session' },
+          sessionEventIds: [
+            'event-beta-1',
+            'event-beta-2',
+            'event-beta-3',
+            'event-beta-4',
+          ],
+        },
+      },
+      protocol: {
+        exercise: 'Movement Beta',
+        sessionFieldIds: ['repetitions'],
+        standard: { repetitions: 5 },
+      },
+      status: 'active',
+      title: 'Movement Beta sets',
+    },
+  }
+  const shellJson = (value: unknown) =>
+    JSON.stringify(value).replaceAll("'", "'\\''")
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      'printf \'%s\\n\' "$*" >> "$MURPH_REPEATED_SET_E2E_COMMAND_LOG"',
+      'command_line="$*"',
+      'case "$command_line" in',
+      '  *"experiment list"*)',
+      `    printf '%s\\n' '${shellJson(experimentList)}'`,
+      '    ;;',
+      '  *"regimen list"*)',
+      `    printf '%s\\n' '${shellJson({ regimens: [regimen.regimen] })}'`,
+      '    ;;',
+      '  *"regimen show regimen-alternating"*)',
+      `    printf '%s\\n' '${shellJson(regimen)}'`,
+      '    ;;',
+      '  *"experiment show exp-alpha"*)',
+      `    printf '%s\\n' '${shellJson(alphaExperiment)}'`,
+      '    ;;',
+      '  *"experiment show exp-beta"*)',
+      `    printf '%s\\n' '${shellJson(betaExperiment)}'`,
+      '    ;;',
+      '  *"automation list"*)',
+      '    printf \'%s\\n\' \'{"automations":[{"id":"support-stale","instructions":"Remind the member about Movement Beta sets.","status":"active","supportKind":"reminder"}]}\'',
+      '    ;;',
+      '  *"experiment session log exp-alpha"*)',
+      '    count=$(grep -c "experiment session log exp-alpha" "$MURPH_REPEATED_SET_E2E_COMMAND_LOG")',
+      '    printf \'{"event":{"id":"event-alpha-%s","fields":{"repetitions":8},"status":"completed"},"ok":true}\\n\' "$((count + 2))"',
+      '    ;;',
+      '  *"experiment session log exp-beta"*)',
+      '    printf \'%s\\n\' \'{"error":{"code":"wrong_owner","message":"Movement Beta is not the current target."}}\' >&2',
+      '    exit 2',
+      '    ;;',
+      '  *"experiment progress exp-alpha"*)',
+      '    count=$(grep -c "experiment session log exp-alpha" "$MURPH_REPEATED_SET_E2E_COMMAND_LOG" || true)',
+      '    ids=\'"event-alpha-1","event-alpha-2"\'',
+      '    index=1',
+      '    while [ "$index" -le "$count" ]; do ids="$ids,\\"event-alpha-$((index + 2))\\""; index=$((index + 1)); done',
+      '    printf \'{"progress":{"adherence":{"completedSessions":%s,"evidence":{"eventKind":"intervention_session"},"sessionEventIds":[%s]}}}\\n\' "$((count + 2))" "$ids"',
+      '    ;;',
+      '  *"experiment progress exp-beta"*)',
+      '    printf \'%s\\n\' \'{"progress":{"adherence":{"completedSessions":4,"evidence":{"eventKind":"intervention_session"},"sessionEventIds":["event-beta-1","event-beta-2","event-beta-3","event-beta-4"]}}}\'',
+      '    ;;',
+      '  *"intervention show event-alpha-"*|*"event show event-alpha-"*)',
+      '    event_id=$(printf \'%s\' "$command_line" | sed -n \'s/.*\\(event-alpha-[0-9][0-9]*\\).*/\\1/p\')',
+      '    printf \'{"event":{"id":"%s","fields":{"repetitions":8},"status":"completed"}}\\n\' "$event_id"',
+      '    ;;',
+      '  *"intervention show event-beta-"*|*"event show event-beta-"*)',
+      '    event_id=$(printf \'%s\' "$command_line" | sed -n \'s/.*\\(event-beta-[0-9][0-9]*\\).*/\\1/p\')',
+      '    printf \'{"event":{"id":"%s","fields":{"repetitions":5},"status":"completed"}}\\n\' "$event_id"',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"items":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
 }
 
 function buildHabitatVoiceE2ePrompt(transcript: string): string {
