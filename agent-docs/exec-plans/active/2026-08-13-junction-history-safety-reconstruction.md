@@ -198,6 +198,23 @@ Updated: 2026-08-14
   unrelated ordinary progress to four passes while preserving the one-root
   limit, active-key suppression, the 396-key query, and independent source-first
   blood-pressure roots without adding retry history or another state owner.
+- Round-5 scheduler-fairness retrospective: the original requirement is one
+  cap-one, stateless scheduler that prioritizes reopened history while eventually
+  admitting every eligible coordinate. The first-reviewed shape rotated one
+  stable sorted pool with the absolute hourly slot. Review remediation added
+  active-key suppression, reopened priority, and then a two-pool 3:1 cadence;
+  reusing the same absolute slot both to choose the ordinary residue and to
+  index that pool repeated the starvation mechanism for pool sizes sharing a
+  factor with four. Deleting reopened priority would restore avoidable reconnect
+  repair latency, treating dead work as coverage would be false, and a persisted
+  cursor or repair loop would add a second owner. Continue with the smallest
+  stateless shape: derive a cycle number and within-cycle offset from the existing
+  hourly slot, use consecutive logical ordinals for the three reopened offers
+  and one ordinary ordinal per cycle, and retain ordinary absolute-slot rotation
+  when no reopened pool exists. Prove the production selector across mixed pool
+  sizes through the 396-coordinate bound, shared factors with four, stable dead
+  coordinates, active-key suppression, successful-coordinate removal, and
+  ordinary on-time scheduler passes.
 
 ## ReviewGPT evidence and finding ledger
 
@@ -261,6 +278,17 @@ Updated: 2026-08-14
   from the existing inactive set and reserves every fourth deterministic
   schedule slot for ordinary work when both exist. It adds no persisted state,
   queue, retry policy, manager, or second owner.
+- Valid final ReviewGPT round 5 transport retry reviewed exact head
+  `83dd248bdcb3b6ec53635d59f46a12503b56f955` with `gpt-5-6-pro`, returned
+  `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` plus `REVIEW_COMPLETE`, and identified
+  a repeated fairness mechanism: ordinary admission is limited to absolute
+  slots congruent to three modulo four, then the same absolute slot indexes the
+  stable ordinary pool. Pool sizes sharing factors with four therefore contain
+  permanently unreachable coordinates. The preceding accepted round-4 fix is
+  not closed. The required requirement-level decision is recorded above before
+  implementation. An earlier accepted round-5 transport attempt completed
+  reasoning but stored no final assistant response; it is an invalid empty
+  capture and carries no verdict.
 
 ## Verification
 
@@ -360,3 +388,15 @@ Updated: 2026-08-14
     reopened attempts followed by ordinary progress on the fourth slot; the
     complete Junction history file passes 98 tests and the device-sync
     typecheck passes.
+  - Round-5 fairness proof first reproduced modulus aliasing against the
+    uncorrected two-pool cadence: across eight real SQLite scheduler/store
+    passes, one dead reopened coordinate and the same dead ordinary coordinate
+    were selected while the second ordinary coordinate was never offered.
+  - The corrected selector gives reopened and ordinary pools independent
+    logical ordinals derived from the existing hourly cycle. The real-store
+    reproduction passes; the production selector reaches every single-pool
+    cardinality through 396 and every mixed-pool cardinality through 395,
+    including factors shared with four; and the actual 33-source by 12-resource
+    candidate set proves the 396-key bound plus active-key and completed-coverage
+    suppression. The complete Junction history file passes 100 tests,
+    device-sync typecheck passes, and `git diff --check` passes.

@@ -11,7 +11,10 @@ import {
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "../src/junction-historical-backfill-progress.ts";
 import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "../src/junction-source-reconnect.ts";
-import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
+import {
+  createJunctionDeviceSyncProvider,
+  selectJunctionScheduledHistoryCandidate,
+} from "../src/providers/junction.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -1475,20 +1478,38 @@ test("active dedupe evidence drains reopened source coordinates before ordinary 
   assert.equal(ordinary.payload?.sourceProviderSlug, "omron");
 });
 
-test("a dead reopened schedule-time coordinate cannot starve ordinary history", async () => {
+test("stable dead coordinates cannot starve any ordinary history coordinate", async () => {
   const tempDir = await makeTempDirectory("murph-junction-reopened-history-fairness");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
   const provider = createProvider({
-    additionalProviders: [{
-      resourceAvailability: { caffeine: true, water: false },
-      slug: "withings",
-    }],
+    additionalProviders: [
+      {
+        resourceAvailability: {
+          caffeine: true,
+          mindfulness_minutes: false,
+          water: false,
+        },
+        slug: "fitbit",
+      },
+      {
+        resourceAvailability: {
+          caffeine: false,
+          mindfulness_minutes: true,
+          water: false,
+        },
+        slug: "withings",
+      },
+    ],
     providerState: {
-      resourceAvailability: { caffeine: false, water: true },
+      resourceAvailability: {
+        caffeine: false,
+        mindfulness_minutes: false,
+        water: true,
+      },
       status: "connected",
     },
     requests: [],
-    timeseriesResources: ["caffeine", "water"],
+    timeseriesResources: ["caffeine", "mindfulness_minutes", "water"],
   });
   const createScheduledJobs = requireValue(
     requireValue(provider.jobExecutor).createScheduledJobs,
@@ -1512,17 +1533,36 @@ test("a dead reopened schedule-time coordinate cannot starve ordinary history", 
       ...createStoredAccount({
         sources: [
           createSourceSummary(
-            "omron",
+            "fitbit",
             "2026-01-01T00:00:00.000Z",
             "connected",
-            { caffeine: false, water: true },
+            {
+              caffeine: true,
+              mindfulness_minutes: false,
+              water: false,
+            },
+            1,
+          ),
+          createSourceSummary(
+            "omron",
+            "2026-01-02T00:00:00.000Z",
+            "connected",
+            {
+              caffeine: false,
+              mindfulness_minutes: false,
+              water: true,
+            },
             1,
           ),
           createSourceSummary(
             "withings",
-            "2026-01-02T00:00:00.000Z",
+            "2026-01-03T00:00:00.000Z",
             "connected",
-            { caffeine: true, water: false },
+            {
+              caffeine: false,
+              mindfulness_minutes: true,
+              water: false,
+            },
             2,
           ),
         ],
@@ -1531,7 +1571,7 @@ test("a dead reopened schedule-time coordinate cannot starve ordinary history", 
     };
     const selectedSources: string[] = [];
 
-    for (let pass = 0; pass < 4; pass += 1) {
+    for (let pass = 0; pass < 8; pass += 1) {
       const now = new Date(Date.parse(NOW) + pass * 60 * 60_000).toISOString();
       const resourceJobs = createScheduledJobs(account, now, {
         findActiveDedupeKeys: (dedupeKeys) => store.findActiveJobDedupeKeys({
@@ -1543,33 +1583,149 @@ test("a dead reopened schedule-time coordinate cannot starve ordinary history", 
       const root = requireValue(resourceJobs[0]);
       selectedSources.push(String(root.payload?.sourceProviderSlug));
 
-      if (root.payload?.sourceProviderSlug === "withings") {
-        const queued = store.enqueueJob({
-          ...root,
-          accountId: storedAccount.id,
-          provider: "junction",
-        });
-        assert.equal(
-          store.claimDueJob(`worker-${pass}`, now, 60_000)?.id,
-          queued.id,
-        );
-        store.failJob(
-          queued.id,
-          now,
-          "NONRETRYABLE_PROVIDER_RESPONSE",
-          "The provider rejected this coordinate.",
-          null,
-          false,
-        );
-        assert.equal(store.getJobById(queued.id)?.status, "dead");
-      }
+      const queued = store.enqueueJob({
+        ...root,
+        accountId: storedAccount.id,
+        provider: "junction",
+      });
+      assert.equal(
+        store.claimDueJob(`worker-${pass}`, now, 60_000)?.id,
+        queued.id,
+      );
+      store.failJob(
+        queued.id,
+        now,
+        "NONRETRYABLE_PROVIDER_RESPONSE",
+        "The provider rejected this coordinate.",
+        null,
+        false,
+      );
+      assert.equal(store.getJobById(queued.id)?.status, "dead");
     }
 
-    assert.deepEqual(selectedSources, ["withings", "withings", "withings", "omron"]);
+    const selectedOrdinarySources = selectedSources.filter(
+      (sourceProviderSlug) => sourceProviderSlug !== "withings",
+    );
+    assert.deepEqual(
+      new Set(selectedOrdinarySources),
+      new Set(["fitbit", "omron"]),
+    );
   } finally {
     store.close();
     await rm(tempDir, { force: true, recursive: true });
   }
+});
+
+test("mixed history priority reaches every stable pool size through the 396-coordinate bound", () => {
+  for (let poolSize = 1; poolSize <= 396; poolSize += 1) {
+    const candidates = Array.from({ length: poolSize }, (_, index) => index);
+    const ordinaryOnlySelections = new Set(
+      Array.from({ length: poolSize }, (_, scheduleSlot) =>
+        selectJunctionScheduledHistoryCandidate({
+          ordinaryCandidates: candidates,
+          reopenedCandidates: [],
+          scheduleSlot,
+        })
+      ),
+    );
+    const reopenedOnlySelections = new Set(
+      Array.from({ length: poolSize }, (_, scheduleSlot) =>
+        selectJunctionScheduledHistoryCandidate({
+          ordinaryCandidates: [],
+          reopenedCandidates: candidates,
+          scheduleSlot,
+        })
+      ),
+    );
+    assert.equal(ordinaryOnlySelections.size, poolSize);
+    assert.equal(reopenedOnlySelections.size, poolSize);
+  }
+
+  for (let mixedPoolSize = 1; mixedPoolSize < 396; mixedPoolSize += 1) {
+    const candidates = Array.from({ length: mixedPoolSize }, (_, index) => index);
+    const ordinarySelections = Array.from(
+      { length: mixedPoolSize * 4 },
+      (_, scheduleSlot) => selectJunctionScheduledHistoryCandidate({
+        ordinaryCandidates: candidates,
+        reopenedCandidates: [-1],
+        scheduleSlot,
+      }),
+    ).filter((candidate) => candidate !== -1);
+    const reopenedSelections = Array.from(
+      { length: mixedPoolSize * 4 },
+      (_, scheduleSlot) => selectJunctionScheduledHistoryCandidate({
+        ordinaryCandidates: [-1],
+        reopenedCandidates: candidates,
+        scheduleSlot,
+      }),
+    ).filter((candidate) => candidate !== -1);
+    assert.equal(new Set(ordinarySelections).size, mixedPoolSize);
+    assert.equal(new Set(reopenedSelections).size, mixedPoolSize);
+  }
+});
+
+test("maximum history matrix applies active and completed coordinate suppression", () => {
+  const resources = [...SPARSE_DAILY_HISTORY_RESOURCES, "note", "weight"] as const;
+  const sourceProviderSlugs = [
+    ...new Set(JUNCTION_CONNECT_SOURCE_TARGETS.map(({ providerSlug }) => providerSlug)),
+  ];
+  const availability = Object.fromEntries(resources.map((resource) => [resource, true]));
+  const provider = createProvider({
+    providerState: { resourceAvailability: availability, status: "connected" },
+    requests: [],
+    timeseriesResources: resources,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  let account = createStoredAccount({
+    sources: sourceProviderSlugs.map((sourceProviderSlug, index) =>
+      createSourceSummary(
+        sourceProviderSlug,
+        new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1_000).toISOString(),
+        "connected",
+        availability,
+        index === 0 ? 2 : 1,
+      )
+    ),
+  });
+  const activeDedupeKeys = new Set<string>();
+  const coordinateCount = sourceProviderSlugs.length * resources.length;
+  let observedCandidateCount = 0;
+  const context = {
+    findActiveDedupeKeys: (dedupeKeys: readonly string[]) => {
+      observedCandidateCount = dedupeKeys.length;
+      return new Set(dedupeKeys.filter((dedupeKey) => activeDedupeKeys.has(dedupeKey)));
+    },
+  };
+  const selectRoot = (now: string) => requireValue(
+    createScheduledJobs(account, now, context).jobs.find((job) => job.kind === "resource"),
+  );
+
+  assert.equal(coordinateCount, 396);
+  const activeRoot = selectRoot(NOW);
+  assert.equal(observedCandidateCount, coordinateCount);
+  activeDedupeKeys.add(requireValue(activeRoot.dedupeKey));
+  const afterActiveSuppression = selectRoot(NOW);
+  assert.notEqual(afterActiveSuppression.dedupeKey, activeRoot.dedupeKey);
+
+  const scheduleSlot = Math.floor(Date.parse(NOW) / (60 * 60_000));
+  const ordinaryPassOffset = (3 - scheduleSlot % 4 + 4) % 4;
+  const ordinaryNow = new Date(
+    Date.parse(NOW) + ordinaryPassOffset * 60 * 60_000,
+  ).toISOString();
+  const completedRoot = selectRoot(ordinaryNow);
+  assert.equal(completedRoot.payload?.sourceLifecycleEpoch, 1);
+  account = {
+    ...account,
+    metadata: addHistoryCoverage(
+      account.metadata,
+      String(completedRoot.payload?.sourceProviderSlug),
+      String(completedRoot.payload?.resource),
+    ),
+  };
+  const afterCompletion = selectRoot(ordinaryNow);
+  assert.notEqual(afterCompletion.dedupeKey, completedRoot.dedupeKey);
 });
 
 test("schedule-time extended history admits one account root and rotates deterministic slots", () => {

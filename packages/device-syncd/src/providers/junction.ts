@@ -507,6 +507,44 @@ const JUNCTION_HISTORICAL_BACKFILL_PRIORITY = 30;
 const JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY = 50;
 const JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS = 4;
 
+/**
+ * Keeps the reopened and ordinary ordinals independent from the 3:1 cadence so
+ * every member of either stable pool remains reachable.
+ */
+export function selectJunctionScheduledHistoryCandidate<T>(input: {
+  ordinaryCandidates: readonly T[];
+  reopenedCandidates: readonly T[];
+  scheduleSlot: number;
+}): T | undefined {
+  if (input.reopenedCandidates.length === 0) {
+    return input.ordinaryCandidates.length === 0
+      ? undefined
+      : input.ordinaryCandidates[
+          input.scheduleSlot % input.ordinaryCandidates.length
+        ];
+  }
+  if (input.ordinaryCandidates.length === 0) {
+    return input.reopenedCandidates[
+      input.scheduleSlot % input.reopenedCandidates.length
+    ];
+  }
+
+  const priorityCycle = Math.floor(
+    input.scheduleSlot / JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS,
+  );
+  const priorityCycleOffset =
+    input.scheduleSlot % JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS;
+  if (priorityCycleOffset === JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS - 1) {
+    return input.ordinaryCandidates[
+      priorityCycle % input.ordinaryCandidates.length
+    ];
+  }
+  const reopenedOrdinal = priorityCycle
+    * (JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS - 1)
+    + priorityCycleOffset;
+  return input.reopenedCandidates[reopenedOrdinal % input.reopenedCandidates.length];
+}
+
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,
 ): DeviceSyncProvider {
@@ -927,14 +965,11 @@ export function createJunctionDeviceSyncProvider(
     const ordinaryInactiveJobs = context
       ? inactiveJobs.filter(([candidate]) => candidate.sourceLifecycleEpoch === 1)
       : inactiveJobs;
-    const ordinaryPrioritySlot = reopenedInactiveJobs.length > 0
-      && ordinaryInactiveJobs.length > 0
-      && scheduleSlot % JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS
-        === JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS - 1;
-    const selectionPool = reopenedInactiveJobs.length === 0 || ordinaryPrioritySlot
-      ? ordinaryInactiveJobs
-      : reopenedInactiveJobs;
-    const scheduledJob = selectionPool[scheduleSlot % selectionPool.length]?.[1];
+    const scheduledJob = selectJunctionScheduledHistoryCandidate({
+      ordinaryCandidates: ordinaryInactiveJobs,
+      reopenedCandidates: reopenedInactiveJobs,
+      scheduleSlot,
+    })?.[1];
     return [
       ...sourceFirstCandidates.map((candidate) => buildExtendedTimeseriesBackfillJob(candidate)),
       ...(scheduledJob ? [scheduledJob] : []),
