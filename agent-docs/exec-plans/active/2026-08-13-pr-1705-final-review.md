@@ -160,6 +160,18 @@ Local replacement-candidate evidence on 2026-08-13:
   prevents GitHub from creating the pull-request merge ref that triggers those
   workflows. The permitted base-update budget remains consumed, so resolving
   that conflict requires explicit new user authorization.
+- The manually dispatched private `Public Murph Integration` run against
+  `dad0a41ed486` passed every feature E2E scenario and the current-sender
+  PostgreSQL proof, then exposed a pre-existing missing authority-signing method
+  in `hosted-onboarding-member-lock-postgres.test.ts` and failed its aggregate
+  check. That file and its production crypto owner were outside this PR's diff,
+  and the test file was byte-identical on current `main`. Its env mock now uses
+  an ephemeral P-256 test signer and matching verification keyring. The exact
+  failed file passes 24 tests against a fresh fully migrated PostgreSQL database;
+  prepared Web typecheck and focused ESLint pass. This isolated regression-test
+  correction adds no production behavior or runtime complexity and does not
+  require another ReviewGPT round. The private workflow still needs an exact
+  final-head rerun.
 
 ## Round-17 requirement retrospective
 
