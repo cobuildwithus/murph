@@ -82,13 +82,25 @@ cd apps/web && pnpm typecheck
 ## Rules
 
 - Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for routed browser proof, the frontend lens inside the preliminary `completion-specialists` ReviewGPT pass, the separate UI double-check, and any applicable final ReviewGPT gate.
+- Follow `agent-docs/operations/product-ux.md` before and after code. Treat
+  loading time, progress, skeletons, empty, partial, stale, error, and recovery
+  states as part of the product experience.
 - Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
 - No `@radix-ui/*` imports. We use base UI.
 - Motion restrained — only for hierarchy or affordance.
-- Verify UI changes in browser (desktop + mobile) before handoff.
+- Verify UI changes in the browser at every viewport where the result can
+  materially differ. Check phone and desktop when responsive behavior can
+  change.
 - Every pull request that changes user-facing frontend UI must update the reviewable catalog with the real production component: use [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) for reusable components, or [localhost:3000/design?tab=sections](http://localhost:3000/design?tab=sections) for a complete page section or flow.
-- Include desktop and mobile screenshots captured from the applicable design-page tab in the pull request. Use lossless PNG at 2x device scale or higher, crop to the changed component or section, and inspect the local and hosted images at native resolution so ordinary body copy is immediately legible. Show each materially changed component or section and every state needed to judge the change.
-- The `Frontend design proof` pull-request check enforces the catalog-file update and the required hosted screenshot links for user-facing UI diffs. Design-catalog-only changes are exempt so the catalog can be maintained independently.
+- Match rendered evidence to the changed visual, state, interaction, and
+  responsive risk. A change can need no screenshots, one screenshot, or many.
+  Do not capture another viewport only to meet a quota. When a screenshot is
+  useful, crop it to the changed component or section and inspect it at native
+  resolution so ordinary body copy is legible.
+- The `Frontend design proof` pull-request check enforces the catalog update,
+  evidence description, and coverage explanation for user-facing UI diffs. It
+  does not enforce a screenshot count. Design-catalog-only changes are exempt
+  so the catalog can be maintained independently.
 
 ## Docs to update
 

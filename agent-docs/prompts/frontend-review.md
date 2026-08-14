@@ -41,13 +41,22 @@ Preflight (required):
 Review for:
 - drift from the declared experience, documented frontend guidance, shared primitives, tokens, spacing, typography, and established visual or interaction implementation patterns
 - missing or broken rendering of declared loading, empty, error, hover, focus, disabled, or success states touched by the diff
-- desktop and mobile responsiveness, clipping, overflow, missing content, keyboard/focus behavior, contrast, and other reachable accessibility failures
+- responsiveness at the viewports where the layout can change, including
+  clipping, overflow, hidden primary value, missing content, keyboard/focus
+  behavior, contrast, and other reachable accessibility failures
+- loading time presentation, skeletons, empty, partial, stale, delayed, error,
+  and recovery states touched by the change
 - visual treatment that obscures or conflicts with the declared hierarchy, including one-off styling or decorative additions
 - unnecessary frontend implementation complexity, speculative component abstractions, or local styling hacks that make future UI work harder
 
 Rendered evidence:
-- When visual behavior changed, render and inspect the affected experience at relevant desktop and mobile viewports after reading the code. Exercise the touched states when practical.
+- When visual behavior changed, render and inspect the affected experience at
+  each relevant viewport after reading the code. Inspect phone and desktop when responsive behavior can change.
+  Do not request another viewport only to satisfy a quota. Exercise the touched
+  states when practical.
 - If browser or rendered inspection is unavailable, report the exact verification gap. Do not infer visual quality from source alone.
+- Report missing rendered evidence only when it prevents judgment of a material
+  visual, interaction, state, or responsive claim.
 - Meaning-preserving tiny static-copy corrections that meet the completion workflow fast path do not require a full visual pass.
 
 Output requirements:

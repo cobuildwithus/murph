@@ -1698,7 +1698,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[0]).toContain('latest-model.md')
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
     expect(completionAuditPrompts[1]).toContain('render and inspect')
-    expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
+    expect(completionAuditPrompts[1]).toContain(
+      'phone and desktop when responsive behavior can change',
+    )
     expect(completionAuditPrompts[2]).toContain(
       'inside the preliminary `completion-specialists`',
     )
@@ -2141,8 +2143,14 @@ printf '%s|%s|%s|%s\n' \
     expect(completionSpecialists).toContain(
       '`agent-docs/prompts/product-experience-review.md`',
     )
+    expect(completionSpecialists).toContain(
+      '`agent-docs/operations/product-ux.md`',
+    )
     expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
     expect(productExperienceReview).toContain('irreducible user purpose')
+    expect(productExperienceReview).toContain(
+      '`agent-docs/operations/product-ux.md`',
+    )
     expect(productExperienceReview).toContain(
       'Product-experience lens for the preliminary unified ReviewGPT completion pass',
     )
@@ -3435,6 +3443,11 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         'profile: murph-verification\nprovider: blacksmith-testbox\nblacksmith:\n  ref: main\n',
       )
       writeHarnessFile(harnessRoot, 'agent-docs/FRONTEND.md', 'frontend workflow\n')
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/operations/product-ux.md',
+        'product UX workflow\n',
+      )
       writeHarnessFile(harnessRoot, 'PRODUCT.md', 'product guidance\n')
       writeHarnessFile(harnessRoot, 'DESIGN.md', 'design guidance\n')
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
@@ -3580,6 +3593,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(preliminaryEntries).toEqual(
         expect.arrayContaining([
           'agent-docs/FRONTEND.md',
+          'agent-docs/operations/product-ux.md',
           'PRODUCT.md',
           'DESIGN.md',
           'agent-docs/prompts/product-experience-review.md',
@@ -4216,6 +4230,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).toContain('DESIGN.md')
       expect(leanEntries).toContain('agent-docs/ARCHITECTURE_GUIDANCE.md')
       expect(leanEntries).toContain('agent-docs/FRONTEND.md')
+      expect(leanEntries).toContain('agent-docs/operations/product-ux.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(leanEntries).toContain('Dockerfile.cloudflare-hosted-runner-base')
@@ -4250,6 +4265,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(fullEntries).toContain('DESIGN.md')
       expect(fullEntries).toContain('agent-docs/ARCHITECTURE_GUIDANCE.md')
       expect(fullEntries).toContain('agent-docs/FRONTEND.md')
+      expect(fullEntries).toContain('agent-docs/operations/product-ux.md')
       expect(fullEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(fullEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')

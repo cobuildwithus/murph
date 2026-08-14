@@ -21,8 +21,8 @@ const COMPLETE_HTML = `
 <h2>Design proof</h2>
 <ul>
 <li>Design page: <code>/design?tab=sections#group-usage-funding</code></li>
-<li>Desktop screenshot: <a href="https://example.test/desktop.png"><img src="https://example.test/desktop.png" alt="Desktop group usage"></a></li>
-<li>Mobile screenshot: <a href="https://example.test/mobile.png"><img src="https://example.test/mobile.png" alt="Mobile group usage"></a></li>
+<li>Evidence: <a href="https://example.test/phone.png"><img src="https://example.test/phone.png" alt="Phone group usage"></a></li>
+<li>Coverage: Narrow phone populated and empty states; desktop layout is unchanged because the component keeps its existing width.</li>
 </ul>
 `;
 const UI_PATHS = [
@@ -62,7 +62,7 @@ test("detects user-facing app and shared component UI paths", () => {
   );
 });
 
-test("passes rendered design-page proof with both hosted viewports", () => {
+test("passes design-page proof with risk-based rendered evidence", () => {
   assert.deepEqual(
     validateFrontendDesignProof({
       changedPaths: UI_PATHS,
@@ -76,7 +76,7 @@ test("passes rendered design-page proof with both hosted viewports", () => {
   );
 });
 
-test("accepts the dedicated consent design catalog and route", () => {
+test("accepts a reasoned walkthrough without a screenshot", () => {
   const result = validateFrontendDesignProof({
     changedPaths: [
       "apps/web/src/components/legal/hosted-legal-consent-card.tsx",
@@ -86,8 +86,8 @@ test("accepts the dedicated consent design catalog and route", () => {
 <h2>Design proof</h2>
 <ul>
 <li>Design page: <code>/design?tab=consent#launch-consent</code></li>
-<li>Desktop screenshot: <img src="https://example.test/consent-desktop.svg"></li>
-<li>Mobile screenshot: <img src="https://example.test/consent-mobile.svg"></li>
+<li>Evidence: Keyboard and screen-reader walkthrough of the existing visual state.</li>
+<li>Coverage: Focus order and announcement changed; layout and responsive styles did not change.</li>
 </ul>
 `,
   });
@@ -99,15 +99,15 @@ test("accepts the dedicated consent design catalog and route", () => {
   });
 });
 
-test("accepts GitHub-rendered attributes and standalone HTML images", () => {
+test("accepts GitHub-rendered attributes and a hosted image", () => {
   const result = validateFrontendDesignProof({
     changedPaths: UI_PATHS,
     prBodyHtml: `
 <h2 class="heading-element" dir="auto">Design proof</h2>
 <ul dir="auto">
 <li>Design page: <a href="/design?tab=components#settings">Settings components</a></li>
-<li>Desktop screenshot: <img data-canonical-src="https://example.test/desktop.png" src="https://camo.githubusercontent.test/desktop"></li>
-<li>Mobile screenshot: <img src="https://example.test/mobile.png"></li>
+<li>Evidence: <img data-canonical-src="https://example.test/settings.png" src="https://camo.githubusercontent.test/settings"></li>
+<li>Coverage: The changed component at its only fixed-width state.</li>
 </ul>
 `,
   });
@@ -115,7 +115,7 @@ test("accepts GitHub-rendered attributes and standalone HTML images", () => {
   assert.deepEqual(result.errors, []);
 });
 
-test("reports missing catalog, heading, route, and viewport proof", () => {
+test("reports missing catalog, heading, evidence, and coverage", () => {
   assert.deepEqual(
     validateFrontendDesignProof({
       changedPaths: ["apps/web/app/settings/page.tsx"],
@@ -134,14 +134,15 @@ test("reports missing catalog, heading, route, and viewport proof", () => {
 <h2>Design proof</h2>
 <ul>
 <li>Design page: <code>/settings</code></li>
-<li>Desktop screenshot: local-only.png</li>
+<li>Evidence: None</li>
+<li>Coverage: N/A</li>
 </ul>
 `,
     }).errors,
     [
       "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
-      "The Design proof section must include a hosted desktop screenshot from the design page.",
-      "The Design proof section must include a hosted mobile screenshot from the design page.",
+      "The Design proof section must include evidence matched to the changed visual, state, interaction, or responsive risk.",
+      "The Design proof section must explain which states and viewports were checked and why that evidence is sufficient.",
     ],
   );
 });
@@ -151,18 +152,19 @@ test("does not borrow proof from another H2 section", () => {
     changedPaths: UI_PATHS,
     prBodyHtml: `
 <h2>Design proof</h2>
-<ul><li>Design page: <code>/design?tab=components#settings</code></li></ul>
-<h2>Screenshots</h2>
 <ul>
-<li>Desktop screenshot: <img src="https://example.test/desktop.png"></li>
-<li>Mobile screenshot: <img src="https://example.test/mobile.png"></li>
+<li>Design page: <code>/design?tab=components#settings</code></li>
+<li>Coverage: Settings states at their changed width.</li>
+</ul>
+<h2>Evidence</h2>
+<ul>
+<li>Evidence: <img src="https://example.test/settings.png"></li>
 </ul>
 `,
   });
 
   assert.deepEqual(result.errors, [
-    "The Design proof section must include a hosted desktop screenshot from the design page.",
-    "The Design proof section must include a hosted mobile screenshot from the design page.",
+    "The Design proof section must include evidence matched to the changed visual, state, interaction, or responsive risk.",
   ]);
 });
 
@@ -171,18 +173,19 @@ test("does not borrow proof across an H1 boundary", () => {
     changedPaths: UI_PATHS,
     prBodyHtml: `
 <h2>Design proof</h2>
-<ul><li>Design page: <code>/design?tab=components#settings</code></li></ul>
-<h1>Screenshots</h1>
 <ul>
-<li>Desktop screenshot: <img src="https://example.test/desktop.png"></li>
-<li>Mobile screenshot: <img src="https://example.test/mobile.png"></li>
+<li>Design page: <code>/design?tab=components#settings</code></li>
+<li>Evidence: Browser walkthrough of the changed settings state.</li>
+</ul>
+<h1>Coverage</h1>
+<ul>
+<li>Coverage: Phone and desktop settings states.</li>
 </ul>
 `,
   });
 
   assert.deepEqual(result.errors, [
-    "The Design proof section must include a hosted desktop screenshot from the design page.",
-    "The Design proof section must include a hosted mobile screenshot from the design page.",
+    "The Design proof section must explain which states and viewports were checked and why that evidence is sufficient.",
   ]);
 });
 
@@ -229,8 +232,8 @@ test("actual CLI trusts rendered GFM for composed Markdown cases", async () => {
 ##<!-- hidden -->Design proof
 
 - Design page: /design?tab=components#settings
-- Desktop screenshot: ![Desktop](https://example.test/desktop.png)
-- Mobile screenshot: ![Mobile](https://example.test/mobile.png)
+- Evidence: ![Settings](https://example.test/settings.png)
+- Coverage: Changed settings state at its only affected width.
 `.trim();
   const commentSuffixedFence = `
 \`\`\`md
@@ -238,8 +241,8 @@ not proof
 \`\`\`<!-- hidden -->
 ## Design proof
 - Design page: /design?tab=components#settings
-- Desktop screenshot: ![Desktop](https://example.test/desktop.png)
-- Mobile screenshot: ![Mobile](https://example.test/mobile.png)
+- Evidence: ![Settings](https://example.test/settings.png)
+- Coverage: Changed settings state at its only affected width.
 `.trim();
   const commentInsideRawHtml = `
 <div>
@@ -247,8 +250,8 @@ not proof
 <!-- hidden -->
 ## Design proof
 - Design page: /design?tab=components#settings
-- Desktop screenshot: ![Desktop](https://example.test/desktop.png)
-- Mobile screenshot: ![Mobile](https://example.test/mobile.png)
+- Evidence: ![Settings](https://example.test/settings.png)
+- Coverage: Changed settings state at its only affected width.
 `.trim();
   const renderedByMarkdown = new Map([
     ["visible", COMPLETE_HTML],

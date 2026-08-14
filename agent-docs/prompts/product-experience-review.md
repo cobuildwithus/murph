@@ -22,14 +22,17 @@ Mode:
 
 Preflight:
 - Read `agent-docs/PRODUCT_SENSE.md`,
-  `agent-docs/PRODUCT_CONSTITUTION.md`, the applicable product spec, and the
+  `agent-docs/PRODUCT_CONSTITUTION.md`,
+  `agent-docs/operations/product-ux.md`, the applicable product spec, and the
   task's intended user outcome.
 - Inspect the full exact-head PR diff and directly affected production path from
   the supplied review packet. Stay within the declared review boundary.
 - Read `agent-docs/FRONTEND.md`, `PRODUCT.md`, and `DESIGN.md` when the changed
   experience includes `apps/web` UI.
-- Inspect the supplied direct scenario evidence. For frontend work, inspect
-  the rendered changed states at relevant desktop and mobile viewports.
+- Read the PR's Product UX effort, plan, exclusions, walkthrough, and direct
+  evidence. Treat the plan as a claim, not proof.
+- Inspect each supplied direct scenario. For frontend work, inspect the
+  rendered changed states and each viewport where the behavior can differ.
 
 Start with the purpose:
 - State the feature's irreducible user purpose in one sentence.
@@ -37,6 +40,27 @@ Start with the purpose:
 - Treat every extra concept, screen, click, field, choice, setting,
   confirmation, interruption, and block of explanatory text as something that
   must earn its place.
+
+Walk the affected people:
+- Challenge whether the plan found every materially different affected person.
+  Use the dimensions in `agent-docs/operations/product-ux.md` to find missing
+  journeys. Do not demand a Cartesian matrix.
+- For each selected person, adopt their context and judge what they see, read,
+  understand, do, publish, reveal, and receive.
+- Check whether the result helps that person's current goal. Several goals can
+  apply to one person, including health improvement, experiments, health
+  discussion, training, and support for another person.
+- Check whether the result uses relevant knowledge already held in
+  conversation, environment, patterns, training, experiments, trackers,
+  preferences, and earlier outcomes. Flag advice or claims that ignore or
+  conflict with that knowledge.
+- Require an honest useful outcome for each supported channel and provider,
+  even when their presentation or available data differs.
+- For data-derived features, check provider field coverage, freshness, legacy
+  state, and whether representative supported profiles reach the minimum useful
+  result. One populated fixture is not proof of ordinary value.
+- For each excluded person, require the existing safe journey or a clear
+  unavailable state. A broken half-feature is a material failure.
 
 Trace the whole journey:
 - the initiating person, entry point, intent, and first visible response
@@ -47,6 +71,8 @@ Trace the whole journey:
   dirty, backlogged, retry, restart, and concurrent-input states
 - progress, completion, and the exact place and audience that receive the
   result
+- verification of canonical state and downstream effect before any success
+  claim
 - failure, timeout, cancellation, revocation, permission denial, and recovery
 - what the person experiences next, including whether completed work reaches
   them without an unrelated new inbound action
@@ -71,6 +97,8 @@ Audit interaction economy and craft:
   promise needs it. Minimal does not mean hidden authority or lost control.
 - Judge loading, empty, success, partial, delayed, error, and recovery states
   by the same standard as the happy path.
+- Judge wait copy, progress, and skeletons against the real timing and
+  continuation owner. A skeleton must not hide an unbounded or abandoned wait.
 - For rendered UI, judge whether hierarchy and state feedback make the purpose,
   primary action, continuation, completion, and recovery immediately legible.
   Reject generic dashboard clutter and ornamental work that competes with the
@@ -85,6 +113,9 @@ Audit interaction economy and craft:
 Evidence rules:
 - Ground every finding in the changed production path, rendered evidence, or a
   production-faithful direct scenario.
+- Start direct scenarios at the ordinary user entry. Stop at the last boundary
+  that defines the promise. A design preview, direct tool call, or provider mock
+  proves only its own layer.
 - Unit tests, mocks, helper-level assertions, and internal completion records do
   not by themselves prove cross-runtime wakeups, provider timing, final
   delivery, interaction clarity, or rendered quality.
@@ -96,6 +127,9 @@ Evidence rules:
   resolving it.
 - Report a missing rendered or direct-scenario proof as an evidence gap. Do not
   replace it with source-only confidence.
+- Match evidence to the claim. There is no screenshot quota. Missing phone or
+  desktop evidence is material only when that viewport can change the result
+  and no other supplied evidence proves it.
 
 Finding bar:
 - `high`: the main user goal is unreachable, silently abandoned, delivered to
@@ -113,8 +147,9 @@ Do not report subjective taste, isolated pixel polish, small copy preferences,
 or hypothetical edge cases. A valid review may have zero findings.
 
 Output through the unified preset:
-1. `Product purpose verdict`: the irreducible purpose and whether the
-   implementation is the smallest complete experience.
+1. `Product purpose verdict`: the irreducible purpose, the affected people
+   checked, and whether the implementation is the smallest complete
+   experience.
 2. Product-experience findings ordered `high`, `material`, then `experience
    collapse`. For each, include the affected journey and actor, `file:line` or
    rendered state, evidence, user-visible impact, smallest correction, and

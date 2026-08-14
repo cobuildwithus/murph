@@ -6,9 +6,14 @@
 
 <!-- Describe the outcome this PR is meant to reach. -->
 
-## User experience
+## Product UX
 
-<!-- Entry point, interaction and feedback states, failure/recovery, and what happens next. Write "No user-facing effect" when accurate. -->
+<!-- Use agent-docs/operations/product-ux.md for any user-facing change. Keep this proportional. A Patch can use Outcome / Reaches / Proof. A Feature includes the approved plan and its material exclusions. -->
+
+- Effort: <!-- Patch, Product change, Feature, or Not applicable — reason -->
+- Plan: <!-- Outcome, entry and promise, affected people, proof path, weak states, UX finish, and done-when decisions; link an approved plan when one exists -->
+- Walkthroughs and evidence: <!-- What each affected person saw, read, understood, did, published, revealed, and received at the last boundary that defines the promise -->
+- Result: <!-- Ready, Hold, or Not applicable -->
 
 ## Invariants
 
@@ -69,12 +74,11 @@ ReviewGPT context sensitivity: <!-- routine OR sensitive -->
 
 ## Design proof
 
-<!-- Required for user-facing apps/web UI changes. Update /design?tab=components for reusable components or /design?tab=sections for full page sections. Embed cropped lossless PNG screenshots captured at 2x device scale or higher from that design-page state and uploaded through the /designproof variant. Verify local and hosted images at native resolution. -->
+<!-- Required for user-facing apps/web UI changes. Update /design?tab=components for reusable components or /design?tab=sections for full page sections. Choose evidence for the actual visual, state, interaction, and responsive risks. A change can need no screenshots, one screenshot, or many. -->
 
 - Design page: <!-- /design?tab=components#... or /design?tab=sections#... -->
-- Coverage: <!-- Component or section names added or updated -->
-- Desktop screenshot: <!-- ![Desktop description](https://hosted-image-url) -->
-- Mobile screenshot: <!-- ![Mobile description](https://hosted-image-url) -->
+- Evidence: <!-- Links, images, browser walkthrough, or a clear reason why an image adds no proof -->
+- Coverage: <!-- States and viewports checked, plus why this evidence is sufficient -->
 
 ## Change-shape breakdown
 

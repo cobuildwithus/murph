@@ -47,7 +47,7 @@ jobs:
           MURPH_PR_BODY: ${{ github.event.pull_request.body }}
           MURPH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
-      - name: Require design-page coverage and screenshots
+      - name: Require design-page coverage and risk-based evidence
         run: node scripts/check-frontend-design-proof.mjs
         env:
           MURPH_GITHUB_TOKEN: ${{ github.token }}

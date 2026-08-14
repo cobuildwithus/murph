@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-11
+Last verified: 2026-08-15
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -93,9 +93,9 @@ against its pushed head, and exports the required PR ref and phase before the
 package can create an attachment. The PR body must
 declare each lens `applicable` or `not applicable`, name the product outcome and
 direct journey evidence or exact gap when applicable, name the focused local
-proof and current exact-head CI status, and list the redacted rendered-evidence
-files for every applicable frontend state and viewport. CI may still be
-`pending`; the preliminary pass runs concurrently with it.
+proof and current exact-head CI status, and list the selected redacted rendered
+evidence for every material frontend claim. CI may still be `pending`; the
+preliminary pass runs concurrently with it.
 
 Do not add `ReviewGPT first-reviewed head` merely for the preliminary pass. When
 final round 1 starts concurrently, add it before launching both jobs and set it
@@ -108,20 +108,22 @@ The repo config defaults response capture to 180 minutes. The workflow commands
 inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
 
 ```bash
-REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
-  pnpm review:gpt completion-specialists \
+pnpm review:gpt completion-specialists \
     --wait \
     --response-marker SPECIALIST_REVIEW_COMPLETE \
     --response-file audit-packages/pr-<number>-specialists.md \
     --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply the product-experience, prompt, frontend, and coverage lenses declared in the PR body."
 ```
 
-Omit `REVIEW_GPT_RENDERED_EVIDENCE_PATHS` only when the frontend lens is not
-applicable. Evidence paths must be repo-relative PNG, JPEG, or WebP files under
-`.artifacts/review-gpt/` or `audit-packages/`; they stay ignored and uncommitted.
-Redact direct identifiers and private content before packaging them. The
-packager rejects absolute paths, traversal, symlinks, missing files, unsupported
-types, and paths outside those two roots.
+Set `REVIEW_GPT_RENDERED_EVIDENCE_PATHS` to newline-separated image paths only
+when images are part of the selected proof. It can contain zero, one, or many
+images. An applicable frontend lens can omit it only when the PR explains why
+images add no material proof and supplies another direct way to judge the
+changed claim. Evidence paths must be repo-relative PNG, JPEG, or WebP files
+under `.artifacts/review-gpt/` or `audit-packages/`; they stay ignored and
+uncommitted. Redact direct identifiers and private content before packaging
+them. The packager rejects absolute paths, traversal, symlinks, missing files,
+unsupported types, and paths outside those two roots.
 
 Set `REVIEW_GPT_PR_URL` only when intentionally targeting a PR other than the
 one associated with the current branch. The guard still requires the local

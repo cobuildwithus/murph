@@ -16,8 +16,9 @@ Do not create a second workflow here. In particular:
 ## Frontend changes are not done until they are seen
 
 For any user-facing `apps/web` UI change, run the app and look at the change
-before calling it complete, then attach hosted desktop and mobile screenshots to
-the PR. This is the existing `/design` catalog rule in
+before calling it complete, then attach the rendered evidence that the changed
+states and risks need. Follow `agent-docs/operations/product-ux.md`; there is no
+screenshot quota. This is the existing `/design` catalog rule in
 `agent-docs/operations/agent-workflow-routing.md`; it is repeated here because it
 is the step most often skipped. Green tests and a typecheck are not evidence that
 a screen renders correctly. Secondary worktrees must isolate ports, database, and
@@ -27,7 +28,7 @@ Next dist dir first, per `agent-docs/operations/hosted-local-worktree-dev.md`.
 
 `agent-docs/operations/completion-workflow.md` defines the required PR body. Every
 `Required:` section is mandatory on the first push, not something to backfill after
-a reviewer asks: why this PR exists, user goal, user experience, invariants,
+a reviewer asks: why this PR exists, user goal, Product UX, invariants,
 non-obvious affected surfaces, preliminary specialist lenses, the five-row
 change-shape table, and the design proof — plus deployment skew when the PR
 touches a deploy boundary.

@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-11
+Last verified: 2026-08-15
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -556,8 +556,8 @@ For hosted assistant-provider choice, the truthful diff lane must cover
 iteration should include the provider contract/config suites, hosted Web
 preference/route/component/workspace tests, and Cloudflare egress plus deploy
 preflight tests. Final proof remains `pnpm test:diff ...` across the touched
-owners plus `pnpm verify:acceptance`, desktop/mobile design-catalog evidence,
-and the routed review gates. Routine verification uses synthetic credentials
+owners plus `pnpm verify:acceptance`, risk-based design-catalog evidence, and
+the routed review gates. Routine verification uses synthetic credentials
 and must not call a paid provider.
 
 Saved-card group-funding changes stay on the full `apps/web` acceptance lane.
@@ -578,8 +578,9 @@ focused hosted-execution contract, hosted-web provider/API/UI, Cloudflare port,
 assistant-runtime bridge, and assistant-engine tool/prompt tests. Exact-head CI
 owns the broad diff and scenario-integrity surfaces; direct shared-default
 pushes use `pnpm verify:acceptance`.
-Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
-putting a real query or ZIP in a durable artifact. Complete the preliminary
+Capture authenticated, fixture-safe `/labs` proof at each viewport where the
+changed result can differ, without putting a real query or ZIP in a durable
+artifact. Complete the preliminary
 ReviewGPT product-experience/prompt/frontend/coverage pass, the review-only
 Fable or Opus UI pass, and the separate final ReviewGPT gate before handoff.
 Live Junction calls are operator smoke only and must use environment-held
@@ -592,20 +593,17 @@ comments, code blocks, and raw HTML cannot satisfy the requirement.
 For every user-facing `apps/web` UI diff, verification also includes
 `pnpm test:frontend-design-proof`, a production-component update on
 `/design?tab=components` or a composed-section update on
-`/design?tab=sections`, and desktop and mobile screenshots from that catalog
-surface in the pull request. The pull-request workflow repeats the policy check
-against the final base-to-head diff and PR body. Prefer an attached in-app
-Browser for this proof when available, then fall back to the repository-installed
-Playwright runtime against the local catalog when no tab is attached or the
-connection is unusable. Browser attachment alone must not block completion when
-Playwright can capture the required states. Treat that fallback as required:
-attempt Playwright before asking for a browser attachment or reporting a
-screenshot blocker, and record the exact command and failure only if Playwright
-cannot capture the proof. Capture lossless PNGs at 2x device scale or higher,
-crop to the changed component or section, and visually inspect both the local
-file and the hosted `/designproof` Cloudflare Images variant at native
-resolution. Do not use a long full-page capture that makes review text smaller
-than the rendered UI.
+`/design?tab=sections`, and evidence matched to the changed visual, state,
+interaction, and responsive risk. The pull-request workflow repeats the policy
+check against the final base-to-head diff and PR body. Inspect phone and desktop
+when responsive behavior can change; do not add a viewport only to meet a
+quota. Prefer an attached in-app Browser for visual proof, then use the
+repository-installed Playwright runtime when no tab is attached or the
+connection is unusable. Report a blocker only when the material claim cannot
+be judged after the applicable fallback. When screenshots add proof, crop them
+to the changed component or section and inspect them at native resolution. Do
+not use a long full-page capture that makes review text smaller than the
+rendered UI.
 
 ## Scoped Verification Mode
 

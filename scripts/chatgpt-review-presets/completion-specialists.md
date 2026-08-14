@@ -76,15 +76,22 @@ external normative source allowed by the prompt lens.
 # Product-experience lens
 
 Read `agent-docs/prompts/product-experience-review.md`,
-`agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`, and the
-applicable product spec. Trace the intended outcome across the changed
-conversation, runtime, and web paths.
+`agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`,
+`agent-docs/operations/product-ux.md`, and the applicable product spec. Read
+the Product UX effort, plan, exclusions, walkthrough, and evidence from the PR.
+Trace the intended outcome across the changed conversation, runtime, and web
+paths.
 
 Find evidence-backed failures in the irreducible purpose, complete journey,
 timing and truthful feedback, continuation ownership, terminal delivery,
 permission boundaries, recovery, or interaction economy. Name concepts, copy,
 steps, screens, choices, or delays that can be removed only when the same
 outcome remains clear, accessible, consensual, trustworthy, and controllable.
+Adopt each materially different affected person's context. Check their goals,
+using the dimensions in `agent-docs/operations/product-ux.md` without demanding
+a Cartesian matrix. Judge what they see, read, understand, do, publish, reveal,
+and receive. Treat output that
+ignores or conflicts with relevant known context as a product failure.
 Treat missing production-faithful journey proof as an evidence gap; do not
 replace it with source-only confidence. Product-experience findings are
 review-only and must never produce a patch artifact.
@@ -116,10 +123,14 @@ Read `agent-docs/prompts/frontend-review.md`, `agent-docs/FRONTEND.md`, and the
 applicable product/design guidance before reviewing. Inspect the changed source,
 nearby shared primitives, and every supplied rendered state.
 
-For a visual or interaction change, `rendered-evidence.txt` must identify
-readable, redacted desktop and mobile evidence for the touched states. If that
-evidence is absent or unreadable, state the exact gap and return
-`SPECIALIST_OUTCOME: INVALID`; do not infer visual quality from source alone.
+For a visual or interaction change, use the PR's Design proof and
+`rendered-evidence.txt` together. They must provide readable, redacted evidence
+for every material visual, state, interaction, and responsive claim. Require
+phone and desktop evidence when responsive behavior can change. Do not require
+a second viewport only to meet a quota. An empty image manifest is valid only
+when another supplied direct proof can support the material judgment. If it
+cannot, state the exact gap and return `SPECIALIST_OUTCOME: INVALID`; do not
+infer visual quality from source alone.
 
 Find evidence-backed regressions in rendered fidelity to the declared
 experience and hierarchy, responsive containment, overflow, interaction

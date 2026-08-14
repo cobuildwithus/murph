@@ -62,14 +62,14 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
         "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
       );
     }
-    if (!hasScreenshotItem(designProof, "Desktop screenshot")) {
+    if (!hasEvidenceItem(designProof)) {
       errors.push(
-        "The Design proof section must include a hosted desktop screenshot from the design page.",
+        "The Design proof section must include evidence matched to the changed visual, state, interaction, or responsive risk.",
       );
     }
-    if (!hasScreenshotItem(designProof, "Mobile screenshot")) {
+    if (!hasMeaningfulListItem(designProof, "Coverage")) {
       errors.push(
-        "The Design proof section must include a hosted mobile screenshot from the design page.",
+        "The Design proof section must explain which states and viewports were checked and why that evidence is sufficient.",
       );
     }
   }
@@ -160,6 +160,21 @@ function hasScreenshotItem(section, label) {
   return /<img\b[^>]*\b(?:src|data-canonical-src)\s*=\s*["']https?:\/\/[^"']+["'][^>]*>/iu.test(
     item,
   );
+}
+
+function hasMeaningfulListItem(section, label) {
+  const item = findRenderedListItem(section, label);
+  if (!item) {
+    return false;
+  }
+  const value = renderedText(item).slice(`${label}:`.length).trim();
+  return value.length >= 8
+    && !/^(?:n\/?a|none|not applicable)$/iu.test(value);
+}
+
+function hasEvidenceItem(section) {
+  return hasScreenshotItem(section, "Evidence")
+    || hasMeaningfulListItem(section, "Evidence");
 }
 
 async function renderPrBody(markdown) {
