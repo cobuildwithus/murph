@@ -403,18 +403,22 @@ if [[ -f "$unmanaged_state_file" ]]; then
   fi
 fi
 if (( new_unmanaged > 0 )); then
-  printf 'worktree storage guard: %d new unmanaged temporary checkout(s) bypassed scripts/create-worktree\n' \
+  if [[ -z "$current_worktree_path" ]]; then
+    printf 'worktree storage guard: %d new unmanaged temporary checkout(s) bypassed scripts/create-worktree\n' \
+      "$new_unmanaged" >&2
+    exit 1
+  fi
+  printf 'worktree storage guard: warning: %d new unmanaged temporary checkout(s) remain outside scripts/create-worktree; global audit remains blocked\n' \
     "$new_unmanaged" >&2
-  exit 1
-fi
-
-tmp_unmanaged_state="$unmanaged_state_file.tmp.$$"
-if (( ${#unmanaged_fingerprints[@]} > 0 )); then
-  printf '%s\n' "${unmanaged_fingerprints[@]}" | LC_ALL=C sort -u >"$tmp_unmanaged_state"
 else
-  : >"$tmp_unmanaged_state"
+  tmp_unmanaged_state="$unmanaged_state_file.tmp.$$"
+  if (( ${#unmanaged_fingerprints[@]} > 0 )); then
+    printf '%s\n' "${unmanaged_fingerprints[@]}" | LC_ALL=C sort -u >"$tmp_unmanaged_state"
+  else
+    : >"$tmp_unmanaged_state"
+  fi
+  mv "$tmp_unmanaged_state" "$unmanaged_state_file"
 fi
-mv "$tmp_unmanaged_state" "$unmanaged_state_file"
 
 if [[ -n "$target_path" ]]; then
   if [[ "$target_path" != /* ]]; then

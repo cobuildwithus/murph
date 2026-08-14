@@ -263,7 +263,8 @@ function resolveStructuredDurationMinutes(input: {
   payloadDurationMinutes?: number
   structuredWorkout?: WorkoutSession
   fallbackText?: string
-}): number {
+  allowUnknownDuration?: boolean
+}): number | undefined {
   const explicitDurationMinutes =
     typeof input.explicitDurationMinutes === 'number'
       ? validateDurationMinutes(input.explicitDurationMinutes)
@@ -286,6 +287,10 @@ function resolveStructuredDurationMinutes(input: {
   )
   if (derivedDurationMinutes !== null) {
     return derivedDurationMinutes
+  }
+
+  if (input.structuredWorkout && input.allowUnknownDuration) {
+    return undefined
   }
 
   if (input.fallbackText) {
@@ -361,6 +366,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
   workout?: WorkoutSession | null
   text?: string
   title?: string
+  allowUnknownDuration?: boolean
 }): ActivitySessionDraft {
   const sourcePayload = parseWorkoutImportPayload(input.payload)
   const explicitStructuredWorkout =
@@ -395,6 +401,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
       payloadDurationMinutes: valueAsNumber(sourcePayload.durationMinutes),
       structuredWorkout: explicitStructuredWorkout,
       fallbackText: fallbackText ?? undefined,
+      allowUnknownDuration: input.allowUnknownDuration,
     })
   const distanceKm =
     typeof input.distanceKm === 'number'
@@ -440,7 +447,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
     title,
     note,
     activityType: activityDescriptor.activityType,
-    durationMinutes,
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
     ...(typeof distanceKm === 'number' ? { distanceKm } : {}),
     workout: structuredWorkout,
   }) as ActivitySessionDraft
@@ -455,6 +462,13 @@ export async function addStructuredWorkoutRecord(input: {
   draft: ActivitySessionDraft
   mediaPaths?: string[]
 }) {
+  const durationMinutes = input.draft.durationMinutes
+  if (durationMinutes === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
+    )
+  }
   const mediaPaths = Array.isArray(input.mediaPaths)
     ? input.mediaPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
     : []
@@ -484,7 +498,7 @@ export async function addStructuredWorkoutRecord(input: {
       kind: 'activity_session' as const,
       title: result.event.title,
       activityType: result.event.activityType,
-      durationMinutes: result.event.durationMinutes,
+      durationMinutes,
       distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
       workout: result.event.workout ?? null,
       manifestFile: result.manifestPath,

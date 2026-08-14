@@ -50,6 +50,14 @@ device or connected-app completion result takes foreground priority; closing it
 refreshes plain Home so pending onboarding appears next instead of mounting a
 second dialog.
 
+Generic dashboard contact resolution reads only complete opaque member-channel
+markers and Murph-owned destinations. It never unwraps a member encryption root
+or reads the Stripe checkout email: the assigned text destination resolves from
+the locally encrypted `HostedLinqLine` row, and the email option uses the signed
+reply alias without exposing the member's verified address. Provider-specific
+webmail shortcuts remain a Settings concern, where that verified address is
+already loaded for the account-email surface.
+
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
@@ -630,10 +638,21 @@ label row's `serving_grams` when it is available instead of storing manual
 product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
-The current search path uses built-in Postgres full-text search only. No
-extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for
-supplement label lookup. Food label lookup additionally applies `pg_trgm` in
-`sql/foods/schema.sql` for name search support.
+The current search path uses built-in Postgres full-text search plus the
+`pg_trgm` extension for indexed name similarity. Public food searches retain
+their existing 250-candidate SQL bound, and supplement searches retain their
+existing ranking path. Private food-name search uses a separate bounded
+retrieval contract for the roughly two-million-row foods corpus: it admits at
+most 250 literal exact-name rows, 5,000 nearest-name matches, and 5,000
+deterministic canonical representatives from either its full-text arm or its
+trigram fallback before similarity scoring, canonical-key deduplication, and
+window sorting. Ranking is deterministic within that admitted set; it is
+intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
+continue to use direct lookup paths.
+
+For an existing labels database, create the foods exact-name-rank, GiST
+name-rank, and canonical-rank indexes concurrently before deploying web code
+that uses this query shape.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new
@@ -807,6 +826,10 @@ Hosted onboarding extras:
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall; recovery silently rearms each monitor independently.
 - `HOSTED_EXECUTION_CONTROL_URL`
+- `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` is an optional comma-separated
+  provider rollout gate for the encrypted Cloudflare Queue transport. Leave it
+  empty until the Queue-capable Worker, main Queue, DLQ, and signed Web batch
+  callback are live; enable one supported provider at a time.
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
 Hosted managed crypto:
@@ -1082,6 +1105,12 @@ Callback auth contract:
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
+- The generic hosted-mailbox append validates a durable dedupe replay before
+  crypto preparation, then warms the exact active ingress root before opening
+  its transaction. Its prepared transaction surface locks and re-reads root
+  authority and seals only from that scoped cache entry, with one full retry on
+  typed root drift. Legacy transaction append surfaces remain for separately
+  migrated callers and are not the transaction-safe generic entrypoint.
 - `POST /api/internal/hosted-runtime/owner-released` is the payload-free
   completion handoff. Web accepts a zero-byte body and either no query or the
   exact signature-bound `immediateRecheckRequested=1` positive edge, binds the

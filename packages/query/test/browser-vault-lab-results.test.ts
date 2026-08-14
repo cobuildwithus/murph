@@ -79,7 +79,7 @@ test("browser vault projects all live lab history without widening the wearable 
     sourceBundleHash: "f".repeat(64),
     vault,
   });
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 7);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 10);
   assert.equal(replica.generation, BROWSER_VAULT_REPLICA_CURRENT_GENERATION);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 

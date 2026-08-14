@@ -1,6 +1,7 @@
 ---
 title: 'Waited ReviewGPT exits after an accepted long-running response detaches from capture'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1670'
 ---
 
 ## Expected Behavior

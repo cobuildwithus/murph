@@ -14,6 +14,7 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   resolveMurphDynamicTools,
   type MurphGroupSharedReadTurnState,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -453,6 +454,7 @@ describe('murph.attach_response_card', () => {
     for (const tool of [
       MURPH_ATTACH_RESPONSE_CARD_TOOL,
       MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+      MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
       groupTool!,
     ]) {
       const serializedBytes = Buffer.byteLength(
@@ -517,8 +519,53 @@ describe('murph.attach_response_card', () => {
   })
 
   it('describes the private on-demand canonical-read contract', () => {
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'Never use this tool to derive or present nutrition totals or targets, tracked-workout state, a compact table that attach_response_card can represent, or a catalog-backed movement routine',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'If the owning semantic card cannot be attached, use ordinary text instead of this tool',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'These three approved cards remain routing examples',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'They are not HTML templates',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'Keep short answers, one-paragraph advice, confirmations, urgent single actions, and casual chat as ordinary text',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'keep safety limits and stop conditions visible',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'under 1,500 visible characters',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'Do not repeat the same facts in a summary, table, and details',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      '<details><summary>Why this helps</summary>',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'repeat, resend, or improve the presentation of a movement routine already present in the committed conversation',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'not styled plain text',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'By default, include at least one useful returned catalog image for every exercise that has one.',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'Omit exercise images only when the user explicitly asks for a routine without them.',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'Never promise images for an exercise that has none.',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'saved instructions for the exact scheduled automation occurrence explicitly request it',
+      'saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'a structured plan or schedule that the table alone can fully represent within its bounds',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Occurrence authority alone is not card intent',
@@ -786,6 +833,35 @@ describe('murph.attach_response_card', () => {
     expect(readCardToolRequest(
       { card: CARD },
       'attach_exercise_routine_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
+    const telegramRichContent = {
+      kind: 'telegram_rich_content',
+      version: 1,
+      html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol><blockquote>Keep the passport with you.</blockquote>',
+    } satisfies AssistantResponseCard
+    expect(readCardToolRequest(
+      { card: telegramRichContent },
+      'attach_telegram_rich_content',
+    )).toEqual({
+      card: telegramRichContent,
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest(
+      { card: telegramRichContent },
+      'attach_response_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
+    expect(readCardToolRequest(
+      {
+        card: {
+          ...telegramRichContent,
+          html: '<h2>Travel prep</h2><img src="https://example.test/a.png">',
+        },
+      },
+      'attach_telegram_rich_content',
     )).toMatchObject({
       kind: 'invalid-response-card-arguments',
     })

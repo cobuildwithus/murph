@@ -225,6 +225,8 @@ export async function executeCodexAssistantTurnAttempt(
     ...codexProcessLaunchInput,
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
+    automationRelativeDateReferenceWindow:
+      input.automationRelativeDateReferenceWindow ?? null,
     authorizeAcceptedMessageTarget:
       input.authorizeAcceptedMessageTarget ?? null,
     approvalPolicy,
@@ -274,6 +276,8 @@ export async function executeCodexAssistantTurnAttempt(
                     steerInput.userMessageContent,
                   ),
                   prompt: steerInput.prompt,
+                  relativeDateReferenceWindow:
+                    steerInput.relativeDateReferenceWindow,
                 })
               },
               turnId: murphTurnId,

@@ -45,6 +45,7 @@ export interface HostedRetentionCleanupResult {
   expiredComputerRunsCleanedUp: number;
   expiredConversationPolicyNonRepliesRecorded: number;
   expiredDeviceWebhookTracesDeleted: number;
+  expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
@@ -73,6 +74,8 @@ export async function runHostedRetentionCleanup(input: {
   // across the same pool that serves user-facing control-plane work.
   const expiredCallbackRequestNoncesDeleted =
     await deleteExpiredHostedCallbackRequestNonces({ prisma });
+  const expiredGroupCurrentSenderClarificationsDeleted =
+    await deleteExpiredGroupCurrentSenderClarifications({ now, prisma });
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
     now,
     prisma,
@@ -112,6 +115,7 @@ export async function runHostedRetentionCleanup(input: {
     expiredConversationPolicyNonRepliesRecorded:
       expiredMailboxItems.policyNonReplies,
     expiredDeviceWebhookTracesDeleted,
+    expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
@@ -120,6 +124,27 @@ export async function runHostedRetentionCleanup(input: {
     oldRuntimeLogsDeleted: 0,
     staleWebSessionsDeleted,
   };
+}
+
+async function deleteExpiredGroupCurrentSenderClarifications(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "group_runtime_member_id", "target_member_id"
+      FROM "hosted_group_current_sender_clarification"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "group_runtime_member_id" ASC,
+        "target_member_id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_group_current_sender_clarification" AS clarification
+    USING doomed
+    WHERE clarification."group_runtime_member_id" =
+        doomed."group_runtime_member_id"
+      AND clarification."target_member_id" = doomed."target_member_id"
+  `);
 }
 
 async function signalDueInboxMediaRetentionRuntimes(input: {

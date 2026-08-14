@@ -90,7 +90,6 @@ beforeEach(() => {
     },
     murphEmailAddress: null,
     murphPhoneNumber: null,
-    userEmailAddress: null,
   });
 });
 
@@ -136,7 +135,6 @@ test("UploadLabsMurphContactAction opens assigned SMS with the lab-report messag
     },
     murphEmailAddress: null,
     murphPhoneNumber: "+15550100001",
-    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -177,7 +175,6 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
     },
     murphEmailAddress: "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: "+15550100001",
-    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -218,7 +215,6 @@ test("UploadLabsMurphContactAction skips verified email without a reply alias", 
     },
     murphEmailAddress: null,
     murphPhoneNumber: null,
-    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -260,7 +256,6 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
     },
     murphEmailAddress: "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: null,
-    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -305,7 +300,6 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
     },
     murphEmailAddress: null,
     murphPhoneNumber: null,
-    userEmailAddress: null,
   });
 
   const { UploadLabsMurphContactAction } = await import(

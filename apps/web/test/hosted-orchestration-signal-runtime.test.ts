@@ -553,6 +553,27 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
+  it("keeps runtime maintenance durable when Temporal signaling fails", async () => {
+    mocks.signalWithStart.mockRejectedValueOnce(new Error("temporal unavailable"));
+
+    await expect(signalHostedRuntimeMaintenanceRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    })).rejects.toThrow("temporal unavailable");
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: expect.stringMatching(/^runtime-control:maintenance:[0-9a-f]{32}$/u),
+        kind: "runtime.maintenance-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalWithStart.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it("dedupes runtime maintenance mailbox work for the same workspace version within a short window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));

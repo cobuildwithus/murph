@@ -1226,14 +1226,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Default to private/minimal support when shared-channel permission is unclear.',
     )
-    expect(raw).toContain(
-      'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
+    expect(compact).toContain(
+      'The scheduled runtime owns generic recurring reminder cadence',
     )
     expect(compact).toContain(
-      'A reminder is a cue. An accountability check-in is normally a separate, later action whose job is to learn the outcome, not repeat the cue.',
+      'A reminder is a cue. An accountability check-in is a separate, later action whose job is to learn the outcome, not repeat the cue.',
     )
     expect(compact).toContain(
-      'The accepted dense-loop policy above is the narrow exception',
+      'The runtime-owned keep/change/pause cadence question does not ask about the outcome and does not turn a reminder into a check-in.',
+    )
+    expect(compact).toContain(
+      'Medication, prescribed treatment, clinician-directed care, clinical monitoring, and safety-critical reminders continue the saved cue after silence',
     )
     expect(compact).toContain(
       'A direct request to check back later authorizes that exact check-in.',
@@ -1274,7 +1277,21 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Silence after that check-in does not authorize another same-occurrence follow-up.',
     )
-    expect(compact).toContain('Prefer bounded support. Never create open-ended nag loops.')
+    expect(compact).toContain(
+      'never increase frequency or add messages after non-response',
+    )
+    expect(compact).toContain(
+      'Reuse a good concise cue when the context has not changed.',
+    )
+    expect(compact).toContain('do not manufacture novelty')
+    expect(compact).toContain(
+      'Never copy these generic repair or review requirements into an ordinary recurring reminder.',
+    )
+    expect(compact).toContain(
+      'The generic repair, skip, and miss rules below apply only to Murph-designed habit support or an explicitly consented `check_in` or `review`',
+    )
+    expect(compact).not.toContain('Do not repeat stale reminder copy.')
+    expect(raw).not.toContain('### Reminder density and reply loop')
     expect(raw).toContain('Count an ignored support attempt only when')
     expect(raw).toContain('When support is working, fade it instead of adding more.')
     expect(raw).toContain('Use `completed`, `partial`, `missed`, or `skipped` session status')
@@ -1460,6 +1477,18 @@ describe('assistant skill assets', () => {
       '`murph.attach_exercise_routine_card`',
     )
     expect(compactCatalog).toContain(
+      'use one card when it alone fully answers the request',
+    )
+    expect(compactCatalog).toContain(
+      'Do not replace that card with one or more long plain-text messages.',
+    )
+    expect(compactCatalog).toContain(
+      'when the member asks to repeat, resend, or improve the layout of a routine already present in the conversation',
+    )
+    expect(compactCatalog).toContain(
+      'Styled Telegram text is not a Rich Message',
+    )
+    expect(compactCatalog).toContain(
       'do not pad a short plan to sound more substantial.',
     )
     expect(compactCatalog).toContain(
@@ -1469,7 +1498,10 @@ describe('assistant skill assets', () => {
       'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
     )
     expect(compactCatalog).toContain(
-      'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
+      'Familiarity alone is not a reason to omit images. Omit exercise images only when the user explicitly asks for a response without them.',
+    )
+    expect(compactCatalog).toContain(
+      'at least one useful returned catalog image for every exercise that has one by default.',
     )
     expect(compactCatalog).toContain(
       'Construct source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`.',
@@ -1477,6 +1509,9 @@ describe('assistant skill assets', () => {
     expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
+    )
+    expect(compactCatalog).not.toContain(
+      'include available catalog media in the same response',
     )
   })
 

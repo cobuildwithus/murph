@@ -80,7 +80,7 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
-review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-main}}}"
+review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-auto}}}"
 review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
 review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
 
@@ -163,6 +163,10 @@ managed_browser_port="${managed_browser_port:-$review_gpt_selected_browser_port}
 # occluded lane window to run at foreground priority. Set this to unthrottled
 # only when a specific browser version has a proven background-capture stall.
 managed_browser_background_mode="${managed_browser_background_mode:-balanced}"
+# Headless removes visible UI but does not remove ChatGPT's renderer or page
+# JavaScript. Settled local measurement used more CPU and memory, so keep the
+# resource-efficient default headful and leave headless as an explicit override.
+managed_browser_display_mode="${managed_browser_display_mode:-headful}"
 export REVIEW_GPT_SELECTED_BROWSER_LANE="$review_gpt_selected_browser_lane"
 
 name_prefix="murph-$review_gpt_selected_browser_lane-chatgpt-audit"

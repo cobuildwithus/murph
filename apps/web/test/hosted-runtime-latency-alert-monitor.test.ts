@@ -397,10 +397,23 @@ describe("hosted runtime latency alert monitor", () => {
     const query = fixture.traceQueryRaw.mock.calls[0]?.[0] as {
       strings: string[];
     };
-    expect(query.strings.join("?")).toContain(
+    const queryText = query.strings.join("?");
+    expect(queryText).toContain(
+      "WITH latency_candidate_trace_ids AS MATERIALIZED",
+    );
+    expect(queryText.match(/\bUNION\b/gu)).toHaveLength(4);
+    expect(queryText).toContain(
+      "trace.assistant_input_staged_at >= ?",
+    );
+    expect(queryText).toContain("delivery.accepted_at >= ?");
+    expect(queryText).toContain("mailbox_item.consumed_at >= ?");
+    expect(queryText).not.toContain(
+      "OR trace.assistant_input_staged_at >= ?",
+    );
+    expect(queryText).toContain(
       "mailbox_item.ai_usage_denied_at < trace.accepted_at",
     );
-    expect(query.strings.join("?")).toContain(
+    expect(queryText).toContain(
       "mailbox_item.ai_usage_denied_at > ?",
     );
   });

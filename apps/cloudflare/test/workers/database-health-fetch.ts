@@ -12,7 +12,12 @@ interface RecordedDatabaseHealthMessageRequest {
 const recordedDatabaseHealthMessageRequests:
   RecordedDatabaseHealthMessageRequest[] = [];
 let databaseHealthClientWaitSeconds = 8;
+let databaseHealthDiscoveryRequestCount = 0;
+let databaseHealthMetricsRequestCount = 0;
+let databaseHealthMissingConnectionErrorScrapesRemaining = 0;
 let databaseHealthNowMs = Date.now();
+let databaseHealthPooledErrors = 0;
+let databaseHealthZeroEvidenceScrapesRemaining = 0;
 
 export function readDatabaseHealthMessageRequests():
   RecordedDatabaseHealthMessageRequest[] {
@@ -22,10 +27,25 @@ export function readDatabaseHealthMessageRequests():
   }));
 }
 
+export function readDatabaseHealthPlanetScaleRequestCounts(): {
+  discovery: number;
+  metrics: number;
+} {
+  return {
+    discovery: databaseHealthDiscoveryRequestCount,
+    metrics: databaseHealthMetricsRequestCount,
+  };
+}
+
 export function resetDatabaseHealthMessageRequests(): void {
   recordedDatabaseHealthMessageRequests.length = 0;
   databaseHealthClientWaitSeconds = 8;
+  databaseHealthDiscoveryRequestCount = 0;
+  databaseHealthMetricsRequestCount = 0;
+  databaseHealthMissingConnectionErrorScrapesRemaining = 0;
   databaseHealthNowMs = Date.now();
+  databaseHealthPooledErrors = 0;
+  databaseHealthZeroEvidenceScrapesRemaining = 0;
 }
 
 export function readDatabaseHealthNowMs(): number {
@@ -36,8 +56,24 @@ export function setDatabaseHealthClientWaitSeconds(value: number): void {
   databaseHealthClientWaitSeconds = value;
 }
 
+export function setDatabaseHealthMissingConnectionErrorScrapesRemaining(
+  value: number,
+): void {
+  databaseHealthMissingConnectionErrorScrapesRemaining = value;
+}
+
+export function setDatabaseHealthZeroEvidenceScrapesRemaining(
+  value: number,
+): void {
+  databaseHealthZeroEvidenceScrapesRemaining = value;
+}
+
 export function setDatabaseHealthNowMs(value: number): void {
   databaseHealthNowMs = value;
+}
+
+export function setDatabaseHealthPooledErrors(value: number): void {
+  databaseHealthPooledErrors = value;
 }
 
 export async function handleDatabaseHealthEgress(
@@ -61,6 +97,7 @@ export async function handleDatabaseHealthEgress(
     && headers.get("authorization")
       === "service-token-id:service-token"
   ) {
+    databaseHealthDiscoveryRequestCount += 1;
     return Response.json([
       {
         labels: {
@@ -84,10 +121,24 @@ export async function handleDatabaseHealthEgress(
     && url.searchParams.get("sig") === "signed-scrape-token"
     && headers.get("authorization") === null
   ) {
-    return new Response(buildMetricsBody({
+    databaseHealthMetricsRequestCount += 1;
+    if (databaseHealthZeroEvidenceScrapesRemaining > 0) {
+      databaseHealthZeroEvidenceScrapesRemaining -= 1;
+      return new Response("", { status: 200 });
+    }
+    const metricsBody = buildMetricsBody({
       branchId: "branch_worker_test",
       clientWaitSeconds: databaseHealthClientWaitSeconds,
-    }));
+      pooledErrors: databaseHealthPooledErrors,
+    });
+    if (databaseHealthMissingConnectionErrorScrapesRemaining > 0) {
+      databaseHealthMissingConnectionErrorScrapesRemaining -= 1;
+      return new Response(metricsBody.replace(
+        /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+        "",
+      ));
+    }
+    return new Response(metricsBody);
   }
   if (
     method === "GET"
@@ -177,7 +228,12 @@ function readValidDatabaseHealthMessageRequest(input: {
     || !isObjectRecord(value.message.parts[0])
     || value.message.parts[0].type !== "text"
     || typeof value.message.parts[0].value !== "string"
-    || !value.message.parts[0].value.includes("PgBouncer wait ")
+    || !(
+      value.message.parts[0].value.includes("PgBouncer wait ")
+      || value.message.parts[0].value.includes(
+        "pooled application connection",
+      )
+    )
     || !Array.isArray(value.to)
     || value.to.length !== 1
     || (

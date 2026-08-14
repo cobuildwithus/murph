@@ -263,7 +263,7 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
-  it("selects pending browser-vault refresh wakes in the shared mailbox sweep", async () => {
+  it("selects pending browser-vault and maintenance wakes in the shared mailbox sweep", async () => {
     mocks.queryRaw.mockResolvedValueOnce([{
       mailboxItemId: "mailbox_browser_refresh",
       userId: "member_browser_refresh",
@@ -283,9 +283,15 @@ describe("hosted preference handoff sweeper", () => {
       strings?: readonly string[];
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
-    expect(sql).toContain('"pending_browser_vault_refresh_users"');
+    expect(sql).toContain('"pending_runtime_control_users"');
     expect(sql).toContain(
-      '"item"."kind" = \'runtime.browser-vault-refresh-requested\'',
+      "'runtime.browser-vault-refresh-requested'",
+    );
+    expect(sql).toContain(
+      "'runtime.maintenance-requested'",
+    );
+    expect(sql).toContain(
+      "'health.daily-metric.reported'",
     );
     expect(sql).toContain(
       '"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)',
