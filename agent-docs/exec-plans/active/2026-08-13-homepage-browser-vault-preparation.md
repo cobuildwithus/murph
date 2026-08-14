@@ -55,6 +55,9 @@ Updated: 2026-08-13
   of adding a lightweight client endpoint.
 - Schedule preparation from the authenticated server render after the response;
   never import the browser warm store from the homepage.
+- Keep the homepage scheduler's static graph limited to Next's after-response
+  primitive; lazily import the authority, freshness, mailbox, and Temporal
+  worker only from inside the registered callback.
 - Keep stale replica reads and decryption exclusively in the dashboard's
   browser-vault provider.
 
@@ -82,3 +85,8 @@ Completed before the exact-head review candidate:
   required Claude Code UI double-check could not start because the `claude`
   executable is unavailable in this environment; no substitute review is
   claimed.
+- Final ReviewGPT round 1 found that the initial scheduler still statically
+  reached the hosted orchestration graph before the response. The accepted
+  correction moves that graph behind a dynamic import inside `after()`; the
+  five focused files still pass all 88 tests, hosted-web typecheck passes, and
+  static ownership proof rejects orchestration imports from the scheduler.

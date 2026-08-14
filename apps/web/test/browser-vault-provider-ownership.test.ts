@@ -66,6 +66,9 @@ test("the homepage schedules only server-side browser-vault preparation", () => 
   const preparationSource = readSource(
     "src/lib/browser-vault/homepage-preparation.ts",
   );
+  const preparationWorkerSource = readSource(
+    "src/lib/browser-vault/homepage-preparation-worker.ts",
+  );
   const retiredClientWarmUrl = new URL(
     "../src/components/homepage/landing-browser-vault-warm.tsx",
     import.meta.url,
@@ -84,9 +87,19 @@ test("the homepage schedules only server-side browser-vault preparation", () => 
   assert.doesNotMatch(homepageSource, /decryptHostedStoragePayload/u);
   assert.doesNotMatch(homepageSource, /unwrapHostedBrowserSessionKey/u);
   assert.match(preparationSource, /import \{ after \} from "next\/server"/u);
-  assert.match(preparationSource, /assertBrowserVaultMemberAuthority/u);
-  assert.match(preparationSource, /assessBrowserVaultReplicaFreshness/u);
-  assert.match(preparationSource, /signalHostedBrowserVaultRefreshRuntime/u);
+  assert.match(
+    preparationSource,
+    /await import\(\s*"\.\/homepage-preparation-worker"\s*\)/u,
+  );
+  assert.doesNotMatch(preparationSource, /assertBrowserVaultMemberAuthority/u);
+  assert.doesNotMatch(preparationSource, /assessBrowserVaultReplicaFreshness/u);
+  assert.doesNotMatch(preparationSource, /signalHostedBrowserVaultRefreshRuntime/u);
+  assert.match(preparationWorkerSource, /assertBrowserVaultMemberAuthority/u);
+  assert.match(preparationWorkerSource, /assessBrowserVaultReplicaFreshness/u);
+  assert.match(
+    preparationWorkerSource,
+    /signalHostedBrowserVaultRefreshRuntime/u,
+  );
   assert.doesNotMatch(preparationSource, /"use client"/u);
   assert.doesNotMatch(preparationSource, /browser-vault\/warm-store/u);
   assert.doesNotMatch(preparationSource, /\/api\/browser-vault\/session/u);
@@ -97,6 +110,18 @@ test("the homepage schedules only server-side browser-vault preparation", () => 
   assert.doesNotMatch(preparationSource, /unwrapHostedBrowserSessionKey/u);
   assert.doesNotMatch(preparationSource, /encryptedReplica/u);
   assert.doesNotMatch(preparationSource, /replicaKeyEnvelope/u);
+  assert.doesNotMatch(preparationWorkerSource, /browser-vault\/warm-store/u);
+  assert.doesNotMatch(preparationWorkerSource, /\/api\/browser-vault\/session/u);
+  assert.doesNotMatch(preparationWorkerSource, /fetch\(/u);
+  assert.doesNotMatch(preparationWorkerSource, /createBrowserVaultSession/u);
+  assert.doesNotMatch(
+    preparationWorkerSource,
+    /generateHostedUserRecipientKeyPair/u,
+  );
+  assert.doesNotMatch(preparationWorkerSource, /decryptHostedStoragePayload/u);
+  assert.doesNotMatch(preparationWorkerSource, /unwrapHostedBrowserSessionKey/u);
+  assert.doesNotMatch(preparationWorkerSource, /encryptedReplica/u);
+  assert.doesNotMatch(preparationWorkerSource, /replicaKeyEnvelope/u);
 });
 
 test("authenticated landing links fetch current dashboard authority on click", () => {
