@@ -203,6 +203,11 @@ Current candidate proof:
   production-watch failures; four exact failures reproduced on clean
   `cobuild-agents` main. GitHub-hosted checks could not start because the
   repository account's Actions budget was exhausted.
+- Current-base proof: a later `main` advance required one index-only conflict
+  resolution. The resolution retained current-main entries plus the exact Frog
+  additions; both current `origin/main` and the immutable first-reviewed head
+  are ancestors, and `git merge-tree --write-tree origin/main HEAD` produced
+  `1f3f4806037b20bb2d1a0a6d9e3bfaf023078544` without conflict.
 - Frog suite: 56 tests, including fresh protected-main instruction drift,
   two-process pre/post-neutral-restamp lease recovery, foreign remote rejection,
   and fixed content-free foreground phase output.

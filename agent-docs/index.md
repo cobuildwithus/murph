@@ -55,8 +55,8 @@ classification, pre-remote local disposition recovery, unchanged-PR
 ancestor-only descendant discard and exact-body handoff without a push, and
 immutable first-reviewed candidate/current-neutral or nonexistence lease
 authorization across pre/post-body-restamp process restarts that preserves
-foreign deterministic branches, fixed content-free foreground phase and
-terminal output, one absolute process-group-bounded
+foreign deterministic branches, current-main-preserving base reconciliation,
+fixed content-free foreground phase and terminal output, one absolute process-group-bounded
 invocation, a native-advisory-serialized two-hour LaunchAgent, and bounded
 metadata-only local state. Its ownership and proof are jointly
 specified by
