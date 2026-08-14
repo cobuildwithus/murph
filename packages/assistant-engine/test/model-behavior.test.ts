@@ -1401,11 +1401,13 @@ describe('assistant execution prompt contract', () => {
       'Prefer bounded, context-aware automations.',
     )
     expect(prompt).toContain(
-      'Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.',
+      'Murph-designed habit support needs request-specific skip/repair rules and an off-ramp.',
     )
-    expect(prompt).toContain('When creating automations, choose continuity deliberately.')
     expect(prompt).toContain(
-      'Use `--continuity-policy preserve` for simple reminders, check-ins, and lightweight support where recent prior automation context can help.',
+      'That silence policy never applies to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders',
+    )
+    expect(prompt).toContain(
+      "Ordinary reminders, check-ins, and lightweight support use the automation contract's default continuity; do not explicitly restate that default.",
     )
     expect(prompt).toContain(
       'Use `--continuity-policy fresh` for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls',
@@ -1413,6 +1415,8 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'so each run starts from current vault/tool evidence instead of prior run transcript context.',
     )
+    expect(prompt).not.toContain('dense personal action cadence')
+    expect(prompt).not.toContain('--continuity-policy preserve')
     expect(prompt).not.toContain('Linq/iMessage off-hours reminder guard')
     expect(prompt).not.toContain('23:00 through 04:59')
   })
