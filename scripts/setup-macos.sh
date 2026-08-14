@@ -17,6 +17,8 @@ if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
   exit 1
 fi
 
+node_formula="node@${required_node%%.*}"
+
 BOLD='\033[1m'
 ACCENT='\033[38;5;111m'
 INFO='\033[38;5;110m'
@@ -237,9 +239,9 @@ ensure_node() {
   fi
 
   ensure_brew_shellenv
-  ui_info 'Installing node@22 so the repo can build Murph...'
-  brew install node@22
-  export PATH="$(brew --prefix node@22)/bin:$PATH"
+  ui_info "Installing ${node_formula} so the repo can build Murph..."
+  brew install "$node_formula"
+  export PATH="$(brew --prefix "$node_formula")/bin:$PATH"
   ui_success "Node.js v$(active_node_version) installed"
   ui_info "Active Node.js: $(command -v node)"
 }
