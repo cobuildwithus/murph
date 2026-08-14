@@ -92,16 +92,17 @@ Updated: 2026-08-14
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest for `apps/web/test/lab-biomarker-history-ui.test.tsx`.
-  - Hosted Web typecheck and lint.
-  - `git diff --check` and privacy-safe diff inspection.
-  - Desktop and mobile captures of the sections catalog study.
+- Completed local proof:
+  - Focused Vitest passed all 34 biomarker-history UI tests.
+  - Changelog generation and 53 focused fragment, archive, and page tests
+    passed.
+  - Hosted Web typecheck passed.
+  - Hosted Web lint passed with no errors; its 43 warnings pre-existed this
+    change and none came from the touched files.
+  - Focused ESLint and `git diff --check` passed.
+  - The production skeleton rendered in the sections catalog at desktop and
+    mobile breakpoints. The inspected crops are private-data-free and meet the
+    repository's 2x-or-higher, 700-pixel-minimum, 2400-pixel-maximum rules.
+- Remaining completion proof:
   - Exact-head PR CI plus the routed completion-specialists and Claude UI
     reviews.
-- Expected outcomes:
-  - No refresh notice or manual refresh action renders for usable stale detail
-    data.
-  - Loading proof contains the result shell, chart scaffold, and year-grouped
-    ledger with no generic full-width chart rectangle.
-  - All required local and PR checks pass with no unresolved accepted finding.
