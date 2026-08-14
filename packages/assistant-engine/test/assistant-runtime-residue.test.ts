@@ -36,6 +36,7 @@ import {
   readAssistantAutoReplyRouteState,
   resolveAssistantAutoReplyOutboxExactRoute,
   resolveAssistantAutoReplyRouteMigrationPath,
+  resolveAssistantAutoReplyRouteStatePath,
 } from '../src/assistant/automation/cross-session-route-state.ts'
 import {
   writeAssistantAutoReplySuppressionEvidence,
@@ -1155,17 +1156,25 @@ describe('assistant runtime residue pruning', () => {
       vault: vaultRoot,
     })
 
-    let yieldChecks = 0
+    const route = resolveAssistantAutoReplyOutboxExactRoute(deliveredSource)
+    if (!route) {
+      throw new Error('expected exact post-pass route')
+    }
+    const routeStatePath = resolveAssistantAutoReplyRouteStatePath(
+      paths,
+      route.digest,
+    )
+    let observedPartialRouteState = false
     await expect(
       maintainAssistantAutoReplyRouteState({
         shouldYield: () => {
-          yieldChecks += 1
-          return yieldChecks >= 4
+          observedPartialRouteState = existsSync(routeStatePath)
+          return observedPartialRouteState
         },
         vault: vaultRoot,
       }),
-    ).resolves.toEqual({ changed: false, trusted: false })
-    expect(yieldChecks).toBeGreaterThanOrEqual(4)
+    ).resolves.toEqual({ changed: true, trusted: false })
+    expect(observedPartialRouteState).toBe(true)
     await expectPathMissing(
       resolveAssistantAutoReplyRouteMigrationPath(paths),
     )
@@ -1174,10 +1183,6 @@ describe('assistant runtime residue pruning', () => {
       vault: vaultRoot,
     })).resolves.toEqual({ changed: true, trusted: true })
 
-    const route = resolveAssistantAutoReplyOutboxExactRoute(deliveredSource)
-    if (!route) {
-      throw new Error('expected exact post-pass route')
-    }
     await expect(readAssistantAutoReplyRouteState({
       routeDigest: route.digest,
       vault: vaultRoot,

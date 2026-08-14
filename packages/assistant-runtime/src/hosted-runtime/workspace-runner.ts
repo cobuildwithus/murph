@@ -936,6 +936,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   }
   const runnerStartedAtEpochMs = Date.now();
+  let foregroundConversationImportsInFlight = 0;
   let foregroundConversationWorkObserved = false;
   let foregroundRuntimeWakeObservedAfterStop = false;
   const backgroundMaintenanceAbortController = new AbortController();
@@ -966,14 +967,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       async () => startHostedForegroundConversationMailboxImportLoop({
         checkpointRequestBuilder: checkpointRequestSession,
         input,
+        onForegroundConversationImportFinished: () => {
+          foregroundConversationImportsInFlight -= 1;
+        },
+        onForegroundConversationImportStarted: () => {
+          foregroundConversationImportsInFlight += 1;
+        },
         onForegroundConversationWorkObserved: () => {
           foregroundConversationWorkObserved = true;
-          abortBackgroundMaintenance(
-            new DOMException(
-              "Foreground conversation input preempted background maintenance.",
-              "AbortError",
-            ),
-          );
         },
         checkpointCanonicalMailboxImportProgress,
       }),
@@ -994,7 +995,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
   };
   const shouldYieldBackgroundMaintenance = (): boolean => {
-    if (foregroundConversationWorkObserved || foregroundRuntimeWakeObservedAfterStop) {
+    if (
+      foregroundConversationImportsInFlight > 0
+      || foregroundConversationWorkObserved
+      || foregroundRuntimeWakeObservedAfterStop
+    ) {
       return true;
     }
 
@@ -1354,6 +1359,8 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   input: HostedWorkspaceRunnerInput;
+  onForegroundConversationImportFinished?: (() => void) | null;
+  onForegroundConversationImportStarted?: (() => void) | null;
   onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
   completion: Promise<void>;
@@ -1445,8 +1452,12 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         async (...importArgs) => {
           // Preempt lock-owning background maintenance before conversation
           // staging waits for that same lock.
-          observeForegroundConversationWork();
-          return await baseForegroundConversationImportItem(...importArgs);
+          input.onForegroundConversationImportStarted?.();
+          try {
+            return await baseForegroundConversationImportItem(...importArgs);
+          } finally {
+            input.onForegroundConversationImportFinished?.();
+          }
         };
       try {
         const handleForegroundImportResult = async (

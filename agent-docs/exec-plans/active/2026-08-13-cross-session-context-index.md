@@ -138,6 +138,15 @@ Updated: 2026-08-14
   maintenance-only or partial migration is checkpointed, and process/lease
   aborts stop the per-entry traversal. Migration-only progress remains distinct
   from assistant progress and cannot trigger managed automation work.
+- Final ReviewGPT round 3 found that the hosted pre-staging yield reused the
+  durable-stage observation, so loop shutdown could abort a freshly awakened
+  import before it wrote the input event or pending index. The correction keeps
+  one ephemeral in-flight import count solely for cooperative maintenance
+  yielding, reserves the existing work-observed flag for durable staging, and
+  leaves the maintenance abort signal owned only by process or lease
+  cancellation. A yielded partial migration can therefore return its actual
+  mutation result for checkpointing while an unstaged import must finish before
+  loop shutdown.
 
 ## Verification
 
@@ -147,3 +156,9 @@ Updated: 2026-08-14
 - Expected outcomes: no receipt inventory call from steady-state unanchored
   selection; one route read plus zero-or-one receipt read; all terminal,
   ordering, migration, route, corruption, and restore cases above pass.
+- ReviewGPT round 3 remediation: the two hosted-runtime suites pass 402 tests;
+  the four route-state and automation suites pass 244 tests; assistant-runtime
+  and assistant-engine typechecks and builds pass under Node 24.14.1. The local
+  pre-staging lock test now resolves the runtime-write-lock module from the same
+  reset module graph as the run loop, so the full-file proof exercises the
+  in-process queue instead of producing a false external-lock collision.

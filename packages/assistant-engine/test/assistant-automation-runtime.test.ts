@@ -37,7 +37,6 @@ import {
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
 } from '../src/assistant/response-media.ts'
-import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
 import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 import type { AssistantAutoReplyPromptInput } from '../src/assistant/automation/prompt-builder.ts'
@@ -14039,6 +14038,9 @@ describe('assistant automation run loop', () => {
     vi.useRealTimers()
     const context = await createTempVaultContext('assistant-local-route-yield-')
     tempRoots.push(context.parentRoot)
+    const { withAssistantRuntimeWriteLock } = await vi.importActual<
+      typeof import('../src/assistant/runtime-write-lock.ts')
+    >('../src/assistant/runtime-write-lock.ts')
     const externalAbort = new AbortController()
     const stagedInputs: AssistantInputCandidate[] = []
     let abortScheduled = false
