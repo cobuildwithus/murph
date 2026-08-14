@@ -44,6 +44,9 @@ import {
   DatabaseHealthDurableObject,
 } from "../../src/worker/database-health-durable-object.ts";
 import {
+  DeviceWebhookQueueHealthDurableObject,
+} from "../../src/worker/device-webhook-queue-health-durable-object.ts";
+import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
   clearRunnerOutputBundleFault,
@@ -61,6 +64,7 @@ import {
 } from "./database-health-fetch.ts";
 
 export { DatabaseHealthDurableObject };
+export { DeviceWebhookQueueHealthDurableObject };
 
 export class VitestDatabaseHealthDurableObject
   extends DatabaseHealthDurableObject {

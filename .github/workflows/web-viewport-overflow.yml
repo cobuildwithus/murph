@@ -44,6 +44,14 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --dir apps/web exec playwright install --with-deps chromium
 
+      - name: Smoke headed Chromium under Xvfb
+        env:
+          MURPH_E2E_HEADED_BROWSER_SMOKE: "1"
+        run: >-
+          xvfb-run --auto-servernum pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts --no-coverage
+          apps/web/test/hosted-headed-browser-smoke.test.ts
+
       - name: Check marketing pages for horizontal overflow
         run: pnpm --dir apps/web test:viewport-overflow
 

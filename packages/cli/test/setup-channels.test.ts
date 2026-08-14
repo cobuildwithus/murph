@@ -5,14 +5,9 @@ import path from 'node:path'
 import { test } from 'vitest'
 import { readAssistantAutomationState } from '@murphai/assistant-engine/assistant-state'
 import type { InboxServices } from '@murphai/inbox-services'
-import {
-  createSetupAgentmailSelectionResolver,
-  configureSetupChannels,
-} from '@murphai/setup-cli/setup-cli'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { configureSetupChannels } from '@murphai/setup-cli/setup-cli'
 
 type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
-type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
 type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
 
 function listAutoReplyChannels(
@@ -265,31 +260,41 @@ test('configureSetupChannels reuses a disabled Telegram connector and re-enables
   }
 })
 
-test('configureSetupChannels provisions email and persists auto-reply when AgentMail readiness passes', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-'))
+test('configureSetupChannels preserves unmanaged Linq connector and auto-reply state while adding Telegram', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channels-linq-'))
 
   try {
+    await import('@murphai/assistant-engine/assistant-state').then(({ saveAssistantAutomationState }) =>
+      saveAssistantAutomationState(vault, {
+        version: 1,
+        autoReply: [
+          {
+            channel: 'linq',
+            enabledAt: '2026-04-08T00:00:00.000Z',
+            eligibleAfter: null,
+          },
+        ],
+        updatedAt: '2026-04-08T00:00:00.000Z',
+      }),
+    )
+
+    const sourceSetEnabledCalls: InboxSourceSetEnabledInput[] = []
     const configured = await configureSetupChannels({
-      channels: ['email'],
+      channels: ['telegram'],
       dryRun: false,
       env: {
-        AGENTMAIL_API_KEY: 'am_test_123',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
       },
       inboxServices: {
         async bootstrap() {
           throw new Error('bootstrap should not be called in this test')
         },
-        async doctor() {
+        async doctor(input: InboxDoctorInput) {
           return {
             vault,
             checks: [
               {
-                message: 'email inbox reachable',
-                name: 'driver-import',
-                status: 'pass' as const,
-              },
-              {
-                message: 'email inbox reachable',
+                message: 'bot authenticated',
                 name: 'probe',
                 status: 'pass' as const,
               },
@@ -299,270 +304,21 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
             databasePath: '.runtime/inboxd.sqlite',
             ok: true,
             parserToolchain: null,
-            target: 'email:agentmail',
+            target: input.sourceId ?? null,
           }
         },
-        async sourceAdd() {
+        async sourceAdd(input) {
           return {
             vault,
             configPath: '.runtime/inboxd/config.json',
             connector: {
-              accountId: 'inbox_123',
-              id: 'email:agentmail',
-              source: 'email',
+              accountId: input.account ?? null,
               enabled: true,
-              options: {
-                emailAddress: 'murph@example.test',
-              },
+              id: input.id,
+              options: {},
+              source: input.source,
             },
-            connectorCount: 1,
-            provisionedMailbox: {
-              inboxId: 'inbox_123',
-              emailAddress: 'murph@example.test',
-              displayName: 'Murph',
-              clientId: null,
-              provider: 'agentmail' as const,
-            },
-          }
-        },
-        async sourceList() {
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-          }
-        },
-      },
-      requestId: null,
-      steps: [],
-      vault,
-    })
-
-    assert.equal(configured[0]?.channel, 'email')
-    assert.equal(configured[0]?.configured, true)
-    assert.equal(configured[0]?.autoReply, true)
-    assert.equal(configured[0]?.connectorId, 'email:agentmail')
-    assert.deepEqual(configured[0]?.missingEnv, [])
-    assert.match(configured[0]?.detail ?? '', /murph@example\.test/u)
-
-    const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(listAutoReplyChannels(automationState), ['email'])
-  } finally {
-    await rm(vault, { recursive: true, force: true })
-  }
-})
-
-test('configureSetupChannels keeps email selected in onboarding preferences even when AgentMail readiness fails', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-fail-'))
-
-  try {
-    const configured = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'am_test_123',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not be called in this test')
-        },
-        async doctor() {
-          return {
-            vault,
-            checks: [
-              {
-                message: 'driver initialized',
-                name: 'driver-import',
-                status: 'pass' as const,
-              },
-              {
-                message: '401 unauthorized',
-                name: 'probe',
-                status: 'fail' as const,
-              },
-            ],
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-            databasePath: '.runtime/inboxd.sqlite',
-            ok: false,
-            parserToolchain: null,
-            target: 'email:agentmail',
-          }
-        },
-        async sourceAdd() {
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connector: {
-              accountId: 'inbox_123',
-              id: 'email:agentmail',
-              source: 'email',
-              enabled: true,
-              options: {
-                emailAddress: 'murph@example.test',
-              },
-            },
-            connectorCount: 1,
-            provisionedMailbox: {
-              inboxId: 'inbox_123',
-              emailAddress: 'murph@example.test',
-              displayName: 'Murph',
-              clientId: null,
-              provider: 'agentmail' as const,
-            },
-          }
-        },
-        async sourceList() {
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-          }
-        },
-      },
-      requestId: null,
-      steps: [],
-      vault,
-    })
-
-    assert.equal(configured[0]?.channel, 'email')
-    assert.equal(configured[0]?.configured, false)
-    assert.equal(configured[0]?.autoReply, false)
-    assert.equal(configured[0]?.connectorId, 'email:agentmail')
-    assert.deepEqual(configured[0]?.missingEnv, [])
-    assert.match(configured[0]?.detail ?? '', /401 unauthorized/u)
-
-    const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(listAutoReplyChannels(automationState), [])
-  } finally {
-    await rm(vault, { recursive: true, force: true })
-  }
-})
-
-test('configureSetupChannels treats an empty but reachable AgentMail inbox as configured and auto-reply ready', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-warn-'))
-
-  try {
-    const configured = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'am_test_123',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not be called in this test')
-        },
-        async doctor() {
-          return {
-            vault,
-            checks: [
-              {
-                message: 'driver initialized',
-                name: 'driver-import',
-                status: 'pass' as const,
-              },
-              {
-                message: 'The AgentMail inbox responded but returned no unread messages.',
-                name: 'probe',
-                status: 'warn' as const,
-              },
-            ],
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-            databasePath: '.runtime/inboxd.sqlite',
-            ok: true,
-            parserToolchain: null,
-            target: 'email:agentmail',
-          }
-        },
-        async sourceAdd() {
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connector: {
-              accountId: 'inbox_123',
-              id: 'email:agentmail',
-              source: 'email',
-              enabled: true,
-              options: {
-                emailAddress: 'murph@example.test',
-              },
-            },
-            connectorCount: 1,
-            provisionedMailbox: {
-              inboxId: 'inbox_123',
-              emailAddress: 'murph@example.test',
-              displayName: 'Murph',
-              clientId: null,
-              provider: 'agentmail' as const,
-            },
-          }
-        },
-        async sourceList() {
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-          }
-        },
-      },
-      requestId: null,
-      steps: [],
-      vault,
-    })
-
-    assert.equal(configured[0]?.channel, 'email')
-    assert.equal(configured[0]?.configured, true)
-    assert.equal(configured[0]?.autoReply, true)
-
-    const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(listAutoReplyChannels(automationState), ['email'])
-  } finally {
-    await rm(vault, { recursive: true, force: true })
-  }
-})
-
-test('configureSetupChannels disables stale setup connectors that were not selected in onboarding on supported platforms', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channel-reconcile-'))
-
-  try {
-    const sourceSetEnabledCalls: Array<{
-      connectorId: string
-      enabled: boolean
-    }> = []
-
-    const configured = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'am_test_123',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not be called in this test')
-        },
-        async doctor() {
-          return {
-            vault,
-            checks: [
-              {
-                message: 'driver initialized',
-                name: 'driver-import',
-                status: 'pass' as const,
-              },
-              {
-                message: 'The AgentMail inbox responded but returned no unread messages.',
-                name: 'probe',
-                status: 'warn' as const,
-              },
-            ],
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-            databasePath: '.runtime/inboxd.sqlite',
-            ok: true,
-            parserToolchain: null,
-            target: 'email:agentmail',
+            connectorCount: 2,
           }
         },
         async sourceList() {
@@ -571,296 +327,36 @@ test('configureSetupChannels disables stale setup connectors that were not selec
             configPath: '.runtime/inboxd/config.json',
             connectors: [
               {
-                accountId: 'murph@agentmail.to',
+                accountId: 'default',
                 enabled: true,
-                id: 'email:agentmail',
+                id: 'linq:default',
                 options: {
-                  emailAddress: 'murph@agentmail.to',
+                  linqWebhookHost: '127.0.0.1',
+                  linqWebhookPath: '/hooks/linq',
+                  linqWebhookPort: 9911,
                 },
-                source: 'email' as const,
-              },
-              {
-                accountId: 'bot',
-                enabled: true,
-                id: 'telegram:bot',
-                options: {
-                  transportMode: 'take-over-webhook',
-                },
-                source: 'telegram' as const,
+                source: 'linq' as const,
               },
             ],
           }
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not be called when an email connector already exists')
         },
         async sourceSetEnabled(input: InboxSourceSetEnabledInput) {
-          sourceSetEnabledCalls.push({
-            connectorId: input.connectorId,
-            enabled: input.enabled,
-          })
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connector: {
-              accountId: input.connectorId === 'email:agentmail' ? 'murph@agentmail.to' : 'bot',
-              enabled: input.enabled,
-              id: input.connectorId,
-              options:
-                input.connectorId === 'email:agentmail'
-                  ? {
-                      emailAddress: 'murph@agentmail.to',
-                    }
-                  : {
-                      transportMode: 'take-over-webhook',
-                    },
-              source: input.connectorId === 'email:agentmail' ? 'email' : 'telegram',
-            },
-            connectorCount: 2,
-          }
+          sourceSetEnabledCalls.push(input)
+          throw new Error('Linq connector must remain unmanaged by Telegram setup')
         },
       },
-      platform: 'darwin',
       requestId: null,
       steps: [],
       vault,
     })
 
-    assert.equal(configured[0]?.channel, 'email')
+    assert.equal(configured[0]?.channel, 'telegram')
     assert.equal(configured[0]?.configured, true)
-    assert.deepEqual(sourceSetEnabledCalls, [
-      {
-        connectorId: 'telegram:bot',
-        enabled: false,
-      },
-    ])
+    assert.deepEqual(sourceSetEnabledCalls, [])
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(listAutoReplyChannels(automationState), ['email'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['linq', 'telegram'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
-})
-
-test('configureSetupChannels reuses a discovered AgentMail inbox during onboarding before falling back to provisioning', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-discovered-'))
-
-  try {
-    const sourceAddCalls: InboxSourceAddInput[] = []
-    const configured = await configureSetupChannels({
-      allowPrompt: true,
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'am_test_123',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not be called in this test')
-        },
-        async doctor() {
-          return {
-            vault,
-            checks: [
-              {
-                message: 'email inbox reachable',
-                name: 'driver-import',
-                status: 'pass' as const,
-              },
-              {
-                message: 'email inbox reachable',
-                name: 'probe',
-                status: 'pass' as const,
-              },
-            ],
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-            databasePath: '.runtime/inboxd.sqlite',
-            ok: true,
-            parserToolchain: null,
-            target: 'email:agentmail',
-          }
-        },
-        async sourceAdd(input: InboxSourceAddInput) {
-          sourceAddCalls.push(input)
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connector: {
-              accountId: 'existing@example.test',
-              id: 'email:agentmail',
-              source: 'email',
-              enabled: true,
-              options: {
-                emailAddress: 'existing@example.test',
-              },
-            },
-            connectorCount: 1,
-          }
-        },
-        async sourceList() {
-          return {
-            vault,
-            configPath: '.runtime/inboxd/config.json',
-            connectors: [],
-          }
-        },
-      },
-      requestId: null,
-      resolveAgentmailInboxSelection: async () => ({
-        accountId: 'existing@example.test',
-        emailAddress: 'existing@example.test',
-        mode: 'discovered' as const,
-      }),
-      steps: [],
-      vault,
-    })
-
-    assert.equal(configured[0]?.channel, 'email')
-    assert.equal(configured[0]?.configured, true)
-    assert.equal(configured[0]?.autoReply, true)
-    assert.deepEqual(sourceAddCalls, [
-      {
-        account: 'existing@example.test',
-        address: 'existing@example.test',
-        emailDisplayName: 'Murph',
-        id: 'email:agentmail',
-        provision: false,
-        requestId: null,
-        source: 'email',
-        vault,
-      },
-    ])
-  } finally {
-    await rm(vault, { recursive: true, force: true })
-  }
-})
-
-test('createSetupAgentmailSelectionResolver paginates AgentMail inbox discovery before prompting for selection', async () => {
-  const listInboxesCalls: Array<{ pageToken?: string | null }> = []
-  const chooserCalls: string[][] = []
-  const resolver = createSetupAgentmailSelectionResolver({
-    createClient() {
-      return {
-        apiKey: 'agentmail-key',
-        baseUrl: 'https://api.agentmail.to/v0',
-        async listInboxes(input?: { pageToken?: string | null }) {
-          listInboxesCalls.push(input ?? {})
-          if (!input?.pageToken) {
-            return {
-              count: 1,
-              inboxes: [
-                {
-                  inbox_id: 'page-1@example.test',
-                  email: 'page-1@example.test',
-                },
-              ],
-              next_page_token: 'page-2',
-            }
-          }
-
-          if (input.pageToken === 'page-2') {
-            return {
-              count: 1,
-              inboxes: [
-                {
-                  inbox_id: 'page-2@example.test',
-                  email: 'page-2@example.test',
-                },
-              ],
-            }
-          }
-
-          throw new Error(`unexpected page token: ${String(input.pageToken)}`)
-        },
-      } as any
-    },
-    prompter: {
-      async chooseInbox(input) {
-        chooserCalls.push(input.inboxes.map((inbox) => inbox.inbox_id))
-        return input.inboxes[1] ?? null
-      },
-      async promptManualInboxId() {
-        throw new Error('promptManualInboxId should not be called in this test')
-      },
-    },
-  })
-
-  const selected = await resolver({
-    allowPrompt: true,
-    env: {
-      AGENTMAIL_API_KEY: 'agentmail-key',
-    },
-  })
-
-  assert.deepEqual(listInboxesCalls, [{}, { pageToken: 'page-2' }])
-  assert.deepEqual(chooserCalls, [['page-1@example.test', 'page-2@example.test']])
-  assert.deepEqual(selected, {
-    accountId: 'page-2@example.test',
-    emailAddress: 'page-2@example.test',
-    mode: 'selected',
-  })
-})
-
-test('createSetupAgentmailSelectionResolver returns a manual inbox id when discovery is forbidden and the operator enters one', async () => {
-  const resolver = createSetupAgentmailSelectionResolver({
-    createClient() {
-      return {
-        apiKey: 'agentmail-key',
-        baseUrl: 'https://api.agentmail.to/v0',
-        async listInboxes() {
-          throw new VaultCliError('AGENTMAIL_REQUEST_FAILED', 'Forbidden', {
-            status: 403,
-            method: 'GET',
-            path: '/inboxes',
-          })
-        },
-      } as any
-    },
-    prompter: {
-      async chooseInbox() {
-        throw new Error('chooseInbox should not be called in this test')
-      },
-      async promptManualInboxId() {
-        return 'manual@example.test'
-      },
-    },
-  })
-
-  const selected = await resolver({
-    allowPrompt: true,
-    env: {
-      AGENTMAIL_API_KEY: 'agentmail-key',
-    },
-  })
-
-  assert.deepEqual(selected, {
-    accountId: 'manual@example.test',
-    emailAddress: null,
-    mode: 'manual',
-  })
-})
-
-test('createSetupAgentmailSelectionResolver rethrows unexpected discovery failures instead of silently provisioning', async () => {
-  const resolver = createSetupAgentmailSelectionResolver({
-    createClient() {
-      return {
-        apiKey: 'agentmail-key',
-        baseUrl: 'https://api.agentmail.to/v0',
-        async listInboxes() {
-          throw new Error('agentmail unavailable')
-        },
-      } as any
-    },
-  })
-
-  await assert.rejects(
-    resolver({
-      allowPrompt: true,
-      env: {
-        AGENTMAIL_API_KEY: 'agentmail-key',
-      },
-    }),
-    /agentmail unavailable/u,
-  )
 })

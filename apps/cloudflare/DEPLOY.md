@@ -158,9 +158,13 @@ Before deploying the Worker version that introduces
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
-migration `v4` creates the SQLite Durable Object namespace and the generated
-config installs the five-minute cron. After deployment, confirm one scheduled
-invocation records an `ok` sample without a Linq send under healthy metrics.
+migration `v4` creates the database-health SQLite Durable Object namespace,
+migration `v5` creates the independent device-webhook Queue-health namespace,
+and the generated config installs the shared five-minute cron. The Queue-health
+owner reuses these two operator chats and the Linq token, but it has separate
+incident, pending-message, and pacing state and never reads Postgres. After
+deployment, confirm one scheduled invocation records healthy database and Queue
+observations without a Linq send.
 Then use the test-only fake-provider coverage for threshold and delivery proof;
 do not induce a production database failure or mutate a real counter for smoke.
 Confirm Workers Observability contains no configuration or collection failure
@@ -297,6 +301,20 @@ that workspace because an older strict reader can quarantine the retained
 intent. Forward-fix on this bundle or newer. Monitor Workers Observability for
 `outbox.intent.quarantined`, strict outbox parse failures, and stale runner
 fingerprints after rollout.
+
+## Model-Authored Telegram Rich-Content Rollout
+
+The `telegram_rich_content` discriminator extends the same strict assistant
+outbox card union. The Worker already allows `sendRichMessage`, so this release
+needs no new provider operation or Worker egress rule. Deploy the new runner
+bundle with `container_rollout=immediate`, and require managed-container smoke
+to report its exact fingerprint before the model can attach this card.
+
+The prior runner remains safe only before the first rich-content card intent is
+written. After that write, the new runner bundle is a hard rollback floor for
+that workspace because an older strict reader can quarantine the retained
+intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
+strict outbox parse failures, and stale runner fingerprints after rollout.
 
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
@@ -861,6 +879,9 @@ Set these in the selected GitHub environment as secrets:
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
+`CLOUDFLARE_API_TOKEN` must include account-scoped Workers Queues write access
+so deploy automation can create/update the producer, consumer, and DLQ binding.
+
 The protected GitHub Environment may also hold the optional
 `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` secret. Deploy
 automation forwards it to the Worker secret store without exposing it to the
@@ -1129,6 +1150,48 @@ Correct the callback hostname before either Web or Worker deployment, and ship
 the Web start/build guard with the Cloudflare preflight change. During a skewed
 rollout the Web start guard still fails closed before OAuth state or provider
 authorization; do not bypass it to recover an invalid split-host environment.
+
+Device-webhook burst transport requires a main Queue and DLQ named from the
+deployed Worker (`<worker>-device-webhooks` and
+`<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
+Deploy the Queue-capable Worker and the Web batch-admission callback before
+setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
+gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, and Web admission stays serial before expanding. To roll back, clear the
+Web gate first, drain the main Queue through the still-deployed consumer, retain
+the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+During Cloudflare automation-key rotation, keep the prior private key as
+`decrypt_only` until Web uses the new public key and both the main Queue and
+encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ
+retention is part of the key-retirement floor; elapsed rollout time alone is not
+proof that the old key is safe to disable.
+Prepared webhook parsers have the same retention floor: keep every decoder for
+an emitted `murph.device-sync-prepared-webhook.*` schema readable until both
+Queues and all supported redrive paths are proven free of that version. A
+provider signing-secret or parser rotation needs no overlap for already queued
+events because Web froze verified prepared meaning before provider acknowledgement.
+
+The Queue-health Durable Object reads only native main-Queue and DLQ metrics.
+It pages both configured operator chats immediately when the DLQ is nonempty,
+when the oldest main-Queue message reaches 15 minutes, or after two consecutive
+metric failures. A failed first page retains its exact body and Linq
+idempotency key for the next five-minute check, while hourly pacing applies
+only to successful repeat pages in the same continuously open incident. Keep
+`HOSTED_DATABASE_ALERT_ENABLED=1` and the existing Linq alert secrets configured
+for production so both independent monitors run.
+
+For encrypted DLQ recovery, first fix the admission failure and retain every
+Cloudflare automation private key still referenced by either Queue. Pause the
+main Queue consumer while producers continue writing. Temporarily configure the
+same Worker as the DLQ consumer with batch size 100, five-second batching,
+concurrency one, ten retries, a 30-second retry delay, and the paused main Queue
+as that temporary consumer's dead-letter target. Wait until DLQ metrics report
+zero, remove the temporary DLQ consumer, resume the ordinary main consumer, and
+verify that main depth returns to zero while the DLQ stays empty. Do not purge,
+download, decrypt, or manually copy messages. This redrive acknowledges only
+successful canonical admissions; work that still fails returns encrypted to the
+paused main Queue instead of being deleted. Keep both Queues at the configured
+14-day retention throughout recovery.
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
@@ -1513,6 +1576,46 @@ additive source field, but conversation and exact participant authorization
 remain available. After convergence, smoke one profile-name label, one
 unverified owner-contact label, and one participant-scoped action selected by
 an opaque accepted-message ref.
+
+Member-reported daily metrics add the
+`health.daily-metric.reported` Web producer to that existing exact-participant
+path. An old runtime quarantines this kind and can stop its ordered system lane,
+so this release is consumer-first:
+
+1. Deploy Cloudflare and the runner with `container_rollout=immediate`. Do not
+   deploy Web until managed-container smoke reports the exact new runner-bundle
+   fingerprint and the immediate rollout has converged across eligible runtime
+   targets.
+2. Deploy Web, then run one synthetic granted `steps-days.v0` correction. The
+   action must return `accepted`; the member's system-lane consumed counter and
+   workspace checkpoint must advance; a later exact-scope `read_shared` must
+   retain the device record and add one `Manual` record. Confirm aggregate
+   runtime evidence contains no `unsupported_kind` route and no unconsumed
+   `health.daily-metric.reported` item behind its system-lane counter.
+3. The first Web producer enablement or imported report makes this exact
+   contracts/query/runner bundle a hard rollback floor. The canonical
+   observation permanently retains the strict `qualifiers` field and its
+   mailbox causal sequence after the transient mailbox item drains. Web may
+   roll back first to stop new reports, but never roll the runner below this
+   floor afterward; forward-fix on this bundle or newer. A pre-floor runner can
+   reject the persisted event while scanning the vault and cannot preserve the
+   report ordering during projection rebuild.
+
+If the post-commit signal fails, keep the accepted mailbox write and let the
+existing scheduled `/api/internal/device-sync/recovery-sweep` handoff select and
+signal the exact pending item. For a bounded manual repair, keep or redeploy the
+compatible runner, roll Web back to stop new production, invoke that existing
+recovery sweep once, and verify the system-lane counter advances before
+redeploying Web. Do not delete the item, edit a mailbox counter, send an
+unrelated member message, or add another repair queue.
+
+After a Web rollback, keep the exact compatible runner fingerprint and prove
+one existing meal-photo import, one ordinary conversation, and one projection
+rebuild against a vault containing a consumed report. The Manual correction
+must remain authoritative, existing canonical imports must still scan the
+strict event ledger, and restoring compatible Web must require no event rewrite
+or migration. Mailbox drain is progress evidence only; it never relaxes this
+persisted-state rollback floor.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare

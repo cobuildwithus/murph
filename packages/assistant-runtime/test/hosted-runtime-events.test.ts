@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -3353,6 +3354,32 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: { kind: "vault-share.projection" },
+      redactedLogEntries: [],
+    }));
+  });
+
+  it("refreshes granted shares after a reported daily metric checkpoints", async () => {
+    const result = await executeHostedMailboxEvent({
+      wake: buildHostedExecutionDailyMetricReportedWake({
+        date: "2026-08-13",
+        eventId: "daily_metric_report_synthetic",
+        memberId: "member_123",
+        metric: "steps",
+        occurredAt: "2026-08-13T20:00:00.000Z",
+        unit: "count",
+        value: 8_000,
+      }),
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
     expect(result).toEqual(expect.objectContaining({
       conversationMetrics: null,
       mailboxLane: "runtime-control",

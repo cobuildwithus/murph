@@ -942,6 +942,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "run-environment-voice"
+    || item.route.action === "import-reported-daily-metric"
     || item.route.action === "apply-runtime-control-request"
   ) {
     return item.route.action;
@@ -1013,7 +1014,11 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
           code: HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_ERROR_CODE,
         });
       }
-      if (result.outcome === "error" || result.outcome === "no-port") {
+      if (
+        result.outcome === "error"
+        || result.outcome === "no-port"
+        || result.outcome === "preempted"
+      ) {
         throw new Error(
           "Hosted vault-share projection checkpoint did not complete.",
         );

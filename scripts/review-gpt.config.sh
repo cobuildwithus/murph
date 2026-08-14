@@ -163,6 +163,10 @@ managed_browser_port="${managed_browser_port:-$review_gpt_selected_browser_port}
 # occluded lane window to run at foreground priority. Set this to unthrottled
 # only when a specific browser version has a proven background-capture stall.
 managed_browser_background_mode="${managed_browser_background_mode:-balanced}"
+# Headless removes visible UI but does not remove ChatGPT's renderer or page
+# JavaScript. Settled local measurement used more CPU and memory, so keep the
+# resource-efficient default headful and leave headless as an explicit override.
+managed_browser_display_mode="${managed_browser_display_mode:-headful}"
 export REVIEW_GPT_SELECTED_BROWSER_LANE="$review_gpt_selected_browser_lane"
 
 name_prefix="murph-$review_gpt_selected_browser_lane-chatgpt-audit"

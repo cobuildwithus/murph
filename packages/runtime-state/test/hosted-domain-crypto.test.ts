@@ -86,6 +86,20 @@ test("hosted domain roots sign, verify, wrap, and unwrap by Cloudflare recipient
     }),
     false,
   );
+  const malformedSignatureEnvelope = {
+    ...parsed,
+    authoritySignature: {
+      ...parsed.authoritySignature,
+      signature: "AA==",
+    },
+  };
+  assert.equal(
+    await verifyHostedDomainRootEnvelopeSignatureWithPublicKey({
+      envelope: malformedSignatureEnvelope,
+      publicKeyPem: signer.publicKeyPem,
+    }),
+    false,
+  );
 });
 
 test("hosted domain crypto helpers fail closed for wrong lanes, private public keys, and aad", async () => {

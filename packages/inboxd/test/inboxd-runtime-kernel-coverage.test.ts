@@ -400,9 +400,9 @@ test("runPollConnector returns an aggregate error when restart cleanup fails aft
     () =>
       runPollConnector({
         connector: createStubPollConnector({
-          id: "email:agentmail",
-          source: "email",
-          accountId: "agentmail",
+          id: "linq:primary",
+          source: "linq",
+          accountId: "primary",
           async watch() {
             watchCalls += 1;
             throw new Error("watch exploded");

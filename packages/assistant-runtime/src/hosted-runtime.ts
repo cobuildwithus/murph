@@ -3380,6 +3380,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // kick() only owns the invocation-local promise; it never awaits the ask.
     detachedAssistantAskController.kick();
     const runDurableCheckpointEffectsBestEffort = async (effectOptions: {
+      vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
       withholdVaultShareDependentEffects?: boolean;
     } = {}): Promise<{
       requiresFollowUpCheckpoint: boolean;
@@ -3394,10 +3395,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       for (const effect of effects) {
         try {
           const effectResult =
-            effectOptions.withholdVaultShareDependentEffects === true
-            && effect.vaultShareProjectionFailureWake
+            effect.vaultShareProjectionFailureWake
+            && (
+              effect.requiresVaultShareProjectionResult === true
+                ? !effectOptions.vaultShareProjectionResult
+                : effectOptions.withholdVaultShareDependentEffects === true
+            )
               ? effect.vaultShareProjectionFailureWake
-              : await effect();
+              : await effect(
+                  effectOptions.vaultShareProjectionResult
+                    ? {
+                        vaultShareProjectionResult:
+                          effectOptions.vaultShareProjectionResult,
+                      }
+                    : undefined,
+                );
           requiresFollowUpCheckpoint ||= effectResult?.requiresFollowUpCheckpoint === true;
           const effectWake = readHostedWorkspaceDurableCheckpointEffectWake(effectResult);
           if (effectWake.nextWakeAt) {
@@ -3618,9 +3630,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ensureIdleCheckpointStartBy(Date.now());
       }
     };
-    const drainCleanDurableCheckpointEffects = async (effectOptions: {
-      withholdVaultShareDependentEffects?: boolean;
-    } = {}): Promise<boolean> => {
+    const drainCleanDurableCheckpointEffects = async (
+      effectOptions: Parameters<
+        typeof runDurableCheckpointEffectsBestEffort
+      >[0] = {},
+    ): Promise<boolean> => {
       if (runtimeStateDirty || pendingDurableCheckpointEffects.length === 0) {
         return false;
       }
@@ -3640,11 +3654,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       latencySeed: HostedRuntimeWakeLatencySeed;
     };
     type HostedVaultShareProjectionOpportunity = {
-      outcome:
-        | Awaited<
-          ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>
-        >["outcome"]
-        | "preempted";
+      result: HostedVaultShareProjectionOfferResult;
       wake: HostedVaultShareOfferWake | null;
     };
     const classifyHostedPostCheckpointWake = async (input: {
@@ -3699,7 +3709,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const vaultSharePort = guardedRuntime.platform.vaultSharePort ?? null;
       if (!vaultSharePort) {
         return {
-          outcome: "no-port",
+          result: { outcome: "no-port" },
           wake: input.deferredDeviceSyncWake ?? null,
         };
       }
@@ -3952,13 +3962,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
       const pendingWake = await consumePendingProjectionWake();
       if (pendingWake) {
-        return { outcome: "preempted", wake: pendingWake };
+        return {
+          result: { outcome: "preempted" },
+          wake: pendingWake,
+        };
       }
       if (shutdownWasSignaled()) {
-        return { outcome: "preempted", wake: deferredDeviceSyncWake };
+        return {
+          result: { outcome: "preempted" },
+          wake: deferredDeviceSyncWake,
+        };
       }
       if (pendingOwnedVaultShareProjection) {
-        return { outcome: "preempted", wake: deferredDeviceSyncWake };
+        return {
+          result: { outcome: "preempted" },
+          wake: deferredDeviceSyncWake,
+        };
       }
 
       const scopeResolutionStage = await waitForOwnedProjectionStage(
@@ -3968,14 +3987,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }),
       );
       if (scopeResolutionStage.kind === "preempted") {
-        return { outcome: "preempted", wake: scopeResolutionStage.wake };
+        return {
+          result: { outcome: "preempted" },
+          wake: scopeResolutionStage.wake,
+        };
       }
       if (scopeResolutionStage.value.outcome !== "active-scopes") {
         if (scopeResolutionStage.value.outcome === "error") {
           logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
         }
         return {
-          outcome: scopeResolutionStage.value.outcome,
+          result: { outcome: scopeResolutionStage.value.outcome },
           wake: deferredDeviceSyncWake,
         };
       }
@@ -3997,7 +4019,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const captureWake = await consumePendingProjectionWake();
       if (captureWake || shutdownWasSignaled()) {
         return {
-          outcome: "preempted",
+          result: { outcome: "preempted" },
           wake: captureWake ?? deferredDeviceSyncWake,
         };
       }
@@ -4005,7 +4027,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (capture.outcome === "error") {
           logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
         }
-        return { outcome: capture.outcome, wake: deferredDeviceSyncWake };
+        return {
+          result: { outcome: capture.outcome },
+          wake: deferredDeviceSyncWake,
+        };
       }
 
       const offerStage = await waitForOwnedProjectionStage(
@@ -4016,10 +4041,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         "retain",
       );
       if (offerStage.kind === "preempted") {
-        return { outcome: "preempted", wake: offerStage.wake };
+        return {
+          result: { outcome: "preempted" },
+          wake: offerStage.wake,
+        };
       }
       logHostedVaultShareProjectionOfferOutcome(offerStage.value);
-      return { outcome: offerStage.value.outcome, wake: deferredDeviceSyncWake };
+      return {
+        result: offerStage.value,
+        wake: deferredDeviceSyncWake,
+      };
     };
     const overlayPendingWakeOnCommittedWorkspace = (
       checkpointPendingBeforePass: boolean,
@@ -4921,15 +4952,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       } else if (committedInboxMediaRetentionWakeDue) {
         setIdleCheckpointStartBy(Date.now());
       }
+      let cleanVaultShareProjectionResult:
+        HostedVaultShareProjectionOfferResult | undefined;
       let cleanVaultShareProjectionIncomplete = false;
       if (!runtimeStateDirty) {
         const vaultShareOpportunity =
           await offerHostedVaultShareProjectionDuringIdle();
+        cleanVaultShareProjectionResult = vaultShareOpportunity.result;
         cleanVaultShareProjectionIncomplete =
           guardedRuntime.platform.vaultSharePort != null
           && (
-            vaultShareOpportunity.outcome === "error"
-            || vaultShareOpportunity.outcome === "preempted"
+            vaultShareOpportunity.result.outcome === "error"
+            || vaultShareOpportunity.result.outcome === "preempted"
           );
         const vaultShareOfferWake = vaultShareOpportunity.wake;
         if (vaultShareOfferWake) {
@@ -4945,6 +4979,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // durable checkpoint. If the ack fails and returns a retry wake, route
         // that wake through the same follow-up checkpoint path as dirty turns.
         await drainCleanDurableCheckpointEffects({
+          ...(cleanVaultShareProjectionResult
+            ? { vaultShareProjectionResult: cleanVaultShareProjectionResult }
+            : {}),
           withholdVaultShareDependentEffects: cleanVaultShareProjectionIncomplete,
         });
       }
@@ -5523,10 +5560,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           guardedRuntime.platform.vaultSharePort != null
           && (
             vaultShareOpportunity === null
-            || vaultShareOpportunity.outcome === "error"
-            || vaultShareOpportunity.outcome === "preempted"
+            || vaultShareOpportunity.result.outcome === "error"
+            || vaultShareOpportunity.result.outcome === "preempted"
           );
         const durableCheckpointEffects = await runDurableCheckpointEffectsBestEffort({
+          ...(vaultShareOpportunity
+            ? { vaultShareProjectionResult: vaultShareOpportunity.result }
+            : {}),
           withholdVaultShareDependentEffects: projectionIncomplete,
         });
         if (durableCheckpointEffects.requiresFollowUpCheckpoint) {
