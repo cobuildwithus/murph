@@ -80,6 +80,9 @@ provider-specific automation layer.
     require an independent trusted zero-marker inspection before resubmit.
 11. [x] Add service, trusted-boundary, computer-use, and real-PostgreSQL proof
     for both corrections and re-audit their coupled state.
+12. [x] Rebind only the computer owner's proven same-setup successor when a
+    `capturing` run expires, preserving the submit fence and recovery-only first
+    inspection.
 
 ## Decisions
 
@@ -107,6 +110,10 @@ provider-specific automation layer.
   no submit controls, fully loads and verifies the exact safe landing, and
   returns a typed zero-marker observation. The service restores
   `browser_setup` and stops, so only a later independent invocation can submit.
+- An expired `capturing` run does not add a recovery owner. The existing
+  computer-use owner proves the stale exact binding and same-setup successor;
+  the setup CAS changes only `browserRunId` while preserving `capturing`, so
+  recovery on the successor remains submit-free.
 
 ## Verification
 
@@ -115,6 +122,12 @@ provider-specific automation layer.
 - Real PostgreSQL OAuth/deletion concurrency and successor admission: 3 passed.
 - Round-8 direct service, trusted-boundary, computer-use, reconnect-link, and
   internal-connect coverage: 244 passed.
+- ReviewGPT round 9 found one pre-existing stale-run composition gap. The
+  correction rebinds a computer-owner-proven same-setup successor without
+  leaving `capturing`; the service proof composes that rebind with a submit-free
+  zero-marker inspection, and the real computer service proves terminal and
+  expired exact-owner replacement plus foreign/active-owner rejection.
+- Corrected round-9 hosted Web lane: 10,024 passed, 415 skipped.
 - Coupled-state audit: two reported findings confirmed and corrected; no
   additional unresolved state inconsistency remains in the affected owner.
 - Corrected-head product-purpose verdict: no findings. The irreducible purpose
@@ -126,4 +139,5 @@ provider-specific automation layer.
   because no presentation component or visible state shape changed.
 - Hosted Web TypeScript: passed.
 - Hosted Web ESLint: 0 errors; unrelated existing warnings remain.
-- `pnpm docs:drift` and `git diff --check` must pass with this active plan.
+- `pnpm docs:drift`, `git diff --check`, and the changed-line identifier scan:
+  passed.

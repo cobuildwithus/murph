@@ -888,7 +888,10 @@ Last verified: 2026-08-13
   infrastructure errors. Browser acquisition is part of that state machine: a
   newly acquired run is bound to the exact setup before navigation, an unrelated
   reusable run is rejected, and a lost acquisition response resumes only by
-  inspecting that same owner binding. Re-entering an awaiting setup rotates or
+  inspecting that same owner binding. When the bound run expires, only the
+  computer owner's proven same-setup successor may replace its run id; a
+  `capturing` successor remains `capturing`, so its first inspection cannot
+  submit. Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
   the exact setup-owned handoff resumes that run without a conversation reply;
   ordinary setup returns to `/connect`; suspended members and generic or foreign

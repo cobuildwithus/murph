@@ -401,7 +401,10 @@ export class MemberOwnedProviderSetupService {
         startUrl: contract.developerPortalUrl,
       });
       if (run.runId !== setup.browserRunId) {
-        throw setupBusyError(setup.status);
+        setup = await this.transition(setup, {
+          browserRunId: run.runId,
+          status: "capturing",
+        });
       }
       return { contract, run, setup: this.toView(setup) };
     }

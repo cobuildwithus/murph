@@ -292,7 +292,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   without conversation routing. Prerequisite cancellation is permitted only when
   durable state proves no provider submission, application binding, or connection.
   Once `capturing` records possible submission, ambiguous failure preserves that
-  fence and exact-run recovery cannot submit again. A fully loaded exact safe
+  fence and exact-run recovery cannot submit again. If that run expires, only a
+  successor already proven by the computer owner to belong to the same setup may
+  replace its run binding, without changing `capturing`. A fully loaded exact safe
   landing with no ownership marker may clear that fence without submitting;
   only a later independent invocation may attempt creation again. Successful
   application deletion deactivates the terminal setup only after its exact

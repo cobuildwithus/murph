@@ -6947,17 +6947,31 @@ describe("ComputerUseService", () => {
     expect(kernel.createdBrowserInputs).toEqual([]);
   });
 
-  it("creates a replacement only after the setup-bound run is terminal", async () => {
+  it.each([
+    {
+      completedAt: new Date("2026-06-17T11:30:00.000Z"),
+      label: "terminal",
+      status: "completed" as const,
+    },
+    {
+      completedAt: null,
+      label: "expired",
+      status: "running" as const,
+    },
+  ])("creates a replacement only after the setup-bound run is $label", async ({
+    completedAt,
+    status,
+  }) => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const terminalRun = createRunRecord({
-      completedAt: new Date("2026-06-17T11:30:00.000Z"),
+      completedAt,
       expiresAt: new Date("2026-06-17T11:30:00.000Z"),
       id: "hcr_terminal_setup",
       kernelLiveViewUrlEncrypted: null,
       kernelSessionId: null,
       ownerKey: "dps_setup123",
       ownerPurpose: "member_owned_provider_setup",
-      status: "completed",
+      status,
       updatedAt: new Date("2026-06-17T11:30:00.000Z"),
     });
     const store = new FakeComputerUseStore({

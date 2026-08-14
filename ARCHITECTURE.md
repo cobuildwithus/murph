@@ -1020,7 +1020,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   uses the same marker-derived boundary; ambiguous absence retains the local
   binding. `capturing` is the irreversible submission fence, so it cannot be
   canceled after an ambiguous failure and recovery of the exact run never
-  submits again. One fully loaded exact safe-landing inspection with no marker
+  submits again. If that run expires, the computer owner's existing exact-owner
+  recovery may CAS-bind only its same-setup successor while preserving
+  `capturing`, so the successor's first inspection is also submit-free. One fully
+  loaded exact safe-landing inspection with no marker
   may restore `browser_setup` without submitting; only a later independent
   invocation may attempt creation again. A persisted `canceling` transition
   remains the reversible pre-submission fence. Once an exact application binding is

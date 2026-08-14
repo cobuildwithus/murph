@@ -600,6 +600,50 @@ describe("member-owned provider setup service", () => {
     expect(code).toContain("provider application ownership marker mismatch");
   });
 
+  it("rebinds an exact successor run while keeping capture recovery submit-free", async () => {
+    const successorRunId = "hcr_provider_setup_successor";
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      status: "capturing",
+      version: 4,
+    });
+    const computer = new FakeProviderComputer();
+    computer.acquireOwnedRun.mockResolvedValueOnce({
+      awaitingReason: null,
+      reused: false,
+      runId: successorRunId,
+      status: "running",
+    });
+    computer.missingApplicationCaptureOnce = true;
+    const service = createService({ computer, store });
+
+    const resumed = await service.beginBrowserSetup(MEMBER_ID);
+
+    expect(resumed.run.runId).toBe(successorRunId);
+    expect(resumed.setup).toMatchObject({
+      setupId: SETUP_ID,
+      status: "capturing",
+    });
+    expect(store.setup).toMatchObject({
+      browserRunId: successorRunId,
+      status: "capturing",
+      version: 5,
+    });
+
+    await expect(service.captureAndSeal(MEMBER_ID, {
+      ...captureRequest(),
+      runId: successorRunId,
+    })).resolves.toMatchObject({ status: "browser_setup" });
+    expect(computer.captureCodes).toHaveLength(1);
+    expect(computer.captureCodes[0]).not.toContain("button.create-application");
+    expect(store.setup).toMatchObject({
+      browserRunId: successorRunId,
+      status: "browser_setup",
+      version: 6,
+    });
+  });
+
   it("requires an independent zero-marker recovery before another submit", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
