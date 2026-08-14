@@ -412,6 +412,8 @@ describe("Frog autofix guards", () => {
         "trusted\n",
       );
       git("init", "--quiet");
+      mkdirSync(path.join(root, ".disabled-hooks"));
+      git("config", "core.hooksPath", ".disabled-hooks");
       git("config", "user.name", "Automation");
       git("config", "user.email", "automation@example.invalid");
       git("add", ".");
