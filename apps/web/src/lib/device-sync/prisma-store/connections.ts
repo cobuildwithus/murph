@@ -1002,6 +1002,32 @@ export class PrismaHostedConnectionStore {
     return result.count > 0;
   }
 
+  async clearStaleConnectionRefreshLease(input: {
+    connectionId: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    const prisma = input.tx ?? this.prisma;
+    const result = await prisma.deviceConnection.updateMany({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+        OR: [
+          { refreshLeaseExpiresAt: { not: null } },
+          { refreshLeaseOwner: { not: null } },
+          { refreshLeaseTokenVersion: { not: null } },
+        ],
+      },
+      data: {
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+      },
+    });
+
+    return result.count > 0;
+  }
+
   async persistPreparedRuntimeApplyTokenWrite(input: {
     prepared: HostedRuntimeApplyPreparedTokenWrite;
     record: HostedConnectionRecord;

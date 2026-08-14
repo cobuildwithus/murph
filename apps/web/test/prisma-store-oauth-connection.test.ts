@@ -3032,7 +3032,13 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       }
 
       if (input.data.refreshLeaseOwner === null) {
-        if (input.where.refreshLeaseOwner === connection.refreshLeaseOwner) {
+        if (
+          input.where.refreshLeaseOwner === connection.refreshLeaseOwner
+          || (
+            input.where.userId === connection.userId
+            && Array.isArray(input.where.OR)
+          )
+        ) {
           connection = {
             ...connection,
             refreshLeaseExpiresAt: null,
@@ -3131,6 +3137,30 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(connection.refreshLeaseOwner).toBeNull();
     expect(connection.refreshLeaseExpiresAt).toBeNull();
     expect(connection.refreshLeaseTokenVersion).toBeNull();
+
+    connection = {
+      ...connection,
+      accessTokenEncrypted: "enc:cleanup-access-token",
+      keyVersion: "v1",
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: "",
+      refreshLeaseTokenVersion: 3,
+      refreshTokenEncrypted: "enc:cleanup-refresh-token",
+      tokenVersion: 3,
+    };
+    await expect(store.clearStaleConnectionRefreshLease({
+      connectionId: "dsc_123",
+      userId: "user-123",
+    })).resolves.toBe(true);
+    expect(connection).toMatchObject({
+      accessTokenEncrypted: "enc:cleanup-access-token",
+      keyVersion: "v1",
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: null,
+      refreshLeaseTokenVersion: null,
+      refreshTokenEncrypted: "enc:cleanup-refresh-token",
+      tokenVersion: 3,
+    });
   });
 
   it("fails closed when OAuth token rows store invalid token versions", async () => {

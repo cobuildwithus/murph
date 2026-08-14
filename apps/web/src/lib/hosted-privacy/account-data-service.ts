@@ -2029,12 +2029,12 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
       retryable: true,
     });
   }
-  if (resolution.status === "stale_failed_closed") {
+  if (resolution.status === "stale_recovered" && leasedConnections.length > 1) {
     throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
-      httpStatus: 409,
-      message: "A connected-health credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
-      retryable: false,
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      httpStatus: 503,
+      message: "One connected-health credential refresh state was recovered. Retry account deletion to check the remaining connections.",
+      retryable: true,
     });
   }
 }

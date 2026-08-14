@@ -32,7 +32,7 @@ export type HostedDestructiveActionRefreshLeaseResolution =
   | { status: "missing" }
   | { status: "none" }
   | { status: "in_progress"; leaseExpiresAt: string }
-  | { status: "stale_failed_closed"; error: unknown };
+  | { status: "stale_recovered" };
 
 export function classifyHostedTokenRefreshLease(input: {
   now: string;
@@ -102,16 +102,14 @@ export async function resolveHostedRefreshLeaseBeforeDestructiveAction(input: {
       return { status: "missing" };
     }
 
-    return {
-      status: "stale_failed_closed",
-      error: await failClosedStaleHostedTokenRefreshLease({
-        account,
-        now: input.now,
-        store: input.store,
-        tx,
-        userId: input.userId,
-      }),
-    };
+    await failClosedStaleHostedTokenRefreshLease({
+      account,
+      now: input.now,
+      store: input.store,
+      tx,
+      userId: input.userId,
+    });
+    return { status: "stale_recovered" };
   });
 }
 
@@ -148,14 +146,19 @@ export async function failClosedStaleHostedTokenRefreshLease(input: {
     tx: input.tx,
   });
   await input.store.syncDurableConnectionState(nextConnection, input.tx);
-  await input.store.persistStoredConnectionTokenBundle({
-    clearRefreshLease: true,
+  const leaseCleared = await input.store.clearStaleConnectionRefreshLease({
     connectionId: input.account.id,
-    externalAccountId: input.account.externalAccountId,
-    provider: input.account.provider,
-    tokenBundle: null,
     tx: input.tx,
+    userId: input.userId,
   });
+  if (!leaseCleared) {
+    throw deviceSyncError({
+      code: "TOKEN_REFRESH_RETRY_REQUIRED",
+      message: "Hosted device-sync token refresh state changed before stale recovery completed.",
+      retryable: true,
+      httpStatus: 409,
+    });
+  }
 
   return error;
 }

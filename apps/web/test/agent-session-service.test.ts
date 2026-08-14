@@ -649,7 +649,12 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       expect(harness.audits).toHaveLength(0);
-      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toBeNull();
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toMatchObject({
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      });
+      expect(harness.getRefreshLease()).toBeNull();
       expect(harness.signals).toHaveLength(1);
       expect(harness.getPublicConnection()).toMatchObject({
         lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
@@ -1152,7 +1157,12 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       expect(refreshTokens).not.toHaveBeenCalled();
-      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toBeNull();
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toMatchObject({
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      });
+      expect(harness.getRefreshLease()).toBeNull();
       expect(harness.signals).toHaveLength(1);
       expect(harness.signals[0]).toMatchObject({
         kind: "reauthorization_required",
@@ -1632,6 +1642,14 @@ function createRetrySafeStoreHarness(bearerToken: string): {
       },
       async clearConnectionRefreshLease(input: { leaseOwner: string }) {
         if (!refreshLease || refreshLease.leaseOwner !== input.leaseOwner) {
+          return false;
+        }
+
+        refreshLease = null;
+        return true;
+      },
+      async clearStaleConnectionRefreshLease() {
+        if (!refreshLease) {
           return false;
         }
 

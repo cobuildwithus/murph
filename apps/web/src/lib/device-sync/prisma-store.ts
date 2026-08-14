@@ -480,6 +480,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.clearConnectionRefreshLease(input);
   }
 
+  async clearStaleConnectionRefreshLease(input: {
+    connectionId: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    return this.connections.clearStaleConnectionRefreshLease(input);
+  }
+
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
     return this.signals.createSignal(input);
   }

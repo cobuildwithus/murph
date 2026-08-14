@@ -3607,9 +3607,9 @@ describe("deleteHostedAccountData", () => {
     expect(rawDeletionQueries).toEqual([]);
   });
 
-  it("fails one expired token refresh closed in one transaction before account suspension", async () => {
+  it("recovers one of several stale refresh leases in one transaction before account suspension", async () => {
     const hostedMemberUpdateCalls: unknown[] = [];
-    const persistStoredConnectionTokenBundle = vi.fn(async () => undefined);
+    const clearStaleConnectionRefreshLease = vi.fn(async () => true);
     const createSignal = vi.fn(async () => ({ id: 1 }));
     const syncDurableConnectionState = vi.fn(async () => undefined);
     const withConnectionMutationLock = vi.fn(async (
@@ -3631,6 +3631,7 @@ describe("deleteHostedAccountData", () => {
     };
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
       store: {
+        clearStaleConnectionRefreshLease,
         createSignal,
         getConnectionForUser: vi.fn(async () => ({
           connectedAt: "2026-04-27T00:07:00.000Z",
@@ -3652,7 +3653,6 @@ describe("deleteHostedAccountData", () => {
           updatedAt: "2026-04-27T00:07:00.000Z",
         })),
         getConnectionRecordForUser: vi.fn(async () => connection),
-        persistStoredConnectionTokenBundle,
         syncDurableConnectionState,
         withConnectionMutationLock,
       },
@@ -3676,8 +3676,8 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
     })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
-      retryable: false,
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      retryable: true,
     });
 
     expect(hostedMemberUpdateCalls).toEqual([]);
@@ -3686,6 +3686,11 @@ describe("deleteHostedAccountData", () => {
       connection.id,
       expect.any(Function),
     );
+    expect(clearStaleConnectionRefreshLease).toHaveBeenCalledWith({
+      connectionId: connection.id,
+      tx: { __tx: true },
+      userId: "member_123",
+    });
     expect(syncDurableConnectionState).toHaveBeenCalledWith(
       expect.objectContaining({
         lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
@@ -3693,15 +3698,91 @@ describe("deleteHostedAccountData", () => {
       }),
       { __tx: true },
     );
-    expect(persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
-      clearRefreshLease: true,
-      connectionId: connection.id,
-      externalAccountId: "provider-account",
-      provider: "oura",
-      tokenBundle: null,
-      tx: { __tx: true },
-    });
     expect(createSignal).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers the final stale lease and revokes with the retained credential before deletion", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    const connection = {
+      connectedAt: new Date("2026-04-27T00:07:00.000Z"),
+      credentialKind: "oauth_tokens",
+      id: "dsc_oauth_cleanup",
+      provider: "oura",
+      providerAccountBlindIndex: "hbdi_refresh_expired",
+      providerApplicationRevision: null,
+      refreshLeaseExpiresAt: new Date("2020-04-27T00:12:00.000Z") as Date | null,
+      refreshLeaseOwner: "refresh_owner" as string | null,
+      refreshLeaseTokenVersion: 1 as number | null,
+      sources: [],
+      tokenVersion: 1,
+    };
+    const storedAccount = buildStoredOAuthDeviceAccountForDeletion();
+    const publicAccount = {
+      accessTokenExpiresAt: storedAccount.accessTokenExpiresAt,
+      connectedAt: storedAccount.connectedAt,
+      createdAt: storedAccount.createdAt,
+      displayName: storedAccount.displayName,
+      externalAccountId: storedAccount.externalAccountId,
+      id: storedAccount.id,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: storedAccount.provider,
+      scopes: storedAccount.scopes,
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      updatedAt: storedAccount.updatedAt,
+    };
+    const clearStaleConnectionRefreshLease = vi.fn(async () => {
+      connection.refreshLeaseExpiresAt = null;
+      connection.refreshLeaseOwner = null;
+      connection.refreshLeaseTokenVersion = null;
+      return true;
+    });
+    const revokeAccess = vi.fn(async () => undefined);
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        clearStaleConnectionRefreshLease,
+        createSignal: vi.fn(async () => ({ id: 1 })),
+        getConnectionForUser: vi.fn(async () => publicAccount),
+        getConnectionRecordForUser: vi.fn(async () => connection),
+        getStoredConnectionAccountForUser: vi.fn(async () => storedAccount),
+        syncDurableConnectionState: vi.fn(async () => undefined),
+        withConnectionMutationLock: vi.fn(async (
+          _connectionId: string,
+          callback: (tx: { __tx: true }) => Promise<unknown>,
+        ) => callback({ __tx: true })),
+      },
+    });
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({ connectionHandler: { revokeAccess } })),
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [connection],
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      providerRevocations: [{
+        connectionId: connection.id,
+        status: "revoked",
+      }],
+    });
+
+    expect(clearStaleConnectionRefreshLease).toHaveBeenCalledTimes(1);
+    expect(revokeAccess).toHaveBeenCalledWith(storedAccount);
+    expect(hostedMemberUpdateCalls.length).toBeGreaterThan(0);
   });
 
   it("keeps the terminal fence for a token refresh that starts after suspension", async () => {

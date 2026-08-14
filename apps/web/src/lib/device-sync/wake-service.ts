@@ -1054,7 +1054,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 }> {
   const disconnectStartedAt = toIsoTimestamp(new Date());
   const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
-    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    let connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
     if (!connection) {
       throw deviceSyncError({
         code: "CONNECTION_NOT_FOUND",
@@ -1087,16 +1087,22 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       });
     }
     if (refreshLeaseStatus.status === "stale") {
-      return {
-        refreshLeaseRecoveryError:
-          await failClosedStaleHostedTokenRefreshLease({
-            account: connection,
-            now: disconnectStartedAt,
-            store: input.store,
-            tx,
-            userId: input.userId,
-          }),
-      };
+      await failClosedStaleHostedTokenRefreshLease({
+        account: connection,
+        now: disconnectStartedAt,
+        store: input.store,
+        tx,
+        userId: input.userId,
+      });
+      const recoveredConnection = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      if (!recoveredConnection) {
+        connectionChangedDuringDisconnectError();
+      }
+      connection = recoveredConnection;
     }
 
     // The raw durable credential kind is the cleanup authority. In particular,
@@ -1148,9 +1154,6 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       storedAccount,
     };
   });
-  if ("refreshLeaseRecoveryError" in target) {
-    throw target.refreshLeaseRecoveryError;
-  }
   const existing = target.connection;
   const storedAccount = target.storedAccount;
 
