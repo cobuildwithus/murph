@@ -84,10 +84,9 @@ programmatically appropriate.
    recreate another platform's UI or default to a long text when the available
    card or media path can present the same answer more clearly.
 7. If acute pain or safety requires an immediate action, give the minimal plan
-   now and include available catalog media in the same response. For a known
-   routine the user has already performed, send a concise reference. Provide
-   full steps only when asked, accepted as a walkthrough, or required for
-   safety.
+   now. For a known routine the user has already performed, send a concise
+   reference. Provide full steps only when asked, accepted as a walkthrough, or
+   required for safety.
 
 Do not assign reporting homework. When subjective response matters, schedule or
 offer an appropriate check-in instead.

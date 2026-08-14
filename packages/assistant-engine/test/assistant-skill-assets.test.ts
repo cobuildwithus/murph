@@ -1493,6 +1493,9 @@ describe('assistant skill assets', () => {
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
     )
+    expect(compactCatalog).not.toContain(
+      'include available catalog media in the same response',
+    )
   })
 
   it('keeps supplement label identity, persistence, and evidence limits in its skill', async () => {
