@@ -2,6 +2,9 @@ export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner
 export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 4;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 11;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
+export const HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT = 5;
+export const HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT = 2;
+export const HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT = 5;
 
 export interface HostedRunnerSmokeInput {
   bundle: string;
@@ -24,6 +27,14 @@ export interface HostedRunnerSmokeResult {
   codexGroupReadRuntimeReadDenied: boolean;
   codexGroupReadSecretEnvironmentDenied: boolean;
   codexGroupReadSiblingRootReadDenied: boolean;
+  codexMemberWorkspaceAutomationMutationDeniedCount: number;
+  codexMemberWorkspaceAutomationReadProofCount: number;
+  codexMemberWorkspaceAutomationTreeUnchanged: boolean;
+  codexMemberWorkspaceLocalMutationProofCount: number;
+  codexMemberWorkspacePermissionProfileAttested: boolean;
+  codexMemberWorkspacePreloadBypassDenied: boolean;
+  codexMemberWorkspaceTempWriteAllowed: boolean;
+  codexMemberWorkspaceVaultWriteAllowed: boolean;
   codexHostedCliSurfaceContractBytes: number;
   codexHostedCliSurfaceHotPathProofCount: number;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
@@ -68,6 +79,14 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexGroupReadRuntimeReadDenied",
   "codexGroupReadSecretEnvironmentDenied",
   "codexGroupReadSiblingRootReadDenied",
+  "codexMemberWorkspaceAutomationMutationDeniedCount",
+  "codexMemberWorkspaceAutomationReadProofCount",
+  "codexMemberWorkspaceAutomationTreeUnchanged",
+  "codexMemberWorkspaceLocalMutationProofCount",
+  "codexMemberWorkspacePermissionProfileAttested",
+  "codexMemberWorkspacePreloadBypassDenied",
+  "codexMemberWorkspaceTempWriteAllowed",
+  "codexMemberWorkspaceVaultWriteAllowed",
   "codexHostedCliSurfaceContractBytes",
   "codexHostedCliSurfaceHotPathProofCount",
   "codexHostedConfigShellEnvironmentPolicyAllowlisted",
@@ -179,6 +198,41 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     codexGroupReadSiblingRootReadDenied: readTrue(
       record.codexGroupReadSiblingRootReadDenied,
       "Hosted runner smoke result.codexGroupReadSiblingRootReadDenied",
+    ),
+    codexMemberWorkspaceAutomationMutationDeniedCount: readMinimumFiniteNumber(
+      record.codexMemberWorkspaceAutomationMutationDeniedCount,
+      "Hosted runner smoke result.codexMemberWorkspaceAutomationMutationDeniedCount",
+      HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+    ),
+    codexMemberWorkspaceAutomationReadProofCount: readMinimumFiniteNumber(
+      record.codexMemberWorkspaceAutomationReadProofCount,
+      "Hosted runner smoke result.codexMemberWorkspaceAutomationReadProofCount",
+      HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+    ),
+    codexMemberWorkspaceAutomationTreeUnchanged: readTrue(
+      record.codexMemberWorkspaceAutomationTreeUnchanged,
+      "Hosted runner smoke result.codexMemberWorkspaceAutomationTreeUnchanged",
+    ),
+    codexMemberWorkspaceLocalMutationProofCount: readMinimumFiniteNumber(
+      record.codexMemberWorkspaceLocalMutationProofCount,
+      "Hosted runner smoke result.codexMemberWorkspaceLocalMutationProofCount",
+      HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
+    ),
+    codexMemberWorkspacePermissionProfileAttested: readTrue(
+      record.codexMemberWorkspacePermissionProfileAttested,
+      "Hosted runner smoke result.codexMemberWorkspacePermissionProfileAttested",
+    ),
+    codexMemberWorkspacePreloadBypassDenied: readTrue(
+      record.codexMemberWorkspacePreloadBypassDenied,
+      "Hosted runner smoke result.codexMemberWorkspacePreloadBypassDenied",
+    ),
+    codexMemberWorkspaceTempWriteAllowed: readTrue(
+      record.codexMemberWorkspaceTempWriteAllowed,
+      "Hosted runner smoke result.codexMemberWorkspaceTempWriteAllowed",
+    ),
+    codexMemberWorkspaceVaultWriteAllowed: readTrue(
+      record.codexMemberWorkspaceVaultWriteAllowed,
+      "Hosted runner smoke result.codexMemberWorkspaceVaultWriteAllowed",
     ),
     codexHostedCliSurfaceContractBytes: readPositiveFiniteNumber(
       record.codexHostedCliSurfaceContractBytes,

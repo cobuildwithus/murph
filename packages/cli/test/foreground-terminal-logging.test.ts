@@ -347,8 +347,8 @@ test('inbox imported-capture summaries handle attachment-only and empty payloads
     formatInboxRunEventForTerminal(
       createInboxEvent({
         type: 'capture.imported',
-        connectorId: 'agentmail-main',
-        source: 'agentmail',
+        connectorId: 'linq-main',
+        source: 'linq',
         phase: 'watch',
         capture: createCapture({
           text: null,
@@ -361,7 +361,7 @@ test('inbox imported-capture summaries handle attachment-only and empty payloads
         }),
       }),
     ),
-    'new AgentMail capture imported: 1 attachment',
+    'new Linq capture imported: 1 attachment',
   )
   assert.equal(
     formatInboxRunEventForTerminal(

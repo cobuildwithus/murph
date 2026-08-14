@@ -85,9 +85,54 @@ describe("workspace snapshot local restore", () => {
     const objectKey = "users/hsn_test/workspace-snapshots/snapshot_round_trip.snapshot.enc";
     const userId = "member_123";
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const retainedDeviceSyncWakeState = {
+      schema: "murph.hosted-system-mailbox-state.v1",
+      schemaVersion: 1,
+      value: {
+        pending: [{
+          attemptCount: 1,
+          itemId: "mailbox_item_device_sync_exact_retry",
+          lastAttemptAt: "2026-05-20T01:02:03.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          mailboxDedupeKey: "device-sync.wake:exact-retry",
+          mailboxLaneSeq: "7",
+          nextAttemptAt: "2026-05-20T01:02:18.000Z",
+          occurredAt: "2026-05-20T01:02:03.000Z",
+          postCheckpointRecord: null,
+          requestId: null,
+          routeAction: "run-device-sync-wake",
+          status: "pending",
+          wake: {
+            connectionId: "dsc_exact_retry",
+            eventId: "device-sync.wake:exact-retry",
+            expectedConnectedAt: "2026-05-20T01:02:03.000Z",
+            hint: {
+              jobs: [{
+                dedupeKey: "initial-history",
+                kind: "resource",
+                maxAttempts: 5,
+                payload: {
+                  windowEnd: "2026-05-20T01:02:03.000Z",
+                  windowStart: "2025-11-21T01:02:03.000Z",
+                },
+              }],
+            },
+            kind: "device-sync.wake",
+            occurredAt: "2026-05-20T01:02:03.000Z",
+            provider: "oura",
+            reason: "connected",
+            userId,
+          },
+        }],
+      },
+    };
 
     try {
       await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "assistant", "sessions"), {
+        recursive: true,
+      });
+      await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "device-sync"), {
         recursive: true,
       });
       await mkdir(path.join(sourceVaultRoot, ".runtime", "projections"), { recursive: true });
@@ -110,6 +155,22 @@ describe("workspace snapshot local restore", () => {
             resumeRouteId: "route-ready",
           },
         }) + "\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(
+          sourceVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "hosted-system-mailbox.json",
+        ),
+        `${JSON.stringify(retainedDeviceSyncWakeState)}\n`,
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceVaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"),
+        "machine-local device sync execution cache\n",
         "utf8",
       );
       await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite"), "projection\n", "utf8");
@@ -156,12 +217,21 @@ describe("workspace snapshot local restore", () => {
       });
       expect(archivePlan.entries).toEqual(expect.arrayContaining([
         expect.objectContaining({
+          archivePath: "vault/.runtime/operations/assistant/hosted-system-mailbox.json",
+          kind: "file",
+        }),
+        expect.objectContaining({
           archivePath: "vault/derived/vault-share/projections.json",
           kind: "file",
         }),
         expect.objectContaining({
           archivePath: "vault/vault-share/projections.json",
           kind: "file",
+        }),
+      ]));
+      expect(archivePlan.entries).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          archivePath: "vault/.runtime/operations/device-sync/state.sqlite",
         }),
       ]));
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
@@ -205,6 +275,19 @@ describe("workspace snapshot local restore", () => {
       const restoredOperatorHomeRoot = path.join(restoredDurableRoot, "home");
       await expect(readFile(path.join(restoredVaultRoot, "note.md"), "utf8"))
         .resolves.toBe("selected workspace\n");
+      await expect(readFile(
+        path.join(
+          restoredVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "hosted-system-mailbox.json",
+        ),
+        "utf8",
+      )).resolves.toBe(`${JSON.stringify(retainedDeviceSyncWakeState)}\n`);
+      await expect(access(
+        path.join(restoredVaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"),
+      )).rejects.toThrow();
       await expect(readFile(
         path.join(restoredVaultRoot, "derived", "vault-share-notes", "keep.md"),
         "utf8",

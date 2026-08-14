@@ -123,6 +123,21 @@ describe("changelog registry", () => {
     expect(item?.tryIt).toBeUndefined();
   });
 
+  it("keeps scheduled native delivery current and private", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "scheduled-cards-use-current-private-route",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1624],
+      summary: expect.stringContaining("current private Messages conversation"),
+    });
+    expect(item?.details).toContain("If the route changes before delivery");
+    expect(item?.details).toContain("exposing private text through recovery");
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps iMessage card preview copy descriptive and value-free", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "descriptive-imessage-card-previews",
@@ -698,6 +713,7 @@ describe("changelog registry", () => {
         })),
     ).toEqual([
       {
+
         id: "2026-08-09",
         itemIds: [
           "group-sleep-challenges-use-fresh-data",
@@ -1058,6 +1074,22 @@ describe("changelog registry", () => {
     });
     expect(item?.details).toContain("existing history");
     expect(item?.details).toContain("association rather than cause");
+  });
+
+  it("bounds wearable recovery to model-free sync work", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "wearable-sync-recovers-model-free",
+    );
+
+    expect(item).toMatchObject({
+      kind: "improvement",
+      priority: 5,
+      sourcePullRequests: [1597, 1721],
+    });
+    expect(item?.summary).toContain("scheduled assistant automations are paused");
+    expect(item?.details).toContain("Fresh messages still take priority");
+    expect(item?.details).toContain("does not start an AI response");
+    expect(item?.tryIt).toBeUndefined();
   });
 
   it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {

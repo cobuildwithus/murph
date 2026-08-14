@@ -12,6 +12,9 @@ import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
 } from "../src/hosted-runner-smoke-contract.js";
 
 const spawnMock = vi.fn();
@@ -105,6 +108,17 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexGroupReadRuntimeReadDenied: true,
             codexGroupReadSecretEnvironmentDenied: true,
             codexGroupReadSiblingRootReadDenied: true,
+            codexMemberWorkspaceAutomationMutationDeniedCount:
+              HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+            codexMemberWorkspaceAutomationReadProofCount:
+              HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+            codexMemberWorkspaceAutomationTreeUnchanged: true,
+            codexMemberWorkspaceLocalMutationProofCount:
+              HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
+            codexMemberWorkspacePermissionProfileAttested: true,
+            codexMemberWorkspacePreloadBypassDenied: true,
+            codexMemberWorkspaceTempWriteAllowed: true,
+            codexMemberWorkspaceVaultWriteAllowed: true,
             codexHostedCliSurfaceContractBytes: 37282,
             codexHostedCliSurfaceHotPathProofCount:
               HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
@@ -166,6 +180,20 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexGroupReadRuntimeReadDenied).toBe(true);
       expect(result.codexGroupReadSecretEnvironmentDenied).toBe(true);
       expect(result.codexGroupReadSiblingRootReadDenied).toBe(true);
+      expect(result.codexMemberWorkspaceAutomationMutationDeniedCount).toBe(
+        HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+      );
+      expect(result.codexMemberWorkspaceAutomationReadProofCount).toBe(
+        HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+      );
+      expect(result.codexMemberWorkspaceAutomationTreeUnchanged).toBe(true);
+      expect(result.codexMemberWorkspaceLocalMutationProofCount).toBe(
+        HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
+      );
+      expect(result.codexMemberWorkspacePermissionProfileAttested).toBe(true);
+      expect(result.codexMemberWorkspacePreloadBypassDenied).toBe(true);
+      expect(result.codexMemberWorkspaceTempWriteAllowed).toBe(true);
+      expect(result.codexMemberWorkspaceVaultWriteAllowed).toBe(true);
       expect(result.codexHostedCliSurfaceContractBytes).toBe(37282);
       expect(result.codexHostedCliSurfaceHotPathProofCount).toBe(
         HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,

@@ -547,21 +547,21 @@ test("daily workout rollup adds distinct sessions and suppresses an imported mir
   assert.equal(point("activity-minutes"), undefined);
 });
 
-test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
+test("unadmitted Junction timeseries stay out of default query/search and wearable summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-raw-timeseries-query-"));
-  const rawTimeseriesSnapshot = {
+  const unadmittedTimeseriesSnapshot = {
     importedAt: "2026-05-20T12:00:00.000Z",
     timeseries: {
-      heartrate: [{
+      experimental_raw: [{
         sourceProviderSlug: "garmin",
         sourceType: "watch",
         timestamp: "2026-05-20T08:00:00Z",
-        unit: "bpm",
-        value: 61,
+        unit: "sample",
+        value: 0.42,
       }],
     },
   };
-  const rawOnlyPayload = normalizeJunctionSnapshot(rawTimeseriesSnapshot);
+  const rawOnlyPayload = normalizeJunctionSnapshot(unadmittedTimeseriesSnapshot);
 
   assert.deepEqual(rawOnlyPayload.events, []);
   assert.deepEqual(rawOnlyPayload.samples ?? [], []);
@@ -574,7 +574,7 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
         formatVersion: CURRENT_VAULT_FORMAT_VERSION,
         vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4B",
         createdAt: "2026-05-20T00:00:00.000Z",
-        title: "Junction raw timeseries query vault",
+        title: "Junction unadmitted timeseries query vault",
         timezone: "UTC",
       })}\n`,
       "utf8",
@@ -583,15 +583,15 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
     const persistedRawVault = await readVault(vaultRoot);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["event"] }), []);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["sample"] }), []);
-    assert.equal(searchVault(persistedRawVault, "heart rate").total, 0);
-    assert.equal((await searchVaultRuntime(vaultRoot, "heart rate")).total, 0);
+    assert.equal(searchVault(persistedRawVault, "vendor waveform").total, 0);
+    assert.equal((await searchVaultRuntime(vaultRoot, "vendor waveform")).total, 0);
     assert.equal(summarizeWearableLatest(persistedRawVault, { providers: ["garmin"] }), null);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 
   const compactSummaryVault = makeVaultFromJunctionSnapshot({
-    ...rawTimeseriesSnapshot,
+    ...unadmittedTimeseriesSnapshot,
     summaries: {
       activity: [{
         sourceProviderSlug: "garmin",
@@ -605,6 +605,110 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
 
   assert.equal(latest?.latestDate, "2026-05-20");
   assert.equal(latest?.activity?.steps.selection.value, 7200);
+});
+
+test("Junction hourly features remain independently queryable without becoming day summaries", () => {
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    timeseries: {
+      heartrate: [
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T08:00:00Z",
+          unit: "bpm",
+          value: 61,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T09:00:00Z",
+          unit: "bpm",
+          value: 72,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T10:15:00Z",
+          sessionId: "workout-1",
+          sessionStart: "2026-05-20T10:00:00Z",
+          sessionEnd: "2026-05-20T11:00:00Z",
+          unit: "bpm",
+          value: 90,
+        },
+      ],
+      calories_active: [
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T08:15:00Z",
+          unit: "kcal",
+          value: 100,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T09:15:00Z",
+          unit: "kcal",
+          value: 200,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T10:15:00Z",
+          sessionId: "workout-1",
+          sessionStart: "2026-05-20T10:00:00Z",
+          sessionEnd: "2026-05-20T11:00:00Z",
+          unit: "kcal",
+          value: 50,
+        },
+      ],
+    },
+  };
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const vault = makeVaultFromJunctionSnapshot(snapshot);
+  const sleepVault = makeVaultFromJunctionSnapshot({
+    ...snapshot,
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "garmin-sleep-1",
+        calendar_date: "2026-05-20",
+        bedtime_start: "2026-05-20T02:00:00Z",
+        bedtime_stop: "2026-05-20T07:00:00Z",
+        duration: 18000,
+        total: 16200,
+        hr_lowest: 45,
+        hr_average: 50,
+      }],
+    },
+  });
+  const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
+  const heartRateSummary = summarizeWearableMetricLatest(vault, "max-heart-rate", {
+    providers: ["garmin"],
+    windowDays: 1,
+  });
+  const projection = buildMetricProjection(vault);
+  const maxHeartRatePoints = projection.metricPoints
+    .filter((point) => point.metricKey === "max-heart-rate")
+    .flatMap((point) => typeof point.value === "number" ? [point.value] : [])
+    .sort((left, right) => left - right);
+  const activeCaloriePoints = projection.metricPoints
+    .filter((point) => point.metricKey === "active-calories")
+    .flatMap((point) => typeof point.value === "number" ? [point.value] : [])
+    .sort((left, right) => left - right);
+
+  assert.equal(payload.events?.length, 12);
+  assert.deepEqual(payload.samples ?? [], []);
+  assert.ok(payload.events?.every((event) => event.fields?.observationGrain === "derived_fact"));
+  assert.equal(listEntities(vault, { families: ["event"] }).length, 12);
+  assert.equal(latest, null);
+  assert.equal(heartRateSummary?.value, null);
+  assert.equal(heartRateSummary?.recentWindow.count, 0);
+  assert.deepEqual(maxHeartRatePoints, [61, 72, 90]);
+  assert.deepEqual(activeCaloriePoints, [50, 100, 200]);
+  assert.equal(summarizeWearableLatest(sleepVault)?.sleep?.averageHeartRate.selection.value, 50);
+  assert.equal(summarizeWearableLatest(sleepVault)?.sleep?.lowestHeartRate.selection.value, 45);
 });
 
 test("latest surface sees Junction Garmin object data envelopes as usable summaries", () => {
@@ -931,6 +1035,14 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         total_elevation_gain: 320,
         elevation_change: -12,
         percent_recorded: 0.95,
+        heart_rate: {
+          avg_bpm: 76,
+          avg_walking_bpm: 101,
+          min_bpm: 44,
+        },
+        high: 5,
+        low: 60,
+        medium: 13,
       }],
       sleep: [{
         source: { provider: "garmin", type: "watch" },
@@ -938,6 +1050,7 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         bedtime_start: "2026-05-20T02:00:00Z",
         bedtime_stop: "2026-05-20T10:00:00Z",
         duration: 28800,
+        latency: 600,
         time_in_bed: 30000,
         sleep_consistency: 91,
         sleep_performance: 88,
@@ -954,27 +1067,146 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   });
 
   const latest = summarizeWearableLatest(vault);
+  const activityMinutes = summarizeWearableMetricLatest(vault, "activity-minutes", { windowDays: 1 });
+  const lowActivityMinutes = summarizeWearableMetricLatest(vault, "low-activity-minutes", { windowDays: 1 });
+  const activityAverageHeartRate = summarizeWearableMetricLatest(vault, "activity-average-heart-rate", { windowDays: 1 });
+  const activityLowestHeartRate = summarizeWearableMetricTrend(vault, "activity-lowest-heart-rate", { windowDays: 1 });
+  const walkingAverageHeartRate = summarizeWearableMetricLatest(vault, "walking-average-heart-rate", { windowDays: 1 });
+  const sleepLatency = summarizeWearableMetricLatest(vault, "sleep-latency-minutes", { windowDays: 1 });
   const leanBodyMass = summarizeWearableMetricLatest(vault, "lean-body-mass", { windowDays: 1 });
   const waistCircumference = summarizeWearableMetricLatest(vault, "waist-circumference", { windowDays: 1 });
+  const projection = buildMetricProjection(vault);
 
   assert.equal(latest?.activity?.steps.selection.value, 9400);
+  assert.equal(latest?.activity?.activityMinutes.selection.value, 78);
+  assert.equal(latest?.activity?.lowActivityMinutes.selection.value, 60);
+  assert.equal(latest?.activity?.mediumActivityMinutes.selection.value, 13);
+  assert.equal(latest?.activity?.highActivityMinutes.selection.value, 5);
+  assert.equal(latest?.activity?.averageHeartRate.selection.value, 76);
+  assert.equal(latest?.activity?.walkingAverageHeartRate.selection.value, 101);
+  assert.equal(latest?.activity?.lowestHeartRate.selection.value, 44);
   assert.equal(latest?.activity?.floorsClimbed.selection.value, 18);
   assert.equal(latest?.activity?.estimatedVo2Max.selection.value, 48.5);
   assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 320);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, -12);
   assert.equal(latest?.activity?.percentRecorded.selection.value, 95);
   assert.equal(latest?.sleep?.timeInBedMinutes.selection.value, 500);
+  assert.equal(latest?.sleep?.sleepLatencyMinutes.selection.value, 10);
+  assert.equal(latest?.sleep?.averageHeartRate.selection.value, null);
+  assert.equal(latest?.sleep?.lowestHeartRate.selection.value, null);
+  assert.equal(latest?.recovery?.restingHeartRate.selection.value, null);
   assert.equal(latest?.sleep?.sleepConsistency.selection.value, 91);
   assert.equal(latest?.sleep?.sleepPerformance.selection.value, 88);
   assert.equal(latest?.bodyState?.leanBodyMassKg.selection.value, 40.1);
   assert.equal(latest?.bodyState?.temperature.selection.value, 36.7);
   assert.equal(latest?.bodyState?.waistCircumference.selection.value, 86.36);
+  assert.equal(activityMinutes?.summaryKind, "activity");
+  assert.equal(activityMinutes?.value, 78);
+  assert.equal(lowActivityMinutes?.summaryKind, "activity");
+  assert.equal(lowActivityMinutes?.value, 60);
+  assert.equal(activityAverageHeartRate?.metric, "averageHeartRate");
+  assert.equal(activityAverageHeartRate?.resolvedAlias, "activity-average-heart-rate");
+  assert.equal(activityAverageHeartRate?.summaryKind, "activity");
+  assert.equal(activityAverageHeartRate?.value, 76);
+  assert.equal(activityLowestHeartRate?.metric, "lowestHeartRate");
+  assert.equal(activityLowestHeartRate?.resolvedAlias, "activity-lowest-heart-rate");
+  assert.equal(activityLowestHeartRate?.summaryKind, "activity");
+  assert.equal(activityLowestHeartRate?.value, 44);
+  assert.equal(activityLowestHeartRate?.points[0]?.value, 44);
+  assert.equal(activityLowestHeartRate?.notes.some((note) => note.startsWith("No ")), false);
+  assert.equal(walkingAverageHeartRate?.summaryKind, "activity");
+  assert.equal(walkingAverageHeartRate?.value, 101);
+  assert.equal(sleepLatency?.summaryKind, "sleep");
+  assert.equal(sleepLatency?.value, 10);
   assert.equal(leanBodyMass?.metric, "leanBodyMassKg");
   assert.equal(leanBodyMass?.summaryKind, "bodyState");
   assert.equal(leanBodyMass?.value, 40.1);
   assert.equal(waistCircumference?.metric, "waistCircumference");
   assert.equal(waistCircumference?.summaryKind, "bodyState");
   assert.equal(waistCircumference?.value, 86.36);
+  const projectedActivitySummaryValue = (metricKey: string) =>
+    projection.metricPoints.find((point) =>
+      point.metricKey === metricKey && point.source.kind === "activity-summary"
+    )?.value;
+  assert.equal(projectedActivitySummaryValue("activity-minutes"), 78);
+  assert.equal(projectedActivitySummaryValue("low-activity-minutes"), 60);
+  assert.equal(projectedActivitySummaryValue("medium-activity-minutes"), 13);
+  assert.equal(projectedActivitySummaryValue("high-activity-minutes"), 5);
+  assert.equal(projectedActivitySummaryValue("average-heart-rate"), 76);
+  assert.equal(projectedActivitySummaryValue("walking-average-heart-rate"), 101);
+  assert.equal(projectedActivitySummaryValue("lowest-heart-rate"), 44);
+});
+
+test("Junction body composition facts remain distinct across wearable and canonical metric queries", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      body: [{
+        source: { provider: "withings", type: "scale" },
+        id: "body-composition-queryable",
+        date: "2026-05-20T08:00:00Z",
+        bone_mass_percentage: 4.2,
+        muscle_mass_percentage: 61.8,
+        visceral_fat_index: 7,
+        water_percentage: 54.6,
+      }],
+    },
+  });
+
+  const bodyState = summarizeWearableLatest(vault)?.bodyState;
+  const boneMass = summarizeWearableMetricLatest(vault, "bone_mass_percentage", { windowDays: 1 });
+  const muscleMass = summarizeWearableMetricLatest(vault, "muscle-mass-percentage", { windowDays: 1 });
+  const visceralFat = summarizeWearableMetricLatest(vault, "visceral_fat_index", { windowDays: 1 });
+  const bodyWater = summarizeWearableMetricLatest(vault, "water_percentage", { windowDays: 1 });
+  const compositionMetricKeys = new Set([
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ]);
+  const metricPoints = buildMetricProjection(vault).metricPoints
+    .filter((point) => compositionMetricKeys.has(point.metricKey))
+    .sort((left, right) => left.metricKey.localeCompare(right.metricKey));
+
+  assert.equal(bodyState?.boneMassPercentage.selection.value, 4.2);
+  assert.equal(bodyState?.boneMassPercentage.selection.unit, "%");
+  assert.equal(bodyState?.boneMassPercentage.selection.provider, "withings");
+  assert.equal(bodyState?.muscleMassPercentage.selection.value, 61.8);
+  assert.equal(bodyState?.bodyWaterPercentage.selection.value, 54.6);
+  assert.equal(bodyState?.visceralFatIndex.selection.value, 7);
+  assert.equal(bodyState?.visceralFatIndex.selection.unit, "index");
+  assert.deepEqual(
+    [boneMass, muscleMass, visceralFat, bodyWater].map((summary) => ({
+      metric: summary?.metric,
+      provider: summary?.provider,
+      summaryKind: summary?.summaryKind,
+      unit: summary?.unit,
+      value: summary?.value,
+    })),
+    [
+      { metric: "boneMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 4.2 },
+      { metric: "muscleMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 61.8 },
+      { metric: "visceralFatIndex", provider: "withings", summaryKind: "bodyState", unit: "index", value: 7 },
+      { metric: "bodyWaterPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 54.6 },
+    ],
+  );
+  assert.deepEqual(
+    metricPoints.map((point) => ({
+      canonicalUnit: point.canonicalUnit,
+      metricKey: point.metricKey,
+      provider: point.provenance.provider,
+      sourceKind: point.source.kind,
+      value: point.value,
+    })),
+    [
+      { canonicalUnit: "percent", metricKey: "body-water-percentage", provider: "withings", sourceKind: "wearable-summary", value: 54.6 },
+      { canonicalUnit: "percent", metricKey: "bone-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 4.2 },
+      { canonicalUnit: "percent", metricKey: "muscle-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 61.8 },
+      { canonicalUnit: "index", metricKey: "visceral-fat-index", provider: "withings", sourceKind: "wearable-summary", value: 7 },
+    ],
+  );
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.aggregatorProvider === "junction"));
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.sourceProviderSlug === "withings"));
 });
 
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {

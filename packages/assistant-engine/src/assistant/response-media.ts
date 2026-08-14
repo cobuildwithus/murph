@@ -15,6 +15,7 @@ export const ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_PREFIX =
   'murph.assistant-generated-image-delivery.v1 '
 const MAX_ASSISTANT_GENERATED_IMAGE_DELIVERY_REF_LENGTH = 1024
 const MAX_ASSISTANT_RESPONSE_MEDIA = 40
+export const ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS = 8
 
 export interface AssistantGeneratedImageDeliveryTranscriptMarker {
   contentType: AssistantVaultImageResponseMedia['contentType']

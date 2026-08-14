@@ -665,6 +665,89 @@ test("AuthProvider preserves a Group payment return through sign-in", async () =
   await rendered.cleanup();
 });
 
+test.each([
+  {
+    label: "exact Family invite",
+    resumes: true,
+    search:
+      "?familyInviteReturn=%2Ffamily%2Faccept%2Fcurrent_username_invite",
+  },
+  {
+    label: "external Family invite",
+    resumes: false,
+    search:
+      "?familyInviteReturn=https%3A%2F%2Fexample.test%2Ffamily%2Faccept%2Finvite_123",
+  },
+  {
+    label: "malformed Family invite",
+    resumes: false,
+    search: "?familyInviteReturn=%2Ffamily%2Faccept%2Finvite%20123",
+  },
+  {
+    label: "repeated Family invite",
+    resumes: false,
+    search:
+      "?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_123&familyInviteReturn=%2Ffamily%2Faccept%2Finvite_456",
+  },
+])("AuthProvider scopes Family invite return resume: $label", async ({ resumes, search }) => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const href = `https://join.example.test/settings${search}#subscription`;
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+  );
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "#subscription",
+      href,
+      origin: "https://join.example.test",
+      pathname: "/settings",
+      reload,
+      search,
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  if (resumes) {
+    expect(rendered.window.location.href).toBe(href);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  } else {
+    expect(assign).toHaveBeenCalledWith("/home");
+    expect(reload).not.toHaveBeenCalled();
+  }
+
+  await rendered.cleanup();
+});
+
 test("AuthProvider preserves a usage-credit Checkout return through sign-in", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"

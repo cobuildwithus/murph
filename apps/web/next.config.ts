@@ -67,6 +67,7 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 // scripts/check-og-asset-traces.ts fails the build when a trace goes missing.
 const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
+  "public/icons/murph-mark.svg",
   "public/logo.svg",
 ];
 // The footer availability indicator reads the incident.io status-page summary

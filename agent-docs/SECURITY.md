@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Non-Negotiable Rules
 
@@ -75,10 +75,20 @@ Last verified: 2026-08-11
   summary and timeseries records. An unresolved source reference fails closed
   while any source admission is pending; a truly absent row retains the legacy
   admitted behavior.
-- Junction Oura `note` data is admitted only for its dated tags. The importer
-  maps each distinct tag to a completed intervention event and compact evidence.
-  It must remove the free-text `value` before provider-snapshot or evidence
-  retention, and must not place that text in Patterns, logs, or fixtures.
+- Junction `note` data is admitted only as normalized dated tag state. The
+  importer keeps one kind-stable neutral note spine per source-scoped provider
+  id, or per source-and-timestamp fallback when no id exists, and retains only
+  compact tag evidence. Two instances of the same provider cannot share that
+  spine. A record without a tag field stays canonical-no-op; a replay of the same
+  provider note with changed or explicitly empty tags revises or clears the
+  spine's tag set. It must remove the free-text `value` before provider-snapshot
+  or evidence retention, and it must not place that text in Patterns, logs, or
+  fixtures. Personal Patterns fails closed on the canonical note type plus
+  Junction/Oura provenance. It currently treats only the exact `sauna` tag as
+  an action; every other source or tag stays neutral. Junction note-history
+  coverage version 2 reopens each legacy-covered source for one bounded pass so
+  existing members receive neutral replacement notes without rewriting or
+  deleting the legacy event spines.
 - Composio connected-app authority is web-owned. Keep `COMPOSIO_API_KEY`, `OPENWEATHER_API_KEY`, remote Tool Router session ids, OAuth state, provider tokens, and full authorization URLs out of runner env, Codex prompts, diagnostics, logs, fixtures, and persisted workspace artifacts. The runner may call only the single signed connected-app control route; web must bind every operation to the callback-authenticated member, enforce approved toolkits plus read-only/non-destructive session tags, require explicit account selection for connected-account execution, and allow accountless execution only for server-owned built-in service tool slugs. Web may inject server-held OpenWeather custom auth only for the allowlisted Composio weather reads. The exact official-alert slug may instead call the fixed OpenWeather One Call origin and path with only validated latitude and longitude, a fixed section exclusion, a short timeout, no cache, a response byte limit, and a bounded normalized projection. The runner never receives the OpenWeather key and cannot choose the provider URL or add query arguments. Connected-app writes remain limited to the exact server-owned fixed-write allowlist: primary-calendar event creation plus bounded Gmail and Microsoft Outlook sends. Every fixed write requires agent approval, an active owned account from the matching toolkit, a pinned provider version, local missing, blank, unsupported, and server-owned argument rejection, and server-forced provider fields. Email sends additionally require current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable, and an ambiguous email outcome may be reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body; uncertain results remain unknown. Web must verify callback account ownership against Composio before showing success. Email, calendar, attachment, weather-alert, and other provider payloads are high-sensitivity untrusted data: full or raw payloads and free-form provider error messages must not be written to operational logs; Web may retain only bounded documented provider error codes or strict category slugs from a bounded failure body.
 - Member memory consolidation retains its isolated network-denied model turn. Reminder availability has no model turn, model-facing tool, or separate permission profile: the hosted background automation pass deterministically selects only active non-exact-time direct automations with exact current `skip-when-busy`, `calendar-only`, and Google Calendar or Outlook account-binding lines. Host code derives the stored account, fixed provider tool, current seven-day window, arguments, and 256-item cap; rejects incomplete pagination and unsupported timestamps; reduces the response to merged busy instants; then rereads the exact automation and requires its version and source/account binding to remain unchanged before atomically replacing the engine-owned suffix. Complete empty reads persist only their bounded timestamps so refresh cadence needs no second state owner. Raw event titles, bodies, attendees, locations, URLs, and provider identifiers must not enter a model, memory, automation instructions, or logs. Ordinary saves and instruction patches strip the owned suffix; changing to an exact-time schedule also converts the policy to fixed and removes its source and account binding. Scheduled execution requires a non-exact-time schedule, current exact policy/source/account authorization, and a canonical snapshot covering an occurrence scheduled within 24 hours of generation. The timestamp-only suffix is removed before every provider prompt. Its host-only snapshot remains a bounded derived-data lease: disconnect or provider revocation blocks future reads but can leave the current lease usable for up to one day. Policy removal or account replacement invalidates it immediately; malformed or older evidence, failed first activation, and concurrent edits fail open to normal reminder delivery without a live account-status request on every occurrence.
 - Habitat location is city-or-approximate-region data, never precise-address data. Reject a precise address at the ordinary Habitat write boundary, instruct voice extraction to discard it, and revalidate the canonical value immediately before weather-provider egress so an unsafe legacy record cannot leave Murph. Environment voice is AI work: first-seen uploads require the existing AI-usage gate and may create at most one unconsumed recording per member under the member lock. Exact duplicate retries may reuse the canonical claim without spending another admission because they cannot create additional work. Enforce the three-minute audio limit on server-side prepared media, not on the caller's duration field.
@@ -96,7 +106,7 @@ Last verified: 2026-08-11
   - A scheduled occurrence remains one ordinary Codex turn: start every selected ask, then use ordinary shell waits and exact replay to poll each accepted ask until it returns completed or unavailable. The existing request expiry bounds the loop. The cron owner revalidates the current canonical automation and non-direct route immediately before each Murph tool call; Web then revalidates the exact request, completion, and live disclosure authority before returning a completed result. Scheduled completion never wakes the group runtime, starts another provider turn, creates an outbox delivery, or holds a callback open while the member runtime works.
   - There is no incoming model reviewer. The personal read-only candidate receives the exact permission context. One fresh outgoing reviewer receives only that permission, the question, and candidate; it has an empty workspace and no shell, personal workspace, application tools, network, delivery route, or persistence. It may only allow or deny. An allowed answer enters only its target-bound completion adapter: the caller group's isolated output-only continuation for group disclosure, or the exact personal notification described below for private continuation. Denied candidates do not enter Murph durable state, operational logs, errors, or delivery.
   - Treat every reviewed answer as untrusted data, not authority for another action. The caller continuation receives no personal vault, target tools, shell, web, apps, plugins, or native provider resume authority and must not infer private facts beyond the reviewed answer. Do not add roster fan-out, broad vault mounts, member fallback, candidate/reviewer write tools, a rewrite loop, a policy engine, a second scheduler, a queue, or continuation lifecycle.
-- Treat AgentMail inbox ids, message metadata, attachment download URLs, and outbound email thread bindings as high-sensitivity operator data; never log or fixture real mailbox details or API keys.
+- Treat email addresses, message metadata, attachment download URLs, and outbound email thread bindings as high-sensitivity data; never log or fixture real mailbox details or transport credentials.
 
 ## Dependency Supply Chain Rules
 
@@ -284,9 +294,20 @@ Last verified: 2026-08-11
   `Object.assign`. Build the SDK-typed object first, then assign each optional
   field explicitly; this preserves excess-property checking that TypeScript
   otherwise loses across composed objects. `pnpm provider-requests:guard`
-  enforces the registered Stripe, Kernel, Linq, Retell, Temporal, OpenAI, and
-  Junction boundaries across production apps, packages, and scripts. Register
-  each new official SDK boundary when it is introduced. The opt-in
+  enforces the registered Composio, Stripe, Kernel, Linq, Retell, Temporal,
+  OpenAI, Resend, Junction, ElevenLabs, Exa, Lob, and Google Cloud client
+  boundaries across production apps, packages, and JavaScript/TypeScript
+  scripts. It also rejects direct `fetch`/`Request` construction when a known
+  provider origin is statically visible through local literals, templates,
+  URL objects, or variables. A detected official-SDK transport adapter may use
+  `provider-request-boundary-allow-next-line: sdk-transport-adapter` only when
+  the matching SDK is imported; a Linq SDK owner may use the
+  `linq-presigned-bytes` reason only for an `uploadUrl` or `downloadUrl` byte
+  transfer. The guard cannot prove the destination of imported or otherwise
+  runtime-computed URLs, and it does not inspect every possible HTTP library,
+  so it remains a focused boundary check rather than blanket proof that raw
+  provider HTTP is absent. Register each new official SDK and provider origin
+  when it is introduced. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode secret key and calls the real resume endpoint with a synthetic
   missing Subscription, so parameter drift fails without creating, charging,
@@ -343,6 +364,25 @@ Last verified: 2026-08-11
   membership check under the group transaction as a concurrency backstop.
   Contact hints, names, stale invitations, and a browser-supplied member id are
   never membership or payment authority.
+- An active Family owner membership without paid billing is not by itself
+  sponsorship authority. Automatic invite recovery may delete only the exact
+  accepting member's never-paid, owner-only group after proving it has no
+  invites, other memberships, paid capacity, Customer, Subscription, billing
+  period, or live or inconsistent Checkout claim. The authenticated Settings
+  recovery route must enforce the normal app session, same-origin mutation
+  check, suspension fence, and the exact group plus nullable Checkout-attempt
+  pair projected into the rendered action. Every abandonment caller supplies
+  that pair before Stripe retrieval, expiry, or a transaction begins; the
+  locked transaction then revalidates the complete claim so completion,
+  replacement, or new authority fails closed. A stale
+  duplicate binder must preserve an exact subscription already accepted by
+  that group and may close a completed Session only after the locked owner
+  boundary proves the original group is absent. Repeating a completed explicit
+  recovery may return only the already-validated internal invite path and must
+  perform no group creation, Checkout, provider call, or deletion. An in-flight
+  recovery must carry its exact projected group and Checkout-attempt identity
+  into replay and abandonment; a changed identity fails before provider cleanup
+  rather than rediscovering or retiring the owner's replacement checkout.
 - Group sponsorship separates funding authority from permission to speak into
   the room. A valid current funding locator may identify only the frozen group
   beneficiary. Alias, note, or running-bit content is accepted only from the
@@ -588,7 +628,7 @@ Last verified: 2026-08-11
   when `Content-Length` is absent or underreported. Logs may include only a
   normalized error code/type and booleans/counts, never callback state/code,
   tokens, patient ids, URLs, or provider response bodies.
-- AgentMail-backed email polling and delivery must keep API keys in environment variables only, must not write raw Authorization headers to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. A signed group route is routing authority, not SMTP sender authentication, and must never authorize any assistant-style mutation, whether personal or room-owned.
+- Hosted email ingress and delivery credentials must remain platform-managed, must not write raw authorization material to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. A signed group route is routing authority, not SMTP sender authentication, and must never authorize any assistant-style mutation, whether personal or room-owned.
 - The companion legal-consent route is shared by the iOS and Android apps. It
   records the generic server-owned `native-companion` audit source because
   member authentication does not attest the client platform; a request's
@@ -598,11 +638,29 @@ Last verified: 2026-08-11
   account boundary. Its Privy bearer may create or recover the canonical hosted
   member through the existing consent, untouched-member trial, and access
   owner, but the closed request accepts only an optional validated IANA time
-  zone and the response is always the non-identifying `{ "ok": true }`. The
-  route requests the existing signup-welcome suppression policy so account
-  admission cannot reserve a Linq home line, queue a signup welcome, or send a
-  welcome email; canonical trial activation and its internal
-  `member.activated` fact remain unchanged. The route must not import or invoke
+  zone and the response is always the non-identifying `{ "ok": true }`. A
+  consented fresh companion activation with a verified phone may enter the
+  canonical signup-welcome path. Exact-member binding, signup idempotency,
+  home-line health, and proactive capacity remain governed by the existing
+  starter enrollment, line reservation, and welcome owners. Exhausted proactive
+  capacity must not block activation: Web still assigns an eligible home line
+  without a proactive welcome, and inbound-first messaging remains available.
+  If no line is assignable, activation still succeeds without creating route
+  authority. The ordinary route owner may later bind the exact active member's
+  provider-attested direct message to the contacted managed line when the
+  existing reply-egress policy permits it, including at-risk and delivery-
+  warning postures that cannot start proactive outreach. That narrow inbound
+  authority does not admit pending-contact or inactive-member claims. Unmanaged,
+  ambiguous, disabled, flagged, critical, unhealthy, or structurally
+  unavailable recipient lines cannot establish exact-line authority; the
+  ordinary fallback pool remains unchanged and fails closed when empty. Successful
+  welcome delivery may seed the existing finite three-local-day unfinished-
+  onboarding continuation, but companion admission must not add a second
+  scheduler or send the separate signup welcome email. If the committed
+  activation's runtime wake is not accepted, return the closed retryable
+  outcome and let replay re-signal only the exact unconsumed Starter activation
+  mailbox item for that member.
+  The route must not import or invoke
   device-sync public ingress, mint Junction authority, or create, resume,
   reactivate, or otherwise mutate a device connection. Validate the complete
   bounded body before acquiring Prisma or running member admission. Its

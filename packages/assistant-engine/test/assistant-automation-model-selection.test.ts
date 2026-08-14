@@ -11,8 +11,8 @@ import {
 } from '../src/assistant/automation/target-override.ts'
 
 const AUTOMATION_SCHEDULE = {
-  kind: 'at',
-  at: '2026-08-08T14:00:00.000Z',
+  kind: 'dailyLocal',
+  localTime: '09:00',
 } as const
 
 function readSaveRequest(assistantTargetOverride?: unknown) {
@@ -34,6 +34,7 @@ function readPatchRequest(assistantTargetOverride?: unknown) {
   return readAutomationDynamicToolRequest({
     arguments: {
       action: 'patch',
+      expectedUpdatedAt: '2031-02-14T12:00:00.000Z',
       ...(assistantTargetOverride === undefined
         ? { title: 'Updated burpee reminder' }
         : { assistantTargetOverride }),

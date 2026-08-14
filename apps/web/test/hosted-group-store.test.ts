@@ -21,6 +21,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   appendHostedGroupJoinConfirmationTx: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
@@ -50,6 +51,10 @@ vi.mock("@/src/lib/legal/consent", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
@@ -317,7 +322,21 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
-    mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
+    mocks.grantHostedVaultShareTx.mockImplementation(async (input) => ({
+      id: `share_${buildHostedVaultShareProjectionScopeKey(input.projectionScope)}`,
+      requiresProjection: true,
+    }));
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => ({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: {
+        id: "mailbox_projection_1",
+        lane: "system",
+        laneSeq: "1",
+        userId: input.envelope.userId,
+      },
+    }));
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
     mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
@@ -393,6 +412,63 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       projectionScope: PROFILE_SCOPE,
       tx,
     });
+  });
+
+  it("fails grant admission when durable projection maintenance cannot append", async () => {
+    const appendError = new Error("projection maintenance append failed");
+    mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(appendError);
+    const tx = buildTx();
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).rejects.toBe(appendError);
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.maintenance-requested",
+        userId: "member_joiner",
+      }),
+      tx,
+    });
+  });
+
+  it("deduplicates maintenance by grant generation and changes identity for a regrant", async () => {
+    let sleepGeneration = "generation_1";
+    mocks.grantHostedVaultShareTx.mockImplementation(async (input) => ({
+      id: input.projectionScope.projectionKind === "sleep-times.v0"
+        ? sleepGeneration
+        : "profile_generation_1",
+      requiresProjection: true,
+    }));
+    const tx = buildTx({
+      activeShareAlreadyExists: true,
+      existingMembershipId: "membership_existing",
+    });
+    const accept = () => acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      tx,
+    });
+
+    await accept();
+    await accept();
+    sleepGeneration = "generation_2";
+    await accept();
+
+    const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+      ([input]) => input.envelope.eventId,
+    );
+    expect(eventIds[0]).toBe(eventIds[1]);
+    expect(eventIds[2]).not.toBe(eventIds[1]);
   });
 
   it("appends a private confirmation in the first membership transaction", async () => {
@@ -783,6 +859,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
       projectionScope: SLEEP_SCOPE,
+      refreshMaterializedProjection: true,
       tx,
     });
   });
@@ -1425,6 +1502,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now,
       projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      refreshMaterializedProjection: true,
       tx,
     });
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
@@ -1680,6 +1758,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now,
       projectionScope: SLEEP_SCOPE,
+      refreshMaterializedProjection: true,
       tx,
     });
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
@@ -2064,7 +2143,10 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
+    mocks.grantHostedVaultShareTx.mockImplementation(async (input) => ({
+      id: `share_${buildHostedVaultShareProjectionScopeKey(input.projectionScope)}`,
+      requiresProjection: true,
+    }));
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
   });
 

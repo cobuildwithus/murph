@@ -43,6 +43,26 @@ const scheduledReminderDeliveredText =
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep, I am here.";
+const scheduledNutritionCard = {
+  kind: "daily_nutrition",
+  version: 2,
+  localDate: "2026-07-28",
+  mealCount: 3,
+  totals: {
+    calories: { mealCount: 3, total: 1_490.25 },
+    carbsGrams: { mealCount: 3, total: 193.125 },
+    fatGrams: { mealCount: 3, total: 34.75 },
+    fiberGrams: { mealCount: 3, total: 26.5 },
+    proteinGrams: { mealCount: 3, total: 94.5 },
+  },
+  goals: {
+    calories: { status: "under_target", target: 2_100 },
+    carbsGrams: { status: "on_target", target: 220 },
+    fatGrams: { status: "on_target", target: 40 },
+    fiberGrams: { status: "under_target", target: 30 },
+    proteinGrams: { status: "on_target", target: 100 },
+  },
+} as const;
 const wakePreservationWindowRequestText =
   "Confirm the hosted-local wake-preservation checkpoint window.";
 const wakePreservationWindowReplyText =
@@ -52,12 +72,19 @@ const scheduledReminderLeadMs = scheduledReminderTiming.leadMs;
 const setupLeadText = scheduledReminderTiming.setupLeadText;
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
+const scheduledNutritionCardSetupRequestText =
+  `Remind me here in ${setupLeadText} to show my daily nutrition summary as a card.`;
+const scheduledNutritionCardInstructions =
+  "Show the user the hosted-local daily nutrition summary as a card.";
 const scheduledImageSetupRequestText =
   `Remind me here in ${setupLeadText} to go to sleep with a simple illustration.`;
 const scheduledReminderInstructions =
   "Send the user the hosted-local sleep reminder: go to sleep.";
 const scheduledImageReminderInstructions =
   "Send the user the hosted-local sleep reminder with a simple sleep illustration.";
+const scheduledImageReminderTitle = "Sleep image reminder";
+const overlapReminderTitle = "Overlapping sleep reminder";
+const scheduledNutritionCardTitle = "Daily nutrition card reminder";
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
@@ -131,6 +158,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: scheduledReminderTimes.dueAtIso,
         instructions: scheduledImageReminderInstructions,
         text: setupReplyText,
+        title: scheduledImageReminderTitle,
       }),
       { matchInputContains: scheduledImageSetupRequestText },
     );
@@ -276,6 +304,8 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     });
 
     expect(sendRequest.method).toBe("POST");
+    expect(requireObservedRequestTimestamp(sendRequest))
+      .toBeGreaterThanOrEqual(Date.parse(scheduledReminderTimes.dueAtIso));
     expect(requireLinqStub().readObservedMessageText(sendRequest))
       .toBe(scheduledReminderDeliveredText);
     expect(readObservedLinqMessageParts(sendRequest)).toEqual([
@@ -314,6 +344,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: overlapSetupTimes.dueAtIso,
         instructions: scheduledReminderInstructions,
         text: setupReplyText,
+        title: overlapReminderTitle,
       }),
       { matchInputContains: setupRequestText },
     );
@@ -449,6 +480,116 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     } finally {
       heldOverlapReminderResponse.release();
     }
+
+    const scheduledCardSetupTimes = resolveScheduledReminderTimes();
+    const scheduledCardSetupBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath);
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantAutomationSaveResponses({
+        dueAtIso: scheduledCardSetupTimes.dueAtIso,
+        instructions: scheduledNutritionCardInstructions,
+        text: setupReplyText,
+        title: scheduledNutritionCardTitle,
+      }),
+      { matchInputContains: scheduledNutritionCardSetupRequestText },
+    );
+    const scheduledCardSetupResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(
+        userId,
+        scheduledChatId,
+        {
+          eventId: `evt_scheduled_nutrition_card_setup_${userId}`,
+          messageId: `msg_scheduled_nutrition_card_setup_${userId}`,
+          text: scheduledNutritionCardSetupRequestText,
+        },
+      ),
+    );
+    expect(scheduledCardSetupResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const scheduledCardSetupSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: scheduledCardSetupBaselineCount,
+      expectedPath: reminderPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(scheduledCardSetupSend))
+      .toBe(setupReplyText);
+    const scheduledCardSetupStatus = await requireScenario()
+      .waitForHostedCompletion(userId);
+    expect(scheduledCardSetupStatus.lastErrorCode ?? null).toBeNull();
+    await waitForHostedWorkspaceWakeNotLaterThan({
+      latestAllowedWakeAt: scheduledCardSetupTimes.dueAtIso,
+      userId,
+    });
+    assertScheduledReminderRunway(scheduledCardSetupTimes.dueAtIso);
+
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("attach_response_card", {
+        card: scheduledNutritionCard,
+      }),
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver scheduled nutrition card",
+        text: "Nutrition card attached.",
+      }),
+    ], {
+      matchInputContains: scheduledNutritionCardInstructions,
+    });
+    const scheduledCardMatcher = createObservedLinqIMessageAppCardMatcher();
+    const scheduledCardTotalSendBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath);
+    const scheduledCardNativeSendBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath, scheduledCardMatcher);
+    const capabilityPath = "/capability/check_imessage";
+    const capabilityMatcher = requireLinqStub().createIMessageCapabilityRequestMatcher({
+      address: memberPhone,
+    });
+    const scheduledCardCapabilityBaselineCount = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: capabilityPath,
+      matchRequest: capabilityMatcher,
+    });
+
+    await sleepUntil(scheduledCardSetupTimes.dueAtIso);
+    const scheduledCardWakeResult =
+      await requireScenario().waitForLatestPendingWake(userId);
+    expect(scheduledCardWakeResult.lastErrorCode ?? null).toBeNull();
+    const scheduledCardSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: scheduledCardNativeSendBaselineCount,
+      expectedPath: reminderPath,
+      matchRequest: scheduledCardMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(scheduledCardSend)).toBeNull();
+    expect(requireLinqStub().readObservedMessageAppCard(scheduledCardSend)).toMatchObject({
+      fallback_text: "Your daily nutrition. Ask Murph for this card in text",
+      interactive: true,
+      layout: {
+        caption: "Jul 28 · 3 meals",
+      },
+      type: "imessage_app",
+    });
+    await requireLinqStub().waitForMatchingRequestCount({
+      expectedCount: scheduledCardCapabilityBaselineCount + 1,
+      expectedMethod: "POST",
+      expectedPath: capabilityPath,
+      matchRequest: capabilityMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    const scheduledCardFinalStatus = await requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: scheduledReminderCompletionWaitMs,
+    });
+    expect(scheduledCardFinalStatus.lastErrorCode ?? null).toBeNull();
+    expect(requireLinqStub().countObservedSends(reminderPath, scheduledCardMatcher))
+      .toBe(scheduledCardNativeSendBaselineCount + 1);
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: capabilityPath,
+      matchRequest: capabilityMatcher,
+    })).toBe(scheduledCardCapabilityBaselineCount + 1);
+    expect(requireLinqStub().countObservedSends(reminderPath))
+      .toBe(scheduledCardTotalSendBaselineCount + 1);
   }, 720_000);
 });
 
@@ -463,20 +604,78 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
     expect(fullTiming).toEqual({
       idleCheckpointDelayMs: 10_000,
       leadMs: 90_000,
-      setupLeadText: "about ninety seconds",
+      setupLeadText: "about two minutes",
     });
     expect(fastTiming).toEqual({
       idleCheckpointDelayMs: 1,
       leadMs: 90_000,
-      setupLeadText: "about ninety seconds",
+      setupLeadText: "about two minutes",
     });
     expect(resolveScheduledReminderTimes(now, fullTiming.leadMs)).toEqual({
-      dueAtIso: "2026-06-18T12:01:30.000Z",
+      dueAtIso: "2026-06-18T12:02:00.000Z",
     });
     expect(resolveScheduledReminderTimes(now, fastTiming.leadMs)).toEqual({
-      dueAtIso: "2026-06-18T12:01:30.000Z",
+      dueAtIso: "2026-06-18T12:02:00.000Z",
     });
+    const nearMinuteEndNow = new Date("2026-06-18T12:00:50.000Z");
+    const nearMinuteEndTimes = resolveScheduledReminderTimes(
+      nearMinuteEndNow,
+      fullTiming.leadMs,
+    );
+    expect(nearMinuteEndTimes).toEqual({
+      dueAtIso: "2026-06-18T12:03:00.000Z",
+    });
+    expect(Date.parse(nearMinuteEndTimes.dueAtIso) - nearMinuteEndNow.getTime())
+      .toBe(130_000);
+    expect(resolveScheduledReminderLocalAt("2026-06-18T12:02:00.000Z")).toEqual({
+      date: "2026-06-18",
+      time: "12:02",
+      timeZone: "UTC",
+    });
+    expect(() => resolveScheduledReminderLocalAt("2026-06-18T12:02:30.000Z"))
+      .toThrow("Expected a minute-aligned scheduled reminder timestamp");
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
+  });
+
+  it("uses distinct create-only automation identities across scenario phases", () => {
+    const dueAtIso = "2026-06-18T12:02:00.000Z";
+    const scriptedSaves = [
+      {
+        instructions: scheduledImageReminderInstructions,
+        title: scheduledImageReminderTitle,
+      },
+      {
+        instructions: scheduledReminderInstructions,
+        title: overlapReminderTitle,
+      },
+      {
+        instructions: scheduledNutritionCardInstructions,
+        title: scheduledNutritionCardTitle,
+      },
+    ].map(({ instructions, title }) => buildHostedAssistantAutomationSaveResponses({
+      dueAtIso,
+      instructions,
+      text: setupReplyText,
+      title,
+    })[0]);
+
+    expect(scriptedSaves).toEqual([
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${scheduledImageReminderTitle}"`),
+        }),
+      }),
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${overlapReminderTitle}"`),
+        }),
+      }),
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${scheduledNutritionCardTitle}"`),
+        }),
+      }),
+    ]);
   });
 });
 
@@ -699,16 +898,20 @@ function buildHostedAssistantAutomationSaveResponses(input: {
   dueAtIso: string;
   instructions: string;
   text: string;
+  title: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
     buildAssistantProviderMurphToolCall("automation", {
       action: "save",
       continuityPolicy: "preserve",
       instructions: input.instructions,
-      schedule: { at: input.dueAtIso, kind: "at" },
+      schedule: {
+        kind: "at",
+        localAt: resolveScheduledReminderLocalAt(input.dueAtIso),
+      },
       summary: "One-shot sleep reminder.",
       tags: ["assistant", "scheduled"],
-      title: "Sleep reminder",
+      title: input.title,
     }),
     input.text,
   ];
@@ -989,15 +1192,42 @@ function createObservedLinqMessageTextMatcher(
   return (request) => requireLinqStub().readObservedMessageText(request) === expectedText;
 }
 
+function createObservedLinqIMessageAppCardMatcher(): ObservedLinqRequestMatcher {
+  return (request) => requireLinqStub().readObservedMessageAppCard(request) !== null;
+}
+
 function resolveScheduledReminderTimes(
   now = new Date(),
   leadMs = scheduledReminderLeadMs,
 ): {
   dueAtIso: string;
 } {
-  const dueAtMs = now.getTime() + leadMs;
+  const minimumDueAtMs = now.getTime() + leadMs;
+  const dueAtMs = Math.ceil(minimumDueAtMs / 60_000) * 60_000;
   return {
     dueAtIso: new Date(dueAtMs).toISOString(),
+  };
+}
+
+function resolveScheduledReminderLocalAt(dueAtIso: string): {
+  date: string;
+  time: string;
+  timeZone: "UTC";
+} {
+  const dueAt = new Date(dueAtIso);
+  if (
+    Number.isNaN(dueAt.getTime())
+    || dueAt.getUTCSeconds() !== 0
+    || dueAt.getUTCMilliseconds() !== 0
+  ) {
+    throw new Error(`Expected a minute-aligned scheduled reminder timestamp: ${dueAtIso}`);
+  }
+
+  const normalizedDueAtIso = dueAt.toISOString();
+  return {
+    date: normalizedDueAtIso.slice(0, 10),
+    time: normalizedDueAtIso.slice(11, 16),
+    timeZone: "UTC",
   };
 }
 
@@ -1012,7 +1242,7 @@ function resolveScheduledReminderTiming(
     idleCheckpointDelayMs:
       env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? 1 : 10_000,
     leadMs: 90_000,
-    setupLeadText: "about ninety seconds",
+    setupLeadText: "about two minutes",
   };
 }
 

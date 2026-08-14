@@ -29,6 +29,9 @@ import type {
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+  isHostedVaultShareRecentDateProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -1714,6 +1717,15 @@ function renderHostedGroupJoinOfferScopeSentence(
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
   const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
   const disclosures: string[] = [];
+  if (projectionScopes.some((scope) =>
+    isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
+  )) {
+    disclosures.push(
+      projectionScopes.some(isHostedGroupSleepStageProjectionScope)
+        ? "health values include source names, and sleep stages include each source's recorded time"
+        : "health values include their source names",
+    );
+  }
   // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
   // the totals come from the member's meals, connected-app imports included, so a
   // like-to-consent reaction is not materially narrower than what is exported.
@@ -1722,9 +1734,35 @@ function renderHostedGroupJoinOfferScopeSentence(
       "nutrition totals come from your meals in Murph, including meals imported from connected apps",
     );
   }
-  if (projectionScopes.some(isHostedGroupSleepSourceProjectionScope)) {
+  const recentSleepLabels = [
+    ...(projectionScopes.some((scope) => scope.projectionKind === "sleep-times.v0")
+      ? ["sleep timing"]
+      : []),
+    ...(projectionScopes.some(
+      (scope) => scope.projectionKind === "sleep-duration-days.v0",
+    )
+      ? ["sleep duration"]
+      : []),
+  ];
+  if (recentSleepLabels.length > 0) {
     disclosures.push(
-      "by-source sleep includes every available source's value and name, plus when Murph recorded that source value",
+      `${formatHumanList(recentSleepLabels)} ${recentSleepLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
+    );
+  }
+  const recentActivityLabels = projectionScopes.flatMap((scope) => {
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} distance and session count`];
+    }
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} session count`];
+    }
+    return [];
+  });
+  if (recentActivityLabels.length > 0) {
+    disclosures.push(
+      `${formatHumanList(recentActivityLabels)} ${recentActivityLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
     );
   }
   return disclosures.length > 0
@@ -1741,10 +1779,12 @@ function isHostedGroupMealNutritionProjectionScope(
   );
 }
 
-function isHostedGroupSleepSourceProjectionScope(
+function isHostedGroupSleepStageProjectionScope(
   scope: HostedVaultShareProjectionScope,
 ): boolean {
-  return scope.projectionKind === "deep-sleep-sources-days.v1"
+  return scope.projectionKind === "deep-sleep-days.v0"
+    || scope.projectionKind === "deep-sleep-sources-days.v1"
+    || scope.projectionKind === "rem-sleep-days.v0"
     || scope.projectionKind === "rem-sleep-sources-days.v1";
 }
 
@@ -1785,7 +1825,7 @@ async function authorizeHostedRuntimeDirectLinqChat(input: {
       prisma: getPrisma(),
       target: input.chatId,
     });
-    if (assertion.threadIsDirect !== true) {
+    if (assertion.resolvedRoute.threadIsDirect !== true) {
       return { unavailableReason: "linq_thread_unauthorized" };
     }
   } catch {

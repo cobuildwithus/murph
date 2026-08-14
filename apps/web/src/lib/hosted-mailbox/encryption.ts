@@ -7,11 +7,15 @@ import {
 
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 
+import type {
+  CachedUnwrappedHostedDomainRoot,
+} from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   prewarmHostedUserSecureBoxStrings,
   openHostedUserSecureBoxStringsWithPreparedRoots,
   openHostedUserSecureBoxString,
   sealHostedUserSecureBoxString,
+  sealHostedUserSecureBoxStringFromPreparedRoot,
   type HostedSecureBoxPrismaClient,
 } from "../hosted-crypto/secure-box";
 import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
@@ -78,6 +82,24 @@ export async function prewarmHostedMailboxPayloadActiveRoot(input: {
     userId: input.userId,
   });
   root.rootKey.fill(0);
+}
+
+export async function encryptHostedMailboxPayloadStringFromPreparedRoot(
+  input: HostedMailboxPayloadCryptoMetadata & {
+    preparedRoot: Promise<CachedUnwrappedHostedDomainRoot>;
+    preparedRootKeyId: string;
+    value: string | null | undefined;
+  },
+): Promise<string | null> {
+  return sealHostedUserSecureBoxStringFromPreparedRoot({
+    aad: buildHostedMailboxPayloadSecureBoxAad(input),
+    lane: "mailbox-payload",
+    preparedRoot: input.preparedRoot,
+    preparedRootKeyId: input.preparedRootKeyId,
+    scope: buildHostedMailboxPayloadScope(input.payloadStorage),
+    userId: input.userId,
+    value: input.value,
+  });
 }
 
 export async function decryptHostedMailboxPayloadString(input: HostedMailboxPayloadCryptoMetadata & {

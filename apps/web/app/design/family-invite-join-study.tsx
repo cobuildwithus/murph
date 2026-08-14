@@ -4,6 +4,9 @@ import {
   FamilyInviteScreen,
   type FamilyInviteView,
 } from "@/src/components/family/family-invite-screen";
+import type {
+  FamilyInviteWebAcceptInitialState,
+} from "@/src/components/family/family-invite-accept-client";
 import { JoinInviteCenteredShell } from "@/src/components/hosted-onboarding/join-invite-shell";
 import type { HostedFamilyInviteAcceptanceView } from "@/src/lib/hosted-onboarding/family-plan";
 
@@ -86,6 +89,13 @@ export function FamilyInviteJoinStudy() {
           view={BASE_PENDING_VIEW}
         />
         <InviteStatePreview
+          label="Signed in · unfinished owner setup blocks joining"
+          state="signed-in-draft-conflict"
+          authenticated
+          view={BASE_PENDING_VIEW}
+          webAcceptInitialState="draft_conflict"
+        />
+        <InviteStatePreview
           label="Email invite · sign in to join"
           state="email-bound-sign-in"
           view={EMAIL_BOUND_VIEW}
@@ -136,6 +146,7 @@ function InviteStatePreview(props: {
   messagesAcceptHref?: string | null;
   state: string;
   view: FamilyInviteView;
+  webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
 }) {
   return (
     <div className="flex flex-col gap-3" data-design-state={props.state}>
@@ -148,6 +159,9 @@ function InviteStatePreview(props: {
             authenticated={props.authenticated ?? false}
             messagesAcceptHref={props.messagesAcceptHref ?? null}
             view={props.view}
+            {...(props.webAcceptInitialState
+              ? { webAcceptInitialState: props.webAcceptInitialState }
+              : {})}
           />
         </div>
       </div>
