@@ -200,3 +200,10 @@ Updated: 2026-08-14
   watermark maintenance, actual unanchored rejection, and eligibility of a
   genuinely new intent. Five affected assistant-engine suites pass 249 tests;
   assistant-engine typecheck and build pass under Node 24.14.1.
+- ReviewGPT tooling refresh: the registry, installed package, and repository
+  wrapper all report `0.5.126`. The manifest, lock entry, and existing
+  version-specific release-age exception advance from `0.5.124` without
+  re-resolving unrelated transitive dependencies. Frozen install, dependency
+  policy, and the full workspace typecheck pass. The repo-tools suite passed
+  536 of 541 tests while competing with that workspace typecheck; the five
+  process-readiness timeouts then passed in an isolated 48-test rerun.
