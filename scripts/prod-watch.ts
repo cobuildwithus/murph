@@ -3,11 +3,11 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, chmod, lstat, mkdtemp, open, readFile, realpath, rm, unlink } from "node:fs/promises";
+import { access, chmod, lstat, mkdtemp, open, readFile, realpath, rename, rm, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   acquireDirectoryLock,
@@ -4331,16 +4331,10 @@ async function preparePinnedSchedulerRuntime(approvedHead: string): Promise<{ ro
   const root = path.join(parent, approvedHead);
   await ensurePrivateDirectory(parent);
   if (!(await pathExists(root))) {
-    const created = await spawnCaptured(
-      "git",
-      ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", root, approvedHead],
-      { cwd: repoRoot, timeoutMs: 120_000, outputLimitBytes: 64 * 1_024 },
-    );
-    if (created.status !== 0 || created.timedOut) {
-      throw new Error("scheduler_pinned_runtime_create_failed");
-    }
+    await createSelfContainedSchedulerRuntime(parent, root, repoRoot, approvedHead);
   }
   await chmod(root, 0o700);
+  await assertPinnedSchedulerRuntime(root, approvedHead);
   const testModules = testOverrides?.nodeModulesSource;
   const installed = testModules === undefined
     ? await spawnCaptured(
@@ -4365,17 +4359,109 @@ async function preparePinnedSchedulerRuntime(approvedHead: string): Promise<{ ro
   return { root, head: approvedHead };
 }
 
+async function createSelfContainedSchedulerRuntime(
+  parent: string,
+  root: string,
+  repositoryTopLevel: string,
+  approvedHead: string,
+): Promise<void> {
+  const stagingRoot = path.join(parent, `.creating-${approvedHead}-${randomUUID()}`);
+  try {
+    const initialized = await spawnCaptured(
+      "git",
+      ["init", "--quiet", stagingRoot],
+      { cwd: parent, timeoutMs: 10_000, outputLimitBytes: 4 * 1_024 },
+    );
+    if (initialized.status !== 0 || initialized.timedOut) {
+      throw new Error("scheduler_pinned_runtime_create_failed");
+    }
+    await chmod(stagingRoot, 0o700);
+    for (const [key, value] of [
+      ["core.hooksPath", "/dev/null"],
+      ["core.logAllRefUpdates", "false"],
+      ["gc.auto", "0"],
+    ] as const) {
+      const configured = await spawnCaptured(
+        "git",
+        ["config", key, value],
+        { cwd: stagingRoot, timeoutMs: 10_000, outputLimitBytes: 4 * 1_024 },
+      );
+      if (configured.status !== 0 || configured.timedOut) {
+        throw new Error("scheduler_pinned_runtime_create_failed");
+      }
+    }
+    const fetched = await spawnCaptured(
+      "git",
+      [
+        "-c",
+        "protocol.file.allow=always",
+        "fetch",
+        "--quiet",
+        "--depth=1",
+        "--no-tags",
+        "--no-write-fetch-head",
+        pathToFileURL(repositoryTopLevel).href,
+        approvedHead,
+      ],
+      { cwd: stagingRoot, timeoutMs: 120_000, outputLimitBytes: 64 * 1_024 },
+    );
+    if (fetched.status !== 0 || fetched.timedOut) {
+      throw new Error("scheduler_pinned_runtime_create_failed");
+    }
+    const checkedOut = await spawnCaptured(
+      "git",
+      ["checkout", "--quiet", "--detach", approvedHead],
+      { cwd: stagingRoot, timeoutMs: 120_000, outputLimitBytes: 64 * 1_024 },
+    );
+    if (checkedOut.status !== 0 || checkedOut.timedOut) {
+      throw new Error("scheduler_pinned_runtime_create_failed");
+    }
+    await assertPinnedSchedulerRuntime(stagingRoot, approvedHead);
+    try {
+      await rename(stagingRoot, root);
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== "EEXIST" && code !== "ENOTEMPTY") || !(await pathExists(root))) {
+        throw error;
+      }
+    }
+  } finally {
+    await rm(stagingRoot, { recursive: true, force: true });
+  }
+}
+
 async function assertPinnedSchedulerRuntime(root: string, approvedHead: string): Promise<void> {
-  const [head, status] = await Promise.all([
+  const [head, status, commonDirectory] = await Promise.all([
     resolveRequiredGitHead(root),
     spawnCaptured("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
       cwd: root,
       timeoutMs: 10_000,
       outputLimitBytes: 64 * 1_024,
     }),
+    spawnCaptured("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      cwd: root,
+      timeoutMs: 10_000,
+      outputLimitBytes: 4 * 1_024,
+    }),
   ]);
   if (head !== approvedHead || status.status !== 0 || status.stdout.length > 0) {
     throw new Error("scheduler_pinned_runtime_mutated");
+  }
+  const resolvedRoot = await realpath(root);
+  const resolvedCommonDirectory = commonDirectory.status === 0
+    && !commonDirectory.timedOut
+    && commonDirectory.stdout.trim().length > 0
+    ? await realpath(commonDirectory.stdout.trim()).catch(() => "")
+    : "";
+  const relativeCommonDirectory = path.relative(resolvedRoot, resolvedCommonDirectory);
+  if (
+    resolvedCommonDirectory.length === 0
+    || relativeCommonDirectory === ".."
+    || relativeCommonDirectory.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativeCommonDirectory)
+    || await pathExists(path.join(resolvedCommonDirectory, "objects", "info", "alternates"))
+  ) {
+    throw new Error("scheduler_pinned_runtime_external_git_state");
   }
 }
 

@@ -3868,6 +3868,33 @@ describe("production-watch static safety contracts", () => {
       expect(replacementCalls[3]).toContain("enable");
       expect(replacementCalls[4]).toContain("print");
       expect(readFileSync(plistPath, "utf8")).toContain("murph-prod-watch-managed:v1");
+      const pinnedRuntimeRoot = path.join(
+        runtimeRoot,
+        "operations",
+        "prod-watch",
+        "scheduler-runtime",
+        sharedEnv.MURPH_PROD_WATCH_APPROVED_HEAD,
+      );
+      expect(statSync(path.join(pinnedRuntimeRoot, ".git")).isDirectory()).toBe(true);
+      const commonDirectory = spawnSync(
+        "git",
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        { cwd: pinnedRuntimeRoot, encoding: "utf8" },
+      );
+      expect(commonDirectory.status, commonDirectory.stderr).toBe(0);
+      const relativeCommonDirectory = path.relative(
+        realpathSync(pinnedRuntimeRoot),
+        realpathSync(commonDirectory.stdout.trim()),
+      );
+      expect(relativeCommonDirectory).not.toBe("..");
+      expect(relativeCommonDirectory.startsWith(`..${path.sep}`)).toBe(false);
+      expect(path.isAbsolute(relativeCommonDirectory)).toBe(false);
+      expect(existsSync(path.join(
+        commonDirectory.stdout.trim(),
+        "objects",
+        "info",
+        "alternates",
+      ))).toBe(false);
 
       writeFileSync(launchctlLog, "");
       const enableFailure = runProdWatchFromCheckout(
