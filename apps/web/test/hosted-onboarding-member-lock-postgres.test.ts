@@ -40,7 +40,11 @@ import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
-import { runHostedAccountDeletionCleanup } from "@/src/lib/hosted-privacy/account-deletion-cleanup";
+import {
+  persistHostedAccountDeletionCleanupTx,
+  prepareHostedAccountDeletionCleanup,
+  runHostedAccountDeletionCleanup,
+} from "@/src/lib/hosted-privacy/account-deletion-cleanup";
 import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -1219,7 +1223,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const authenticationClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const fixtureId = randomUUID();
       const oldMemberId = `hbm_privy_delete_${fixtureId}`;
-      const cleanupId = `hbadc_privy_delete_${fixtureId}`;
       const privyUserId = `did:privy:delete-race-${fixtureId}`;
       const privyUserLookupKey = createHostedPrivyUserLookupKey(privyUserId);
       const authenticationReachedReceiptRead = createDeferred();
@@ -1230,6 +1233,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       if (!privyUserLookupKey) {
         throw new Error("Expected a Privy user lookup key for the concurrency fixture.");
       }
+
+      const preparedCleanup = await prepareHostedAccountDeletionCleanup({
+        now: cleanupStartedAt,
+        privyUserId,
+        runtimeMemberIds: [oldMemberId],
+        stripeCustomerIds: [],
+      });
+      preparedCleanup.cloudflareCompletedAt = cleanupStartedAt;
+      preparedCleanup.stripeCompletedAt = cleanupStartedAt;
+      const cleanupId = preparedCleanup.id;
 
       privyProvider.exists = true;
       privyProvider.deleteUser.mockClear();
@@ -1244,23 +1257,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         },
       });
       await deletionClient.$transaction(async (tx) => {
-        await tx.hostedAccountDeletionCleanup.create({
-          data: {
-            cloudflareCompletedAt: cleanupStartedAt,
-            environment: "test",
-            id: cleanupId,
-            kmsKeyName:
-              "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
-            nextAttemptAt: cleanupStartedAt,
-            payloadCiphertext: encodeCleanupPayload({
-              privyUserId,
-              runtimeMemberIds: [oldMemberId],
-              schema: "murph.hosted-account-deletion-cleanup.v1",
-              stripeCustomerIds: [],
-            }),
-            privyUserLookupKey,
-            stripeCompletedAt: cleanupStartedAt,
-          },
+        await persistHostedAccountDeletionCleanupTx({
+          cleanup: preparedCleanup,
+          prisma: tx,
         });
         await tx.hostedMember.delete({
           where: { id: oldMemberId },
@@ -2358,15 +2357,6 @@ async function applyOrdinaryBillingProgress(input: {
       member: input.member,
       tx,
     }), { timeout: transactionTimeoutMs });
-}
-
-function encodeCleanupPayload(value: {
-  privyUserId: string;
-  runtimeMemberIds: string[];
-  schema: "murph.hosted-account-deletion-cleanup.v1";
-  stripeCustomerIds: string[];
-}): string {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64");
 }
 
 function makeActiveStripeSubscription(input: {

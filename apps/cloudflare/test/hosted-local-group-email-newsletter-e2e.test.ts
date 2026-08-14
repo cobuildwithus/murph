@@ -132,8 +132,11 @@ describe("hosted local group email newsletter e2e", () => {
       }),
     ]);
     await Promise.all([
-      requireScenario().runWake(buildActivationWake(), ownerMemberId),
-      requireScenario().runWake(buildActivationWake(), missingEmailMemberId),
+      requireScenario().runWake(buildActivationWake(ownerMemberId), ownerMemberId),
+      requireScenario().runWake(
+        buildActivationWake(missingEmailMemberId),
+        missingEmailMemberId,
+      ),
     ]);
     const [ownerActivated, missingEmailActivated] = await Promise.all([
       requireScenario().waitForHostedCompletion(ownerMemberId),
@@ -300,11 +303,11 @@ describe("hosted local group email newsletter e2e", () => {
   }, 720_000);
 });
 
-function buildActivationWake() {
+function buildActivationWake(memberId: string) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${ownerMemberId}:group-email-newsletter`,
+    eventId: `member.activated:local:${memberId}:group-email-newsletter`,
     memberChannels: { email: false, linq: true, telegram: false },
-    memberId: ownerMemberId,
+    memberId,
     occurredAt: new Date().toISOString(),
   });
 }
