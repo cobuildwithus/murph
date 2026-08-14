@@ -6,7 +6,7 @@ import {
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
-import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "./junction-historical-backfill-progress.ts";
+import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "./junction-source-reconnect.ts";
 import { stringifyJson } from "./shared.ts";
 
 import {
@@ -65,7 +65,6 @@ import {
 import {
   listConnectionSources as listStoredConnectionSources,
   markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
-  upsertJunctionConnectionSourceProjection as upsertStoredJunctionConnectionSourceProjection,
   upsertConnectionSource as upsertStoredConnectionSource,
   upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
@@ -230,14 +229,11 @@ export class SqliteDeviceSyncStore {
     return patchStoredAccount(this.database, accountId, patch);
   }
 
-  upsertConnectionSource(input: UpsertDeviceConnectionSourceInput): StoredDeviceConnectionSource {
-    return upsertStoredConnectionSource(this.database, input);
-  }
-
-  upsertJunctionConnectionSourceProjection(
+  upsertConnectionSource(
     input: UpsertDeviceConnectionSourceInput,
+    options?: { preserveDisconnected?: boolean },
   ): StoredDeviceConnectionSource {
-    return upsertStoredJunctionConnectionSourceProjection(this.database, input);
+    return upsertStoredConnectionSource(this.database, input, options);
   }
 
   listConnectionSources(input: ListDeviceConnectionSourcesInput): StoredDeviceConnectionSource[] {
@@ -426,10 +422,11 @@ export class SqliteDeviceSyncStore {
 
   commitConnectionEstablished(input: {
     accountId: string;
+    expectedSourceLastSeenAt?: string | null;
     jobs: readonly DeviceSyncJobInput[];
     provider: string;
     source?: UpsertDeviceConnectionSourceInput | null;
-  }): DeviceSyncJobRecord[] {
+  }): DeviceSyncJobRecord[] | null {
     return withImmediateTransaction(this.database, () => {
       if (input.source) {
         const existingSource = input.provider === "junction" && input.source.status === "connected"
@@ -438,6 +435,16 @@ export class SqliteDeviceSyncStore {
               sourceProviderSlug: input.source.sourceProviderSlug,
             }).find((source) => source.sourceInstanceKey === input.source?.sourceInstanceKey)
           : null;
+        if (
+          input.provider === "junction"
+          && input.source.status === "connected"
+          && (
+            existingSource?.status !== "disconnected"
+            || existingSource.lastSeenAt !== input.expectedSourceLastSeenAt
+          )
+        ) {
+          return null;
+        }
         const reconnectsJunctionSource = existingSource?.status === "disconnected";
 
         if (reconnectsJunctionSource) {

@@ -7,6 +7,10 @@ import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { SqliteDeviceSyncStore } from "../src/store.ts";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "../src/junction-historical-backfill-progress.ts";
 import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "../src/store/jobs.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { makeTempDirectory } from "./helpers.ts";
@@ -330,12 +334,61 @@ test("device sync store commits source admission with initial jobs atomically", 
       lastSeenAt: "2026-07-28T10:00:00.000Z",
     };
     store.upsertConnectionSource(source);
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: account.metadata,
+      providerSlug: "garmin",
+      resource: "note",
+      version: 2,
+    });
+    assert.ok(coverage);
+    store.patchAccount(account.id, {
+      metadata: { ...account.metadata, [coverage.metadataKey]: coverage.value },
+    });
+    const revisionBeforeStaleAdmission = store.getAccountById(account.id)?.localConnectionRevision;
+
+    store.upsertConnectionSource({
+      ...source,
+      lastSeenAt: "2026-07-28T10:00:30.000Z",
+    });
+    const stale = store.commitConnectionEstablished({
+      accountId: account.id,
+      expectedSourceLastSeenAt: source.lastSeenAt,
+      provider: account.provider,
+      source: {
+        ...source,
+        status: "connected",
+        lastSeenAt: "2026-07-28T10:01:00.000Z",
+      },
+      jobs: [{
+        availableAt: "2026-07-28T10:01:00.000Z",
+        kind: "reconcile",
+        payload: {},
+      }],
+    });
+    assert.equal(stale, null);
+    assert.equal(store.listConnectionSources({ connectionId: account.id })[0]?.status, "disconnected");
+    assert.equal(store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch, 1);
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      revisionBeforeStaleAdmission,
+    );
+    assert.equal(
+      hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        store.getAccountById(account.id)?.metadata ?? {},
+        "garmin",
+        "note",
+        2,
+      ),
+      true,
+    );
+    assert.equal(store.claimDueJob("worker-a", "2026-07-28T10:02:00.000Z", 60_000), null);
 
     const circularPayload: Record<string, unknown> = {};
     circularPayload.self = circularPayload;
     assert.throws(() =>
       store.commitConnectionEstablished({
         accountId: account.id,
+        expectedSourceLastSeenAt: "2026-07-28T10:00:30.000Z",
         provider: account.provider,
         source: {
           ...source,
@@ -359,7 +412,7 @@ test("device sync store commits source admission with initial jobs atomically", 
     );
     assert.equal(
       store.getAccountById(account.id)?.localConnectionRevision,
-      account.localConnectionRevision,
+      revisionBeforeStaleAdmission,
     );
     assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:02:00.000Z", 60_000),
@@ -368,6 +421,7 @@ test("device sync store commits source admission with initial jobs atomically", 
 
     const committed = store.commitConnectionEstablished({
       accountId: account.id,
+      expectedSourceLastSeenAt: "2026-07-28T10:00:30.000Z",
       provider: account.provider,
       source: {
         ...source,
@@ -380,6 +434,7 @@ test("device sync store commits source admission with initial jobs atomically", 
         payload: {},
       }],
     });
+    assert.ok(committed);
     assert.equal(committed.length, 1);
     assert.equal(
       store.listConnectionSources({ connectionId: account.id })[0]?.status,
@@ -391,7 +446,7 @@ test("device sync store commits source admission with initial jobs atomically", 
     );
     assert.equal(
       store.getAccountById(account.id)?.localConnectionRevision,
-      account.localConnectionRevision + 1,
+      (revisionBeforeStaleAdmission ?? 0) + 1,
     );
     assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:04:00.000Z", 60_000)?.id,

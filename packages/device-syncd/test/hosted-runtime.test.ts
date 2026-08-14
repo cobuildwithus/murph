@@ -1448,6 +1448,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       buildSnapshot(legacySource),
     );
     expect(parsed.connections[0]?.sources?.[0]?.lastDataAt).toBeNull();
+    expect(parsed.connections[0]?.sources?.[0]?.lifecycleEpoch).toBeUndefined();
 
     // A present-but-malformed value is still a contract violation.
     expect(() =>
@@ -1455,6 +1456,16 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         buildSnapshot({ ...legacySource, lastDataAt: "not-a-timestamp" }),
       )
     ).toThrow();
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+        buildSnapshot({ ...legacySource, lifecycleEpoch: null }),
+      )
+    ).toThrow(/lifecycleEpoch must be a positive integer/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+        buildSnapshot({ ...legacySource, lifecycleEpoch: 0 }),
+      )
+    ).toThrow(/lifecycleEpoch must be a positive integer/u);
 
     const withArrival = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
       buildSnapshot({ ...legacySource, lastDataAt: "2026-07-01T07:59:00+00:00" }),

@@ -7,6 +7,9 @@ import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
+import {
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
+} from "@murphai/device-syncd/junction-source-reconnect";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -31,7 +34,6 @@ import {
 } from "@murphai/device-syncd/public-account";
 import {
   bucketHostedDeviceSyncEventToProviderSendDelay,
-  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   measureHostedDeviceSyncProviderSendToWebhookMs,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,

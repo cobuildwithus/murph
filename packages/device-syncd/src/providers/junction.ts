@@ -245,7 +245,7 @@ interface JunctionImportAdmissionSource {
 }
 
 type JunctionImportSourceStatusRequirement = "connected" | "not_disconnected";
-type JunctionCurrentSourceAdmission = "admitted" | "fenced" | "pending" | "superseded";
+type JunctionCurrentSourceAdmission = "admitted" | "fenced" | "pending";
 
 interface JunctionHistoricalUnresolvedProviderRecords {
   identities: readonly string[];
@@ -884,11 +884,18 @@ export function createJunctionDeviceSyncProvider(
           days: extendedTimeseriesBackfillDays,
         });
         return {
-          policy,
+          availableAt: now,
+          ...(resource === "note"
+            ? { historicalBackfillVersion: policy.version }
+            : {}),
+          historicalWindowStart: window.windowStart,
           resource,
-          source,
+          ...(policy.anchor === "current_day"
+            ? { sourceLifecycleEpoch: source.lifecycleEpoch }
+            : {}),
           sourceProviderSlug,
-          window,
+          windowEnd: window.windowEnd,
+          windowStart: window.windowStart,
         };
       });
     });
@@ -902,20 +909,7 @@ export function createJunctionDeviceSyncProvider(
     );
     const scheduleSlot = Math.floor(Date.parse(now) / reconcileIntervalMs);
     const candidate = candidates[scheduleSlot % candidates.length]!;
-    return [buildExtendedTimeseriesBackfillJob({
-      availableAt: now,
-      ...(candidate.resource === "note"
-        ? { historicalBackfillVersion: candidate.policy.version }
-        : {}),
-      historicalWindowStart: candidate.window.windowStart,
-      resource: candidate.resource,
-      ...(candidate.policy.anchor === "current_day"
-        ? { sourceLifecycleEpoch: candidate.source.lifecycleEpoch }
-        : {}),
-      sourceProviderSlug: candidate.sourceProviderSlug,
-      windowEnd: candidate.window.windowEnd,
-      windowStart: candidate.window.windowStart,
-    })];
+    return [buildExtendedTimeseriesBackfillJob(candidate)];
   }
 
   /**
@@ -2161,14 +2155,12 @@ export function createJunctionDeviceSyncProvider(
           });
         }
         const sourceLifecycleEpoch = extendedHistoricalPolicy?.anchor === "current_day"
-          ? readJunctionSourceLifecycleEpoch(job.payload)
+          ? readJunctionPositiveInteger(job.payload.sourceLifecycleEpoch)
           : null;
         if (
           extendedHistoricalPolicy?.anchor === "current_day"
           && sourceLifecycleEpoch === null
         ) {
-          // A pre-epoch schedule-time job cannot prove which source lifecycle
-          // it belongs to. Let the current scheduler replace it.
           return {};
         }
         const historicalWindowStart =
@@ -2188,10 +2180,7 @@ export function createJunctionDeviceSyncProvider(
               sourceProviderSlug,
               sourceLifecycleEpoch ?? undefined,
             );
-            if (
-              currentSourceAdmission === "fenced"
-              || currentSourceAdmission === "superseded"
-            ) {
+            if (currentSourceAdmission === "fenced") {
               return {};
             }
           }
@@ -2236,10 +2225,7 @@ export function createJunctionDeviceSyncProvider(
           }
           throw error;
         }
-        if (
-          currentSourceAdmission === "fenced"
-          || currentSourceAdmission === "superseded"
-        ) {
+        if (currentSourceAdmission === "fenced") {
           return {};
         }
         if (
@@ -2388,10 +2374,7 @@ export function createJunctionDeviceSyncProvider(
         );
         if (
           extendedHistoricalBackfill
-          && (
-            timeseriesImport.postFetchSourceAdmission === "fenced"
-            || timeseriesImport.postFetchSourceAdmission === "superseded"
-          )
+          && timeseriesImport.postFetchSourceAdmission === "fenced"
         ) {
           return {};
         }
@@ -3314,31 +3297,6 @@ export function createJunctionDeviceSyncProvider(
 
     if (executionWindowStart && executionWindowEnd) {
       try {
-        if (
-          sourceProviderSlug
-          && options.sourceStatusRequirement === "connected"
-        ) {
-          postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
-            context,
-            sourceProviderSlug,
-            options.sourceLifecycleEpoch,
-          );
-          if (postFetchSourceAdmission !== "admitted") {
-            return {
-              acceptedProviderRecordCount: 0,
-              canonicalProviderRecordIdentities: [],
-              canonicalEventCount: 0,
-              fetchComplete: false,
-              postFetchSourceAdmission,
-              providerRecordsExamined: false,
-              providerRecordCount,
-              unresolvedProviderRecordIdentities,
-              unresolvedProviderRecordCount,
-              unresolvedProviderRecordsWithoutStableIdentity,
-              yieldedAt: null,
-            };
-          }
-        }
         const preparedImport = await prepareJunctionImportSnapshot(
           context,
           dedupedTimeseries,
@@ -8004,7 +7962,7 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return null;
   }
 
-  const sourceLifecycleEpoch = readJunctionSourceLifecycleEpoch(payload);
+  const sourceLifecycleEpoch = readJunctionPositiveInteger(payload.sourceLifecycleEpoch);
   if (policy.anchor === "current_day" && sourceLifecycleEpoch === null) {
     return null;
   }
@@ -8149,13 +8107,10 @@ function readJunctionNoteHistoryBackfillVersion(
     : 1;
 }
 
-function readJunctionSourceLifecycleEpoch(
-  payload: Record<string, unknown>,
+function readJunctionPositiveInteger(
+  value: unknown,
 ): number | null {
-  const epoch = payload.sourceLifecycleEpoch;
-  return typeof epoch === "number" && Number.isSafeInteger(epoch) && epoch >= 1
-    ? epoch
-    : null;
+  return typeof value === "number" && value >= 1 && Number.isSafeInteger(value) ? value : null;
 }
 
 function buildJunctionWebhookJobs(input: {
@@ -9375,7 +9330,7 @@ async function resolveJunctionCurrentSourceAdmission(
       && (source.lifecycleEpoch ?? 1) === expectedLifecycleEpoch
     )
   ) {
-    return "superseded";
+    return "fenced";
   }
   return isJunctionSourceAdmittedForImport(
     sources,

@@ -81,13 +81,16 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
   "weight",
 ] as const);
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
-  ["blood_pressure", 1],
+export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.freeze([
   ["note", 2],
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
     (resource) => [resource, 1] as const,
   ),
   ["weight", 1],
+]);
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
+  ["blood_pressure", 1],
+  ...JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
 ]);
 const JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
@@ -530,39 +533,6 @@ export function removeJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
       : metadata;
   }
   metadata[metadataKey] = value;
-  return metadata;
-}
-
-/**
- * Exact-source reconnect admission clears schedule-time history evidence in
- * the caller's existing database transaction. Blood pressure is provider-pull
- * completion evidence and is intentionally not reset here.
- */
-export function clearJunctionScheduleTimeExtendedHistoryCoverageForProvider(input: {
-  metadata: Record<string, unknown>;
-  providerSlug: string;
-}): Record<string, unknown> {
-  let metadata = { ...input.metadata };
-
-  for (const resource of JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS) {
-    if (resource === "blood_pressure") {
-      continue;
-    }
-    const version = JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(resource);
-    if (version === undefined) {
-      continue;
-    }
-    const cleared = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
-      metadata,
-      providerSlug: input.providerSlug,
-      resource,
-      version,
-    });
-    if (cleared) {
-      metadata = cleared;
-    }
-  }
-
   return metadata;
 }
 

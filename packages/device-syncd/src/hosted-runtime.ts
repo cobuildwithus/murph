@@ -8,7 +8,6 @@ import {
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
-  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedJunctionHistoricalBackfillMetadata,
@@ -27,7 +26,6 @@ import type {
 
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
-  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillProgress,
@@ -444,13 +442,12 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
   observedLastSeenAt: string | null;
-  observedLifecycleEpoch?: number | null;
+  observedLifecycleEpoch?: number;
   displayName?: string | null;
   status: DeviceConnectionSourceStatus;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
-  lifecycleEpoch?: number;
   firstSeenAt?: string | null;
   lastSeenAt: string;
   lastDataAt?: string | null;
@@ -1922,7 +1919,6 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
     "lastErrorCode",
     "lastErrorMessage",
     "lastSeenAt",
-    "lifecycleEpoch",
     "observedLifecycleEpoch",
     "observedLastSeenAt",
     "resourceAvailabilitySummary",
@@ -1953,14 +1949,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       record.observedLastSeenAt,
       `${label}.observedLastSeenAt`,
     ),
-    ...(record.observedLifecycleEpoch === undefined
-      ? {}
-      : {
-          observedLifecycleEpoch: readNullablePositiveInteger(
-            record.observedLifecycleEpoch,
-            `${label}.observedLifecycleEpoch`,
-          ),
-        }),
+    observedLifecycleEpoch: record.observedLifecycleEpoch === undefined
+      ? undefined
+      : requirePositiveInteger(
+          record.observedLifecycleEpoch,
+          `${label}.observedLifecycleEpoch`,
+        ),
     sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`),
     sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     ...(record.displayName === undefined
@@ -1980,14 +1974,6 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       : {
           lastErrorMessage: sanitizeHostedRuntimeErrorText(
             readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
-          ),
-        }),
-    ...(record.lifecycleEpoch === undefined
-      ? {}
-      : {
-          lifecycleEpoch: requirePositiveInteger(
-            record.lifecycleEpoch,
-            `${label}.lifecycleEpoch`,
           ),
         }),
     ...(record.firstSeenAt === undefined

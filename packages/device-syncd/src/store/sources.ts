@@ -503,29 +503,19 @@ function getConnectionSourceByInstanceKey(
 export function upsertConnectionSource(
   database: DatabaseSync,
   input: UpsertDeviceConnectionSourceInput,
-): StoredDeviceConnectionSource {
-  return withImmediateTransaction(database, () =>
-    upsertConnectionSourceInTransaction(database, input)
-  );
-}
-
-/**
- * Provider projection may refresh an existing Junction source, but it cannot
- * consume a disconnected reconnect boundary owned by callback admission.
- */
-export function upsertJunctionConnectionSourceProjection(
-  database: DatabaseSync,
-  input: UpsertDeviceConnectionSourceInput,
+  options: { preserveDisconnected?: boolean } = {},
 ): StoredDeviceConnectionSource {
   return withImmediateTransaction(database, () => {
-    const normalized = normalizeSourceInput(input);
-    const existing = getConnectionSourceByInstanceKey(
-      database,
-      normalized.connectionId,
-      normalized.sourceInstanceKey,
-    );
-    if (existing?.status === "disconnected" && normalized.status !== "disconnected") {
-      return existing;
+    if (options.preserveDisconnected) {
+      const normalized = normalizeSourceInput(input);
+      const existing = getConnectionSourceByInstanceKey(
+        database,
+        normalized.connectionId,
+        normalized.sourceInstanceKey,
+      );
+      if (existing?.status === "disconnected" && normalized.status !== "disconnected") {
+        return existing;
+      }
     }
     return upsertConnectionSourceInTransaction(database, input);
   });

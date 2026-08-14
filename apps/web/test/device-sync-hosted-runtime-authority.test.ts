@@ -1940,14 +1940,14 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
   });
 
   it.each([
-    {
+    ...(["connected", "disconnected", "error", "unavailable"] as const).map((projectedStatus) => ({
       currentLifecycleEpoch: 1,
       currentStatus: "disconnected" as const,
-      label: "disconnected lifecycle fence without an error sentinel",
+      label: `disconnected lifecycle fence projected as ${projectedStatus}`,
       lastErrorCode: null,
       observedLifecycleEpoch: 1,
-      projectedLifecycleEpoch: 1,
-    },
+      projectedStatus,
+    })),
     ...[
       "SOURCE_DISCONNECT_IN_PROGRESS",
       "SOURCE_START_CLEANUP_IN_PROGRESS",
@@ -1958,7 +1958,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       label: lastErrorCode,
       lastErrorCode,
       observedLifecycleEpoch: 1,
-      projectedLifecycleEpoch: 1,
+      projectedStatus: "connected" as const,
     })),
     {
       currentLifecycleEpoch: 2,
@@ -1966,14 +1966,22 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       label: "stale lifecycle epoch",
       lastErrorCode: null,
       observedLifecycleEpoch: 1,
-      projectedLifecycleEpoch: 1,
+      projectedStatus: "connected" as const,
+    },
+    {
+      currentLifecycleEpoch: 2,
+      currentStatus: "connected" as const,
+      label: "missing lifecycle epoch after reconnect",
+      lastErrorCode: null,
+      observedLifecycleEpoch: undefined,
+      projectedStatus: "connected" as const,
     },
   ])("does not let a runtime source projection cross the $label", async ({
     currentLifecycleEpoch,
     currentStatus,
     lastErrorCode,
     observedLifecycleEpoch,
-    projectedLifecycleEpoch,
+    projectedStatus,
   }) => {
     const connectionId = "conn_junction";
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
@@ -2017,7 +2025,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             sources: [{
               displayName: null,
               firstSeenAt: "2026-04-06T09:00:00.000Z",
-              lifecycleEpoch: projectedLifecycleEpoch,
               lastErrorCode: null,
               lastErrorMessage: null,
               lastSeenAt: "2026-04-06T10:05:00.000Z",
@@ -2026,7 +2033,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               resourceAvailabilitySummary: { sleep: true },
               sourceInstanceKey,
               sourceProviderSlug: "oura",
-              status: "connected",
+              status: projectedStatus,
             }],
           }],
           userId: "user_123",

@@ -271,9 +271,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
           : { resourceAvailabilitySummary: source.resourceAvailabilitySummary }),
         lastErrorCode: source.lastErrorCode,
         lastErrorMessage: source.lastErrorMessage,
-        ...(source.lifecycleEpoch === undefined
-          ? {}
-          : { lifecycleEpoch: source.lifecycleEpoch }),
+        lifecycleEpoch: source.lifecycleEpoch ?? 1,
         firstSeenAt: source.firstSeenAt,
         lastSeenAt: source.lastSeenAt,
         // Merged monotonically below rather than taken verbatim: Web and the
@@ -1616,10 +1614,7 @@ function buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
         observedLastSeenAt: baseline?.lastSeenAt ?? null,
         ...(baseline?.lifecycleEpoch === undefined
           ? {}
-          : {
-              lifecycleEpoch: source.lifecycleEpoch,
-              observedLifecycleEpoch: baseline.lifecycleEpoch,
-            }),
+          : { observedLifecycleEpoch: baseline.lifecycleEpoch }),
         displayName: source.displayName ?? null,
         status: source.status,
         resourceAvailabilitySummary: { ...source.resourceAvailabilitySummary },
@@ -1655,10 +1650,6 @@ function hostedDeviceSyncRuntimeSourceUpdateMatchesBaseline(
     )
     && (baseline.lastErrorCode ?? null) === (update.lastErrorCode ?? null)
     && (baseline.lastErrorMessage ?? null) === (update.lastErrorMessage ?? null)
-    && (
-      update.lifecycleEpoch === undefined
-      || (baseline.lifecycleEpoch ?? 1) === update.lifecycleEpoch
-    )
     && baseline.firstSeenAt === (update.firstSeenAt ?? null)
     && baseline.lastSeenAt === update.lastSeenAt
     && (baseline.lastDataAt ?? null) === (update.lastDataAt ?? null);

@@ -30,6 +30,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./junction-inline-authority",
     "./junction-push-source-recovery",
     "./junction-resources",
+    "./junction-source-reconnect",
     "./local-secret-codec",
     "./provider-configs",
     "./provider-credential-policy",
@@ -73,6 +74,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   assert.deepEqual(packageManifest.exports?.["./junction-resources"], {
     default: "./dist/junction-resources.js",
     types: "./dist/junction-resources.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./junction-source-reconnect"], {
+    default: "./dist/junction-source-reconnect.js",
+    types: "./dist/junction-source-reconnect.d.ts",
   });
   assert.deepEqual(packageManifest.exports?.["./provider-credential-policy"], {
     default: "./dist/provider-credential-policy.js",

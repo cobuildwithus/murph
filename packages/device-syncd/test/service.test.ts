@@ -926,6 +926,70 @@ test("local shared-Junction target starts preserve established siblings through 
     await assert.doesNotReject(
       service.handleWebhook("junction", new Headers(), Buffer.from("fitbit")),
     );
+
+    const connectedFitbit = store.listConnectionSources({
+      connectionId: baseline.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.equal(connectedFitbit?.lifecycleEpoch, 2);
+
+    vi.setSystemTime(new Date("2026-07-28T10:06:00.000Z"));
+    const staleReconnect = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+    vi.setSystemTime(new Date("2026-07-28T10:07:00.000Z"));
+    const currentReconnect = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+    const jobsBeforeCallbacks = countJobsForAccountForTesting(store, baseline.id);
+    const revisionBeforeCallbacks = store.getAccountById(baseline.id)?.localConnectionRevision;
+
+    vi.setSystemTime(new Date("2026-07-28T10:08:00.000Z"));
+    await assert.rejects(
+      service.handleConnectionCallback({
+        expectedOwnerId: "<REDACTED_OWNER_ID>",
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: staleReconnect.state,
+          result: "success",
+        }),
+      }),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "CONNECTION_SOURCE_START_STALE",
+    );
+    const afterStaleCallback = store.listConnectionSources({
+      connectionId: baseline.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.equal(afterStaleCallback?.status, "disconnected");
+    assert.equal(afterStaleCallback?.lifecycleEpoch, 2);
+    assert.equal(countJobsForAccountForTesting(store, baseline.id), jobsBeforeCallbacks);
+    assert.equal(
+      store.getAccountById(baseline.id)?.localConnectionRevision,
+      revisionBeforeCallbacks,
+    );
+
+    vi.setSystemTime(new Date("2026-07-28T10:09:00.000Z"));
+    await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: currentReconnect.state,
+        result: "success",
+      }),
+    });
+    const afterCurrentCallback = store.listConnectionSources({
+      connectionId: baseline.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.equal(afterCurrentCallback?.status, "connected");
+    assert.equal(afterCurrentCallback?.lifecycleEpoch, 3);
+    assert.ok(countJobsForAccountForTesting(store, baseline.id) > jobsBeforeCallbacks);
   } finally {
     close();
     vi.useRealTimers();
@@ -2588,6 +2652,13 @@ test("device sync job context lets providers update source projections", async (
       provider: "demo",
       state: begin.state,
       code: "source-projection",
+    });
+    store.upsertConnectionSource({
+      connectionId: connected.account.id,
+      lastSeenAt: "2026-04-01T00:00:00.000Z",
+      sourceInstanceKey: "oura",
+      sourceProviderSlug: "oura",
+      status: "disconnected",
     });
 
     await service.runWorkerOnce();

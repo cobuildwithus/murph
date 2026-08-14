@@ -2243,6 +2243,11 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
       });
+      assert.equal(
+        getStore(service).listConnectionSources({ connectionId: connected.account.id })[0]
+          ?.lifecycleEpoch,
+        1,
+      );
 
       // Only the arrival advances; everything else matches the baseline. If the
       // outbound comparator ignored lastDataAt this would be dropped as a no-op
@@ -2264,6 +2269,7 @@ describe("hosted device-sync runtime", () => {
       const projectedSources = appliedRequests
         .flatMap((request) => request.updates)
         .flatMap((update) => update.sources ?? []);
+      assert.equal(Object.hasOwn(projectedSources[0] ?? {}, "observedLifecycleEpoch"), false);
       assert.deepEqual(
         projectedSources.map((source) => (source as { lastDataAt?: string | null }).lastDataAt),
         ["2026-04-06T10:08:00.000Z"],

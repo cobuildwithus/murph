@@ -363,6 +363,7 @@ class DeviceSyncServiceController {
         onConnectionEstablished: async ({
           account,
           connection,
+          connectionStartedAt,
           now,
           provider,
           sourceProviderSlug,
@@ -373,8 +374,9 @@ class DeviceSyncServiceController {
                 sourceProviderSlug,
               })
             : null;
-          this.store.commitConnectionEstablished({
+          const committed = this.store.commitConnectionEstablished({
             accountId: account.id,
+            expectedSourceLastSeenAt: connectionStartedAt,
             jobs: this.normalizeJobsForEnqueue(account, connection.initialJobs ?? []),
             provider: account.provider,
             source: sourceInstanceKey && sourceProviderSlug
@@ -388,6 +390,14 @@ class DeviceSyncServiceController {
                 }
               : null,
           });
+          if (sourceInstanceKey && committed === null) {
+            throw deviceSyncError({
+              code: "CONNECTION_SOURCE_START_STALE",
+              message: "Device source state changed while its connection link was starting. Retry.",
+              retryable: true,
+              httpStatus: 409,
+            });
+          }
           await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
           return {
             sourceAdmissionCommitted: true,
@@ -1025,13 +1035,10 @@ class DeviceSyncServiceController {
         },
         upsertConnectionSource: (input) => {
           ensureExecutionActive();
-          const upsertSource = provider.provider === "junction"
-            ? this.store.upsertJunctionConnectionSourceProjection.bind(this.store)
-            : this.store.upsertConnectionSource.bind(this.store);
-          return upsertSource({
-            ...input,
-            connectionId: currentAccount.id,
-          });
+          return this.store.upsertConnectionSource(
+            { ...input, connectionId: currentAccount.id },
+            { preserveDisconnected: provider.provider === "junction" },
+          );
         },
         listConnectionSources: async (input = {}) => {
           ensureExecutionActive();

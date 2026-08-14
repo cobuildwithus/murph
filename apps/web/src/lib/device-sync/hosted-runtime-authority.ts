@@ -607,9 +607,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               ...(Object.prototype.hasOwnProperty.call(source, "lastErrorMessage")
                 ? { lastErrorMessage: source.lastErrorMessage ?? null }
                 : {}),
-              ...(Object.prototype.hasOwnProperty.call(source, "lifecycleEpoch")
-                ? { lifecycleEpoch: source.lifecycleEpoch }
-                : {}),
               ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
                 ? { firstSeenAt: source.firstSeenAt ?? null }
                 : {}),
@@ -1467,6 +1464,7 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
   );
   const toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[] = [];
   let staleCount = 0;
+  const junction = input.provider.trim().toLowerCase() === "junction";
   const historicalProgressMutable =
     canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.historicalMetadata);
   const historicalResetRequired = historicalProgressMutable
@@ -1485,26 +1483,25 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
 
     if (
       current
-      && update.observedLifecycleEpoch !== undefined
-      && current.lifecycleEpoch !== update.observedLifecycleEpoch
+      && (
+        (
+          update.observedLifecycleEpoch !== undefined
+          && current.lifecycleEpoch !== update.observedLifecycleEpoch
+        )
+        || (
+          junction
+          && current.lifecycleEpoch > 1
+          && update.observedLifecycleEpoch === undefined
+        )
+      )
     ) {
       staleCount += 1;
       continue;
     }
 
     if (
-      current
-      && update.lifecycleEpoch !== undefined
-      && current.lifecycleEpoch !== update.lifecycleEpoch
-    ) {
-      staleCount += 1;
-      continue;
-    }
-
-    if (
-      input.provider.trim().toLowerCase() === "junction"
+      junction
       && current?.status === "disconnected"
-      && update.status === "connected"
     ) {
       staleCount += 1;
       continue;
@@ -1644,10 +1641,6 @@ function hostedRuntimeSourceUpdateMatchesCurrent(
     )
     && current.lastErrorCode === (update.lastErrorCode ?? null)
     && current.lastErrorMessage === (update.lastErrorMessage ?? null)
-    && (
-      update.lifecycleEpoch === undefined
-      || current.lifecycleEpoch === update.lifecycleEpoch
-    )
     && current.firstSeenAt === (update.firstSeenAt ?? null)
     && current.lastSeenAt === update.lastSeenAt
     // A push carrier can deliver without any other field moving, so an

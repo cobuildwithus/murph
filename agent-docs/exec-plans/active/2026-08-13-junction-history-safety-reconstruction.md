@@ -14,8 +14,9 @@ Updated: 2026-08-13
 ## Success criteria
 
 - Every reconnect admission owner advances the exact Junction source lifecycle
-  once, clears only that source's schedule-time coverage, and atomically admits
-  current-lifecycle work; stale jobs cannot fetch, import, continue, or certify.
+  once and clears only that source's schedule-time coverage. Read fences stop
+  known-stale jobs before provider discovery, fetch, preparation, or import;
+  a lifecycle change observed after import stops continuation and certification.
 - Extended sparse history offers at most one uncovered coordinate per scheduler
   pass, preserves current main's bounded continuation behavior, and emits no
   history root once every admitted coordinate has completion coverage.
@@ -30,7 +31,7 @@ Updated: 2026-08-13
 
 - In scope:
   - Source lifecycle epoch persistence, hydration/projection/admission fences,
-    schedule-time job binding, and terminal/import rereads.
+    schedule-time job binding, and pre-import/post-import rereads.
   - Deterministic cap-one scheduling of uncovered sparse-history coordinates.
   - Existing SQLite/Postgres schema, hosted hint, runner, and direct proof
     surfaces required by those invariants.
@@ -74,7 +75,7 @@ Updated: 2026-08-13
 3. Risk: lifecycle repair can create another state owner or clear sibling/source-
    first coverage.
    Mitigation: keep epoch and coverage mutation on the exact existing source-row
-   admission transactions and fence every side-effect boundary with live reads.
+   admission transactions and fence provider/fetch/import decisions with live reads.
 4. Risk: late sparse facts remain outside this foundation after initial
    completion.
    Mitigation: state that limit explicitly and defer recovery until a separately
@@ -91,9 +92,9 @@ Updated: 2026-08-13
    preserving current pagination, completion-bit suppression, and retry owners.
 4. [completed] Audit rolling verification and reject it from this foundation because
    its composed maximum-cardinality provider load is unacceptable.
-5. [in progress] Run focused and comprehensive verification, bundle/type boundaries, privacy
-   scans, scope/shape review, and update durable docs only where current owner
-   contracts materially change.
+5. [completed] Run focused and comprehensive verification, bundle/type boundaries,
+   privacy scans, scope/shape review, and update durable docs only where current
+   owner contracts materially change.
 6. [pending] Commit and push a candidate, open a replacement PR with exact intent/load/
    deployment/shape/proof metadata, then run preliminary specialist and final
    ReviewGPT concurrently with CI.
@@ -109,9 +110,19 @@ Updated: 2026-08-13
 - Preserve the current `m1` 13-slot layout and current pagination by default.
 - Completion coverage is monotonic initial-obligation evidence, not a claim of
   permanent provider completeness.
+- The final pre-import lifecycle read prevents known-stale imports but is not an
+  atomic importer-write fence. A reconnect racing after that read can overlap an
+  import; the post-import read still prevents stale continuation or certification.
 - Use an intentional intermediate `scripts/committer` checkpoint before merging
   the newer current-main device-sync changes; keep this plan active until the
   integrated candidate completes its PR review gates.
+- Changelog is not applicable: this is internal lifecycle/scheduling hardening,
+  not a new member-visible capability, interaction, or safely distinct public
+  outcome.
+- Maximum schedule-time candidate cardinality remains 396 source/resource
+  coordinates, but one deterministic uncovered root is offered per scheduler
+  pass and fully covered accounts offer none. Rolling verification remains out
+  of scope because it would reintroduce unbounded composed provider work.
 
 ## Verification
 
@@ -128,3 +139,19 @@ Updated: 2026-08-13
   - All selected checks pass on the exact candidate; any unrelated blocker is
     named with the narrow reproducer and direct proof that the diff did not
     cause it.
+- Results on the integrated candidate before PR creation:
+  - Focused device-sync lifecycle/provider/store: 3 files, 249 tests passed.
+  - Assistant hosted-device-sync runtime: 1 file, 100 tests passed.
+  - Hosted Web runtime authority, wake, migration, Prisma source, and due-wake
+    owners: 5 files, 232 tests passed.
+  - Full `@murphai/device-syncd`: 47 files, 1,078 tests passed.
+  - Device-sync, assistant-runtime, and Web typechecks passed; Prisma schema
+    validation, device-sync runner package boundary, workspace package cycles,
+    docs drift, diff check, and privacy/secret/path scan passed.
+  - Workspace boundary verification reports an unchanged current-main sibling
+    test import violation outside this branch's diff; current-main contains the
+    same offending line.
+  - Production runner assembly built and passed parity probes, then measured
+    10,226,960 total bytes and an 8,088,603-byte static boot closure, exceeding
+    the checked-in limits by 57,261 and 133 bytes respectively. Hold ratchet
+    changes until the exact current-main benchmark classifies base drift.
