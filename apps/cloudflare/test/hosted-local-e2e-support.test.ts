@@ -571,6 +571,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.ask_grok"
       && name !== "murph.attach_response_card"
       && name !== "murph.attach_exercise_routine_card"
+      && name !== "murph.attach_telegram_rich_content"
     );
     const baseToolNamesWithoutProgress = baseToolNames.filter((name) =>
       name !== "murph.send_progress_update"
@@ -587,6 +588,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.ask_grok");
     expect(allToolNames).toContain("murph.attach_response_card");
     expect(allToolNames).toContain("murph.attach_exercise_routine_card");
+    expect(allToolNames).toContain("murph.attach_telegram_rich_content");
 
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),
@@ -637,6 +639,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
         responseCardAvailable: true,
+        telegramRichContentResponseCardAvailable: true,
         vaultFileSendAvailable: true,
         askGrokAvailable: true,
       },
