@@ -23,6 +23,7 @@ import {
   detectWorkspacePackageCycles,
   formatWorkspacePackageCycles,
 } from '../../../scripts/check-workspace-package-cycles.mjs'
+import { buildHostedWebVitestArgs } from '../../../apps/web/scripts/run-hosted-web-vitest.mjs'
 import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -4739,8 +4740,14 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       'pnpm health-commons:generate && pnpm test:prepared',
     )
     expect(hostedWebPackageJson.scripts?.['test:prepared']).toContain(
-      'vitest run --config apps/web/vitest.workspace.ts --no-coverage',
+      'tsx apps/web/scripts/run-hosted-web-vitest.mts',
     )
+    expect(buildHostedWebVitestArgs([])).toEqual([
+      'run',
+      '--config',
+      'apps/web/vitest.workspace.ts',
+      '--no-coverage',
+    ])
     expect(webVerify).toContain('MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV=1 pnpm dev:smoke')
     expect(webVerify).toContain('pnpm test:prepared')
     expect(webVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')
