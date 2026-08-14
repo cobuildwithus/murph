@@ -64,8 +64,9 @@ continuation authority, including causally monotonic clarification replacement
 and resolved-pointer replay closure. Current-sender clarification and
 continuation reuse the stateful dynamic-tool chain in provider request order,
 so one cannot overtake the other while independent new exact-ref requests stay
-concurrent. Before any external await, one turn-local decision claim per exact
-accepted ref prevents contradictory or duplicate same-ref effects; repeated
+concurrent. App Server request intake claims one turn-local decision per exact
+accepted ref in arrival order before lane selection or the pre-tool hook,
+preventing contradictory or duplicate same-ref effects; repeated
 group decisions share one in-flight notice, notice failure retains that claim,
 and Web's exact-source identity remains the durable replay fence. A marked
 current caller may start a group-bound read only after the required notice;
@@ -74,10 +75,12 @@ Web-first rollout,
 while unmarked private calls and already-persisted legacy work retain their
 bounded drain. One `current_sender_personal` target owns the read while a
 separate result destination owns group or same-channel direct delivery; replay
-cannot switch that destination. Private delivery has a distinct
-identity from the canonical group completion/fallback, so expiry or a lost
-private route produces only a fresh non-disclosing group `cannot_answer`
-completion. Its exact
+cannot switch that destination. A valid answered group completion whose sender
+loses personal runtime access before provider entry converges to the existing
+fixed non-disclosing fallback rather than becoming stranded. Private delivery
+has a distinct identity from the canonical group completion/fallback, so expiry
+or a lost private route produces only a fresh non-disclosing group
+`cannot_answer` completion. Its exact
 reviewed-text binding, personal direct-route revalidation at every provider
 attempt, and terminal no-fallback failure, plus exact legacy `aask_done_*` and
 current `aask_private_*` pre-checkpoint staging without generic-notification

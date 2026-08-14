@@ -791,21 +791,26 @@ Last verified: 2026-08-13
   stateful dynamic-tool chain in provider request order, so a later continuation
   cannot overtake an earlier clarification or its required notice boundary;
   independent new exact-ref requests remain concurrent.
-- Before any external await, the runtime records one turn-local decision claim
-  per exact accepted ref: clarification, group delivery, or private delivery,
-  including new versus continuation semantics. A different same-ref decision
-  fails before a notice, Web admission, or clarification write. Exact repeated
-  group decisions share one in-flight notice, and notice failure retains the
-  group claim for that invocation instead of allowing a private switch.
-  Different exact refs remain independently concurrent. This claim is
-  invocation-local only; Web's canonical exact-source request identity remains
-  the durable replay and disclosure-destination fence.
+- At the accepted App Server request boundary, strict parsing precedes one
+  turn-local decision claim per exact accepted ref in App Server request
+  arrival order. The claim occurs before dynamic-tool lane selection, the
+  pre-tool hook, notice, or Web work and distinguishes clarification, group,
+  private, new, and continuation semantics. A different same-ref decision
+  fails there. Exact repeated group decisions share one in-flight notice, and
+  notice failure retains the group claim for that invocation instead of
+  allowing a private switch. Different exact refs remain independently
+  concurrent. This claim is invocation-local only; Web's canonical exact-source
+  request identity remains the durable replay and disclosure-destination fence.
 - A successful current-sender completion cannot change result destination.
   `assistant.ask.completed` is the group path and remains bound to the exact
   origin request and synthetic group runtime. Linq and Telegram carry its exact
   completion proof into the existing Web-owned provider-entry authority
   transaction; stale disclosure authority replaces the answer with fixed
-  non-disclosing text before provider dispatch.
+  non-disclosing text before provider dispatch. A structurally valid answered
+  `origin_context` completion that loses current-sender personal runtime access
+  after persistence uses that same fixed fallback at provider entry instead of
+  stranding the group terminal. Invalid envelopes and destination mismatches
+  remain authority failures.
   `assistant.notification.requested` is the private path and may target only
   the source sender's current same-channel `direct-member` route, with
   `threadIsDirect: true`, queue-only dispatch, exact reviewed text, and no

@@ -1351,6 +1351,7 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     && isHostedAssistantAskCurrentSenderAuthority(authority)
     ? authority
     : null;
+  let currentSenderFallbackRequired = false;
   if (currentSenderAuthority) {
     const currentSenderRequestIds =
       readHostedGroupCurrentSenderAssistantAskRequestIds({
@@ -1360,16 +1361,26 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
           currentSenderAuthority.currentSender.origin.assistantInputId,
       });
     await acquireHostedAssistantAskLocksTx(input.tx, currentSenderRequestIds);
+    const fixedFallback = isHostedCurrentSenderGroupFallbackResult(
+      completionWake.ask.result,
+    );
+    currentSenderFallbackRequired =
+      supportsSafeFallback
+      && !currentSenderAuthority.currentSender.personalReadAllowed
+      && currentSenderAuthority.currentSender.resultDestination.kind
+        === "origin_context"
+      && !fixedFallback;
+    const personalReadDeniedWithoutFallback =
+      !currentSenderAuthority.currentSender.personalReadAllowed
+      && !currentSenderFallbackRequired;
     if (
       (
         (
           currentSenderAuthority.currentSender.resultDestination.kind
             === "requester_direct"
-          || !currentSenderAuthority.currentSender.personalReadAllowed
+          || personalReadDeniedWithoutFallback
         )
-        && !isHostedCurrentSenderGroupFallbackResult(
-          completionWake.ask.result,
-        )
+        && !fixedFallback
       )
       || !await hasExactlyOneHostedCurrentSenderRequestAliasTx({
         groupRuntimeMemberId:
@@ -1408,6 +1419,9 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
       return { assistantAskFallbackRequired: true };
     }
     throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
+  if (currentSenderFallbackRequired) {
+    return { assistantAskFallbackRequired: true };
   }
 }
 

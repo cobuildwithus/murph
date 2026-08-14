@@ -1202,15 +1202,18 @@ Last verified: 2026-08-13
   request order; a later continuation cannot start before an earlier
   clarification settles, while independent new exact-ref requests remain
   concurrent.
-- Before any external await, the runtime records one turn-local decision claim
-  per exact accepted ref. Contradictory clarification, group, private, new, or
-  continuation choices for that ref fail before notice, Web admission, or
-  clarification persistence. Exact repeated group decisions share one in-flight
-  notice promise. The claim remains after notice failure or uncertainty, so a
-  same-turn retry cannot switch to private delivery; different exact refs stay
-  concurrent. This is bounded invocation memory, not another durable owner.
-  Web's canonical exact-source request identity remains the replay fence across
-  invocations and restarts.
+- At accepted App Server request intake, strict parsing precedes one turn-local
+  decision claim per exact accepted ref in App Server request arrival order.
+  The claim happens before dynamic-tool lane selection or the pre-tool hook, so
+  a later immediate `new` request cannot overtake an earlier serialized
+  clarification or continuation. Contradictory clarification, group, private,
+  new, or continuation choices for that ref fail before notice, Web admission,
+  or clarification persistence. Exact repeated group decisions share one
+  in-flight notice promise. The claim remains after notice failure or
+  uncertainty, so a same-turn retry cannot switch to private delivery;
+  different exact refs stay concurrent. This is bounded invocation memory, not
+  another durable owner. Web's canonical exact-source request identity remains
+  the replay fence across invocations and restarts.
 - Admission persists one `current_sender_personal` read target and a separate
   result destination. `origin_context` selects the existing group completion;
   `requester_direct` also pins the admitted Linq or Telegram channel. The
@@ -1222,7 +1225,12 @@ Last verified: 2026-08-13
   mailbox item, a replay that switches destination conflicts, and exactly one
   alias may exist for an origin.
 - Group completion persists as `assistant.ask.completed` for the originating
-  group. Private completion persists as one deterministic queue-only
+  group. If a valid answered `origin_context` completion is already persisted
+  when the current sender loses personal runtime access, provider-entry
+  authority returns the existing fixed-fallback signal so the outbox sends the
+  non-disclosing terminal instead of becoming permanently stranded. Malformed
+  envelopes and destination mismatches remain terminal authority failures.
+  Private completion persists as one deterministic queue-only
   `assistant.notification.requested` for the source sender: exact text,
   same-channel current `direct-member` route, no external group-route authority,
   and the original request expiry. Its separate identity cannot block the

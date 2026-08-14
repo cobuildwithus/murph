@@ -47,9 +47,15 @@ describe("current-sender durable contract", () => {
       const ownerDoc = readFileSync(url, "utf8");
 
       expect(ownerDoc).toMatch(/turn-local\s+decision\s+claim/iu);
+      expect(ownerDoc).toMatch(
+        /App Server request[\s\S]{0,360}(?:arrival order|intake)/iu,
+      );
+      expect(ownerDoc).toMatch(
+        /before[\s\S]{0,120}(?:lane selection|dynamic-tool lane)[\s\S]{0,120}pre-tool/iu,
+      );
       expect(ownerDoc).toMatch(/in-flight\s+notice/iu);
       expect(ownerDoc).toMatch(
-        /different exact refs[\s\S]{0,80}concurrent/iu,
+        /different\s+exact\s+refs[\s\S]{0,80}concurrent/iu,
       );
       expect(ownerDoc).toMatch(
         /canonical\s+exact-source\s+request\s+identity/iu,
@@ -66,6 +72,9 @@ describe("current-sender durable contract", () => {
       );
       expect(ownerDoc).toMatch(
         /(?:expired[\s\S]{0,260}(?:private|effect)|(?:private|effect)[\s\S]{0,260}expired)/iu,
+      );
+      expect(ownerDoc).toMatch(
+        /answered[\s\S]{0,240}personal runtime access[\s\S]{0,240}(?:fixed|non-disclosing)[\s-]*fallback/iu,
       );
     }
   });

@@ -12,6 +12,7 @@ import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionLinqConversationMessageWake,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
 } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -145,6 +146,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import {
+  assertHostedAssistantAskCompletionDeliveryAuthorityTx,
   createHostedAssistantAskCompletionId,
   handleHostedRuntimeAssistantAskControl,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
@@ -1021,6 +1023,48 @@ describe("hosted current-sender Assistant Ask authority", () => {
       response: { action: "complete", status: "already_completed" },
     });
     expect(storedItems.size).toBe(2);
+  });
+
+  it("requires the fixed fallback when personal access is lost after group completion", async () => {
+    const { requestId } = await admit({
+      text: "Murph, ask my Murph how my synthetic activity has changed?",
+    });
+    const result = {
+      answer: "Synthetic activity increased.",
+      outcome: "answered" as const,
+    };
+    await handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: NOW,
+      request: { action: "complete", requestId, result },
+    });
+    const completionId = createHostedAssistantAskCompletionId(requestId);
+    const completionWake = requireCompletedWake(completionId);
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockImplementation(
+      async (memberId: string) => {
+        if (memberId === CURRENT_SENDER_MEMBER_ID) {
+          throw Object.assign(new Error("runtime inactive"), {
+            code: "HOSTED_ASSISTANT_ASK_RUNTIME_INACTIVE",
+            retryable: false,
+          });
+        }
+      },
+    );
+
+    await expect(
+      assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+        answeredMailboxItemIds: [completionId],
+        assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
+        assistantAskFallback: false,
+        boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        idempotencyKey:
+          createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+            completionId,
+          ),
+        now: new Date(NOW.getTime() + 1_000),
+        tx: asPrismaTransactionClient(fakeTx),
+      }),
+    ).resolves.toEqual({ assistantAskFallbackRequired: true });
   });
 
   it.each([

@@ -970,15 +970,18 @@ the existing stateful dynamic-tool chain in provider request order, so an
 earlier clarification settles before a later continuation may begin its notice
 or Web effect; independent new exact-ref requests remain concurrent.
 
-Before any external await, the runtime records one turn-local decision claim
-per exact accepted ref. A different same-ref clarification, group, private,
-new, or continuation decision fails before a notice, Web admission, or
-clarification write. Exact repeated group decisions share one in-flight notice;
-notice failure retains the group claim for the invocation rather than allowing
-a private switch. Different exact refs remain independently concurrent. The
-claim is invocation-local only. Web's canonical exact-source request identity
-remains the durable replay and destination fence across invocations and
-restarts.
+At accepted App Server request intake, strict parsing precedes one turn-local
+decision claim per exact accepted ref in App Server request arrival order. The
+claim happens before dynamic-tool lane selection or the pre-tool hook, so a
+later immediate `new` request cannot overtake an earlier serialized
+clarification or continuation. A different same-ref clarification, group,
+private, new, or continuation decision fails before a notice, Web admission,
+or clarification write. Exact repeated group decisions share one in-flight
+notice; notice failure retains the group claim for the invocation rather than
+allowing a private switch. Different exact refs remain independently concurrent.
+The claim is invocation-local only. Web's canonical exact-source request
+identity remains the durable replay and destination fence across invocations
+and restarts.
 
 Prepare reloads the same source and revalidates membership, group routing,
 permission, fixed result destination, and any required private route immediately before
@@ -992,10 +995,14 @@ ambiguity fails closed, and denied candidate bytes do not enter a Murph mailbox,
 vault, assistant state, operational log, or error.
 
 Completion cannot change result destination. `origin_context` uses the existing
-authorized group completion. `requester_direct` uses the existing same-channel
-private notification with exact reviewed text and a separate deterministic
-delivery identity. It cannot occupy the canonical group completion/fallback
-identity. If that direct route disappears after admission or at provider entry,
+authorized group completion. If a valid answered group completion was already
+persisted when the current sender loses personal runtime access, provider-entry
+authority returns the existing fixed-fallback signal and the outbox substitutes
+the non-disclosing terminal before provider dispatch. Malformed envelopes and
+destination mismatches remain authority failures. `requester_direct` uses the
+existing same-channel private notification with exact reviewed text and a
+separate deterministic delivery identity. It cannot occupy the canonical group
+completion/fallback identity. If that direct route disappears after admission or at provider entry,
 or if the request expires before prepare, Web persists a fresh non-disclosing
 `cannot_answer` completion to the already-authorized originating group; the
 private answer never falls back. Replay, restart, and concurrent prepare or

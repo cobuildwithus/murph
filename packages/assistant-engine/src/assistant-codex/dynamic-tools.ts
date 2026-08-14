@@ -1294,6 +1294,56 @@ export type MurphDynamicToolRequest =
       tool: string | null
     }
 
+export type CurrentSenderTurnDecisionClaimResult =
+  | 'claimed'
+  | 'conflict'
+  | 'not_current_sender'
+  | 'replay'
+  | 'unavailable'
+
+function currentSenderTurnDecisionForGroupRequest(
+  request: Extract<MurphGroupToolRequest, { action: 'ask_current_sender' }>,
+): CurrentSenderTurnDecision {
+  return request.mode === 'clarification'
+    ? 'clarification'
+    : request.audience === 'group'
+      ? request.mode === 'continuation'
+        ? 'group_continuation'
+        : 'group_new'
+      : request.mode === 'continuation'
+        ? 'private_continuation'
+        : 'private_new'
+}
+
+export function claimCurrentSenderTurnDecision(input: {
+  request: MurphDynamicToolRequest
+  turnState: MurphGroupSharedReadTurnState | null
+}): CurrentSenderTurnDecisionClaimResult {
+  if (
+    input.request.kind !== 'group'
+    || input.request.request.action !== 'ask_current_sender'
+  ) {
+    return 'not_current_sender'
+  }
+  const decisionByMessageRef =
+    input.turnState?.currentSenderDecisionByMessageRef
+  if (!decisionByMessageRef) {
+    return 'unavailable'
+  }
+  const decision = currentSenderTurnDecisionForGroupRequest(
+    input.request.request,
+  )
+  const existing = decisionByMessageRef.get(input.request.request.messageRef)
+  if (existing) {
+    return existing.decision === decision ? 'replay' : 'conflict'
+  }
+  decisionByMessageRef.set(input.request.request.messageRef, {
+    decision,
+    groupNotice: null,
+  })
+  return 'claimed'
+}
+
 function isMurphDynamicToolNamespace(namespace: string | null): boolean {
   return namespace === MURPH_SEND_PROGRESS_UPDATE_TOOL.namespace
 }
@@ -4409,33 +4459,29 @@ async function executeGroupTool(input: {
         'current-sender decision authority is unavailable for this turn',
       )
     }
-    const decision: CurrentSenderTurnDecision =
-      input.request.mode === 'clarification'
-        ? 'clarification'
-        : input.request.audience === 'group'
-          ? input.request.mode === 'continuation'
-            ? 'group_continuation'
-            : 'group_new'
-          : input.request.mode === 'continuation'
-            ? 'private_continuation'
-            : 'private_new'
-    let claim = decisionByMessageRef.get(input.request.messageRef)
-    if (claim && claim.decision !== decision) {
+    const decision = currentSenderTurnDecisionForGroupRequest(input.request)
+    const claim = decisionByMessageRef.get(input.request.messageRef)
+    if (!claim) {
+      return toolTextResult(
+        false,
+        'current-sender decision was not claimed at server request intake',
+      )
+    }
+    if (claim.decision !== decision) {
       return toolTextResult(
         false,
         'current-sender request conflicts with an earlier decision for this Message',
       )
     }
-    if (!claim) {
-      claim = { decision, groupNotice: null }
-      decisionByMessageRef.set(input.request.messageRef, claim)
-      if (input.request.audience === 'group') {
-        claim.groupNotice = sendCurrentSenderGroupNotice({
-          deliveryContextOrdinal: input.deliveryContextOrdinal,
-          messageRef: input.request.messageRef,
-          progressDelivery: input.progressDelivery,
-        })
-      }
+    if (
+      input.request.audience === 'group'
+      && claim.groupNotice === null
+    ) {
+      claim.groupNotice = sendCurrentSenderGroupNotice({
+        deliveryContextOrdinal: input.deliveryContextOrdinal,
+        messageRef: input.request.messageRef,
+        progressDelivery: input.progressDelivery,
+      })
     }
     if (input.request.audience === 'group') {
       const previewSent = claim.groupNotice

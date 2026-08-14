@@ -386,8 +386,10 @@ provider request order, so a later continuation cannot start its notice or Web
 effect while an earlier clarification is unsettled. Independent new exact-ref
 requests retain their existing concurrent path.
 
-Before any external await, the runtime also records one turn-local decision
-claim per exact accepted ref: clarification, group delivery, or private
+At the accepted App Server request boundary, immediately after strict tool
+parsing and before dynamic-tool lane selection or the pre-tool hook, the
+runtime records one turn-local decision claim per exact accepted ref in App
+Server request arrival order: clarification, group delivery, or private
 delivery, including whether that action starts or continues a request. A
 different same-ref decision fails before a notice, Web admission, or
 clarification write. Exact repeated group decisions share one in-flight notice;
@@ -414,8 +416,13 @@ completion uses a separate deterministic queue-only
 `assistant.notification.requested` containing the exact reviewed text for the
 same sender's current same-channel direct route, with no external group-route
 authority. Completion revalidates the persisted request, exact source, fixed
-result destination, expiry, runtime fences, and route. If a private route is lost after
-admission or at provider entry, or if the request expires before prepare, Web
+result destination, expiry, runtime fences, and route. If an answered
+`origin_context` completion was validly persisted but the current sender loses
+personal runtime access before group provider dispatch, provider-entry
+authority requests the existing fixed non-disclosing fallback instead of
+stranding the group terminal. Malformed completion envelopes or destination
+mismatches still fail closed. If a private route is lost after admission or at
+provider entry, or if the request expires before prepare, Web
 discards the private answer and persists a fresh fixed `cannot_answer`
 completion to the already-authorized originating group. The private delivery
 identity cannot occupy that group fallback identity. Exact replay returns the

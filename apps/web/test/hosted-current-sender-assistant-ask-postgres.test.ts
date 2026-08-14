@@ -49,7 +49,7 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 describe.skipIf(!runPostgresProof)(
   "current-sender Assistant Ask privacy with PostgreSQL",
   () => {
-    it("binds a mixed-sender batch to the exact flat author and replays one group terminal", async () => {
+    it("binds a mixed-sender batch and preserves its group terminal across personal access loss", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const now = new Date();
       let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
@@ -194,6 +194,39 @@ describe.skipIf(!runPostgresProof)(
           },
           response: { action: "prepare", status: "already_completed" },
         });
+
+        const completedWakeBeforeAccessLoss = await readHostedMailboxWakeByItemId({
+          availableAt: completedAt,
+          mailboxItemId: completionId,
+          prisma,
+        });
+        if (
+          !completedWakeBeforeAccessLoss
+          || !isHostedExecutionAssistantAskCompletedWake(
+            completedWakeBeforeAccessLoss,
+          )
+        ) {
+          throw new Error("Expected the persisted group completion.");
+        }
+        await prisma.hostedMember.update({
+          data: { suspendedAt: completedAt },
+          where: { id: fixture.senderMemberId },
+        });
+        await expect(prisma.$transaction((tx) =>
+          assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+            answeredMailboxItemIds: [completionId],
+            assistantAskCompletionExpiresAt:
+              completedWakeBeforeAccessLoss.ask.expiresAt,
+            assistantAskFallback: false,
+            boundRuntimeMemberId: fixture!.groupRuntimeMemberId,
+            idempotencyKey:
+              createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+                completionId,
+              ),
+            now: completedAt,
+            tx,
+          })
+        )).resolves.toEqual({ assistantAskFallbackRequired: true });
 
         const delayedFetchAt = new Date(
           Date.parse(requestWake.ask.expiresAt) + 1,

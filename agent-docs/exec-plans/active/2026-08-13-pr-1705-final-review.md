@@ -23,9 +23,14 @@ Updated: 2026-08-13
 - A later continuation cannot reach its notice or Web transition before an
   earlier clarification settles, while independent new exact-ref requests
   remain concurrent.
+- For contradictory same-ref calls, the first strictly parsed accepted App
+  Server request claims the decision in arrival order before lane selection or
+  the pre-tool hook.
 - A committed group fallback supersedes private delivery across lost authority
   responses and route recovery; expired detached replay does not create a
   competing group terminal beside an existing private effect.
+- A valid answered group completion converges to the fixed non-disclosing
+  fallback if the sender loses personal runtime access before provider entry.
 - Durable owner docs describe natural audience inference and clarification instead of retired phrase classification.
 - Focused Web, assistant-runtime, PostgreSQL, type, documentation, and privacy checks pass.
 - The final ReviewGPT gate passes, required exact-head CI is green, and the PR reaches the repository-authorized merge boundary.
@@ -50,6 +55,8 @@ Updated: 2026-08-13
   transitions ordered by the existing app-server dynamic-tool chain; provider
   scheduling must not let a later continuation overtake an earlier
   clarification, while independent new exact-ref requests remain concurrent.
+- Claim contradictory same-ref decisions at accepted App Server request intake,
+  before choosing the serialized or immediate execution lane.
 - Add no context registry, shared memory, queue, service, or workflow owner.
 - Do not add state or retry machinery that cannot provide a real provider-level guarantee.
 - Preserve the already-consumed base-update budget unless the user grants new authority.
@@ -127,5 +134,45 @@ Local replacement-candidate evidence on 2026-08-13:
   state, queue, service, or lifecycle owner. Eleven focused engine tests, the
   production app-server concurrency proof, the 13-test current-sender filter,
   and Assistant Engine typecheck pass.
-- A fresh full-snapshot ReviewGPT round 17 PASS and required GitHub checks
+- ReviewGPT round 17 found two defects. First, round 16's decision map still
+  claimed inside the executor, below the split between serialized
+  clarification/continuation and immediate new requests, so a later new call
+  could claim before the earlier accepted request reached its pre-tool hook.
+  Second, a valid answered group completion became permanently stranded when
+  the current sender lost personal runtime access after completion persistence
+  but before provider entry. Both findings were accepted; none were rejected.
+  Production App Server tests reproduced both decision directions, and Web unit
+  plus real PostgreSQL proof reproduced the access-loss terminal. The claim now
+  occurs in accepted App Server request arrival order immediately after strict
+  parsing and before lane selection or the pre-tool hook; the executor consumes
+  but never creates it. Provider entry now returns the existing fixed-fallback
+  signal only for a structurally valid group-bound answered completion whose
+  personal access was lost. Invalid envelopes and private destinations retain
+  their fail-closed behavior. The current-sender Engine filter passes 15 tests,
+  the Web authority file passes 25 tests, and the fully migrated PostgreSQL
+  lifecycle suite passes 9 tests.
+- A fresh sensitive full-snapshot ReviewGPT round 18 and required GitHub checks
   remain pending on the remediated exact head.
+
+## Round-17 requirement retrospective
+
+Rounds 14, 16, and 17 repeatedly exposed the same mechanism: provider request
+acceptance, execution-lane scheduling, and first-decision ownership were split.
+Ordering only stateful transitions fixed continuation causality but left
+immediate new requests outside the arbitration point; moving the round-16 map
+into the executor still let lane scheduling choose the winner.
+
+The requirement-level decision is that accepted App Server server-request
+arrival order owns the first decision for one exact ref. The existing request
+handler now claims that decision after strict validation and before lane
+selection, notice, the pre-tool hook, or Web. The downstream executor only
+consumes the claim. This collapses authority into the existing dispatch owner
+without a queue, persisted claim, workflow, service, retry protocol, or new
+lifecycle state, and different exact refs remain concurrent.
+
+The terminal decision is that a valid group-bound answered completion remains
+an authorized group terminal even if the personal runtime loses access after
+the read and persisted completion. Provider entry must replace its answer with
+the existing fixed non-disclosing fallback rather than permanently silencing
+the group. This reuses the outbox fallback signal and adds no second terminal
+identity or recovery owner.

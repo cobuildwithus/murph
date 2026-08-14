@@ -53,14 +53,17 @@ later continuation cannot overtake an earlier clarification; independent new
 exact-ref requests remain concurrent. No exact response format is required from
 the person.
 
-Before any external await, the runtime records one turn-local decision claim
-per exact accepted ref. A different same-ref clarification, group, private,
-new, or continuation decision fails before a notice, Web admission, or
-clarification write. Exact repeated group decisions share one in-flight notice,
-and notice failure retains the group claim for the rest of that invocation
-instead of silently switching to private delivery. Different exact refs remain
-independently concurrent. This claim is not persisted; Web's canonical
-exact-source request identity remains the durable replay fence.
+At accepted App Server request intake, strict parsing precedes one turn-local
+decision claim per exact accepted ref in App Server request arrival order. The
+claim happens before dynamic-tool lane selection or the pre-tool hook, so a
+later immediate `new` request cannot overtake an earlier serialized
+clarification or continuation. A different same-ref clarification, group,
+private, new, or continuation decision fails before a notice, Web admission,
+or clarification write. Exact repeated group decisions share one in-flight
+notice, and notice failure retains the group claim for the rest of that
+invocation instead of silently switching to private delivery. Different exact
+refs remain independently concurrent. This claim is not persisted; Web's
+canonical exact-source request identity remains the durable replay fence.
 
 Web derives the member, route, question, and replay identity from the exact
 stored source; the model never supplies those values. The requested wake
@@ -70,8 +73,13 @@ digest remains the disclosure policy for that destination. Request identity
 uses the exact source rather than the destination, so replay cannot switch the
 stored choice or cause another personal read. The private candidate and fresh
 outgoing reviewer may only allow or deny the answer under the fixed permission.
-Group answers use the existing group completion. Private
-answers use the existing exact-text notification on the admitted channel. If a
+Group answers use the existing group completion. If a valid answered
+`origin_context` completion is persisted and the current sender then loses
+personal runtime access before provider dispatch, the provider-entry check
+returns the existing fixed-fallback signal so the group receives only the
+non-disclosing terminal. Malformed envelopes and destination mismatches remain
+authority failures. Private answers use the existing exact-text notification
+on the admitted channel. If a
 private route disappears after admission or at provider entry, or if the
 request expires before prepare, the private answer is discarded and the
 originating group receives only a fresh non-disclosing cannot-answer

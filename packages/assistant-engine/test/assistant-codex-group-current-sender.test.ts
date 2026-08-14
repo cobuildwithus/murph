@@ -4,6 +4,7 @@ import type {
   AssistantHostedToolContext,
 } from "../src/assistant/hosted-tool-context.ts";
 import {
+  claimCurrentSenderTurnDecision,
   executeMurphDynamicToolRequest,
   MURPH_GROUP_TOOL,
   readMurphDynamicToolRequest,
@@ -97,6 +98,31 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+async function executeCurrentSenderToolRequest(
+  input: Parameters<typeof executeMurphDynamicToolRequest>[0],
+) {
+  if (input.groupSharedReadTurnState) {
+    const claim = claimCurrentSenderTurnDecision({
+      request: input.request,
+      turnState: input.groupSharedReadTurnState,
+    });
+    if (claim === "conflict" || claim === "unavailable") {
+      return {
+        rpcResult: {
+          contentItems: [{
+            text: claim === "conflict"
+              ? "current-sender request conflicts with an earlier decision for this Message"
+              : "current-sender decision authority is unavailable for this turn",
+            type: "inputText" as const,
+          }],
+          success: false,
+        },
+      };
+    }
+  }
+  return await executeMurphDynamicToolRequest(input);
+}
+
 describe("murph.group current-sender intent", () => {
   it("maps natural-intent actions to one exact Message ref", () => {
     expect(parseCurrentSenderRequest().request).toEqual({
@@ -175,7 +201,7 @@ describe("murph.group current-sender intent", () => {
         return { kind: "sent" as const, source: "system" as const };
       }),
     };
-    const result = await executeMurphDynamicToolRequest({
+    const result = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 3,
       env: {},
       fetchImpl: fetch,
@@ -238,7 +264,7 @@ describe("murph.group current-sender intent", () => {
       roster: [],
     };
     const hostedToolContext = createHostedToolContext({ request: groupRequest });
-    const result = await executeMurphDynamicToolRequest({
+    const result = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
@@ -248,7 +274,7 @@ describe("murph.group current-sender intent", () => {
       progressDelivery,
       request: parseCurrentSenderRequest(),
     });
-    const privateResult = await executeMurphDynamicToolRequest({
+    const privateResult = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 1,
       env: {},
       fetchImpl: fetch,
@@ -286,7 +312,7 @@ describe("murph.group current-sender intent", () => {
       [0, EARLIER_SENDER_INPUT_ID],
       [1, NEWEST_SENDER_INPUT_ID],
     ] as const).map(([ordinal, messageRef]) =>
-      executeMurphDynamicToolRequest({
+      executeCurrentSenderToolRequest({
         deliveryContextOrdinal: ordinal,
         env: {},
         fetchImpl: fetch,
@@ -338,7 +364,7 @@ describe("murph.group current-sender intent", () => {
       readProjectionScopeKeyBatches: [],
       roster: [],
     };
-    const execute = () => executeMurphDynamicToolRequest({
+    const execute = () => executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
@@ -376,7 +402,7 @@ describe("murph.group current-sender intent", () => {
     };
     const hostedToolContext = createHostedToolContext({ request: groupRequest });
 
-    const privateResult = executeMurphDynamicToolRequest({
+    const privateResult = executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
@@ -386,7 +412,7 @@ describe("murph.group current-sender intent", () => {
       progressDelivery,
       request: parseCurrentSenderRequest({ action: "message_current_sender" }),
     });
-    const groupResult = await executeMurphDynamicToolRequest({
+    const groupResult = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 1,
       env: {},
       fetchImpl: fetch,
@@ -429,7 +455,7 @@ describe("murph.group current-sender intent", () => {
     };
     const hostedToolContext = createHostedToolContext({ request: groupRequest });
 
-    const groupResult = executeMurphDynamicToolRequest({
+    const groupResult = executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
@@ -439,7 +465,7 @@ describe("murph.group current-sender intent", () => {
       progressDelivery,
       request: parseCurrentSenderRequest(),
     });
-    const privateResult = await executeMurphDynamicToolRequest({
+    const privateResult = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 1,
       env: {},
       fetchImpl: fetch,
@@ -479,7 +505,7 @@ describe("murph.group current-sender intent", () => {
       roster: [],
     };
     const hostedToolContext = createHostedToolContext({ request: groupRequest });
-    const execute = () => executeMurphDynamicToolRequest({
+    const execute = () => executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
@@ -519,7 +545,7 @@ describe("murph.group current-sender intent", () => {
     };
     const hostedToolContext = createHostedToolContext({ request: groupRequest });
 
-    const clarificationResult = executeMurphDynamicToolRequest({
+    const clarificationResult = executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
@@ -529,7 +555,7 @@ describe("murph.group current-sender intent", () => {
       progressDelivery: sentProgressDelivery(),
       request: parseCurrentSenderRequest({ action: "clarify_current_sender" }),
     });
-    const privateResult = await executeMurphDynamicToolRequest({
+    const privateResult = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 1,
       env: {},
       fetchImpl: fetch,
@@ -567,7 +593,7 @@ describe("murph.group current-sender intent", () => {
       acceptedInputIds: [EARLIER_SENDER_INPUT_ID, NEWEST_SENDER_INPUT_ID],
       request: groupRequest,
     });
-    await executeMurphDynamicToolRequest({
+    await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
@@ -577,7 +603,7 @@ describe("murph.group current-sender intent", () => {
       progressDelivery,
       request: parseCurrentSenderRequest({ action: "clarify_current_sender" }),
     });
-    await executeMurphDynamicToolRequest({
+    await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 1,
       env: {},
       fetchImpl: fetch,
@@ -614,7 +640,7 @@ describe("murph.group current-sender intent", () => {
   it("rejects a foreign Message ref before any notice or Web request", async () => {
     const groupRequest = vi.fn();
     const progressDelivery = sentProgressDelivery();
-    const result = await executeMurphDynamicToolRequest({
+    const result = await executeCurrentSenderToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,

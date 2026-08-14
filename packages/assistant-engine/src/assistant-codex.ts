@@ -4090,6 +4090,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
     const {
+      claimCurrentSenderTurnDecision,
       executeMurphDynamicToolRequest,
       isComputerDynamicToolRequest,
       readMurphDynamicToolRequest,
@@ -4163,6 +4164,29 @@ async function runCodexAppServerTurnOnProcess(
         request: dynamicToolRequest,
         reason: 'invalid_arguments',
       }))
+    }
+
+    const currentSenderDecisionClaim = claimCurrentSenderTurnDecision({
+      request: dynamicToolRequest,
+      turnState: groupSharedReadTurnState,
+    })
+    if (
+      currentSenderDecisionClaim === 'conflict'
+      || currentSenderDecisionClaim === 'unavailable'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [{
+            type: 'inputText',
+            text: currentSenderDecisionClaim === 'conflict'
+              ? 'current-sender request conflicts with an earlier decision for this Message'
+              : 'current-sender decision authority is unavailable for this turn',
+          }],
+        },
+      })
+      return
     }
 
     if (
