@@ -74,6 +74,7 @@ export type AssistantAutoReplyRouteReadResult =
     }
 
 export interface AssistantAutoReplyRouteMaintenanceResult {
+  changed: boolean
   trusted: boolean
 }
 
@@ -499,26 +500,40 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
   paths: AssistantStatePaths
   receipts: readonly AssistantTurnReceipt[]
   receiptsTrusted: boolean
+  shouldYield?: (() => boolean) | null
 }): Promise<AssistantAutoReplyRouteMaintenanceResult> {
-  if (!input.outboxTrusted || !input.receiptsTrusted) {
+  if (
+    !input.outboxTrusted
+    || !input.receiptsTrusted
+    || input.shouldYield?.() === true
+  ) {
     return {
+      changed: false,
       trusted: false,
     }
   }
+
+  let changed = false
 
   const migrationStatus =
     await readAssistantAutoReplyRouteMigrationStatusAtPaths(input.paths)
   if (migrationStatus === 'corrupt') {
     return {
+      changed,
       trusted: false,
     }
   }
   if (migrationStatus === 'missing') {
-    await migrateAssistantAutoReplyRouteStateAtPaths({
+    const migration = await migrateAssistantAutoReplyRouteStateAtPaths({
       outboxIntents: input.outboxIntents,
       paths: input.paths,
       receipts: input.receipts,
+      shouldYield: input.shouldYield,
     })
+    changed = changed || migration.changed
+    if (!migration.completed) {
+      return { changed, trusted: false }
+    }
   }
 
   const routesDirectory = resolveAssistantAutoReplyRoutesDirectory(input.paths)
@@ -528,6 +543,7 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
   } catch (error) {
     if (isMissingFileError(error)) {
       return {
+        changed,
         trusted: true,
       }
     }
@@ -536,19 +552,29 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
 
   const receiptsByTurnId = new Map<string, AssistantTurnReceipt>()
   for (const receipt of input.receipts) {
+    if (input.shouldYield?.() === true) {
+      return { changed, trusted: false }
+    }
     receiptsByTurnId.set(receipt.turnId, receipt)
   }
-  const liveRouteDigests = new Set(
-    input.outboxIntents.flatMap((intent) => {
-      if (!hasAssistantOutboxDeliveryEvidence(intent)) {
-        return []
-      }
-      const route = resolveAssistantAutoReplyOutboxExactRoute(intent)
-      return route ? [route.digest] : []
-    }),
-  )
+  const liveRouteDigests = new Set<string>()
+  for (const intent of input.outboxIntents) {
+    if (input.shouldYield?.() === true) {
+      return { changed, trusted: false }
+    }
+    if (!hasAssistantOutboxDeliveryEvidence(intent)) {
+      continue
+    }
+    const route = resolveAssistantAutoReplyOutboxExactRoute(intent)
+    if (route) {
+      liveRouteDigests.add(route.digest)
+    }
+  }
   let trusted = true
   for (const entry of entries) {
+    if (input.shouldYield?.() === true) {
+      return { changed, trusted: false }
+    }
     if (
       !entry.isFile() ||
       !entry.name.endsWith('.json') ||
@@ -569,6 +595,7 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
         await removeAssistantAutoReplyRouteStateFile(
           resolveAssistantAutoReplyRouteStatePath(input.paths, routeDigest),
         )
+        changed = true
         continue
       }
       trusted = false
@@ -579,6 +606,7 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
       await removeAssistantAutoReplyRouteStateFile(
         resolveAssistantAutoReplyRouteStatePath(input.paths, routeDigest),
       )
+      changed = true
       continue
     }
     if (!pending) {
@@ -602,6 +630,7 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
           ),
         },
       )
+      changed = true
       continue
     }
     if (reconciled.changed) {
@@ -612,17 +641,20 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
         await removeAssistantAutoReplyRouteStateFile(
           resolveAssistantAutoReplyRouteStatePath(input.paths, routeDigest),
         )
+        changed = true
       } else {
         await writeAssistantAutoReplyRouteStateAtPaths(
           input.paths,
           routeDigest,
           reconciled.state,
         )
+        changed = true
       }
     }
   }
 
   return {
+    changed,
     trusted,
   }
 }
@@ -787,12 +819,17 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
   outboxIntents: readonly AssistantOutboxIntent[]
   paths: AssistantStatePaths
   receipts: readonly AssistantTurnReceipt[]
-}): Promise<void> {
+  shouldYield?: (() => boolean) | null
+}): Promise<{ changed: boolean; completed: boolean }> {
+  let changed = false
   const deliveriesByIntentId = new Map<string, {
     order: AssistantAutoReplyDeliveryOrder
     routeDigest: string
   }>()
   for (const intent of input.outboxIntents) {
+    if (input.shouldYield?.() === true) {
+      return { changed, completed: false }
+    }
     if (!hasAssistantOutboxDeliveryEvidence(intent)) {
       continue
     }
@@ -811,6 +848,9 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
     AssistantAutoReplyDeliveryOrder
   >()
   for (const receipt of input.receipts) {
+    if (input.shouldYield?.() === true) {
+      return { changed, completed: false }
+    }
     if (
       receipt.status !== 'completed' &&
       receipt.status !== 'deferred' &&
@@ -843,6 +883,9 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
 
   const routeDigests = new Set(settledThroughByRoute.keys())
   for (const routeDigest of routeDigests) {
+    if (input.shouldYield?.() === true) {
+      return { changed, completed: false }
+    }
     const currentRead = await readAssistantAutoReplyRouteStateAtPaths(
       input.paths,
       routeDigest,
@@ -878,8 +921,12 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
         settledThrough,
       },
     )
+    changed = true
   }
 
+  if (input.shouldYield?.() === true) {
+    return { changed, completed: false }
+  }
   await writeAssistantStateVersionedJson({
     filePath: resolveAssistantAutoReplyRouteMigrationPath(input.paths),
     schema: ASSISTANT_AUTO_REPLY_ROUTE_MIGRATION_SCHEMA,
@@ -888,6 +935,7 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
       completedAt: new Date().toISOString(),
     } satisfies AssistantAutoReplyRouteMigrationValue,
   })
+  return { changed: true, completed: true }
 }
 
 export async function readAssistantAutoReplyRouteMigrationStatusAtPaths(

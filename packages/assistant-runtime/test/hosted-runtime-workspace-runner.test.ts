@@ -5795,7 +5795,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake waits for late assistant input import before interrupting background maintenance", async () => {
+  test("runtime wake interrupts background maintenance before late assistant input import finishes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -5883,9 +5883,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           await lateImportStartedPromise;
           assert.deepEqual(importedSeqs, ["1"]);
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
-          if (input.shouldYieldBackgroundMaintenance?.() !== false) {
-            throw new Error("Foreground yield must wait for the mailbox import result.");
+          if (input.shouldYieldBackgroundMaintenance?.() !== true) {
+            throw new Error("Foreground yield must preempt lock-bound input staging.");
           }
+          assert.equal(input.backgroundMaintenanceSignal?.aborted, true);
           releaseLateImport();
           await waitForCondition(() => importedSeqs.includes("2"));
           await waitForCondition(() =>
@@ -5904,7 +5905,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(importStartedSeqs, ["1", "2"]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
-      assert.deepEqual(yieldStates, [false, false, true]);
+      assert.deepEqual(yieldStates, [false, true, true]);
       assert.equal(
         result.assistantPhaseResult?.nextWakeAt,
         TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,

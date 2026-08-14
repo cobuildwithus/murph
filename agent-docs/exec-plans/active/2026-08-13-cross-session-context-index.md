@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -119,6 +119,25 @@ Updated: 2026-08-13
   without live outbox authority are deleted before reconciliation. This
   removes the timeout, abandoned-turn classifier, and route-specific receipt
   protection instead of adding another lifecycle.
+- Final ReviewGPT round 2 found that the first shared owner still ran before
+  local queue delivery and before hosted foreground delivery. The correction
+  moves local, assistantd, and one-shot maintenance after the current pass's
+  direct delivery or queue drain, and composes hosted maintenance after
+  checkpoint delivery (or after an already-completed synchronous delivery).
+  Multi-file inventory and migration loops now check the existing foreground
+  yield signal between entries; a yielded partial migration is idempotent and
+  cannot publish its marker. This keeps migration ownership in every runtime
+  mode without putting the legacy O(n) walk on either provider-start or
+  member-delivery latency.
+- The follow-up invariant pass found that a fresh local or hosted input could
+  not flip the yield signal until after staging acquired the same runtime lock,
+  and that hosted background/no-progress passes did not own migration. Fresh
+  input now signals before staging and re-arms after durable persistence;
+  background, fast-delivery, and no-progress hosted results all reconcile after
+  their delivery boundary. Maintenance reports actual mutations so a
+  maintenance-only or partial migration is checkpointed, and process/lease
+  aborts stop the per-entry traversal. Migration-only progress remains distinct
+  from assistant progress and cannot trigger managed automation work.
 
 ## Verification
 

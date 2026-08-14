@@ -314,13 +314,85 @@ describe('assistant auto-reply exact route state', () => {
       paths,
       receipts: [firstReceipt, secondReceipt],
       receiptsTrusted: true,
-    })).resolves.toEqual({ trusted: true })
+    })).resolves.toEqual({ changed: true, trusted: true })
     await expect(readFile(
       resolveAssistantAutoReplyRouteMigrationPath(paths),
       'utf8',
     )).resolves.toContain('murph.assistant-auto-reply-route-migration')
     await expect(readAssistantAutoReplyRouteState({
       routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: order(secondIntent.intentId, LATER_TIME),
+    })
+  })
+
+  it('repeats partial multi-route migration without publishing the marker early', async () => {
+    const vault = await createTempVault('migration-partial-multi-route')
+    const paths = resolveAssistantStatePaths(vault)
+    const firstIntent = createOutboxIntent({ intentId: 'intent-route-first' })
+    const secondIntent = createOutboxIntent({
+      identityId: 'identity-2',
+      intentId: 'intent-route-second',
+      sentAt: LATER_TIME,
+    })
+    const firstRoute = requireRoute(
+      resolveAssistantAutoReplyOutboxExactRoute(firstIntent),
+    )
+    const secondRoute = requireRoute(
+      resolveAssistantAutoReplyOutboxExactRoute(secondIntent),
+    )
+    const receipts = [
+      createReceipt({
+        intentId: firstIntent.intentId,
+        status: 'completed',
+        turnId: 'turn-route-first',
+      }),
+      createReceipt({
+        intentId: secondIntent.intentId,
+        status: 'completed',
+        turnId: 'turn-route-second',
+      }),
+    ]
+    let yieldChecks = 0
+
+    await expect(maintainAssistantAutoReplyRouteStateAtPaths({
+      outboxIntents: [firstIntent, secondIntent],
+      outboxTrusted: true,
+      paths,
+      receipts,
+      receiptsTrusted: true,
+      shouldYield: () => {
+        yieldChecks += 1
+        return yieldChecks >= 7
+      },
+    })).resolves.toEqual({ changed: true, trusted: false })
+    await expect(readFile(
+      resolveAssistantAutoReplyRouteMigrationPath(paths),
+      'utf8',
+    )).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(
+      resolveAssistantAutoReplyRouteStatePath(paths, firstRoute.digest),
+      'utf8',
+    )).resolves.toContain(firstIntent.intentId)
+
+    await expect(maintainAssistantAutoReplyRouteStateAtPaths({
+      outboxIntents: [firstIntent, secondIntent],
+      outboxTrusted: true,
+      paths,
+      receipts,
+      receiptsTrusted: true,
+    })).resolves.toEqual({ changed: true, trusted: true })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: firstRoute.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: order(firstIntent.intentId, BASE_TIME),
+    })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: secondRoute.digest,
       vault,
     })).resolves.toEqual({
       kind: 'ready',

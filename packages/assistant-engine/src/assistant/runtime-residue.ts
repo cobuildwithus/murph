@@ -160,32 +160,44 @@ export async function pruneAssistantRuntimeResidue(input: {
   return result
 }
 
-export async function maintainAssistantAutoReplyRouteStateAfterAutomationPass(
+export async function maintainAssistantAutoReplyRouteState(
   input: {
+    shouldYield?: (() => boolean) | null
     signal?: AbortSignal | null
     vault: string
   },
 ): Promise<AssistantAutoReplyRouteMaintenanceResult> {
   input.signal?.throwIfAborted()
+  const shouldYield = () => {
+    input.signal?.throwIfAborted()
+    return input.shouldYield?.() === true
+  }
+  if (shouldYield()) {
+    return { changed: false, trusted: false }
+  }
   return await withAssistantRuntimeWriteLock(
     input.vault,
     async (paths) => {
       await ensureAssistantState(paths)
       input.signal?.throwIfAborted()
-      const [outbox, migrationStatus] = await Promise.all([
-        readOutboxInventory(
-          paths.outboxDirectory,
-          input.vault,
-          input.signal,
-        ),
-        readAssistantAutoReplyRouteMigrationStatusAtPaths(paths),
-      ])
+      const migrationStatus =
+        await readAssistantAutoReplyRouteMigrationStatusAtPaths(paths)
+      const outbox = await readOutboxInventory(
+        paths.outboxDirectory,
+        input.vault,
+        input.signal,
+        shouldYield,
+      )
       input.signal?.throwIfAborted()
+      if (!outbox.trusted || shouldYield()) {
+        return { changed: false, trusted: false }
+      }
       const receipts = migrationStatus === 'missing'
         ? await readJsonInventory(
             paths.turnsDirectory,
             (value) => assistantTurnReceiptSchema.parse(value),
             input.signal,
+            shouldYield,
           )
         : { records: [], trusted: true }
       input.signal?.throwIfAborted()
@@ -195,6 +207,7 @@ export async function maintainAssistantAutoReplyRouteStateAfterAutomationPass(
         paths,
         receipts: receipts.records.map(({ record }) => record),
         receiptsTrusted: receipts.trusted,
+        shouldYield,
       })
     },
     input.signal,
@@ -1170,12 +1183,16 @@ async function readOutboxInventory(
   directory: string,
   vault: string,
   signal?: AbortSignal | null,
+  shouldYield?: (() => boolean) | null,
 ): Promise<Inventory<PersistedRecord<AssistantOutboxIntent>>> {
   const records: Array<PersistedRecord<AssistantOutboxIntent>> = []
   let trusted = true
 
   for (const entry of await readDirectoryEntries(directory, signal)) {
     signal?.throwIfAborted()
+    if (shouldYield?.() === true) {
+      return { records, trusted: false }
+    }
     if (!entry.name.endsWith('.json')) {
       if (entry.name === '.quarantine') {
         const quarantineStats = await lstat(path.join(directory, entry.name))
@@ -1270,12 +1287,16 @@ async function readJsonInventory<T>(
   directory: string,
   parse: (value: unknown) => T,
   signal?: AbortSignal | null,
+  shouldYield?: (() => boolean) | null,
 ): Promise<Inventory<PersistedRecord<T>>> {
   const records: Array<PersistedRecord<T>> = []
   let trusted = true
 
   for (const entry of await readDirectoryEntries(directory, signal)) {
     signal?.throwIfAborted()
+    if (shouldYield?.() === true) {
+      return { records, trusted: false }
+    }
     if (!entry.name.endsWith('.json')) {
       continue
     }

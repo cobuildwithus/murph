@@ -35,6 +35,7 @@ import {
   maintainAssistantAutoReplyRouteStateAtPaths,
   readAssistantAutoReplyRouteState,
   resolveAssistantAutoReplyOutboxExactRoute,
+  resolveAssistantAutoReplyRouteMigrationPath,
 } from '../src/assistant/automation/cross-session-route-state.ts'
 import {
   writeAssistantAutoReplySuppressionEvidence,
@@ -50,7 +51,7 @@ import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../src/assistant/generated-delivery-files.ts'
 import {
-  maintainAssistantAutoReplyRouteStateAfterAutomationPass,
+  maintainAssistantAutoReplyRouteState,
   pruneAssistantRuntimeResidue,
 } from '../src/assistant/runtime-residue.ts'
 import {
@@ -1105,8 +1106,8 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(resolveAssistantTurnReceiptPath(paths, recentTurnId))
   })
 
-  it('owns legacy route migration after a local automation pass', async () => {
-    const { vaultRoot } = await createAssistantVault(
+  it('cooperatively owns local migration without rescanning receipts after the marker', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-post-pass-migration-',
     )
     const source = await createAssistantOutboxIntent({
@@ -1154,11 +1155,24 @@ describe('assistant runtime residue pruning', () => {
       vault: vaultRoot,
     })
 
+    let yieldChecks = 0
     await expect(
-      maintainAssistantAutoReplyRouteStateAfterAutomationPass({
+      maintainAssistantAutoReplyRouteState({
+        shouldYield: () => {
+          yieldChecks += 1
+          return yieldChecks >= 4
+        },
         vault: vaultRoot,
       }),
-    ).resolves.toEqual({ trusted: true })
+    ).resolves.toEqual({ changed: false, trusted: false })
+    expect(yieldChecks).toBeGreaterThanOrEqual(4)
+    await expectPathMissing(
+      resolveAssistantAutoReplyRouteMigrationPath(paths),
+    )
+
+    await expect(maintainAssistantAutoReplyRouteState({
+      vault: vaultRoot,
+    })).resolves.toEqual({ changed: true, trusted: true })
 
     const route = resolveAssistantAutoReplyOutboxExactRoute(deliveredSource)
     if (!route) {
@@ -1174,6 +1188,15 @@ describe('assistant runtime residue pruning', () => {
         sentAt: RECENT_RECORD_AT,
       },
     })
+
+    await writeFile(
+      resolveAssistantTurnReceiptPath(paths, createTurnId('6')),
+      '{invalid receipt json',
+      'utf8',
+    )
+    await expect(maintainAssistantAutoReplyRouteState({
+      vault: vaultRoot,
+    })).resolves.toEqual({ changed: false, trusted: true })
   })
 
   it('retires a quiescent route claim while generic journal retention remains authoritative', async () => {

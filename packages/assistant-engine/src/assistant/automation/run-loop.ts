@@ -25,7 +25,7 @@ import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 import {
-  maintainAssistantAutoReplyRouteStateAfterAutomationPass,
+  maintainAssistantAutoReplyRouteState,
 } from '../runtime-residue.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
 import {
@@ -181,6 +181,7 @@ export async function runAssistantAutomation(
               event.persisted &&
               (input.allowSelfAuthored || event.capture.actor.isSelf !== true)
             ) {
+              wakeController.requestWake()
               stageImportedCaptureAssistantInputEvent({
                 capture: event.capture,
                 executionContext: input.executionContext,
@@ -188,6 +189,8 @@ export async function runAssistantAutomation(
                 persisted: event.persisted,
                 vault: input.vault,
               }).then(() => {
+                // Re-arm after persistence in case the pre-staging wake was
+                // consumed while the writer waited for route maintenance.
                 wakeController.requestWake()
                 notifyImportedCaptureInputAvailable({
                   event,
@@ -278,6 +281,27 @@ export async function runAssistantAutomation(
       aggregateReplies.failed += passResult.replies.failed
       aggregateReplies.replied += passResult.replies.replied
       aggregateReplies.skipped += passResult.replies.skipped
+
+      const shouldYieldRouteMaintenance = () =>
+        controller.signal.aborted
+        || input.shouldYieldBackgroundMaintenance?.() === true
+        || (input.once !== true && wakeController.hasPendingWake())
+      if (
+        (input.applyCanonicalWrites ?? true)
+        && !controller.signal.aborted
+        && !shouldYieldRouteMaintenance()
+      ) {
+        await maintainAssistantAutoReplyRouteState({
+          shouldYield: shouldYieldRouteMaintenance,
+          signal: controller.signal,
+          vault: input.vault,
+        }).catch((error) => {
+          warnAssistantBestEffortFailure({
+            error,
+            operation: 'auto-reply route maintenance',
+          })
+        })
+      }
 
       if (input.once) {
         break
@@ -974,21 +998,6 @@ export async function runAssistantAutomationPass(
     },
   })
   passTiming.scanElapsedMs = Date.now() - scanStartedAt
-  if (
-    applyCanonicalWrites
-    && input.signal?.aborted !== true
-    && input.shouldYieldBackgroundMaintenance?.() !== true
-  ) {
-    await maintainAssistantAutoReplyRouteStateAfterAutomationPass({
-      signal: input.signal ?? null,
-      vault: input.vault,
-    }).catch((error) => {
-      warnAssistantBestEffortFailure({
-        error,
-        operation: 'auto-reply route maintenance',
-      })
-    })
-  }
   if (
     scanResult.replies.considered === 0
     && input.signal?.aborted !== true

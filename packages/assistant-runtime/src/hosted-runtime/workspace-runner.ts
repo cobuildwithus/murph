@@ -1439,8 +1439,15 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         runtimePassDiagnostics: input.input.runtimePassDiagnostics ?? null,
         runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
       });
-      const foregroundConversationImportItem =
+      const baseForegroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
+      const foregroundConversationImportItem: typeof baseForegroundConversationImportItem =
+        async (...importArgs) => {
+          // Preempt lock-owning background maintenance before conversation
+          // staging waits for that same lock.
+          observeForegroundConversationWork();
+          return await baseForegroundConversationImportItem(...importArgs);
+        };
       try {
         const handleForegroundImportResult = async (
           result: HostedMailboxImportCheckpointResult,

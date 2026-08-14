@@ -164,6 +164,10 @@ const mocks = vi.hoisted(() => ({
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
+  maintainAssistantAutoReplyRouteState: vi.fn(async () => ({
+    changed: false,
+    trusted: true,
+  })),
   prepareHostedCodexAssistantProcess: vi.fn<
     (
       input: HostedCodexAssistantProcessPreparationInput,
@@ -225,6 +229,17 @@ vi.mock("@murphai/assistant-engine/assistant-automation", async (importOriginal)
       mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mockImplementation(
         actual.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
       ),
+  };
+});
+
+vi.mock("@murphai/assistant-engine/assistant-runtime-residue", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-runtime-residue")
+  >();
+  return {
+    ...actual,
+    maintainAssistantAutoReplyRouteState:
+      mocks.maintainAssistantAutoReplyRouteState,
   };
 });
 
