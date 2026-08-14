@@ -848,12 +848,15 @@ Last verified: 2026-08-12
 - Junction full reconcile and backfill jobs finish inventory, summary, profile,
   and historical scheduling once, then advance timeseries-only work through the
   existing job payload. Each attempt owns one canonical resource and one
-  complete UTC day. A collection may use at most two sequential pages with one
+  complete UTC day. A collection may use at most three sequential pages with one
   bounded request attempt per page. Page-heavy active-calorie and heart-rate
   days deterministically retry as complete UTC hours; no partial aggregate or
   vendor cursor is persisted. `timeseriesCursor` and
   `timeseriesResourceCursor` identify the next complete unit without changing
-  job dedupe identity. Every partial continuation preserves
+  job dedupe identity. The deployed v1 resource envelope is read only at this
+  provider boundary, validated exactly, and projected immediately to its active
+  scalar resource; new successors never write the envelope or consult its
+  completed-resource names. Every partial continuation preserves
   `lastSyncCompletedAt`; only terminal current full work may advance it.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application

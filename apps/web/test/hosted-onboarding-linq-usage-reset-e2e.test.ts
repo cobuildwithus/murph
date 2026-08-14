@@ -1,4 +1,9 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
+import {
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  type HostedCryptoDomain,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -9,6 +14,9 @@ import {
 import {
   encryptHostedLinqLinePhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
+import {
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 
 const MEMBER_ID = "member_usage_reset";
 const CHAT_ID = "chat_usage_reset";
@@ -74,15 +82,19 @@ const mocks = vi.hoisted(() => {
     },
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
+    hasActiveHostedCryptoDomainRootsForUserTx: vi.fn(),
+    lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
     lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
     lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
     lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+    projectHostedMemberRoutingState: vi.fn(),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: { mailboxItemId: string }) => ({
       id: input.mailboxItemId,
       userId: "member_usage_reset",
     })),
     readHostedMemberHomeLinqRoute: vi.fn(),
+    readHostedMemberRoutingRecord: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
@@ -96,9 +108,70 @@ const mocks = vi.hoisted(() => {
       workflowId: "hosted-user-runtime:member_usage_reset",
     })),
     upsertHostedMemberHomeLinqBindingTx: vi.fn(async () => undefined),
+    unwrapHostedDomainRootForWeb: vi.fn(),
   };
 
   return state;
+});
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+  const preparedMissingRoots = new WeakSet<object>();
+  const prepareHostedDomainRootForWeb = vi.fn(async (input: {
+    domain: HostedCryptoDomain;
+    userId: string;
+  }) => {
+    const root = await mocks.unwrapHostedDomainRootForWeb(input);
+    root.rootKey.fill(0);
+    const prepared = Object.freeze({
+      domain: input.domain,
+      rootKeyId: root.envelope.rootKeyId,
+      userId: input.userId,
+    });
+    preparedMissingRoots.add(prepared);
+    return prepared;
+  });
+  const revalidatePreparedHostedDomainRootForWebTx = vi.fn(async (input: {
+    prepared: {
+      domain: HostedCryptoDomain;
+      rootKeyId: string;
+      userId: string;
+    };
+    tx: unknown;
+  }) => {
+    const activeRootKeyId = await mocks.lockAndReadActiveHostedDomainRootKeyIdTx({
+      domain: input.prepared.domain,
+      tx: input.tx,
+      userId: input.prepared.userId,
+    });
+    if (
+      (activeRootKeyId === null && !preparedMissingRoots.has(input.prepared))
+      || (activeRootKeyId !== null
+        && activeRootKeyId !== input.prepared.rootKeyId)
+    ) {
+      throw new actual.HostedDomainRootPreparationMismatchError();
+    }
+    const root = getHostedDomainRootUnwrapCache()?.get(
+      `${input.prepared.userId}|${input.prepared.domain}|${input.prepared.rootKeyId}`,
+    );
+    if (!root) {
+      throw new TypeError("Expected prepared hosted domain root in test cache.");
+    }
+    return { root, rootKeyId: input.prepared.rootKeyId };
+  });
+  return {
+    ...actual,
+    hasActiveHostedCryptoDomainRootsForUserTx:
+      mocks.hasActiveHostedCryptoDomainRootsForUserTx,
+    lockAndReadActiveHostedDomainRootKeyIdTx:
+      mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+    prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
+    prepareHostedDomainRootForWeb,
+    revalidatePreparedHostedDomainRootForWebTx,
+    unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
+  };
 });
 
 function expectHostedLinqReadReceiptSent(chatId = CHAT_ID): void {
@@ -118,6 +191,13 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     appendHostedMailboxEnvelopeWithSourceMessageTx: (
       input: Parameters<typeof actual.appendHostedMailboxEnvelopeWithSourceMessageTx>[0],
+    ) =>
+      mocks.appendHostedMailboxEnvelopeTx({
+        envelope: input.envelope,
+        tx: input.tx,
+      }),
+    appendHostedMailboxEnvelopeWithPreparedCryptoTx: (
+      input: Parameters<typeof actual.appendHostedMailboxEnvelopeWithPreparedCryptoTx>[0],
     ) =>
       mocks.appendHostedMailboxEnvelopeTx({
         envelope: input.envelope,
@@ -148,7 +228,9 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
     ...actual,
     lookupHostedMemberRoutingByPendingLinqParticipantContact:
       mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    projectHostedMemberRoutingState: mocks.projectHostedMemberRoutingState,
     readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
+    readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
     readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
     upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   };
@@ -322,11 +404,16 @@ type UsageResetPrismaFixture = {
   hostedMember: {
     findUnique: MockedFunction;
   };
+  hostedMemberIdentity: {
+    findUnique: MockedFunction;
+  };
   hostedMemberRouting: {
     findMany: MockedFunction;
+    findUnique: MockedFunction;
     updateMany: MockedFunction;
   };
   hostedThreadRoute: {
+    findFirst: MockedFunction;
     findMany: MockedFunction;
     groupBy: MockedFunction;
     updateMany: MockedFunction;
@@ -364,10 +451,52 @@ describe("hosted Linq usage reset e2e", () => {
       },
       matchedBy: "phoneNumber",
     });
+    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(true);
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue(
+      "root_usage_reset",
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(async (input: {
+      domain: HostedCryptoDomain;
+      userId: string;
+    }) => {
+      const envelope: HostedDomainRootKeyEnvelopeV1 = {
+        authoritySignature: {
+          alg: "GCP-KMS-EC-P256-SHA256",
+          keyVersionName: "test-authority-key",
+          signature: "test-signature",
+          signedAt: "2026-04-30T00:00:00.000Z",
+        },
+        createdAt: "2026-04-30T00:00:00.000Z",
+        domain: input.domain,
+        generation: 1,
+        rootKeyId: "root_usage_reset",
+        schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+        updatedAt: "2026-04-30T00:00:00.000Z",
+        userId: input.userId,
+        wraps: [],
+      };
+      const cachedRoot = Promise.resolve({
+        envelope,
+        rootKey: new Uint8Array(32).fill(7),
+      });
+      const cache = getHostedDomainRootUnwrapCache();
+      cache?.set(`${input.userId}|${input.domain}|@active`, cachedRoot);
+      cache?.set(
+        `${input.userId}|${input.domain}|${envelope.rootKeyId}`,
+        cachedRoot,
+      );
+      return {
+        envelope,
+        rootKey: new Uint8Array(32).fill(7),
+      };
+    });
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact.mockResolvedValue(null);
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
       linqChatId: CHAT_ID,
       linqRecipientPhone: OWNER_PHONE,
+      memberId: MEMBER_ID,
+    });
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
       memberId: MEMBER_ID,
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue({
@@ -382,6 +511,9 @@ describe("hosted Linq usage reset e2e", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
+    mocks.projectHostedMemberRoutingState.mockImplementation(() =>
+      mocks.readHostedMemberRoutingState()
+    );
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue(makeHostedLinqDailyState());
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
@@ -586,7 +718,18 @@ function createUsageResetPrismaFixture(input: {
 
   const prisma: UsageResetPrismaFixture = {
     $executeRaw: vi.fn(async () => 0),
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (
+      query: readonly string[] | { strings?: readonly string[] },
+      ...values: unknown[]
+    ) => {
+      const taggedTemplate = Array.isArray(query);
+      const strings = taggedTemplate
+        ? query as readonly string[]
+        : (query as { strings?: readonly string[] }).strings ?? [];
+      return strings.join(" ").toLowerCase().includes("for update skip locked")
+        ? [{ id: values[0] }]
+        : [];
+    }),
     $transaction: vi.fn(async (run: (tx: UsageResetPrismaFixture) => Promise<unknown>) => run(prisma)),
     hostedAiUsage: {
       aggregate: vi.fn(async (aggregateInput: {
@@ -754,11 +897,16 @@ function createUsageResetPrismaFixture(input: {
         threadContainer: null,
       })),
     },
+    hostedMemberIdentity: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     hostedMemberRouting: {
       findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       groupBy: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
