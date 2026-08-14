@@ -56,7 +56,7 @@ Updated: 2026-08-14
    table and capture a secret-safe plan/runtime comparison.
 3. [x] Apply the smallest candidate-bound correction and add focused regression
    coverage.
-4. [ ] Run focused tests, hosted-web typecheck, direct PostgreSQL proof, and a
+4. [x] Run focused tests, hosted-web typecheck, direct PostgreSQL proof, and a
    parent diff review.
 5. [ ] Commit and push the candidate, open a PR, and complete exact-head CI and
    required ReviewGPT review gates.
