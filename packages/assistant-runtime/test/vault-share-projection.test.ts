@@ -75,6 +75,7 @@ import {
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
   CURRENT_VAULT_FORMAT_VERSION,
+  HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER,
   createEmptyMemoryDocument,
   formatTimeZoneDateTimeParts,
   formatMemoryDisplayNameRecordText,
@@ -1578,6 +1579,109 @@ describe("selectProjectableDailyMetricDays", () => {
         dateNow.mockRestore();
         await rm(vaultRoot, { recursive: true, force: true });
       }
+    }
+  });
+
+  it.each([
+    {
+      metric: "sleep-deep-minutes",
+      projectionKind: "deep-sleep-sources-days.v1" as const,
+      stage: "deep",
+    },
+    {
+      metric: "sleep-rem-minutes",
+      projectionKind: "rem-sleep-sources-days.v1" as const,
+      stage: "rem",
+    },
+  ])("reduces sequenced $stage reports before comparing the legacy Manual point", async ({
+    metric,
+    projectionKind,
+    stage,
+  }) => {
+    const vaultRoot = await createSleepSourceProjectionVault([]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const eventsPath = join(
+        vaultRoot,
+        "ledger",
+        "events",
+        "2026",
+        "2026-07.jsonl",
+      );
+      const existingRecords = await readFile(eventsPath, "utf8");
+      const manualPoints = [
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_${stage}_report_newer`,
+          kind: "observation",
+          occurredAt: "2026-07-03T16:00:00.000Z",
+          recordedAt: "2026-07-03T18:00:00.000Z",
+          dayKey: ACTIVITY_DAY.date,
+          source: "manual",
+          title: `${stage} report newer`,
+          metric,
+          value: 91,
+          unit: "minutes",
+          externalRef: {
+            system: "manual",
+            resourceType: "daily-metric-report",
+            resourceId: `${stage}-report-newer`,
+          },
+          qualifiers: { [HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER]: "42" },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_${stage}_legacy_manual`,
+          kind: "observation",
+          occurredAt: "2026-07-03T15:00:00.000Z",
+          recordedAt: "2026-07-03T17:00:00.000Z",
+          dayKey: ACTIVITY_DAY.date,
+          source: "manual",
+          title: `${stage} legacy manual`,
+          metric,
+          value: 75,
+          unit: "minutes",
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_${stage}_report_older`,
+          kind: "observation",
+          occurredAt: "2026-07-03T19:00:00.000Z",
+          recordedAt: "2026-07-03T18:00:00.000Z",
+          dayKey: ACTIVITY_DAY.date,
+          source: "manual",
+          title: `${stage} report older`,
+          metric,
+          value: 60,
+          unit: "minutes",
+          externalRef: {
+            system: "manual",
+            resourceType: "daily-metric-report",
+            resourceId: `${stage}-report-older`,
+          },
+          qualifiers: { [HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER]: "41" },
+        },
+      ];
+      await writeFile(
+        eventsPath,
+        `${existingRecords}${manualPoints.map((record) => JSON.stringify(record)).join("\n")}\n`,
+        "utf8",
+      );
+
+      await expect(readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec(projectionKind),
+      )).resolves.toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({ value: 75 }),
+          recordKey: `${ACTIVITY_DAY.date}.manual`,
+          source: { label: "Manual", source: "manual" },
+        }),
+      ]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
     }
   });
 

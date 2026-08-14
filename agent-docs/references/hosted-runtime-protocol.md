@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-12
+Last verified: 2026-08-14
 
 ## Decision
 
@@ -206,10 +206,13 @@ serialized heartbeat attempts on a two-second start-to-start cadence for the
 full publication. This leaves the two-second heartbeat request inside the
 10-second stale boundary. A successful foreground preemption bypasses handoff
 preservation and stops heartbeat liveness before detached session cleanup.
-After Web accepts the checkpoint, the runtime stops heartbeating and
-best-effort records completion; a failed marker falls back to stale-heartbeat
-expiry. Absent, mismatched, completed, or stale sessions do not delay
-replacement. This
+If `/complete` loses its response at the transport boundary, the runtime replays
+that exact completion request at most once under the original heartbeat,
+stored write-fence headers, and remaining commit timeout; non-OK HTTP responses
+and parse/validation failures are terminal. After Web accepts the checkpoint,
+the runtime stops heartbeating and best-effort records completion; a failed
+marker falls back to stale-heartbeat expiry. Absent, mismatched, completed, or
+stale sessions do not delay replacement. This
 bridges the shutdown publication race without imposing a fixed snapshot
 deadline or turning the much longer orphan-cleanup lifetime into startup
 liveness. A dead runtime can defer replacement for the 10-second liveness
@@ -2048,7 +2051,12 @@ The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
 selects due-reconcile facts, records due-reconcile signals, appends bounded
-`device-sync.wake` handoffs, and keeps retries idempotent. Dirty rows are not
+`device-sync.wake` handoffs, and keeps retries idempotent. An unchanged due tuple
+is suppressed only inside the current five-minute recovery bucket; a later
+bucket may re-signal the same durable mailbox item while canonical cadence is
+still stale. That signal is recovery admission for the existing mailbox/event
+identity and must not mint another schedule-event or mailbox-item identity.
+It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,
 not a scheduler queue. The runtime must support dirty-pending and dirty-ack
@@ -2073,9 +2081,19 @@ worker-created children. It also carries the provider's advanced cadence, but
 withholds that cadence from Web until an empty-job completion-fence checkpoint
 has made the terminal transition durable. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
-unfinished operation and cadence from that item. Terminal success or failure
-then advances the mailbox item. Web dirty rows use their existing terminal
-acknowledgement boundary instead. Device-sync mailbox ordering and scheduler
+unfinished operation and cadence from that item. The canonical mailbox
+item/event already exists in the committed input workspace. The read-only
+provider classes and their artifact writes run before checkpoint 1, which then
+durably captures the replayable post-pull/intermediate state. If checkpoint 2
+fails to persist record/completion, cold restore from checkpoint 1 lacks the
+machine-local SQLite execution record and may run the same provider classes
+again. Replay compares the read-only HTTP method/path class rather than the full
+query string because the reconstructed pull window may advance. This
+bounded at-least-once behavior is the intentional consequence of keeping
+machine-local execution state out of snapshots; preventing it would require a
+new durable provider-effect journal or snapshot protocol. Terminal success or
+failure then advances the mailbox item. Web dirty rows use their existing
+terminal acknowledgement boundary instead. Device-sync mailbox ordering and scheduler
 admission are per connection, so a retained retry cannot block or advance a due
 wake for a different connection. The global due-reconcile sweep consumes only
 the Web-owned provider `nextReconcileAt`; local retry timing never enters that
@@ -2083,6 +2101,28 @@ sweep. Future provider cadence may remain the workspace's projected follow-up
 wake and is included in the system-mailbox checkpoint handoff, but a cadence
 that is already due is suppressed from generic runtime-timer projection and can
 be admitted only by its connection mailbox wake.
+
+The executable WHOOP regression fixes one canonical schedule-event identity and
+one durable mailbox-item identity. The fixture commits the clean input workspace
+through the production v2 checkpoint bridge. Its initial incident pass then
+fetches the mailbox item, issues sleep, recovery, cycle, and workout reads, writes
+four artifacts, and creates the machine-local SQLite execution record. The
+production v2 post-pull archive plan observes the live SQLite store, omits it from
+the archive, and retains the durable system-mailbox state. The only injected
+failure rejects that snapshot checkpoint, so the clean input ref remains the last
+committed snapshot. In the next five-minute bucket, the production v2 restore
+dispatch restores that exact ref without the SQLite execution record,
+reconstructs the pending obligation from durable mailbox authority, and replays
+those same four method/path classes exactly once,
+for eight requests total. That 00:05 recovery pass makes three successful
+checkpoints. Its retained completion-fence wake is due at 00:05:30 and carries
+the 06:05 provider cadence. The completion pass makes no third provider pull,
+makes two successful checkpoints, and publishes 06:05 only after the durable
+recovery/completion checkpoint. The 00:10 pass returns idle with no wake and
+makes one bounded post-publication convergence checkpoint; the 00:15 pass is
+fully quiescent. Within the measured incident window, the proof observes eight
+checkpoint attempts, seven commits, one injected failure, and no provider work
+after the single replay.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

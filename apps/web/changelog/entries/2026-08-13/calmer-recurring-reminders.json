@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 200,
+  "item": {
+    "id": "calmer-recurring-reminders",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Daily and weekly reminders know when to pause",
+    "summary": "When an ordinary daily or weekly reminder receives no reply, Murph now asks once whether to keep, change, or pause it instead of repeating indefinitely.",
+    "details": "If that question also goes unanswered, later ordinary reminders stay quiet until someone replies about the reminder or asks Murph to resume or change it. A longer cadence or unusual delay continues the cue when its prior delivery evidence has expired, rather than guessing from missing context. In groups, Murph asks the room and never blames a participant. Medication, clinician-directed, and safety-critical reminders keep sending unless explicitly changed or paused.",
+    "relevanceTags": ["assistant", "reminders", "groups"],
+    "sourcePullRequests": [1775]
+  }
+}

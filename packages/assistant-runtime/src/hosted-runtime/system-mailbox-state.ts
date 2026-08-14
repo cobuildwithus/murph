@@ -64,6 +64,7 @@ export type HostedSystemMailboxRouteAction =
   | "run-clinical-records-sync"
   | "run-device-sync-wake"
   | "run-environment-voice"
+  | "import-reported-daily-metric"
   | "apply-runtime-control-request";
 
 export interface HostedSystemMailboxPendingItem {
@@ -501,6 +502,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
     || value === "run-environment-voice"
+    || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
   ) {
     return value;

@@ -4,6 +4,9 @@ import {
   parseHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "../daily-metric.ts";
+import {
   parseHostedExecutionDeviceSyncExpectedConnectedAt,
 } from "./device-sync.ts";
 import {
@@ -1141,6 +1144,28 @@ export function parseHostedRuntimeGroupToolRequest(
       throw new TypeError(`${label} origin must be an accepted input.`);
     }
     return { action, origin };
+  }
+  if (action === "record_current_sender_daily_metric") {
+    const label = "Hosted runtime group tool record_current_sender_daily_metric request";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "dailyMetric", "origin"]),
+      label,
+    );
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label} origin must be an accepted input.`);
+    }
+    return {
+      action,
+      dailyMetric: parseHostedExecutionDailyMetricReportedPayload(
+        record.dailyMetric,
+      ),
+      origin,
+    };
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
@@ -2516,9 +2541,9 @@ function parseHostedRuntimeGroupCanonicalTimestamp(
 
 function parseHostedRuntimeGroupCurrentSenderMessageResult(
   value: unknown,
+  action: "message_current_sender" | "record_current_sender_daily_metric",
 ): HostedRuntimeGroupCurrentSenderMessageResult {
-  const label =
-    "Hosted runtime group tool message_current_sender response result";
+  const label = `Hosted runtime group tool ${action} response result`;
   const result = requireObject(value, label);
   const status = requireString(result.status, `${label} status`);
   if (status === "accepted") {
@@ -2591,10 +2616,16 @@ export function parseHostedRuntimeGroupToolResponse(
   const action = requireString(record.action, "Hosted runtime group tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
-  if (action === "message_current_sender") {
+  if (
+    action === "message_current_sender"
+    || action === "record_current_sender_daily_metric"
+  ) {
     return {
       action,
-      result: parseHostedRuntimeGroupCurrentSenderMessageResult(record.result),
+      result: parseHostedRuntimeGroupCurrentSenderMessageResult(
+        record.result,
+        action,
+      ),
     };
   }
   if (action === "ask_current_sender" || action === "ask_member") {

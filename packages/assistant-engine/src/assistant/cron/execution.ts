@@ -89,7 +89,11 @@ import type {
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
-import { errorMessage, normalizeNullableString } from '../shared.js'
+import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+  errorMessage,
+  normalizeNullableString,
+} from '../shared.js'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -1737,7 +1741,14 @@ function buildAssistantCronExecutionInstructions(
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
-  const overlays = [retryEvidence, independentAuthority, supportScope]
+  const recurringReminderConversation =
+    buildAssistantCronRecurringReminderConversationInstructions(job)
+  const overlays = [
+    retryEvidence,
+    independentAuthority,
+    recurringReminderConversation,
+    supportScope,
+  ]
     .filter((section): section is string => section !== null)
   const providerSafeBase =
     stripAutomationAvailabilityConflictEvidenceForProvider(job.job.prompt)
@@ -1786,7 +1797,7 @@ function buildAssistantCronSupportScopeInstructions(
   }
 
   const exactScope = job.source.supportKind === 'reminder'
-    ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. Do not ask a proactive repair, accountability, reflection, or follow-up question.'
+    ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
       ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
       : job.source.supportKind === 'review'
@@ -1798,6 +1809,39 @@ function buildAssistantCronSupportScopeInstructions(
     `- Persisted support kind: ${job.source.supportKind}.`,
     `- ${exactScope}`,
   ].join('\n')
+}
+
+export const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS = [
+  'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):',
+  '- This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders. For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
+  '- Apply a silence-based cadence question or skip only when the immediately prior confirmed output appears in this request\'s engine-supplied automation-output history. If that output is unavailable under the existing evidence-retention horizon, send the current cue normally. Do not use an assistant transcript entry alone as proof of dispatch because transcript persistence precedes delivery.',
+  '- Use recent conversation plus engine delivery evidence. A failed or unconfirmed immediately prior attempt does not count: send the current reminder normally instead of treating that attempt as unanswered.',
+  '- Otherwise find the most recent output from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
+  '- If there is no such confirmed output for this revision, send the current reminder normally.',
+  '- If a relevant human reply followed that output, use it when composing the current reminder.',
+  `- When a history item with the exact text \`${ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT}\` appears inside this provider request's engine-supplied recent-conversation-history section, the current cold reconstruction is incomplete because an existing retention, count, or byte bound omitted committed details. It is not a human reply and does not prove silence. For this occurrence, do not apply a silence-based cadence question or skip: continue the current cue unless retained conversation or another authoritative owner proves an explicit pause, change, or valid skip condition.`,
+  '- That marker expires after the provider request that supplied it. If it is visible only in an earlier turn of a resumed provider thread, ignore it when deciding whether a later confirmed reminder received a relevant reply.',
+  '- If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
+  '- Otherwise send the current concise cue and ask one natural question about whether to keep, change, or pause these interruptions.',
+  '- This question administers reminder cadence only. Do not ask whether the action was completed, infer failure or refusal from silence, increase frequency, or manufacture novelty when the same concise cue still fits.',
+  '- In a group, address the room collectively. Never assign silence, non-completion, or failure to an individual participant.',
+].join('\n')
+
+function buildAssistantCronRecurringReminderConversationInstructions(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  if (
+    job.kind !== 'canonical' ||
+    job.source.kind !== 'automation' ||
+    job.source.status !== 'active' ||
+    (job.source.supportKind !== null && job.source.supportKind !== 'reminder') ||
+    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
+    job.source.schedule.kind === 'at'
+  ) {
+    return null
+  }
+
+  return ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS
 }
 
 function assistantCronTimestampIsLater(

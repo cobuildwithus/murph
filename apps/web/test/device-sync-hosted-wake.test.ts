@@ -1631,25 +1631,47 @@ describe("hosted device-sync wakes", () => {
     }
   });
 
-  it("re-signals duplicate due-reconcile wakes and records the successful due claim", async () => {
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
-      dedupeConflict: false,
-      duplicate: true,
-      inserted: false,
-      item: {
-        id: "mailbox_existing",
-        userId: "user-123",
-      },
-    });
-
-    await expect(appendHostedDeviceSyncScheduledReconcileWake({
+  it("re-signals one unchanged due tuple in the next recovery bucket without appending another mailbox item", async () => {
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {
+          id: "mailbox_existing",
+          userId: "user-123",
+        },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_existing",
+          userId: "user-123",
+        },
+      });
+    const canonicalWake = {
       connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:01:00.000Z",
       eventId: "device-sync:scheduled-reconcile:abc123",
       expectedConnectedAt: "2026-03-26T12:00:00.000Z",
       nextReconcileAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
+      provider: "oura" as const,
       userId: "user-123",
+    };
+
+    await expect(appendHostedDeviceSyncScheduledReconcileWake({
+      ...canonicalWake,
+      createdAt: "2026-03-26T12:00:30.000Z",
+    })).resolves.toEqual({
+      wakeAccepted: true,
+      wakeAppended: true,
+      wakeDuplicate: false,
+      wakeInserted: true,
+    });
+    await expect(appendHostedDeviceSyncScheduledReconcileWake({
+      ...canonicalWake,
+      createdAt: "2026-03-26T12:05:00.000Z",
     })).resolves.toEqual({
       wakeAccepted: true,
       wakeAppended: false,
@@ -1657,23 +1679,29 @@ describe("hosted device-sync wakes", () => {
       wakeInserted: false,
     });
 
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_existing",
-    });
-    expect(mocks.createSignal).toHaveBeenCalledWith({
-      connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:01:00.000Z",
-      eventType: null,
-      kind: "reconcile_due",
-      nextReconcileAt: "2026-03-26T12:00:00.000Z",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      reason: null,
-      resourceCategory: null,
-      revokeWarning: null,
-      traceId: null,
-      userId: "user-123",
-    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(([request]) =>
+        request.envelope.eventId
+      ),
+    ).toEqual([canonicalWake.eventId, canonicalWake.eventId]);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime.mock.calls).toEqual([
+      [{ mailboxItemId: "mailbox_existing" }],
+      [{ mailboxItemId: "mailbox_existing" }],
+    ]);
+    expect(mocks.createSignal.mock.calls.map(([request]) => ({
+      createdAt: request.createdAt,
+      nextReconcileAt: request.nextReconcileAt,
+    }))).toEqual([
+      {
+        createdAt: "2026-03-26T12:00:30.000Z",
+        nextReconcileAt: canonicalWake.nextReconcileAt,
+      },
+      {
+        createdAt: "2026-03-26T12:05:00.000Z",
+        nextReconcileAt: canonicalWake.nextReconcileAt,
+      },
+    ]);
   });
 
   it("surfaces duplicate due-reconcile dedupe conflicts without writing signals or Temporal signals", async () => {

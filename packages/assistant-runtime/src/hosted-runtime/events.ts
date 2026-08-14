@@ -415,6 +415,14 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
       );
+    case "health.daily-metric.reported":
+      // The canonical observation landed at mailbox import. After that write
+      // checkpoints, refresh any already-granted group projections.
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: { kind: "vault-share.projection" },
+      });
   }
 
   const exhaustiveWake: never = input.wake;
