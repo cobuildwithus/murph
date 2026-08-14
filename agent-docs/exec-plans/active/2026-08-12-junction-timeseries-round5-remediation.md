@@ -453,5 +453,18 @@ Updated: 2026-08-14
   provider request boundaries plus 206-scenario integrity remain green. The
   exact Linux CI runner measurement is retained with the existing 32KB
   allowance.
-- Pending: commit/push, exact-head CI, ReviewGPT PASS,
+- Fresh exact-head CI passed every required check plus the frontend, hygiene,
+  billing, viewport, and Cloudflare sandbox workflows. Its non-required
+  platform-coverage shard exposed three stale PR test models: the direct
+  executor helper abandoned the durable calendar siblings intentionally
+  emitted beside yielded precise continuations, and a scheduled-reconcile test
+  expected ordinary resource jobs to advance the full-sync clock despite the
+  established preservation rule. The helper now drains deduplicated immediate
+  calendar siblings while retaining the precise result, importer receipts
+  mirror production calendar-target evidence, malformed sparse coverage proves
+  that only the repaired 120 mg complete-day total publishes, and the reconcile
+  regression advances its clock through the pre-closure full-job continuation.
+  The exact three-test reproduction and four-test follow-up pass, both full
+  affected files pass 200/200, and the device-sync typecheck passes.
+- Pending: commit/push the CI-only test correction, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

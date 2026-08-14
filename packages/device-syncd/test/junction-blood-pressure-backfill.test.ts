@@ -260,6 +260,27 @@ function createJobContext(input: {
       const canonicalEventExternalRefResourceIds = (normalized.events ?? []).flatMap(
         (event) => event.externalRef?.resourceId ? [event.externalRef.resourceId] : [],
       );
+      const canonicalSparseCalendarTargets = [...new Map(
+        (normalized.events ?? []).flatMap((event) =>
+          typeof event.dayKey === "string" && event.dataOrigin?.sourceProviderSlug
+            ? [[JSON.stringify([
+                event.dayKey,
+                event.dataOrigin.sourceProviderSlug,
+                event.dataOrigin.sourceType ?? null,
+                event.dataOrigin.sourceInstanceId ?? null,
+              ]), {
+                dayKey: event.dayKey,
+                sourceProviderSlug: event.dataOrigin.sourceProviderSlug,
+                ...(event.dataOrigin.sourceInstanceId === undefined
+                  ? {}
+                  : { sourceInstanceId: event.dataOrigin.sourceInstanceId }),
+                ...(event.dataOrigin.sourceType
+                  ? { sourceType: event.dataOrigin.sourceType }
+                  : {}),
+              }] as const]
+            : []
+        ),
+      ).values()];
       const canonicalEventCount = input.canonicalEventCount
         ?? normalized.events?.length
         ?? 0;
@@ -267,6 +288,7 @@ function createJobContext(input: {
         canonicalEventCount,
         canonicalEventExternalRefResourceIds:
           canonicalEventExternalRefResourceIds.slice(0, canonicalEventCount),
+        canonicalSparseCalendarTargets,
         durableDeliveryAccepted: true,
       };
     }),
@@ -594,19 +616,62 @@ async function executeImmediateResourceContinuations(input: {
   let executionCount = 0;
   let nextIndex = input.startingIndex ?? 10_000;
   const results: ProviderJobResult[] = [];
+  const pendingCalendarJobs = new Map<string, DeviceSyncJobInput>();
+
+  const retainCalendarJobs = (result: ProviderJobResult) => {
+    for (const scheduledJob of result.scheduledJobs ?? []) {
+      if (
+        scheduledJob.kind !== "resource"
+        || scheduledJob.payload?.resource !== input.resource
+        || typeof scheduledJob.payload.calendarRefreshDay !== "string"
+      ) {
+        continue;
+      }
+      const identity = scheduledJob.dedupeKey
+        ?? JSON.stringify(scheduledJob.payload);
+      pendingCalendarJobs.set(identity, scheduledJob);
+    }
+  };
 
   while (executionCount < 400) {
     const result = await executor.executeJob(input.context, currentJob);
     results.push(result);
     executionCount += 1;
+    retainCalendarJobs(result);
     const continuation = result.scheduledJobs?.find((job) =>
-      job.kind === "resource" && job.payload?.resource === input.resource
+      job.kind === "resource"
+      && job.payload?.resource === input.resource
+      && job.payload.calendarRefreshDay === undefined
     );
     if (
       !continuation
       || (continuation.availableAt && continuation.availableAt !== input.context.now)
     ) {
-      return { executionCount, result, results };
+      for (const calendarJob of pendingCalendarJobs.values()) {
+        if (
+          calendarJob.availableAt
+          && calendarJob.availableAt !== input.context.now
+        ) {
+          continue;
+        }
+        const calendarResult = await executor.executeJob(
+          input.context,
+          toJobRecord(calendarJob, nextIndex),
+        );
+        results.push(calendarResult);
+        executionCount += 1;
+        nextIndex += 1;
+      }
+      const remainingScheduledJobs = result.scheduledJobs?.filter((job) =>
+        typeof job.payload?.calendarRefreshDay !== "string"
+      );
+      return {
+        executionCount,
+        result: result.scheduledJobs
+          ? { ...result, scheduledJobs: remainingScheduledJobs }
+          : result,
+        results,
+      };
     }
     currentJob = toJobRecord(continuation, nextIndex);
     nextIndex += 1;
@@ -1460,7 +1525,7 @@ test("a sparse daily aggregate retries a date with a malformed sibling", async (
         ?.filter((event) => event.fields?.metric === "caffeine")
         .map((event) => event.fields?.value) ?? []
     ),
-    [80, 120],
+    [120],
   );
 });
 
@@ -1608,7 +1673,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
   });
 
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
 });
 
 test("sparse history completion resolves supported source aliases", async () => {
@@ -1645,7 +1710,7 @@ test("sparse history completion resolves supported source aliases", async () => 
     {
       expectedCoverage: true,
       expectedScheduledJobs: 0,
-      expectedTimeseriesRequests: 2,
+      expectedTimeseriesRequests: 3,
       historicalPullState: {
         notPulled: true,
         resource: "caffeine",
@@ -1914,7 +1979,9 @@ test("a persistently malformed sparse day exhausts only its bounded day retry", 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const result = await executor.executeJob(createJobContext({ now }), job);
     const retry = result.scheduledJobs?.find((candidate) =>
-      candidate.kind === "resource" && candidate.payload?.resource === "caffeine"
+      candidate.kind === "resource"
+      && candidate.payload?.resource === "caffeine"
+      && candidate.payload.calendarRefreshDay === undefined
     );
     if (!retry) {
       finalResult = result;

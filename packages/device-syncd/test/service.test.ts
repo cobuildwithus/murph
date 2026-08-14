@@ -6760,7 +6760,7 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
   }
 });
 
-test("Junction scheduled reconcile imports a newly closed day after resource jobs advance the account clock", async () => {
+test("Junction scheduled reconcile imports a newly closed day after its pre-closure continuation advances the account clock", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-closed-day-floor");
   let now = new Date("2026-04-02T00:05:00.000Z");
   const importedSnapshots: unknown[] = [];
@@ -6848,41 +6848,20 @@ test("Junction scheduled reconcile imports a newly closed day after resource job
       priority,
       dedupeKey,
     });
-    const enqueueResource = (dedupeKey: string) => store.enqueueJob({
-      accountId: account.id,
-      provider: "junction",
-      kind: "resource",
-      payload: {
-        resource: "activity",
-        resourceCategory: "summary",
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-02T00:00:00.000Z",
-      },
-      availableAt: now.toISOString(),
-      priority: 80,
-      dedupeKey,
-    });
-
     enqueueReconcile("junction-pre-closure-floor");
     const preClosure = await service.runWorkerOnce();
     assert.equal(preClosure?.kind, "reconcile");
     assert.equal(timeseriesRequests.length, 0);
-
-    now = new Date("2026-04-02T12:00:00.000Z");
-    const firstResource = enqueueResource("junction-post-closure-resource-1");
-    const secondResource = enqueueResource("junction-post-closure-resource-2");
-    const postClosureReconcile = enqueueReconcile("junction-post-closure-floor");
-
-    const firstProcessedResource = await service.runWorkerOnce();
-    now = new Date("2026-04-02T12:01:00.000Z");
-    const secondProcessedResource = await service.runWorkerOnce();
-    assert.deepEqual(
-      new Set([firstProcessedResource?.id, secondProcessedResource?.id]),
-      new Set([firstResource.id, secondResource.id]),
+    const preClosureContinuation = await service.runWorkerOnce();
+    assert.equal(preClosureContinuation?.kind, "reconcile");
+    assert.equal(timeseriesRequests.length, 0);
+    assert.equal(
+      store.getAccountById(account.id)?.lastSyncCompletedAt,
+      "2026-04-02T00:05:00.000Z",
     );
-    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
 
     now = new Date("2026-04-02T12:02:00.000Z");
+    const postClosureReconcile = enqueueReconcile("junction-post-closure-floor");
     assert.equal((await service.runWorkerOnce())?.id, postClosureReconcile.id);
     assert.equal(timeseriesRequests.length, 1);
     assert.equal(timeseriesRequests[0]?.searchParams.get("start_date"), "2026-04-01");
