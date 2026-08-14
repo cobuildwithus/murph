@@ -501,11 +501,11 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 fi
 
-# Root dotfiles are not discovered by the ordinary source scan, but Crabbox
-# reviews depend on this provider/ref trust-root configuration even when the
-# current patch changes only its consumers.
+# Root dotfiles are not discovered by the ordinary source scan, but reviews
+# depend on these execution trust roots even when the current patch changes
+# only their consumers.
 if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
-  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'".crabbox.yaml"
+  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'".crabbox.yaml"$'\n'".nvmrc"
 fi
 export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 

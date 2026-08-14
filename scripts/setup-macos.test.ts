@@ -12,11 +12,16 @@ describe("macOS setup Node alignment", () => {
     ) as { engines?: { node?: string } };
     const pinnedNode = readFileSync(path.join(repoRoot, ".nvmrc"), "utf8").trim();
     const setupScript = readFileSync(path.join(repoRoot, "scripts/setup-macos.sh"), "utf8");
+    const auditPackageScript = readFileSync(
+      path.join(repoRoot, "scripts/package-audit-context-full.sh"),
+      "utf8",
+    );
 
     expect(packageJson.engines?.node).toBe(`>=${pinnedNode}`);
     expect(setupScript).toContain('node_formula="node@${required_node%%.*}"');
     expect(setupScript).toContain('brew install "$node_formula"');
     expect(setupScript).toContain('brew --prefix "$node_formula"');
     expect(setupScript).not.toContain("node@22");
+    expect(auditPackageScript).toContain('$\'\\n\'".nvmrc"');
   });
 });
