@@ -3117,10 +3117,29 @@ describe('assistant outbox runtime', () => {
     const completedAt = '2026-04-08T02:03:00.000Z'
     const hookFailedAt = '2026-04-08T02:04:00.000Z'
     vi.setSystemTime(new Date(completedAt))
-    const { vaultRoot } = await createAssistantVault(
+    const { paths, vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-completion-checkpoint-hook-',
     )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      instructions: 'Send the hourly hook checkpoint reminder.',
+      now: new Date('2026-04-08T02:00:00.000Z'),
+      route: {
+        ...scaffold.route,
+        channel: 'linq',
+        threadId: 'linq-thread-completion-checkpoint-hook',
+      },
+      schedule: { everyMs: 60 * 60 * 1_000, kind: 'every' },
+      slug: 'completion-checkpoint-hook',
+      title: 'Completion checkpoint hook',
+      vaultRoot,
+    })
     const seeded = await createIntent(vaultRoot, {
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
       channel: 'linq',
       createdAt: '2026-04-08T02:00:00.000Z',
       explicitTarget: 'linq-thread-completion-checkpoint-hook',
@@ -3130,6 +3149,16 @@ describe('assistant outbox runtime', () => {
       sessionId: 'session-completion-checkpoint-hook',
       threadId: 'linq-thread-completion-checkpoint-hook',
       turnId: 'turn-completion-checkpoint-hook',
+    })
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'Send the hook checkpoint recovery reminder.',
+      provider: 'codex-cli',
+      providerModel: 'gpt-test',
+      sessionId: seeded.sessionId,
+      startedAt: '2026-04-08T02:00:00.000Z',
+      turnId: seeded.turnId,
+      vault: vaultRoot,
     })
     await saveAssistantOutboxIntent(vaultRoot, {
       ...seeded,
@@ -3154,6 +3183,18 @@ describe('assistant outbox runtime', () => {
       nextAttemptAt: completedAt,
       status: 'retryable',
       updatedAt: acceptedMediaAt,
+    })
+    const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: automation.record.automationId,
+      now: automation.record.updatedAt,
+    })
+    runtimeRecord.updatedAt = '2026-04-08T02:00:00.000Z'
+    runtimeRecord.state.lastRunAt = '2026-04-08T02:00:00.000Z'
+    runtimeRecord.state.pendingDeliveryIntentId = seeded.intentId
+    runtimeRecord.state.pendingOccurrenceAt = '2026-04-08T02:00:00.000Z'
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeRecord],
+      version: 1,
     })
     mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
       delivery: createDelivery({
@@ -3195,11 +3236,15 @@ describe('assistant outbox runtime', () => {
     })
     expect(interrupted.intent.delivery?.sentAt).toBe(acceptedMediaAt)
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    const retryAt = interrupted.intent.nextAttemptAt
+    if (!retryAt) {
+      throw new Error('Expected the hook failure to schedule recovery.')
+    }
+    vi.setSystemTime(new Date(retryAt))
 
     const recovered = await dispatchAssistantOutboxIntent({
-      force: true,
       intentId: seeded.intentId,
-      now: new Date(hookFailedAt),
+      now: new Date(retryAt),
       vault: vaultRoot,
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
@@ -3209,6 +3254,35 @@ describe('assistant outbox runtime', () => {
       updatedAt: completedAt,
     })
     expect(recovered.intent.delivery?.sentAt).toBe(acceptedMediaAt)
+    const receipt = await readAssistantTurnReceipt(vaultRoot, seeded.turnId)
+    expect(receipt?.timeline.filter(
+      (event) => event.kind === 'delivery.sent',
+    )).toEqual([
+      expect.objectContaining({ at: completedAt }),
+    ])
+    const diagnosticEvents = (await readFile(paths.diagnosticEventsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { at: string; kind: string })
+    expect(diagnosticEvents).toContainEqual(expect.objectContaining({
+      at: completedAt,
+      kind: 'delivery.sent',
+    }))
+    const cronRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(cronRuntime.jobs[0]?.state).toMatchObject({
+      lastSucceededAt: completedAt,
+      pendingOccurrenceAt: null,
+    })
+    expect(cronRuntime.jobs[0]?.state.pendingDeliveryIntentId).toBeUndefined()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
+      expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          lastSucceededAt: completedAt,
+          nextRunAt: '2026-04-08T03:03:00.000Z',
+        }),
+      }),
+    )
   })
 
   it('delivers immediately, reuses sent dedupe hits, and supports queue-only mode', async () => {
