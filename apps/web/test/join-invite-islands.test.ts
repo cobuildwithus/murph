@@ -298,13 +298,13 @@ test("JoinInviteCheckoutPlanButtonIsland refreshes instead of redirecting when c
   await cleanup();
 });
 
-test("JoinInviteStarterUsageIsland redirects after successful enrollment", async () => {
+test("JoinInviteStarterUsageIsland reloads the document after successful enrollment", async () => {
   mocks.requestHostedStarterUsageEnrollment.mockResolvedValue({
     redirectPath: "/home",
     status: "enrolled",
   });
 
-  const { cleanup } = await renderClientComponent(
+  const { cleanup, replaceLocation } = await renderClientComponent(
     createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
@@ -318,11 +318,12 @@ test("JoinInviteStarterUsageIsland redirects after successful enrollment", async
   expect(mocks.requestHostedStarterUsageEnrollment).toHaveBeenCalledWith({
     inviteCode: "invite-code",
   });
-  expect(mocks.replace).toHaveBeenCalledWith("/home");
+  expect(replaceLocation).toHaveBeenCalledWith("/home");
+  expect(mocks.replace).not.toHaveBeenCalled();
   await cleanup();
 });
 
-test("JoinInviteStarterUsageIsland preserves the enrollment redirect after unmount", async () => {
+test("JoinInviteStarterUsageIsland preserves the document reload after unmount", async () => {
   let resolveEnrollment!: (value: HostedStarterUsageEnrollmentResponse) => void;
   mocks.requestHostedStarterUsageEnrollment.mockReturnValue(
     new Promise<HostedStarterUsageEnrollmentResponse>((resolve) => {
@@ -330,7 +331,7 @@ test("JoinInviteStarterUsageIsland preserves the enrollment redirect after unmou
     }),
   );
 
-  const { cleanup } = await renderClientComponent(
+  const { cleanup, replaceLocation } = await renderClientComponent(
     createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
@@ -347,7 +348,8 @@ test("JoinInviteStarterUsageIsland preserves the enrollment redirect after unmou
     await Promise.resolve();
   });
 
-  expect(mocks.replace).toHaveBeenCalledWith("/home");
+  expect(replaceLocation).toHaveBeenCalledWith("/home");
+  expect(mocks.replace).not.toHaveBeenCalled();
 });
 
 test("JoinInviteStarterUsageIsland renders a distinct retry state after enrollment fails", async () => {
