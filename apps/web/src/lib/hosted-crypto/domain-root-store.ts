@@ -1015,10 +1015,16 @@ async function createSignedHostedDomainRootEnvelope(input: {
       userId: input.userId,
       wraps,
     };
-    const signature = await config.gcpKms.asymmetricSign({
-      keyVersionName: config.authoritySignKeyVersionName,
-      message: buildHostedDomainRootEnvelopeSigningPayload(body),
-    });
+    const signingPayload = buildHostedDomainRootEnvelopeSigningPayload(body);
+    let signature: Awaited<ReturnType<typeof config.gcpKms.asymmetricSign>>;
+    try {
+      signature = await config.gcpKms.asymmetricSign({
+        keyVersionName: config.authoritySignKeyVersionName,
+        message: signingPayload,
+      });
+    } finally {
+      signingPayload.fill(0);
+    }
     return attachHostedDomainRootEnvelopeSignature({
       body,
       keyVersionName: signature.keyVersionName,

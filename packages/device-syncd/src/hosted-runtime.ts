@@ -624,6 +624,7 @@ export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
 }
 
 export interface HostedExecutionDeviceSyncDirtyPendingRequest {
+  connectionId?: string | null;
   limit?: number | null;
   stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
@@ -747,7 +748,11 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   sourceEventType: "string",
   sourceProviderSlug: "string",
   timeseriesCursor: "isoTimestamp",
+  timeseriesPhase: "string",
+  timeseriesResourceCursor: "string",
+  timeseriesWindowHours: "number",
   webhookDataJson: "string",
+  workoutStreamCursor: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });
@@ -1013,6 +1018,14 @@ export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
     );
 
   return {
+    ...(record.connectionId === undefined
+      ? {}
+      : {
+          connectionId: readNullableStringValue(
+            record.connectionId,
+            "Hosted device-sync dirty pending request connectionId",
+          ),
+        }),
     ...(record.limit === undefined
       ? {}
       : {

@@ -3066,6 +3066,226 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
   )
 })
 
+describeRealCodex('real Codex connected health record awareness e2e', () => {
+  it(
+    'chooses one canonical read for expanded connected health records',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        for (const probe of [
+          {
+            commandPattern: /measurement entry list --metric calories_basal --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /wearables day|food intake|ate|consumed/iu,
+            finalIncludes: [/1[,.]?640.*(?:basal|calor)|(?:basal|calor).*1[,.]?640/iu],
+            id: 'basal',
+            prompt: 'How many basal calories did my connected device record on July 12?',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_basal_calories_summary',
+                metric: 'basal-calories',
+                occurredAt: '2026-07-12T23:59:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'kcal',
+                value: 1640,
+              }],
+            },
+            skillSlug: 'daily-activity',
+          },
+          {
+            commandPattern: /event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json/u,
+            finalExcludes: /(?:you should|I recommend|I suggest).{0,40}(?:start|stop|change|adjust|retime)|no insulin was recorded|none recorded|total dose/iu,
+            finalIncludes: [/4(?:\s|-)?unit.*insulin|insulin.*4(?:\s|-)?unit/iu],
+            id: 'insulin',
+            prompt: 'What insulin dose records did my connected device return for July 12?',
+            result: {
+              count: 1,
+              items: [{
+                data: {
+                  fields: {
+                    'dose-amount': 4,
+                    'dose-unit': 'unit',
+                  },
+                  interventionType: 'insulin-injection',
+                  sessionStatus: 'completed',
+                  source: 'device',
+                },
+                id: 'evt_insulin_dose',
+                kind: 'intervention_session',
+                links: [],
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                path: 'events/2026/07/evt_insulin_dose.md',
+                title: 'Connected insulin injection',
+              }],
+            },
+            skillSlug: 'cardiometabolic-health',
+          },
+          {
+            commandPattern: /measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /unavailable|no carbohydrate|(?:ate|consumed).*48/iu,
+            finalIncludes: [/48\s*(?:g|grams?).*carb|carb.*48\s*(?:g|grams?)/iu],
+            id: 'carbohydrates',
+            prompt: 'How many carbohydrates did my connected device record on July 12?',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_carbohydrates_summary',
+                metric: 'carbohydrates',
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'g',
+                value: 48,
+              }],
+            },
+            skillSlug: 'food-journal',
+          },
+          {
+            commandPattern: /measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /you (?:ate|consumed) 48|(?:ate|consumed|total).{0,30}192/iu,
+            finalIncludes: [
+              /(?:complete|full).*(?:unavailable|cannot|not)|(?:meal|food) records?.*(?:needed|required)|does not (?:show|prove|establish)/iu,
+            ],
+            id: 'carbohydrates-not-complete-intake',
+            prompt: 'Use my connected-device carbohydrate data to tell me what I ate and how many calories I consumed on July 12.',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_carbohydrates_summary',
+                metric: 'carbohydrates',
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'g',
+                value: 48,
+              }],
+            },
+            skillSlug: 'food-journal',
+          },
+          {
+            commandPattern: /event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json/u,
+            finalExcludes: /(?:you should|I recommend|I suggest).{0,40}(?:start|stop|change|adjust|retime)|total dose|all insulin|complete history/iu,
+            finalIncludes: [
+              /4(?:\s|-)?unit.*insulin|insulin.*4(?:\s|-)?unit/iu,
+              /2(?:\s|-)?unit.*insulin|insulin.*2(?:\s|-)?unit/iu,
+            ],
+            id: 'multiple-insulin',
+            prompt: 'Which insulin dose records did my connected device return for July 12?',
+            result: {
+              count: 2,
+              items: [
+                {
+                  data: {
+                    fields: {
+                      'dose-amount': 4,
+                      'dose-unit': 'unit',
+                    },
+                    interventionType: 'insulin-injection',
+                    sessionStatus: 'completed',
+                    source: 'device',
+                  },
+                  id: 'evt_insulin_dose_1',
+                  kind: 'intervention_session',
+                  links: [],
+                  occurredAt: '2026-07-12T08:15:00.000Z',
+                  path: 'events/2026/07/evt_insulin_dose_1.md',
+                  title: 'Connected insulin injection',
+                },
+                {
+                  data: {
+                    fields: {
+                      'dose-amount': 2,
+                      'dose-unit': 'unit',
+                    },
+                    interventionType: 'insulin-injection',
+                    sessionStatus: 'completed',
+                    source: 'device',
+                  },
+                  id: 'evt_insulin_dose_2',
+                  kind: 'intervention_session',
+                  links: [],
+                  occurredAt: '2026-07-12T19:15:00.000Z',
+                  path: 'events/2026/07/evt_insulin_dose_2.md',
+                  title: 'Connected insulin injection',
+                },
+              ],
+            },
+            skillSlug: 'cardiometabolic-health',
+          },
+          {
+            commandPattern: /event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json/u,
+            finalExcludes: /no insulin was recorded|none recorded|you did not take insulin|you took no insulin|(?:you should|I recommend|I suggest).{0,40}(?:start|stop|change|adjust|retime)/iu,
+            finalIncludes: [
+              /(?:bounded|this) (?:read|result).*(?:no|none)|no matching.*(?:returned|found)|did not return any/iu,
+            ],
+            id: 'empty-insulin',
+            prompt: 'Did my connected device return any insulin dose records for July 12?',
+            result: {
+              count: 0,
+              items: [],
+            },
+            skillSlug: 'cardiometabolic-health',
+          },
+        ] as const) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-connected-health-${probe.id}-e2e-`),
+          )
+
+          try {
+            const binDirectory = path.join(workingDirectory, 'bin')
+            const skillsRoot = path.join(workingDirectory, 'skills')
+            await Promise.all([
+              materializeAssistantSkill({ skillsRoot, slug: probe.skillSlug }),
+              materializeConnectedHealthVaultCli({
+                binDirectory,
+                result: probe.result,
+              }),
+            ])
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions: buildDirectConversationDeveloperInstructions(),
+              env: {
+                ...config.env,
+                [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+                PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+              },
+              excludeResumeTurns: true,
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const commands = readCapabilityRoutingActions(result.jsonEvents)
+              .flatMap((action) => action.kind === 'command' ? [action.command] : [])
+              .filter((command) => command.includes('vault-cli'))
+
+            expect(commands, probe.id).toHaveLength(1)
+            expect(commands[0], probe.id).toMatch(probe.commandPattern)
+            for (const expected of probe.finalIncludes) {
+              expect(result.finalMessage, probe.id).toMatch(expected)
+            }
+            expect(result.finalMessage, probe.id).not.toMatch(probe.finalExcludes)
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
   it.each([
     {
@@ -5633,7 +5853,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'preserves a foreign wall clock and reports a successful save without unverified timing',
+    'preserves a foreign wall clock and confirms host-recovered timing',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5657,21 +5877,22 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
+                automationRequests.push(request)
                 if (request.action !== 'save') {
                   throw new Error('Expected an automation save request.')
                 }
-                automationRequests.push(request)
                 return {
                   action: 'save',
                   automationId: 'automation-central-evening',
                   created: true,
                   effectiveTimeZone: 'America/Chicago',
                   lookupId: 'central-evening-reminder',
-                  nextOccurrenceAt: null,
+                  nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: false,
+                  timingVerified: true,
+                  timingVerificationIssues: [],
                   updatedAt: '2026-08-10T00:00:00.000Z',
                 }
               },
@@ -5712,11 +5933,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         }
         expect(result.finalMessage).toMatch(/saved|set up|created/iu)
         expect(result.finalMessage).toMatch(
-          /could not verify|couldn't verify|unable to verify/iu,
-        )
-        expect(result.finalMessage).toMatch(/inspect|check|review|update|change/iu)
-        expect(result.finalMessage).not.toMatch(
           /9\s*(?::00)?\s*p\.?m\.?|21:00|central time|america\/chicago/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /could not verify|couldn't verify|unable to verify|if you want/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -5927,7 +6147,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'does not describe an unverified stale recurrence as exhausted',
+    'does not inspect again or describe an unverified stale recurrence as exhausted',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -5951,22 +6171,26 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
-                if (request.action !== 'patch') {
-                  throw new Error('Expected an automation patch request.')
-                }
                 automationRequests.push(request)
-                return {
-                  action: 'patch',
+                const response = {
                   automationId: 'automation-daily-interval',
-                  created: false,
                   effectiveTimeZone: null,
                   lookupId: 'daily-interval-reminder',
                   nextOccurrenceAt: null,
-                  routeBinding: 'preserved',
-                  schedule: { everyMs: 86_400_000, kind: 'every' },
-                  status: 'active',
+                  routeBinding: 'preserved' as const,
+                  schedule: { everyMs: 86_400_000, kind: 'every' as const },
+                  status: 'active' as const,
                   timingVerified: false,
+                  timingVerificationIssues: ['runtime_state_pending'] as const,
                   updatedAt: '2026-08-10T00:01:00.000Z',
+                }
+                if (request.action !== 'patch') {
+                  throw new Error('Expected an automation patch request.')
+                }
+                return {
+                  action: 'patch' as const,
+                  ...response,
+                  created: false,
                 }
               },
             },
@@ -5995,11 +6219,11 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           lookup: 'daily-interval-reminder',
         })
         expect(result.finalMessage).toMatch(
-          /could not verify|couldn't verify|unable to verify/iu,
+          /saved|updated|changed/iu,
         )
-        expect(result.finalMessage).toMatch(/inspect|check|review|update/iu)
+        expect(result.finalMessage).toMatch(/next.*not (?:yet )?(?:confirmed|verified)|still finishing/iu)
         expect(result.finalMessage).not.toMatch(
-          /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+          /if you want|inspect|check again|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -7664,6 +7888,25 @@ async function materializeWearableArrivalVaultCli(input: {
       '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
       '    ;;',
       'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function materializeConnectedHealthVaultCli(input: {
+  binDirectory: string
+  result: Record<string, unknown>
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const encodedResult = JSON.stringify(input.result).replaceAll("'", "'\\''")
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      `printf '%s\\n' '${encodedResult}'`,
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },

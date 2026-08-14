@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT can stage a ready draft while the send control stays disabled'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1686'
 ---
 
 ## Expected Behavior

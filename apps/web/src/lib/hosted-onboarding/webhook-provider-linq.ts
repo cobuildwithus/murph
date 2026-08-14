@@ -2250,6 +2250,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
 
     const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
+      acceptManagedInboundLine:
+        existingMemberMatch === "phone-identity"
+        && isHostedLinqIMessageService(messageEvent.data.service),
       incomingChatId: summary.chatId,
       incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       incomingRecipientPhone: recipientPhoneNumber,
@@ -2943,6 +2946,7 @@ export function isExpectedHostedLinqFamilyInviteAcceptanceMiss(error: unknown): 
 }
 
 async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
+  acceptManagedInboundLine?: boolean;
   incomingChatId: string;
   incomingDirectAttested: boolean;
   incomingRecipientPhone: string | null;
@@ -2953,6 +2957,9 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
   if (input.memberId) {
     return resolveHostedMemberLinqHomeLineRouteBindingTx({
+      ...(input.acceptManagedInboundLine
+        ? { acceptManagedInboundLine: true }
+        : {}),
       incomingChatId: input.incomingChatId,
       incomingDirectAttested: input.incomingDirectAttested,
       incomingRecipientPhone: input.incomingRecipientPhone,

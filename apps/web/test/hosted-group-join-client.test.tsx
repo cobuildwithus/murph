@@ -172,7 +172,7 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
       joinCode: "JOIN123",
       permissions: [{
         description:
-          "Shares which health sources are connected. No health values.",
+          "Shares which health sources are connected, not their health values.",
         label: "Health source connection status",
         projectionScope: { projectionKind: "device-sync-status.v0" },
         projectionScopeKey: "device-sync-status.v0",
@@ -184,7 +184,7 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
 
   expect(markup).toContain("Health source connection status");
   expect(markup).toContain(
-    "Shares which health sources are connected. No health values.",
+    "Shares which health sources are connected, not their health values.",
   );
   expect(markup).toContain("has-[:focus-visible]:ring-2");
   expect(markup).toContain('type="checkbox"');
@@ -384,16 +384,14 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
       joinCode: "JOIN123",
       permissions: [
         {
-          description:
-            "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+          description: "Shares 7 days of deep sleep minutes and recorded times by source.",
           label: "Deep sleep",
           legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" as const },
           projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
           projectionScopeKey: "deep-sleep-sources-days.v1",
         },
         {
-          description:
-            "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+          description: "Shares 7 days of REM sleep minutes and recorded times by source.",
           label: "REM sleep",
           legacyProjectionScope: { projectionKind: "rem-sleep-days.v0" as const },
           projectionScope: { projectionKind: "rem-sleep-sources-days.v1" as const },
@@ -411,10 +409,10 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
   )).toEqual(["Deep sleep", "REM sleep"]);
 
   expect(container.textContent).toContain(
-    "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+    "Shares 7 days of deep sleep minutes and recorded times by source.",
   );
   expect(container.textContent).toContain(
-    "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+    "Shares 7 days of REM sleep minutes and recorded times by source.",
   );
   expect(Array.from(container.querySelectorAll<HTMLInputElement>(
     'input[type="checkbox"]',
@@ -440,7 +438,6 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
 
 test.each([
   ["preserves", "preserve", [{ projectionKind: "deep-sleep-days.v0" }]],
-  ["explicitly upgrades", "upgrade", [{ projectionKind: "deep-sleep-sources-days.v1" }]],
   ["fully revokes", "off", []],
 ] as const)(
   "%s a visible legacy Deep sleep grant from the single permission row",
@@ -459,8 +456,7 @@ test.each([
         groupName: "Sunday Sleep Crew",
         joinCode: "JOIN123",
         permissions: [{
-          description:
-            "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+          description: "Shares 7 days of deep sleep minutes and recorded times by source.",
           label: "Deep sleep",
           legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" as const },
           projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
@@ -476,20 +472,11 @@ test.each([
     if (!checkbox) throw new Error("Expected the Deep sleep checkbox.");
     expect(checkbox.checked).toBe(true);
     expect(container.textContent).toContain(
-      "Currently shares one daily value only. Source names and recorded times are not shared.",
+      "Shares 7 days of deep sleep minutes and recorded times by source.",
     );
+    expect(container.textContent).not.toContain("Include source details");
 
-    if (action === "upgrade") {
-      const upgradeButton = Array.from(container.querySelectorAll("button")).find(
-        (candidate) => candidate.textContent === "Include source details",
-      );
-      if (!upgradeButton) throw new Error("Expected the legacy upgrade action.");
-      await act(async () => {
-        upgradeButton.dispatchEvent(new window.Event("click", { bubbles: true }));
-      });
-      expect(container.textContent).not.toContain("Currently shares one daily value only.");
-      expect(checkbox.checked).toBe(true);
-    } else if (action === "off") {
+    if (action === "off") {
       await act(async () => {
         checkbox.dispatchEvent(new window.Event("click", { bubbles: true }));
       });

@@ -25,14 +25,18 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
-  HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
+  HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -134,6 +138,10 @@ const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope("workouts.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
 const MAXIMUM_WIDTH_WORKOUT_MINUTES = 0.0000030024105450300988;
+function maximumWidthWorkoutSource(sourceIndex: number) {
+  const source = `${String.fromCharCode(97 + sourceIndex)}${"x".repeat(79)}`;
+  return { label: source, source };
+}
 
 const ACTIVE_SHARE = {
   destinationMemberId: "member_referee",
@@ -185,13 +193,15 @@ function deliveryEffectControls() {
   };
 }
 
-function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRequest {
+function workoutsDeliveryBody(
+  workoutsPerSource: number,
+): HostedVaultShareDeliverRequest {
   return {
     expectedGenerationToken: CURRENT_GENERATION_TOKEN,
     projectionKind: "workouts.v0",
     projectionScope: WORKOUTS_SCOPE,
     records: Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
+      { length: HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS },
       (_, dayIndex): HostedVaultShareDeliveryRecord => {
         const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
         return {
@@ -200,10 +210,16 @@ function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRe
             date,
             timeSemantics: "canonical-event-zone-or-vault-zone.v0",
             workouts: Array.from(
-              { length: workoutsPerDay },
+              {
+                length: workoutsPerSource
+                  * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
+              },
               (_, workoutIndex) => ({
                 kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
                 minutes: MAXIMUM_WIDTH_WORKOUT_MINUTES,
+                source: maximumWidthWorkoutSource(
+                  Math.floor(workoutIndex / workoutsPerSource),
+                ),
                 startLocalMs: 86_399_999 - workoutIndex,
               }),
             ),
@@ -231,39 +247,85 @@ function sourceAwareSleepDeliveryBody(
     { label: "Oura", source: "oura" },
     { label: "Garmin", source: "garmin" },
     { label: "fitbit", source: "fitbit" },
-    { label: "Manual", source: "manual" },
+    { label: "Apple Health", source: "apple-health-kit" },
     { label: "Strava", source: "strava" },
+    { label: "polar", source: "polar" },
+    { label: "suunto", source: "suunto" },
+    { label: "withings", source: "withings" },
   ] as const;
   return {
     expectedGenerationToken: CURRENT_GENERATION_TOKEN,
     projectionKind: projectionScope.projectionKind,
     projectionScope,
     records: Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
-      (_, dayIndex): HostedVaultShareDeliveryRecord => {
+      { length: 7 * sourcesPerDay },
+      (_, recordIndex): HostedVaultShareDeliveryRecord => {
+        const dayIndex = Math.floor(recordIndex / sourcesPerDay);
         const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        const source = publicSources[recordIndex % sourcesPerDay];
+        if (!source) {
+          throw new Error("Missing bounded public source fixture.");
+        }
         return {
           data: {
             date,
             metricKey: "deep-sleep-minutes",
-            projectedAt: "2026-07-24T23:59:59.999Z",
             provisional: true,
-            sources: Array.from({ length: sourcesPerDay }, (_, sourceIndex) => ({
-              label: publicSources[sourceIndex]?.label ?? "unknown",
-              recordedAt: "2026-07-24T23:59:59.999Z",
-              ...(publicSources[sourceIndex]?.source === "manual"
-                ? { selected: true as const }
-                : {}),
-              source: publicSources[sourceIndex]?.source ?? "unknown",
-              unit: "minutes",
-              value: 1_000.0000000000001,
-            })),
-            sourcesDisagree: false,
+            recordedAt: `${date}T${String(6 + (recordIndex % sourcesPerDay)).padStart(2, "0")}:00:00.000Z`,
             unit: "minutes",
             value: 1_000.0000000000001,
           },
           occurredAt: `${date}T00:00:00.000Z`,
-          recordKey: date,
+          recordKey: `${date}.${source.source}`,
+          source,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    ),
+    sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+  };
+}
+
+function heartRateZonesDeliveryBody(): HostedVaultShareDeliverRequest {
+  const projectionScope = hostedVaultShareProjectionKindToScope(
+    "heart-rate-zones-days.v0",
+  );
+  const sources = Array.from({ length: 8 }, (_, index) => ({
+    label: `${"x".repeat(78)}-${index}`,
+    source: `${"x".repeat(78)}-${index}`,
+  }));
+  return {
+    expectedGenerationToken: CURRENT_GENERATION_TOKEN,
+    projectionKind: projectionScope.projectionKind,
+    projectionScope,
+    records: Array.from(
+      { length: 7 * sources.length },
+      (_, recordIndex): HostedVaultShareDeliveryRecord => {
+        const dayIndex = Math.floor(recordIndex / sources.length);
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        const source = sources[recordIndex % sources.length];
+        if (!source) {
+          throw new Error("Missing bounded public source fixture.");
+        }
+        return {
+          data: {
+            date,
+            zones: Array.from(
+              { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+              (_, zone) => ({
+                durationMinutes: MAXIMUM_WIDTH_WORKOUT_MINUTES,
+                label: "é".repeat(
+                  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+                ),
+                zone,
+              }),
+            ),
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.${source.source}`,
+          source,
           sourceRevision: "A".repeat(
             HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
           ),
@@ -302,37 +364,40 @@ describe("vault-share deliver route", () => {
 
     expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
     expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
-      new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
+      new RegExp(
+        `at most ${HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY} source-tagged entries`,
+        "u",
+      ),
     );
     expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
-    expect(bodyBytes).toBe(18_476);
+    expect(body.records[0]?.data).toMatchObject({
+      workouts: expect.arrayContaining([
+        expect.objectContaining({ source: maximumWidthWorkoutSource(0) }),
+        expect.objectContaining({
+          source: maximumWidthWorkoutSource(
+            HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES - 1,
+          ),
+        }),
+      ]),
+    });
+    expect(bodyBytes).toBeGreaterThan(250 * 1024);
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
-    expect(nextBoundBodyBytes).toBe(19_684);
-    expect(nextBoundBodyBytes).toBeGreaterThan(
-      HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
-    );
+    expect(nextBoundBodyBytes).toBeGreaterThan(bodyBytes);
   });
 
   it("keeps the maximum source-aware sleep body within the ingress limit", () => {
-    const body = sourceAwareSleepDeliveryBody(
-      HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
-    );
+    const body = sourceAwareSleepDeliveryBody(8);
     const bodyBytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
-    const nextBoundBody = sourceAwareSleepDeliveryBody(
-      HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES + 1,
-    );
+    const nextBoundBody = sourceAwareSleepDeliveryBody(9);
     const nextBoundBodyBytes = new TextEncoder().encode(
       JSON.stringify(nextBoundBody),
     ).byteLength;
 
     expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
     expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
-      new RegExp(
-        `1-${HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES} entries`,
-        "u",
-      ),
+      new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"),
     );
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
@@ -340,6 +405,30 @@ describe("vault-share deliver route", () => {
     expect(nextBoundBodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
+  });
+
+  it("accepts the maximum heart-rate-zone body within the ingress limit", async () => {
+    const body = heartRateZonesDeliveryBody();
+    const bodyBytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+    const projectionScope = hostedVaultShareProjectionKindToScope(
+      "heart-rate-zones-days.v0",
+    );
+    mocks.findActiveHostedVaultShares.mockResolvedValue([{
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_heart_rate_zones",
+      projectionKind: projectionScope.projectionKind,
+      projectionScope,
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+    }]);
+
+    expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
+    expect(bodyBytes).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+    );
+    const response = await deliverRoute.POST(buildRequest(body));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
   });
 
   it("replaces the snapshot for every active share", async () => {
@@ -461,6 +550,39 @@ describe("vault-share deliver route", () => {
       share: workoutShare,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
+  });
+
+  it("preserves source-recorded sleep times through the deliver route", async () => {
+    const projectionScope = hostedVaultShareProjectionKindToScope(
+      "deep-sleep-sources-days.v1",
+    );
+    const share = {
+      ...ACTIVE_SHARE,
+      projectionKind: projectionScope.projectionKind,
+      projectionScope,
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+    };
+    const body = sourceAwareSleepDeliveryBody(2);
+    const records = body.records.slice(0, 2);
+    mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
+
+    const response = await deliverRoute.POST(buildRequest({
+      projectionKind: projectionScope.projectionKind,
+      records,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
+      records,
+      share,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+    });
+    expect(records.map((record) => record.data)).toEqual([
+      expect.objectContaining({ recordedAt: "2026-07-24T06:00:00.000Z" }),
+      expect.objectContaining({ recordedAt: "2026-07-24T07:00:00.000Z" }),
+    ]);
   });
 
   it("returns no-active-share and appends nothing when no grant exists", async () => {
