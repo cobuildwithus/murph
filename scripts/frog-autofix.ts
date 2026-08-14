@@ -2473,7 +2473,6 @@ function publishPullRequest(
   branch: string,
   issueNumber: number,
   expectedTask?: FrogTaskIdentity,
-  publicationAttempt?: { pushedHead?: string },
 ): number {
   const head = requireCommand("git", ["rev-parse", "HEAD"], worktree);
   return publishDraftRepair(head, {
@@ -2534,9 +2533,6 @@ function publishPullRequest(
       {},
       30 * 60 * 1_000,
     ),
-    recordPushedHead: (pushedHead) => {
-      if (publicationAttempt) publicationAttempt.pushedHead = pushedHead;
-    },
     refreshAndVerifyIssue: () => {
       refreshAndVerifyExactIssue(primary, issueNumber, expectedTask);
       if (expectedTask) {
@@ -2762,15 +2758,12 @@ function persistRepairHandoff(options: {
   failure?: TerminalPrePullRequestFailureClass;
   issueNumber: number;
   primary: string;
-  pushedHead?: string;
   recoveredExistingBody: string | null;
   task?: FrogTaskIdentity;
   worktree: string;
 }): number {
-  if (options.pushedHead && !/^[0-9a-f]{40}$/u.test(options.pushedHead)) {
-    throw new Error("successfully pushed repair head is invalid");
-  }
   let head = requireCommand("git", ["rev-parse", "HEAD"], options.worktree);
+  const previousHandoffHead = head;
   let firstHead: string | undefined;
   if (options.recoveredExistingBody) {
     try {
@@ -2939,7 +2932,6 @@ function persistRepairHandoff(options: {
     options.worktree,
     options.branch,
   );
-  const previousHandoffHead = options.pushedHead ?? head;
   const currentMainTree = requireCommand(
     "git",
     ["rev-parse", "origin/main^{tree}"],
@@ -3874,7 +3866,6 @@ async function reviewPublishAndFinalize(options: {
   issueNumber: number;
   loadedRunnerHead: string;
   primary: string;
-  publicationAttempt: { pushedHead?: string };
   recoveredExistingBody: string | null;
   task: FrogTaskIdentity;
   transient: string;
@@ -3961,7 +3952,6 @@ async function reviewPublishAndFinalize(options: {
     options.branch,
     options.issueNumber,
     options.task,
-    options.publicationAttempt,
   );
 
   const persistMetadata = (): boolean => {
@@ -4384,7 +4374,6 @@ async function runOnce() {
     mkdirSync(transientRoot, { mode: 0o700, recursive: true });
     const transient = mkdtempSync(path.join(transientRoot, "run-"));
     let repairTaskIdentity: FrogTaskIdentity | undefined;
-    const publicationAttempt: { pushedHead?: string } = {};
     try {
       if (workerMode === "implement") {
         repairTaskIdentity = admittedTask;
@@ -4464,7 +4453,6 @@ async function runOnce() {
         issueNumber: issue.number,
         loadedRunnerHead,
         primary,
-        publicationAttempt,
         recoveredExistingBody,
         task: repairTask,
         transient,
@@ -4494,7 +4482,6 @@ async function runOnce() {
             : undefined,
           issueNumber: issue.number,
           primary,
-          pushedHead: publicationAttempt.pushedHead,
           recoveredExistingBody,
           task: repairTaskIdentity,
           worktree,

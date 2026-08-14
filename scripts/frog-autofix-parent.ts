@@ -120,7 +120,6 @@ export interface DraftPullRequestPublicationDependencies {
   createPullRequest: () => void;
   currentOpenPullRequest: () => DraftPullRequestPublicationRecord | null;
   editPullRequest: (pullRequest: number) => void;
-  recordPushedHead?: (head: string) => void;
   pushExactHead: () => void;
   refreshAndVerifyIssue: () => void;
 }
@@ -131,7 +130,6 @@ export function publishDraftRepair(
 ): number {
   dependencies.refreshAndVerifyIssue();
   dependencies.pushExactHead();
-  dependencies.recordPushedHead?.(head);
   const existing = dependencies.currentOpenPullRequest();
   if (existing) {
     if (existing.headRefOid !== head) {

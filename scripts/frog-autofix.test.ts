@@ -1168,8 +1168,10 @@ describe("Frog autofix guards", () => {
     );
     expect(terminalHandoff).toContain("authorizedTerminalHandoffLease({");
     expect(terminalHandoff).toContain(
-      "const previousHandoffHead = options.pushedHead ?? head",
+      "const previousHandoffHead = head",
     );
+    expect(terminalHandoff.indexOf("const previousHandoffHead = head"))
+      .toBeLessThan(terminalHandoff.indexOf("createEmptyRepairHandoffCommit("));
     expect(terminalHandoff).toContain(
       "normalizeUnpushedDescendantToPullRequestHead(",
     );
@@ -1192,8 +1194,8 @@ describe("Frog autofix guards", () => {
     );
     expect(publication.indexOf("refreshAndVerifyExactIssue("))
       .toBeLessThan(publication.indexOf("verifyCandidateWorkerAuthority("));
-    expect(publication).toContain("publicationAttempt.pushedHead = pushedHead");
-    expect(runOnce).toContain("pushedHead: publicationAttempt.pushedHead");
+    expect(publication).not.toContain("publicationAttempt");
+    expect(runOnce).not.toContain("publicationAttempt");
   });
 
   it("restamps foreign-edited exact and ancestor handoffs before worktree recovery", () => {
@@ -2570,13 +2572,11 @@ esac
       },
       editPullRequest: () => events.push("edit"),
       pushExactHead: () => events.push("push"),
-      recordPushedHead: (pushedHead) => events.push(`pushed:${pushedHead}`),
       refreshAndVerifyIssue: () => events.push("verify"),
     })).toBe(99);
     expect(events).toEqual([
       "verify",
       "push",
-      `pushed:${head}`,
       "lookup",
       "verify",
       "create",
@@ -2592,13 +2592,11 @@ esac
       },
       editPullRequest: () => existingEvents.push("edit"),
       pushExactHead: () => existingEvents.push("push"),
-      recordPushedHead: (pushedHead) => existingEvents.push(`pushed:${pushedHead}`),
       refreshAndVerifyIssue: () => existingEvents.push("verify"),
     })).toBe(99);
     expect(existingEvents).toEqual([
       "verify",
       "push",
-      `pushed:${head}`,
       "lookup",
       "edit",
     ]);
@@ -2615,7 +2613,6 @@ esac
       refreshAndVerifyIssue: () => undefined,
     })).toThrow("head changed before body edit");
 
-    const failedPushProofs: string[] = [];
     expect(() => publishDraftRepair(head, {
       createPullRequest: () => undefined,
       currentOpenPullRequest: () => null,
@@ -2623,10 +2620,8 @@ esac
       pushExactHead: () => {
         throw new Error("push failed");
       },
-      recordPushedHead: (pushedHead) => failedPushProofs.push(pushedHead),
       refreshAndVerifyIssue: () => undefined,
     })).toThrow("push failed");
-    expect(failedPushProofs).toEqual([]);
   });
 
   it("creates no draft after issue authority is revoked at either checkpoint", () => {
@@ -2642,7 +2637,6 @@ esac
         },
         editPullRequest: () => events.push("edit"),
         pushExactHead: () => events.push("push"),
-        recordPushedHead: (pushedHead) => events.push(`pushed:${pushedHead}`),
         refreshAndVerifyIssue: () => {
           events.push("verify");
           verificationCount += 1;
@@ -2653,97 +2647,184 @@ esac
       })).toThrow("revoked Frog authority");
       expect(events).toEqual(revokedAt === 1
         ? ["verify"]
-        : ["verify", "push", `pushed:${head}`, "lookup", "verify"]);
+        : ["verify", "push", "lookup", "verify"]);
     }
   });
 
-  it("lease-replaces only the exact candidate proven pushed before task drift", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "frog-post-push-drift-"));
-    const origin = path.join(root, "origin.git");
-    const worktree = path.join(root, "worktree");
-    const branch = "agent/frog-autofix-42";
-    const git = (cwd: string, ...args: string[]) => {
-      const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-      expect(result.status, result.stderr).toBe(0);
-      return result.stdout.trim();
+  it("recovers a pushed candidate after restart and lease-rejects a foreign move", () => {
+    const runRecovery = (moveRemote: "exact" | "foreign") => {
+      const root = mkdtempSync(path.join(tmpdir(), "frog-post-push-restart-"));
+      const origin = path.join(root, "origin.git");
+      const primary = path.join(root, "primary");
+      const worktree = path.join(root, "worktree");
+      const branch = "agent/frog-autofix-42";
+      const runGit = (cwd: string, ...args: string[]) => {
+        const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+        return {
+          status: result.status ?? 1,
+          stderr: result.stderr,
+          stdout: result.stdout.trim(),
+        };
+      };
+      const git = (cwd: string, ...args: string[]) => {
+        const result = runGit(cwd, ...args);
+        expect(result.status, result.stderr).toBe(0);
+        return result.stdout;
+      };
+      try {
+        git(root, "init", "--bare", "--quiet", origin);
+        for (const checkout of [primary, worktree]) {
+          mkdirSync(checkout);
+          git(checkout, "init", "--quiet");
+          git(checkout, "config", "user.name", "Automation");
+          git(checkout, "config", "user.email", "automation@example.invalid");
+          git(checkout, "remote", "add", "origin", origin);
+        }
+        writeFileSync(path.join(primary, ".gitignore"), "audit-packages/\n");
+        writeFileSync(path.join(primary, "AGENTS.md"), "trusted instructions v1\n");
+        writeFileSync(path.join(primary, "base.txt"), "base\n");
+        git(primary, "add", ".gitignore", "AGENTS.md", "base.txt");
+        git(primary, "commit", "--quiet", "-m", "base");
+        git(primary, "branch", "-M", "main");
+        git(primary, "push", "--set-upstream", "origin", "main");
+
+        git(worktree, "fetch", "--quiet", "origin", "main");
+        git(worktree, "checkout", "--quiet", "-b", branch, "origin/main");
+        writeFileSync(path.join(worktree, "candidate.txt"), "candidate\n");
+        git(worktree, "add", "candidate.txt");
+        git(worktree, "commit", "--quiet", "-m", "candidate");
+        const candidate = git(worktree, "rev-parse", "HEAD");
+        mkdirSync(path.join(worktree, "audit-packages"), { recursive: true });
+        writeFileSync(
+          path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH),
+          bodyWithParentMetadata(renderRecoveredPullRequestBody(42), {
+            firstHead: candidate,
+            task: taskIdentity,
+          }),
+        );
+
+        let verificationCount = 0;
+        expect(() => publishDraftRepair(candidate, {
+          createPullRequest: () => {
+            throw new Error("draft creation must not run after authority drift");
+          },
+          currentOpenPullRequest: () => null,
+          editPullRequest: () => {
+            throw new Error("body edit must not run without a pull request");
+          },
+          pushExactHead: () => {
+            git(
+              worktree,
+              "push",
+              "--set-upstream",
+              "origin",
+              `${candidate}:refs/heads/${branch}`,
+            );
+          },
+          refreshAndVerifyIssue: () => {
+            verificationCount += 1;
+            if (verificationCount === 2) throw new Error("authority drift");
+          },
+        })).toThrow("authority drift");
+        expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(candidate);
+
+        writeFileSync(path.join(primary, "AGENTS.md"), "trusted instructions v2\n");
+        git(primary, "add", "AGENTS.md");
+        git(primary, "commit", "--quiet", "-m", "advance authority");
+        git(primary, "push", "origin", "main");
+
+        const commands = {
+          authenticatedOperator: () => authenticatedOperator,
+          require: (command: string, args: string[], cwd: string) => {
+            if (command === "gh") return pullRequestPages([]);
+            const result = runGit(cwd, ...args);
+            expect(result.status, result.stderr).toBe(0);
+            return result.stdout;
+          },
+          run: (command: string, args: string[], cwd: string) => {
+            if (command === "gh") {
+              return { status: 0, stdout: pullRequestPages([]) };
+            }
+            const result = runGit(cwd, ...args);
+            return { status: result.status, stdout: result.stdout };
+          },
+        };
+        expect(resolveWorkerMode(worktree, branch, 42, commands)).toBe("resume");
+        const previousHandoffHead = git(worktree, "rev-parse", "HEAD");
+        expect(previousHandoffHead).toBe(candidate);
+
+        if (moveRemote === "foreign") {
+          const foreign = git(
+            worktree,
+            "commit-tree",
+            `${candidate}^{tree}`,
+            "-p",
+            candidate,
+            "-m",
+            "foreign move",
+          );
+          git(
+            worktree,
+            "push",
+            "--force",
+            "origin",
+            `${foreign}:refs/heads/${branch}`,
+          );
+        }
+        const observedRemoteHead = git(
+          origin,
+          "rev-parse",
+          `refs/heads/${branch}`,
+        );
+        const handoff = createEmptyRepairHandoffCommit(worktree, 42);
+        const authorize = () => authorizedTerminalHandoffLease({
+          currentHandoffHead: handoff,
+          observedRemoteHead,
+          previousHandoffHead,
+        });
+
+        if (moveRemote === "foreign") {
+          expect(authorize).toThrow("unproven remote issue branch");
+          expect(git(origin, "rev-parse", `refs/heads/${branch}`))
+            .toBe(observedRemoteHead);
+          return;
+        }
+
+        const lease = authorize();
+        let created = false;
+        expect(publishDraftRepair(handoff, {
+          createPullRequest: () => {
+            created = true;
+          },
+          currentOpenPullRequest: () => created
+            ? { headRefOid: handoff, number: 99 }
+            : null,
+          editPullRequest: () => {
+            throw new Error("new handoff must create its draft");
+          },
+          pushExactHead: () => {
+            git(
+              worktree,
+              "push",
+              `--force-with-lease=refs/heads/${branch}:${lease}`,
+              "origin",
+              `${handoff}:refs/heads/${branch}`,
+            );
+          },
+          refreshAndVerifyIssue: () => {
+            expect(git(worktree, "rev-parse", "HEAD^{tree}"))
+              .toBe(git(worktree, "rev-parse", "origin/main^{tree}"));
+          },
+        })).toBe(99);
+        expect(created).toBe(true);
+        expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(handoff);
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
     };
-    try {
-      mkdirSync(worktree);
-      git(root, "init", "--bare", "--quiet", origin);
-      git(worktree, "init", "--quiet");
-      git(worktree, "config", "user.name", "Automation");
-      git(worktree, "config", "user.email", "automation@example.invalid");
-      git(worktree, "remote", "add", "origin", origin);
-      writeFileSync(path.join(worktree, "tracked.txt"), "candidate\n");
-      git(worktree, "add", "tracked.txt");
-      git(worktree, "commit", "--quiet", "-m", "candidate");
-      const candidate = git(worktree, "rev-parse", "HEAD");
-      let pushedHead: string | undefined;
-      let verificationCount = 0;
 
-      expect(() => publishDraftRepair(candidate, {
-        createPullRequest: () => {
-          throw new Error("draft creation must not run after task drift");
-        },
-        currentOpenPullRequest: () => null,
-        editPullRequest: () => {
-          throw new Error("body edit must not run without a pull request");
-        },
-        pushExactHead: () => {
-          git(worktree, "push", "origin", `${candidate}:refs/heads/${branch}`);
-        },
-        recordPushedHead: (head) => {
-          pushedHead = head;
-        },
-        refreshAndVerifyIssue: () => {
-          verificationCount += 1;
-          if (verificationCount === 2) throw new Error("task drift");
-        },
-      })).toThrow("task drift");
-      expect(pushedHead).toBe(candidate);
-      expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(candidate);
-
-      const tree = git(worktree, "rev-parse", `${candidate}^{tree}`);
-      const handoff = git(
-        worktree,
-        "commit-tree",
-        tree,
-        "-p",
-        candidate,
-        "-m",
-        "neutral handoff",
-      );
-      const lease = authorizedTerminalHandoffLease({
-        currentHandoffHead: handoff,
-        observedRemoteHead: candidate,
-        previousHandoffHead: pushedHead as string,
-      });
-      git(
-        worktree,
-        "push",
-        `--force-with-lease=refs/heads/${branch}:${lease}`,
-        "origin",
-        `${handoff}:refs/heads/${branch}`,
-      );
-      expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(handoff);
-
-      const foreign = git(
-        worktree,
-        "commit-tree",
-        tree,
-        "-p",
-        candidate,
-        "-m",
-        "foreign move",
-      );
-      expect(() => authorizedTerminalHandoffLease({
-        currentHandoffHead: handoff,
-        observedRemoteHead: foreign,
-        previousHandoffHead: candidate,
-      })).toThrow("unproven remote issue branch");
-    } finally {
-      rmSync(root, { force: true, recursive: true });
-    }
+    runRecovery("exact");
+    runRecovery("foreign");
   });
 
   it("paginates foreign PR history before enforcing parent-owned cardinality", () => {
