@@ -347,13 +347,15 @@ function matchesExperimentRunCardLookup(
 
 function createMetricsQueryAccess(
   replica: BrowserVaultMetricsReplica | BrowserVaultMetricsIndexReplica,
-  metricRows: readonly BrowserVaultMetricRow[] = "metricRows" in replica ? replica.metricRows : [],
+  metricRows?: readonly BrowserVaultMetricRow[],
   requireMetricLoaded?: (metricKey: string) => void,
 ): BrowserVaultMetricsQueryAccess {
   const metricSelectionById = new Map<string, BrowserVaultMetricSelectionRow>();
   const metricSelectionsByMetricKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
   const metricSelectionsByBiomarkerKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
-  const sortedMetricRows = sortMetricRowsAsc(metricRows);
+  const resolvedMetricRows = metricRows
+    ?? ("metricRows" in replica ? replica.metricRows : []);
+  const sortedMetricRows = sortMetricRowsAsc(resolvedMetricRows);
   const metricRowsByMetricKey = new Map<string, BrowserVaultMetricRow[]>();
   const metricRowsByBiomarkerKey = new Map<string, BrowserVaultMetricRow[]>();
 

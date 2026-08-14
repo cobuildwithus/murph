@@ -107,8 +107,8 @@ const DESIGN_DEVICE_ITEMS: DeviceMetricListItem[] = [
         role: "primary",
       }],
       routeId: "design-recovery-variability",
-      shortName: "Recovery variability",
-      summary: "A fabricated device reading used only to review progressive loading.",
+      shortName: "HRV",
+      summary: "Synthetic example.",
       unit: "ms",
       valuePrecision: 0,
     },
@@ -232,7 +232,7 @@ export function BrowserVaultLoadingTransitionsStudy() {
         title="Private experiment route"
         transition="private-experiment"
       >
-        <div className="grid gap-5 xl:grid-cols-3">
+        <div className="grid gap-5 xl:grid-cols-2">
           <StudyState label="Loading" state="loading">
             <PrivateRunRouteState error={null} loading onRetry={noopRetry} />
           </StudyState>
@@ -282,7 +282,7 @@ export function BrowserVaultLoadingTransitionsStudy() {
         title="Biomarkers list"
         transition="biomarkers-list"
       >
-        <div className="grid gap-5 xl:grid-cols-3">
+        <div className="grid gap-5 xl:grid-cols-2">
           <StudyState label="Loading" state="loading">
             <PageHeader title="Biomarkers" />
             <BiomarkerListSkeleton />
@@ -291,11 +291,13 @@ export function BrowserVaultLoadingTransitionsStudy() {
             <PageHeader title="Biomarkers" />
             <MeasuredBiomarkerSection group={DESIGN_LAB_GROUP} />
           </StudyState>
-          <StudyState label="Wearable + labs" state="complete">
-            <PageHeader title="Biomarkers" />
-            <DeviceMetricsSection items={DESIGN_DEVICE_ITEMS} />
-            <MeasuredBiomarkerSection group={DESIGN_LAB_GROUP} />
-          </StudyState>
+          <div className="xl:col-span-2">
+            <StudyState label="Wearable + labs" state="complete">
+              <PageHeader title="Biomarkers" />
+              <DeviceMetricsSection items={DESIGN_DEVICE_ITEMS} />
+              <MeasuredBiomarkerSection group={DESIGN_LAB_GROUP} />
+            </StudyState>
+          </div>
         </div>
       </TransitionStudy>
     </div>
