@@ -128,7 +128,33 @@ describe("live Junction wearable canary workflow", () => {
     expect(browserRunner).toContain(
       "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",
     );
-    expect(browserRunner).toContain("if (!clicked && config.manualAuthorizationAllowed)");
+
+    const clickedBranchOffset = browserRunner.indexOf("if (clicked) {");
+    const blockedWindowResetOffset = browserRunner.indexOf(
+      "automationBlockedObservedAt = null;",
+      clickedBranchOffset,
+    );
+    const challengeClassificationResetOffset = browserRunner.indexOf(
+      "blockedWindowObservedChallenge = false;",
+      blockedWindowResetOffset,
+    );
+    const automatedProgressOffset = browserRunner.indexOf(
+      "await page.waitForTimeout(750);",
+      challengeClassificationResetOffset,
+    );
+    const manualRecoveryOffset = browserRunner.indexOf(
+      "if (config.manualAuthorizationAllowed) {",
+      automatedProgressOffset,
+    );
+    expect(clickedBranchOffset).toBeGreaterThan(0);
+    expect(blockedWindowResetOffset).toBeGreaterThan(clickedBranchOffset);
+    expect(challengeClassificationResetOffset).toBeGreaterThan(
+      blockedWindowResetOffset,
+    );
+    expect(automatedProgressOffset).toBeGreaterThan(
+      challengeClassificationResetOffset,
+    );
+    expect(manualRecoveryOffset).toBeGreaterThan(automatedProgressOffset);
   });
 
   it("keeps Playwright's closing quote out of redacted navigation URLs", () => {
