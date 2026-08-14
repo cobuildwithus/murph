@@ -16,6 +16,7 @@ import {
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   isCodexReservedModelProviderId,
   resolveAssistantCodexModelProviderConfig,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -1184,7 +1185,10 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
 }): AssistantUsageTokenPricingBasis {
   return resolveHostedAiUsageTokenPricingBasis({
     model: input.model,
-    providerName: input.modelProvider,
+    providerName:
+      input.modelProvider === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+        ? 'openai'
+        : input.modelProvider,
     serviceTier: input.serviceTier ?? null,
   })
 }

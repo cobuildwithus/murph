@@ -1737,13 +1737,13 @@ describe('Codex model catalog', () => {
     expect(providerInput?.groupConversation).toBe(true)
   })
 
-  it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
+  it('drops unsupported rich user parts and keeps flex for the hosted-local OpenAI route', async () => {
     const providerScopeEvents: string[] = []
     const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra' })
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.6-terra',
-        modelProvider: 'hosted-openai',
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
     const session = createAssistantSession({

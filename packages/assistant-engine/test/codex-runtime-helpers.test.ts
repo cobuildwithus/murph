@@ -34,6 +34,9 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
+import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   VAULT_CLI_BATCH_RESULT_SCHEMA,
@@ -631,6 +634,11 @@ describe('Codex assistant registry helpers', () => {
     expect(resolveCodexAssistantProviderTokenPricingBasis({
       model: 'gpt-5.6-terra',
       modelProvider: 'hosted-openai',
+      serviceTier: 'flex',
+    })).toBe('openai-flex')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.6-terra',
+      modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({

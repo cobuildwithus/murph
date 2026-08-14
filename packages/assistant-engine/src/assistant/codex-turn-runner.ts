@@ -16,9 +16,6 @@ import {
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
-  resolveHostedAiUsageTokenPricingBasis,
-} from '@murphai/hosted-execution/runtime-control'
-import {
   hasHostedCodexModelCatalogFlexTier,
 } from '../assistant-codex/config.js'
 import {
@@ -38,6 +35,9 @@ import type {
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
 } from './providers/types.js'
+import {
+  resolveCodexAssistantProviderTokenPricingBasis,
+} from './providers/helpers.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 import {
   recordAssistantRuntimeIssueInputsBestEffort,
@@ -1000,9 +1000,9 @@ function resolveCodexAttemptServiceTier(input: {
   if (!input.executionContext?.hosted) {
     return null
   }
-  if (resolveHostedAiUsageTokenPricingBasis({
+  if (resolveCodexAssistantProviderTokenPricingBasis({
     model: input.routeModel,
-    providerName: input.routeModelProvider,
+    modelProvider: input.routeModelProvider,
     serviceTier: input.requestedServiceTier,
   }) !== 'openai-flex') {
     return null

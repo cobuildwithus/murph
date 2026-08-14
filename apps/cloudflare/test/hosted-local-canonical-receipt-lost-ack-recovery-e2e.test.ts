@@ -773,9 +773,13 @@ function collectAutomationWriteResults(
       return [];
     }
     const item = entry as Record<string, unknown>;
-    return item.type === "custom_tool_call_output"
-      ? parseAutomationWriteResult(item.output)
-      : [];
+    if (
+      item.type !== "custom_tool_call_output"
+      && item.type !== "function_call_output"
+    ) {
+      return [];
+    }
+    return parseAutomationWriteResult(item.output);
   });
 }
 
