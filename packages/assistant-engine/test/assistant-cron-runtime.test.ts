@@ -4238,7 +4238,10 @@ describe('assistant cron runtime orchestration', () => {
         'Recurring reminder conversation (engine-supplied',
       )
       expect(notificationInput.instructions).toContain(
-        'If no relevant human reply followed and that reminder already asked whether to keep, change, or pause these interruptions, return `skip`.',
+        'If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
+      )
+      expect(notificationInput.instructions).toContain(
+        'If that output is unavailable under the existing evidence-retention horizon, send the current cue normally.',
       )
       expect(notificationInput.instructions).toContain(
         'In a group, address the room collectively.',

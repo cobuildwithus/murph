@@ -6,10 +6,10 @@ Updated: 2026-08-14
 
 ## Goal
 
-- Make ordinary recurring reminders inspect the existing conversation before
-  interrupting again: send normally until a delivered reminder is unanswered,
-  ask once whether to keep, change, or pause the interruption, then stay quiet
-  until relevant human input changes the context.
+- Make normal daily and weekly ordinary reminders inspect the existing
+  conversation before interrupting again: send normally until a delivered
+  reminder is unanswered, ask once whether to keep, change, or pause the
+  interruption, then stay quiet until relevant human input changes the context.
 
 ## Success criteria
 
@@ -19,6 +19,9 @@ Updated: 2026-08-14
   then skip after continued silence.
 - Bounded cold transcript history carries one privacy-safe incompleteness marker,
   so omitted reply context cannot be mistaken for silence.
+- The guarantee stays inside the existing 14-day confirmed-output evidence
+  horizon; a longer or unusually delayed cadence sends normally after that
+  evidence expires rather than retaining content or inventing reminder state.
 - Medication, clinician-directed, clinical, and safety-critical reminders remain
   outside the quiet-after-silence policy and continue until explicitly changed
   or paused or an existing authoritative skip condition applies.
@@ -67,6 +70,11 @@ Updated: 2026-08-14
    Mitigation: project one fixed assistant-role incompleteness marker whenever
    an existing cold-history bound omits committed details, and disallow
    silence-based cadence escalation or skipping while that marker is present.
+6. Risk: a cadence longer than cron-response retention could lose the only
+   durable content that distinguishes a normal cue from the cadence question.
+   Mitigation: state the daily/weekly evidence horizon explicitly and send
+   normally when prior confirmed output is unavailable; do not extend private
+   content retention or add durable reminder classification.
 
 ## Tasks
 
@@ -93,6 +101,11 @@ Updated: 2026-08-14
 - Exclude every recognized Murph-managed automation owner scope from the
   ordinary reminder overlay while retaining `supportKind: null` compatibility
   for legacy or user-authored reminders.
+- Guarantee quieting only while the immediately prior confirmed output remains
+  inside the existing 14-day evidence horizon. Normal daily and weekly
+  reminders are covered; longer or delayed reminders safely continue when
+  evidence expires. This explicit scope is preferable to extending message
+  retention or adding a cadence enum, bit, counter, or host lifecycle.
 
 ## Review outcomes
 
@@ -136,6 +149,20 @@ Updated: 2026-08-14
   the current cue sends normally and establishes a fresh same-session sequence.
   Output enrichment moves behind session resolution; no schema, state, counter,
   session type, lifecycle, or reminder-specific history is added.
+- Final round 6 found the remaining evidence-horizon boundary: ordinary cron
+  response text and terminal outbox delivery evidence both expire after 14
+  days, so an arbitrary long-cadence reminder cannot retain both confirmed
+  dispatch and cue-versus-cadence-question semantics without changing privacy
+  retention or adding durable classification. The third requirement-level
+  retrospective chooses scope shrink and continuation. The quieting guarantee
+  applies to normal daily and weekly reminders whose immediately prior
+  confirmed output remains inside the existing evidence horizon. A longer or
+  unusually delayed cadence sends normally when that evidence has expired; it
+  never guesses silence. Extending message-content retention, adding a durable
+  cadence bit/counter, correlating pre-delivery transcript text by timing, and
+  rebuilding the deleted host lifecycle are rejected. The correction is an
+  intent-contract and resident-copy clarification with focused horizon proof,
+  not a new state or retention owner.
 
 ## Verification
 
@@ -146,12 +173,12 @@ Updated: 2026-08-14
   clean, the dense lifecycle remains deleted while review-driven safety and
   retention corrections stay focused, ReviewGPT has no accepted unresolved
   findings, and required CI is green on the final head.
-- Current local evidence: 9 changed-surface assistant files passed with 490
+- Current local evidence: 9 changed-surface assistant files passed with 491
   tests and 71 intentional provider-gated skips; focused cron output and
   notification-turn coverage passed with 277 tests; assistant and Web
-  typechecks passed; 57 focused changelog tests passed; desktop and 390px
-  archive/design renders were inspected without overflow or clipping. The
-  session replacement correction has direct selection, persisted-vault, and
-  resolved-notification-path proof. The live real-model command is authored but
-  cannot execute in this worktree because the isolated harness requires an
-  `OPENAI_API_KEY` and none is configured.
+  typechecks passed; 57 focused changelog tests passed. Production UI design
+  proof is not applicable because no component, style, layout, or browser state
+  changed. The session replacement correction has direct selection,
+  persisted-vault, and resolved-notification-path proof. The live real-model
+  command is authored but cannot execute in this worktree because the isolated
+  harness requires an `OPENAI_API_KEY` and none is configured.

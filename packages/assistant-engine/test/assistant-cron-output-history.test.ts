@@ -17,7 +17,10 @@ import {
   prepareAssistantCronNotificationInput,
   selectAssistantCronRecentOutputs,
 } from '../src/assistant/cron/output-history.ts'
-import { appendAssistantCronRun } from '../src/assistant/cron/store.ts'
+import {
+  appendAssistantCronRun,
+  pruneAssistantCronRunHistory,
+} from '../src/assistant/cron/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -218,6 +221,33 @@ describe('assistant cron output history', () => {
     expect(forwarded.instructions).not.toContain('Another automation output.')
     expect(forwarded.instructions).not.toContain('Prior session cadence question.')
     expect(input.instructions).toBe('Send a different Stoic quote every day.')
+  })
+
+  it('uses a normal turn after retention retires the prior confirmed output', async () => {
+    const context = await createTempVaultContext('assistant-cron-output-retention-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await appendAssistantCronRun(
+      paths,
+      createCronRun({
+        jobId: AUTOMATION_ID,
+        outcome: 'delivered',
+        response: 'Prior monthly reminder.',
+        runId: 'cronrun_retired_history',
+        sessionId: 'session-current',
+      }),
+    )
+    await pruneAssistantCronRunHistory({
+      now: new Date('2026-08-24T12:02:00.000Z'),
+      paths,
+    })
+
+    const input = createNotificationInput(context.vaultRoot)
+    await expect(
+      prepareAssistantCronNotificationInput(input, {
+        sessionId: 'session-current',
+      }),
+    ).resolves.toBe(input)
   })
 
   it('keeps the owned availability block as the terminal suffix', async () => {

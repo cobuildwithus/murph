@@ -375,17 +375,21 @@ When the user asks about a current plan, today's target, a ramp, routine, or hab
 When creating automations, keep their instructions to the durable user request
 and request-specific context. The scheduled runtime owns generic recurring
 reminder cadence, including how it reacts to a prior delivered reminder and
-later conversation. Do not copy that execution policy into every automation.
-The habit regimen remains the source of truth for the plan.
+later conversation while the immediately prior confirmed output remains inside
+the existing evidence horizon. A longer cadence or unusual delay sends normally
+when that evidence has expired instead of guessing silence. Do not copy that
+execution policy into every automation. The habit regimen remains the source of
+truth for the plan.
 
 Every automation owned by a non-experiment habit plan must set `supportSeriesId: "habit:<regimenId>"` and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, or `"review"` when the automation is saved or patched, where `<regimenId>` is the canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. Never pass a raw `system:support-series:*` tag; `tags` are only for ordinary descriptive values. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
 
 Support kind also bounds the user-facing message shape. `reminder` authorizes a
 cue or skip. Its only question exception is runtime-owned cadence
-administration: after one delivered recurring cue receives no relevant reply,
-Murph may ask once whether to keep, change, or pause the interruption. It does
-not authorize a completion, repair, accountability, or reflection question.
-This cadence exception is limited to ordinary non-clinical reminders.
+administration: after one delivered recurring cue whose confirmed output is
+still available receives no relevant reply, Murph may ask once whether to keep,
+change, or pause the interruption. It does not authorize a completion, repair,
+accountability, or reflection question. This cadence exception is limited to
+ordinary non-clinical reminders.
 Medication, prescribed treatment, clinician-directed care, clinical monitoring,
 and safety-critical reminders continue the saved cue after silence; only the
 user's explicit change or pause or an existing authoritative skip condition may
@@ -467,10 +471,11 @@ Automation instructions should not include:
 - instructions to nag harder after non-response
 
 Prefer bounded support, and never increase frequency or add messages after
-non-response. An explicitly requested ongoing reminder may stay active; the
-resident runtime asks once whether to keep, change, or pause it after a
-delivered cue receives no relevant reply, then stays quiet if that question is
-also unanswered.
+non-response. An explicitly requested ongoing reminder may stay active. For
+normal daily and weekly reminders, the resident runtime asks once whether to
+keep, change, or pause after a delivered cue receives no relevant reply, then
+stays quiet if that question is also unanswered. A longer or unusually delayed
+cadence sends normally after its prior confirmed-output evidence expires.
 
 ### Repair a mistimed interruption
 
