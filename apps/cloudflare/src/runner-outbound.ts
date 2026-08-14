@@ -1645,7 +1645,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   const snapshotRef = parseHostedWorkspaceSnapshotV2Ref(
     buildHostedWorkspaceSnapshotRefFromUploadSession({
       archive: body.archive,
-      createdAt: new Date().toISOString(),
+      createdAt: session.createdAt,
       session,
     }),
     "Hosted workspace snapshot complete snapshotRef",
