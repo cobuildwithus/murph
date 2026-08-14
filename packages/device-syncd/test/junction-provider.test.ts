@@ -2838,8 +2838,16 @@ test("Junction route-equivalent persisted sources choose the earliest keyed auth
 test("Junction routine, precise, and retained calendar writers share persisted source identity", async () => {
   const persistedSource = createConnectionSource({
     connectionId: "local-reminted-account",
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
     sourceInstanceKey: "jxn_src_hosted_connection_apple_health",
     sourceProviderSlug: "apple_health",
+    resourceAvailabilitySummary: { water: true },
+  });
+  const laterDuplicate = createConnectionSource({
+    connectionId: "local-reminted-account",
+    firstSeenAt: "2026-04-02T00:00:00.000Z",
+    sourceInstanceKey: "jxn_src_later_duplicate_apple_health",
+    sourceProviderSlug: "apple_healthkit",
     resourceAvailabilitySummary: { water: true },
   });
   const persistedSourceInstanceId = resolveJunctionOrigin({
@@ -2943,7 +2951,7 @@ test("Junction routine, precise, and retained calendar writers share persisted s
         durableDeliveryAccepted: true,
       };
     },
-    listConnectionSources: () => [persistedSource],
+    listConnectionSources: () => [laterDuplicate, persistedSource],
     now: "2026-04-03T12:00:00.000Z",
     upsertConnectionSource: (input) => createConnectionSource({
       ...input,

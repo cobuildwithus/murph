@@ -126,7 +126,7 @@ async function listHostedJobConnectionSources(input: {
   const localSources = input.store.listConnectionSources({
     connectionId: input.accountId,
   });
-  return connection.sources
+  const projectedSources = connection.sources
     .filter((source) =>
       (!input.sourceProviderSlug || areHostedJunctionSourcesEquivalent(
         input.provider,
@@ -136,13 +136,17 @@ async function listHostedJobConnectionSources(input: {
       && (!input.status || source.status === input.status)
     )
     .map((source) => {
-      const localSource = localSources.find(
+      const exactLocalSource = localSources.find(
         (candidate) => candidate.sourceInstanceKey === source.sourceInstanceKey,
-      ) ?? selectHostedJunctionSource(
+      );
+      const routeEquivalentLocalSource = selectHostedJunctionSource(
         input.provider,
         localSources,
         source.sourceProviderSlug,
       );
+      const localSource = input.provider === "junction"
+        ? routeEquivalentLocalSource ?? exactLocalSource
+        : exactLocalSource ?? routeEquivalentLocalSource;
       const sourceInstanceKey = localSource?.sourceInstanceKey
         ?? source.sourceInstanceKey
         ?? (
@@ -160,6 +164,7 @@ async function listHostedJobConnectionSources(input: {
         sourceProviderSlug: localSource?.sourceProviderSlug ?? source.sourceProviderSlug,
       };
     });
+  return dedupeHostedJobConnectionSources(input.provider, projectedSources);
 }
 
 function areHostedJunctionSourcesEquivalent(
@@ -203,6 +208,34 @@ function compareHostedJobSources(
     ? leftFirstSeenRank - rightFirstSeenRank
     : (left.sourceInstanceKey ?? "").localeCompare(right.sourceInstanceKey ?? "")
       || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
+}
+
+function dedupeHostedJobConnectionSources(
+  provider: string,
+  sources: readonly ProviderJobConnectionSource[],
+): ProviderJobConnectionSource[] {
+  if (provider !== "junction") {
+    return [...sources];
+  }
+  const deduped: ProviderJobConnectionSource[] = [];
+  for (const source of sources) {
+    const existingIndex = deduped.findIndex((candidate) =>
+      areHostedJunctionSourcesEquivalent(
+        provider,
+        candidate.sourceProviderSlug,
+        source.sourceProviderSlug,
+      )
+    );
+    if (existingIndex === -1) {
+      deduped.push(source);
+      continue;
+    }
+    const existing = deduped[existingIndex];
+    if (existing && compareHostedJobSources(source, existing) < 0) {
+      deduped[existingIndex] = source;
+    }
+  }
+  return deduped;
 }
 
 function hostedSourceStateUnavailable(cause?: unknown) {

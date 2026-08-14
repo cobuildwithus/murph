@@ -69,7 +69,9 @@ Updated: 2026-08-13
 19. [x] Resolve round seventeen's end-to-end alias-equivalence finding.
 20. [x] Resolve round eighteen's account-owned source identity finding.
 21. [x] Resolve round nineteen's split persisted-source authority finding.
-22. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+22. [x] Resolve round twenty's hosted exact-key precedence finding.
+23. [ ] Obtain exact-head green CI and a ReviewGPT PASS no later than round
+    twenty-two, then merge and retire
     the task worktree.
 
 ## Decisions
@@ -211,6 +213,14 @@ Updated: 2026-08-13
   of failing every retry. This reuses the connect-route owner and existing
   source rows; it adds no alias registry, migration, queue, schema, or second
   identity owner.
+- Round twenty's review-induced finding is accepted. Hosted job-time listing
+  still preferred a later duplicate's exact hosted key before the older
+  route-equivalent local source that hydration and provider projection already
+  treated as authoritative. Junction job listing now selects the established
+  route-equivalent source first and collapses multiple hosted alias entries to
+  one projected source. This is one precedence correction and one bounded
+  in-memory dedupe in the existing listing owner; it adds no persisted state,
+  migration, alias registry, queue, service, or lifecycle machinery.
 
 ## Verification
 
@@ -369,5 +379,13 @@ Updated: 2026-08-13
   its pre-fetch persisted authority for retry evidence and one post-fetch
   source reread for both admission and canonical projection, so the correction
   adds no extra post-fetch state round trip.
+- Round twenty reproduced the remaining split with an older established local
+  Apple Health source, a later route-equivalent duplicate whose key exactly
+  matched the hosted snapshot, and two hosted alias entries. The hosted
+  hydration/job regression now proves hydration keeps the established row,
+  job-time listing returns that same key and spelling exactly once, and the
+  provider's routine, precise D1-to-D2 correction, and retained repair paths
+  stay on that identity even when both persisted rows remain present. The
+  existing real-core stale-replay proof remains on the same canonical spine.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

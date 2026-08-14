@@ -1497,6 +1497,18 @@ describe("hosted device-sync runtime", () => {
         sourceProviderSlug: "apple_health",
         status: "connected",
       });
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        displayName: "Apple Health duplicate",
+        firstSeenAt: "2026-04-02T09:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T09:21:00.000Z",
+        resourceAvailabilitySummary: { water: true },
+        sourceInstanceKey: hostedSourceInstanceKey,
+        sourceProviderSlug: "apple_healthkit",
+        status: "connected",
+      });
       hostedSnapshot = buildRuntimeSnapshot({
         connectionId: hostedConnectionId,
         credential: {
@@ -1506,19 +1518,34 @@ describe("hosted device-sync runtime", () => {
         },
         externalAccountId,
         provider: "junction",
-        sources: [{
-          displayName: "Apple Health",
-          firstSeenAt: "2026-04-01T09:00:00.000Z",
-          lastDataAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSeenAt: "2026-04-06T09:25:00.000Z",
-          resourceCount: 1,
-          resourceAvailabilitySummary: { water: true },
-          sourceInstanceKey: hostedSourceInstanceKey,
-          sourceProviderSlug: "apple-healthkit",
-          status: "connected",
-        }],
+        sources: [
+          {
+            displayName: "Apple Health duplicate",
+            firstSeenAt: "2026-04-02T09:00:00.000Z",
+            lastDataAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:25:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: hostedSourceInstanceKey,
+            sourceProviderSlug: "apple-healthkit",
+            status: "connected",
+          },
+          {
+            displayName: "Apple Health duplicate alias",
+            firstSeenAt: "2026-04-03T09:00:00.000Z",
+            lastDataAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:25:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: "jxn_src_later_duplicate_apple_health",
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+          },
+        ],
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -1529,10 +1556,17 @@ describe("hosted device-sync runtime", () => {
       });
 
       const sources = getStore(service).listConnectionSources({ connectionId: localAccountId });
-      assert.equal(sources.length, 1);
-      assert.equal(sources[0]?.sourceInstanceKey, establishedSourceInstanceKey);
-      assert.equal(sources[0]?.sourceProviderSlug, "apple_health");
-      assert.equal(sources[0]?.lastSeenAt, "2026-04-06T09:25:00.000Z");
+      assert.equal(sources.length, 2);
+      const establishedSource = sources.find(
+        (source) => source.sourceInstanceKey === establishedSourceInstanceKey,
+      );
+      const laterDuplicate = sources.find(
+        (source) => source.sourceInstanceKey === hostedSourceInstanceKey,
+      );
+      assert.equal(establishedSource?.sourceProviderSlug, "apple_health");
+      assert.equal(establishedSource?.lastSeenAt, "2026-04-06T09:25:00.000Z");
+      assert.equal(laterDuplicate?.sourceProviderSlug, "apple_healthkit");
+      assert.equal(laterDuplicate?.lastSeenAt, "2026-04-06T09:21:00.000Z");
       const job = getStore(service).enqueueJob({
         accountId: localAccountId,
         availableAt: "2026-04-06T09:25:00.000Z",
