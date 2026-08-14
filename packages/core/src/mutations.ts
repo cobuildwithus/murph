@@ -3698,13 +3698,34 @@ async function findExactDocumentImport(input: {
     }
   }
 
-  const liveDocuments = collapseEventSpineEntries(entries)
-    .filter((entry) => !isDeletedEventSpineRecord(entry.record))
+  // Exact-source identity needs the latest revision even when it is a
+  // tombstone. The ordinary collapse helper intentionally removes deleted
+  // records, which would make a deleted source look like it never existed.
+  const latestDocuments = new Map<string, EventSpineEntry<DocumentEventRecord>>();
+  for (const entry of entries) {
+    const current = latestDocuments.get(entry.record.id);
+    if (!current || compareEventSpineEntries(current, entry) < 0) {
+      latestDocuments.set(entry.record.id, entry);
+    }
+  }
+  const documents = [...latestDocuments.values()]
     .sort((left, right) => left.record.id.localeCompare(right.record.id));
+  let deletedExactSourceExists = false;
 
-  for (const entry of liveDocuments) {
+  for (const entry of documents) {
     const stored = matchingManifests.get(entry.record.documentId);
-    if (!stored || !entry.record.rawRefs?.includes(stored.rawRef)) {
+    if (!stored) {
+      continue;
+    }
+    if (isDeletedEventSpineRecord(entry.record)) {
+      // The verified manifest and raw artifact already prove this document
+      // owned an exact copy. Tombstones intentionally need not preserve every
+      // live compatibility projection, so detect deletion before consulting
+      // rawRefs or attachments.
+      deletedExactSourceExists = true;
+      continue;
+    }
+    if (!entry.record.rawRefs?.includes(stored.rawRef)) {
       continue;
     }
     const raw = entry.record.attachments?.find((attachment) =>
@@ -3728,6 +3749,13 @@ async function findExactDocumentImport(input: {
       auditPath: null,
       manifestPath: stored.manifestPath,
     };
+  }
+
+  if (deletedExactSourceExists) {
+    throw new VaultError(
+      "DOCUMENT_EXACT_SOURCE_DELETED",
+      "An exact source document existed but was deleted. Exact reuse will not create a replacement identity.",
+    );
   }
 
   return null;

@@ -80,6 +80,7 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(instructions).toContain('document workout-import-status')
     expect(instructions).toContain('event import-jsonl --input @<temporary.jsonl> --source-raw-ref-once')
     expect(instructions).toContain('Do not add model-authored `externalRef` values')
+    expect(instructions).toContain('prior source document was deleted')
     expect(instructions).toContain('Confirm the JSONL SHA-256 is unchanged')
     expect(instructions).toContain('never blindly retry an')
     expect(instructions).toContain('ambiguous failure')

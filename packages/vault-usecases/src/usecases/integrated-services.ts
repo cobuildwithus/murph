@@ -900,15 +900,22 @@ function createIntegratedImporterServices(): ImporterServices {
     async importDocument(input) {
       const { vault, file, title, occurredAt, note, source, reuseExact } = input
       const importers = await loadImporterRuntime()
-      const result = await importers.importDocument({
-        filePath: file,
-        vaultRoot: vault,
-        title,
-        occurredAt,
-        note,
-        source,
-        reuseExact,
-      })
+      let result: Awaited<ReturnType<typeof importers.importDocument>>
+      try {
+        result = await importers.importDocument({
+          filePath: file,
+          vaultRoot: vault,
+          title,
+          occurredAt,
+          note,
+          source,
+          reuseExact,
+        })
+      } catch (error) {
+        throw toVaultCliError(error, {
+          DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
+        })
+      }
 
       return {
         vault,

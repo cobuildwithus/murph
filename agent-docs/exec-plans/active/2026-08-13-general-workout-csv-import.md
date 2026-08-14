@@ -77,3 +77,9 @@ Updated: 2026-08-13
 - Review finding: the exact-document lookup treated any `manifest.json` or `manifest.*.json` document artifact as internal metadata and allowed its JSON/schema parse failure to abort every later exact-source import.
 - Decision: retain the existing filename prefilter, but treat it only as a candidate. Read errors still surface; candidate JSON or manifest-contract mismatch makes that file ineligible and continues the scan. This fixes existing vaults without reserving member filenames or changing manifest storage.
 - Proof: a public core-boundary test first imports member-owned JSON documents with both manifest-like basename forms, then creates and reuses a separate workout CSV source, proves stable identities and no extra raw files, and verifies both unrelated member artifacts remain byte-identical.
+
+## Round 5 deleted-source identity correction
+
+- Review finding: exact reuse considered only live document events. Deleting the preserved source left its raw artifact and workouts intact, but a later replay silently minted a new document/raw identity whose source guard had no history, admitting a duplicate full batch.
+- Decision: when verified exact bytes exist only behind a tombstoned document, `--reuse-exact` returns a typed no-write conflict. It never creates a replacement identity; ordinary document import without the replay-safe option remains the explicit create-new path.
+- Proof: a real CLI test applies two source-guarded workouts, deletes the source through the public document command, proves exact reuse conflicts with unchanged vault paths and workout count, then proves ordinary import still creates. A real App Server replacement-workspace turn surfaces the deleted-source state and performs no Python or event command.

@@ -6,12 +6,14 @@ import path from "node:path";
 import { test } from "vitest";
 
 import {
+  deleteEvent,
   importDocument,
   initializeVault,
   resolveRawAssetDirectory,
   resolveRawManifestPath,
   resolveVaultPath,
   validateVault,
+  VaultError,
 } from "../src/index.ts";
 import { parseRawImportManifest, stageRawImportManifest } from "../src/operations/raw-manifests.ts";
 import { WriteBatch } from "../src/operations/write-batch.ts";
@@ -145,6 +147,37 @@ test("exact document reuse ignores member documents with manifest-like names", a
   for (const { content, rawRef } of memberArtifacts.values()) {
     assert.equal(await fs.readFile(path.join(vaultRoot, rawRef), "utf8"), content);
   }
+});
+
+test("exact document reuse fails closed after its source document is deleted", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-document-exact-reuse-deleted");
+  const sourceRoot = await makeTempDirectory("murph-core-document-exact-reuse-deleted-source");
+  await initializeVault({ vaultRoot });
+
+  const sourcePath = path.join(sourceRoot, "workout-history.csv");
+  await fs.writeFile(sourcePath, "session,exercise,reps\na,Squat,5\n", "utf8");
+  const imported = await importDocument({ vaultRoot, sourcePath, reuseExact: true });
+  await deleteEvent({ vaultRoot, eventId: imported.event.id });
+  const treeBeforeReplay = (await fs.readdir(vaultRoot, { recursive: true })).sort();
+
+  await assert.rejects(
+    importDocument({ vaultRoot, sourcePath, reuseExact: true }),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "DOCUMENT_EXACT_SOURCE_DELETED");
+      return true;
+    },
+  );
+  assert.deepEqual((await fs.readdir(vaultRoot, { recursive: true })).sort(), treeBeforeReplay);
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, imported.raw.relativePath), "utf8"),
+    await fs.readFile(sourcePath, "utf8"),
+  );
+
+  const explicitReplacement = await importDocument({ vaultRoot, sourcePath });
+  assert.equal(explicitReplacement.created, true);
+  assert.notEqual(explicitReplacement.documentId, imported.documentId);
+  assert.notEqual(explicitReplacement.raw.relativePath, imported.raw.relativePath);
 });
 
 test("validateVault reports missing raw manifests by raw directory for immutable manifest files", async () => {

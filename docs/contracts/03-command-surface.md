@@ -287,6 +287,12 @@ immutable event-ledger relationship so a later assistant turn can stop before
 regenerating a scratch transform. Edited and deleted workouts still count as a
 completed source import.
 
+`document import --reuse-exact` reuses only a verified live exact document. If
+verified exact bytes exist only behind a deleted document event, it fails with
+a typed conflict and performs no write instead of minting a replacement raw
+identity. Ordinary document import without `--reuse-exact` retains its explicit
+create-new behavior.
+
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
 ## Health Noun Grammar

@@ -227,6 +227,70 @@ test('independent exact-source attempts stop from durable workout-source history
   assert.equal(manifestFiles.filter((name) => name.startsWith('manifest.')).length, 1)
 }, 180_000)
 
+test('deleted exact source fails closed without duplicating workout history', async () => {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-deleted-source-'))
+  const vaultRoot = path.join(workDir, 'vault')
+  const sourcePath = path.join(workDir, 'workout-history.csv')
+  await writeFile(sourcePath, 'session,exercise,reps\na,Squat,5\nb,Row,8\n', 'utf8')
+  await runCli(['init', '--vault', vaultRoot])
+
+  const sourceImport = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+  ])
+  assert.equal(sourceImport.ok, true)
+  const source = requireData(sourceImport)
+  const secondPayload = {
+    ...withRawRef(source.rawFile, 30),
+    occurredAt: '2026-03-14T17:00:00.000Z',
+    title: 'Upper body',
+  }
+  const inputPath = path.join(workDir, 'events.jsonl')
+  await writeFile(inputPath, toJsonl([withRawRef(source.rawFile), secondPayload]), 'utf8')
+  const applied = await runCli<EventImportJsonlResult>([
+    'event', 'import-jsonl',
+    '--input', `@${inputPath}`,
+    '--source-raw-ref-once', source.rawFile,
+    '--apply',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(applied.ok, true)
+  assert.equal(requireData(applied).createdCount, 2)
+
+  const deletedSource = await runCli([
+    'document', 'delete', source.documentId, '--vault', vaultRoot,
+  ])
+  assert.equal(deletedSource.ok, true)
+  const pathsBeforeReplay = (await readdir(vaultRoot, { recursive: true })).sort()
+
+  const rejectedReplay = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+  ])
+  assert.equal(
+    rejectedReplay.ok,
+    false,
+    rejectedReplay.ok ? JSON.stringify(rejectedReplay.data) : JSON.stringify(rejectedReplay.error),
+  )
+  if (rejectedReplay.ok) throw new Error('expected deleted exact source reuse to fail')
+  assert.equal(rejectedReplay.error.code, 'conflict')
+  assert.match(rejectedReplay.error.message ?? '', /exact source document existed but was deleted/iu)
+  assert.deepEqual((await readdir(vaultRoot, { recursive: true })).sort(), pathsBeforeReplay)
+  assert.equal(await readFile(path.join(vaultRoot, source.rawFile), 'utf8'), await readFile(sourcePath, 'utf8'))
+
+  const workoutsAfterReplay = await runCli<EventListResult>([
+    'event', 'list', '--kind', 'activity_session', '--vault', vaultRoot,
+  ])
+  assert.equal(workoutsAfterReplay.ok, true)
+  assert.equal(requireData(workoutsAfterReplay).count, 2)
+
+  const explicitNewImport = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--vault', vaultRoot,
+  ])
+  assert.equal(explicitNewImport.ok, true)
+  assert.equal(requireData(explicitNewImport).created, true)
+  assert.notEqual(requireData(explicitNewImport).documentId, source.documentId)
+  assert.notEqual(requireData(explicitNewImport).rawFile, source.rawFile)
+}, 180_000)
+
 test('event import-jsonl dry-runs, applies, and stays idempotent', async () => {
   const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-'))
   const vaultRoot = path.join(workDir, 'vault')

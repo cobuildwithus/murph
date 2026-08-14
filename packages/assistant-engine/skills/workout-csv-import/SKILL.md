@@ -28,6 +28,10 @@ batch write. Keep raw rows out of model context and user-facing replies.
    of minting attempt-local provenance. Keep the
    returned document id and raw file ref. This is the durable source if mapping
    cannot safely finish; a temporary script or JSONL file is not durable proof.
+   If exact reuse reports that the prior source document was deleted, stop
+   before Python and event import. Explain that Murph will not silently create a
+   replacement source identity; do not bypass the conflict with ordinary
+   document import in this workout workflow.
 2. Immediately run `vault-cli document workout-import-status <raw-file-ref>
    --format json`. If `imported` is true, the atomic workout import for this
    exact source completed in an earlier attempt. Stop before Python or JSONL
