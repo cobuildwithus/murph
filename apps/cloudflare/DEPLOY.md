@@ -158,9 +158,13 @@ Before deploying the Worker version that introduces
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
-migration `v4` creates the SQLite Durable Object namespace and the generated
-config installs the five-minute cron. After deployment, confirm one scheduled
-invocation records an `ok` sample without a Linq send under healthy metrics.
+migration `v4` creates the database-health SQLite Durable Object namespace,
+migration `v5` creates the independent device-webhook Queue-health namespace,
+and the generated config installs the shared five-minute cron. The Queue-health
+owner reuses these two operator chats and the Linq token, but it has separate
+incident, pending-message, and pacing state and never reads Postgres. After
+deployment, confirm one scheduled invocation records healthy database and Queue
+observations without a Linq send.
 Then use the test-only fake-provider coverage for threshold and delivery proof;
 do not induce a production database failure or mutate a real counter for smoke.
 Confirm Workers Observability contains no configuration or collection failure
@@ -861,6 +865,9 @@ Set these in the selected GitHub environment as secrets:
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
+`CLOUDFLARE_API_TOKEN` must include account-scoped Workers Queues write access
+so deploy automation can create/update the producer, consumer, and DLQ binding.
+
 The protected GitHub Environment may also hold the optional
 `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` secret. Deploy
 automation forwards it to the Worker secret store without exposing it to the
@@ -1129,6 +1136,48 @@ Correct the callback hostname before either Web or Worker deployment, and ship
 the Web start/build guard with the Cloudflare preflight change. During a skewed
 rollout the Web start guard still fails closed before OAuth state or provider
 authorization; do not bypass it to recover an invalid split-host environment.
+
+Device-webhook burst transport requires a main Queue and DLQ named from the
+deployed Worker (`<worker>-device-webhooks` and
+`<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
+Deploy the Queue-capable Worker and the Web batch-admission callback before
+setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
+gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, and Web admission stays serial before expanding. To roll back, clear the
+Web gate first, drain the main Queue through the still-deployed consumer, retain
+the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+During Cloudflare automation-key rotation, keep the prior private key as
+`decrypt_only` until Web uses the new public key and both the main Queue and
+encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ
+retention is part of the key-retirement floor; elapsed rollout time alone is not
+proof that the old key is safe to disable.
+Prepared webhook parsers have the same retention floor: keep every decoder for
+an emitted `murph.device-sync-prepared-webhook.*` schema readable until both
+Queues and all supported redrive paths are proven free of that version. A
+provider signing-secret or parser rotation needs no overlap for already queued
+events because Web froze verified prepared meaning before provider acknowledgement.
+
+The Queue-health Durable Object reads only native main-Queue and DLQ metrics.
+It pages both configured operator chats immediately when the DLQ is nonempty,
+when the oldest main-Queue message reaches 15 minutes, or after two consecutive
+metric failures. A failed first page retains its exact body and Linq
+idempotency key for the next five-minute check, while hourly pacing applies
+only to successful repeat pages in the same continuously open incident. Keep
+`HOSTED_DATABASE_ALERT_ENABLED=1` and the existing Linq alert secrets configured
+for production so both independent monitors run.
+
+For encrypted DLQ recovery, first fix the admission failure and retain every
+Cloudflare automation private key still referenced by either Queue. Pause the
+main Queue consumer while producers continue writing. Temporarily configure the
+same Worker as the DLQ consumer with batch size 100, five-second batching,
+concurrency one, ten retries, a 30-second retry delay, and the paused main Queue
+as that temporary consumer's dead-letter target. Wait until DLQ metrics report
+zero, remove the temporary DLQ consumer, resume the ordinary main consumer, and
+verify that main depth returns to zero while the DLQ stays empty. Do not purge,
+download, decrypt, or manually copy messages. This redrive acknowledges only
+successful canonical admissions; work that still fails returns encrypted to the
+paused main Queue instead of being deleted. Keep both Queues at the configured
+14-day retention throughout recovery.
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
