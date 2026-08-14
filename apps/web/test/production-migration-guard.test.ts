@@ -1439,6 +1439,12 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
     assert.match(productionNextBuildScript, /typecheck_worker_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /build_cache_epoch=webpack-next-16\.3-v1/u);
+    assert.match(
+      productionNextBuildScript,
+      /node \.\.\/\.\.\/scripts\/rm-paths\.mjs \.next\/cache/u,
+    );
+    assert.match(productionNextBuildScript, /murph-production-build-epoch/u);
     assert.match(
       productionNextBuildScript,
       /sed -E 's\/\(\^\|\[\[:space:\]\]\)--max\[-_\]old\[-_\]space\[-_\]size/u,
@@ -1449,7 +1455,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
+      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
     assert.match(productionNextBuildScript, /compiler=webpack/u);
     assert.match(

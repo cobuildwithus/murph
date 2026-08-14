@@ -35,6 +35,13 @@ Updated: 2026-08-14
   command. The cold proof therefore needs both one exact task-branch allowance
   and one deployment-scoped `ignoreCommand` override; both temporary settings
   must be removed after the proof.
+- The first current-scale Webpack preview restored the existing Vercel build
+  cache and remained inside compilation for more than 15 minutes. The proven
+  Next 16.3 Webpack lane previously compiled in 2.6 to 3.2 minutes, while Next's
+  own cache guidance warns that a sufficiently large Webpack disk cache can be
+  slower than rebuilding. The compiler transition therefore needs a one-time,
+  fail-closed cache epoch: clear `.next/cache` until a successful Webpack build
+  writes the new epoch, then retain normal warm caching on later deploys.
 
 ## Protected invariants
 
@@ -52,12 +59,14 @@ Updated: 2026-08-14
    supported build-worker/memory-optimization settings.
 2. Correct the two invalid route-module exports exposed by the restored builder.
 3. Make OG/card assets prefer the deployed runtime layout under Webpack.
-4. Update focused build-policy coverage and the hosted Web build contract.
-5. Run focused tests, hosted Web typechecking, and a complete local production
+4. Invalidate the incompatible pre-cutover build cache once, preserving warm
+   Webpack caching after a successful epoch build.
+5. Update focused build-policy coverage and the hosted Web build contract.
+6. Run focused tests, hosted Web typechecking, and a complete local production
    build.
-6. Commit and push the exact candidate, open a PR, and complete the preliminary
+7. Commit and push the exact candidate, open a PR, and complete the preliminary
    specialist plus final ReviewGPT gates with exact-head CI.
-7. Run a forced-cold Standard preview on the exact candidate and verify that the
+8. Run a forced-cold Standard preview on the exact candidate and verify that the
    build uses Webpack and reaches Ready without an OOM.
 
 ## Deployment concerns

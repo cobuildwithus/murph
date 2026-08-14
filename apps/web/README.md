@@ -1598,6 +1598,12 @@ script passes `--webpack`, and the Next config explicitly enables
 integration contributes Webpack configuration that otherwise prevents Next
 from selecting the isolated build worker automatically. The hosted local-
 development wrapper remains on Turbopack and rejects an explicit Webpack flag.
+The production runner also owns a versioned cache epoch inside `.next/cache`.
+When that stamp is absent or differs, it removes the incompatible cache before
+compilation and writes the epoch only after Next succeeds. This gives the
+Turbopack-to-Webpack rollout one cold build without permanently disabling warm
+Webpack caching; bump the epoch only when a proven compiler/cache transition
+requires another invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions
@@ -1642,9 +1648,12 @@ about four minutes, but that bounded proof did not disprove the already observed
 intermittent memory failure. On 2026-08-14, two production builds remained in
 Turbopack compilation until Vercel's build-duration ceiling and another exited
 137 during compilation with Vercel's explicit container-OOM report. Production
-therefore uses the repeatedly proven Webpack path again. A future Turbopack
-production cutover must prove repeated cold builds over a representative change
-window, not only isolated preview successes.
+therefore uses the repeatedly proven Webpack path again. The first restored
+preview inherited the old Vercel build cache and remained in Webpack compilation
+for more than 15 minutes, despite the same Next 16.3 Webpack lane previously
+compiling in 2.6 to 3.2 minutes. That evidence owns the cache epoch above. A
+future Turbopack production cutover must prove repeated cold builds over a
+representative change window, not only isolated preview successes.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build

@@ -417,8 +417,14 @@ supported provider credential.
   Webpack build worker and memory optimizations because Workflow contributes
   Webpack configuration. Three consecutive forced-cold Webpack previews, a
   later integration preview, and the final corrected head previously completed
-  on the Standard builder without OOM. Exact-head CI proves the complete
-  compile, type-validation, static-generation, and directive-discovery path,
+  on the Standard builder without OOM. A versioned `.next/cache` epoch clears an
+  incompatible restored cache
+  until one Webpack build succeeds and then preserves ordinary warm caching.
+  The epoch is owned by the shared production runner and changes only after a
+  proven compiler/cache transition; missing or mismatched stamps fail toward a
+  cold build instead of trusting cross-compiler state.
+  Exact-head CI proves the complete compile, type-validation, static-generation,
+  and directive-discovery path,
   while focused Stripe and phone-call suites prove the existing
   `workflow/api.start` wrappers and step contracts. The accepted correction
   preserves the heap split and all route/type validation. The advisory budget is
