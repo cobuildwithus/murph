@@ -52,7 +52,10 @@ import {
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
 } from "../src/config/junction-connect-sources.ts";
-import { resolveDeviceConnectSourceIdForJunctionProviderSlug } from "../src/config/connect-routes.ts";
+import {
+  resolveDeviceConnectSourceIdForJunctionProviderSlug,
+} from "../src/config/connect-routes.ts";
+import { canonicalizeJunctionProviderSlug } from "../src/connect-config.ts";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
@@ -5536,6 +5539,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     historicalWindowStart: "2026-03-18T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
     sourceProviderSlug: "garmin",
     windowEnd: "2026-03-20T00:00:00.000Z",
     windowStart: "2026-03-18T00:00:00.000Z",
@@ -6450,9 +6454,19 @@ test("Junction provider source keys are stable provider-level opaque ids", () =>
     connectionId: "acct-junction-1",
     sourceProviderSlug: "peloton",
   });
+  const appleHealthKeys = ["apple_health_kit", "apple_health", "apple-healthkit"].map(
+    (sourceProviderSlug) => buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug,
+    }),
+  );
 
   assert.equal(garminKey, garminKeyAgain);
   assert.notEqual(garminKey, pelotonKey);
+  assert.equal(new Set(appleHealthKeys).size, 1);
+  assert.equal(canonicalizeJunctionProviderSlug(" Apple Health "), "apple_health_kit");
+  assert.equal(canonicalizeJunctionProviderSlug("unknown-source"), "unknown_source");
+  assert.equal(canonicalizeJunctionProviderSlug(null), null);
   assert.match(garminKey ?? "", /^jxn_src_[a-f0-9]{32}$/u);
   assert.doesNotMatch(garminKey ?? "", /acct|junction|garmin/u);
 });
@@ -10609,7 +10623,7 @@ test("Junction source projection persists provider error details for errored sou
   assert.equal(Object.hasOwn(connectedUpsert, "lastErrorMessage"), false);
 });
 
-test("Junction source projection drops error details when a sibling source entry is connected", async () => {
+test("Junction source projection keeps fail-closed error state when a sibling entry is connected", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -10676,9 +10690,9 @@ test("Junction source projection drops error details when a sibling source entry
 
   assert.equal(upserts.length, 1);
   assert.equal(upserts[0]?.sourceProviderSlug, "whoop_v2");
-  assert.equal(upserts[0]?.status, "connected");
-  assert.equal(Object.hasOwn(upserts[0] ?? {}, "lastErrorCode"), false);
-  assert.equal(Object.hasOwn(upserts[0] ?? {}, "lastErrorMessage"), false);
+  assert.equal(upserts[0]?.status, "error");
+  assert.equal(upserts[0]?.lastErrorCode, "token_refresh_failed");
+  assert.equal(upserts[0]?.lastErrorMessage, "WHOOP rejected the refresh token.");
 });
 
 test("Junction source projection tolerates malformed error details and reads camelCase fields", async () => {

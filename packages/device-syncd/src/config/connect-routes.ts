@@ -314,6 +314,12 @@ export function normalizeJunctionProviderSlug(value: unknown): string | null {
   return normalized || null;
 }
 
+export function canonicalizeJunctionProviderSlug(value: unknown): string | null {
+  const slug = normalizeJunctionProviderSlug(value);
+  return JUNCTION_ROUTE_ENTRY_BY_PROVIDER_SLUG.get(slug ?? "")?.route.sourceProviderSlug
+    ?? slug;
+}
+
 export function resolveDeviceConnectSourceById(sourceId: string): DeviceConnectSource | null {
   const normalized = normalizeDeviceConnectSourceId(sourceId);
   return normalized ? DEVICE_CONNECT_SOURCE_BY_ID.get(normalized) ?? null : null;

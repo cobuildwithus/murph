@@ -68,22 +68,26 @@ vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
   buildHostedPublicDeviceSyncAccount: mocks.buildHostedPublicDeviceSyncAccount,
 }));
 
-vi.mock("@/src/lib/device-sync/prisma-store", () => ({
-  hostedConnectionRecordArgs: {
-    select: {
-      accessTokenEncrypted: true,
-      externalAccountIdEncrypted: true,
-      refreshTokenEncrypted: true,
+vi.mock("@/src/lib/device-sync/prisma-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/device-sync/prisma-store")>();
+  return {
+    ...actual,
+    hostedConnectionRecordArgs: {
+      select: {
+        accessTokenEncrypted: true,
+        externalAccountIdEncrypted: true,
+        refreshTokenEncrypted: true,
+      },
     },
-  },
-  hostedRuntimeRedactedConnectionRecordArgs: {
-    select: {
-      id: true,
+    hostedRuntimeRedactedConnectionRecordArgs: {
+      select: {
+        id: true,
+      },
     },
-  },
-  mapHostedConnectionRecord: mocks.mapHostedConnectionRecord,
-  mapHostedRuntimeRedactedConnectionRecord: mocks.mapHostedRuntimeRedactedConnectionRecord,
-}));
+    mapHostedConnectionRecord: mocks.mapHostedConnectionRecord,
+    mapHostedRuntimeRedactedConnectionRecord: mocks.mapHostedRuntimeRedactedConnectionRecord,
+  };
+});
 
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
   writeHostedRuntimeLogs: mocks.writeHostedRuntimeLogs,
@@ -474,9 +478,11 @@ function createAuthorityHarness(input: {
     ),
     listBoundedConnectionSourcesForConnections: vi.fn(async (sourceInput: {
       connectionIds: readonly string[];
+      excludeDisconnected?: boolean;
       sourceProviderSlugs?: readonly string[] | null;
     }) => connectionSources.filter((source) =>
       sourceInput.connectionIds.includes(source.connectionId)
+      && (sourceInput.excludeDisconnected !== true || source.status !== "disconnected")
       && (
         sourceInput.sourceProviderSlugs == null
         || sourceInput.sourceProviderSlugs.includes(source.sourceProviderSlug)
@@ -1976,17 +1982,33 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       observedLifecycleEpoch: undefined,
       projectedStatus: "connected" as const,
     },
-  ])("does not let a runtime source projection cross the $label", async ({
-    currentLifecycleEpoch,
-    currentStatus,
-    lastErrorCode,
-    observedLifecycleEpoch,
-    projectedStatus,
-  }) => {
+    {
+      currentLifecycleEpoch: 2,
+      currentSourceProviderSlug: "apple_health_kit",
+      currentStatus: "connected" as const,
+      label: "legacy alias lifecycle epoch",
+      lastErrorCode: null,
+      observedLifecycleEpoch: 1,
+      projectedSourceInstanceKey: "jxn_src_legacy_apple_health",
+      projectedSourceProviderSlug: "apple_health",
+      projectedStatus: "connected" as const,
+    },
+  ])("does not let a runtime source projection cross the $label", async (scenario) => {
+    const {
+      currentLifecycleEpoch,
+      currentStatus,
+      lastErrorCode,
+      observedLifecycleEpoch,
+      projectedStatus,
+    } = scenario;
+    const currentSourceProviderSlug = "currentSourceProviderSlug" in scenario
+      && typeof scenario.currentSourceProviderSlug === "string"
+      ? scenario.currentSourceProviderSlug
+      : "oura";
     const connectionId = "conn_junction";
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId,
-      sourceProviderSlug: "oura",
+      sourceProviderSlug: currentSourceProviderSlug,
     });
     if (!sourceInstanceKey) {
       throw new Error("Expected a canonical Junction source instance key.");
@@ -2002,7 +2024,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         lastSeenAt: "2026-04-06T10:00:00.000Z",
         resourceAvailabilitySummary: { sleep: true },
         sourceInstanceKey,
-        sourceProviderSlug: "oura",
+        sourceProviderSlug: currentSourceProviderSlug,
         status: currentStatus,
       }],
       record: buildHostedRecord({
@@ -2031,8 +2053,14 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               observedLifecycleEpoch,
               observedLastSeenAt: "2026-04-06T10:00:00.000Z",
               resourceAvailabilitySummary: { sleep: true },
-              sourceInstanceKey,
-              sourceProviderSlug: "oura",
+              sourceInstanceKey: "projectedSourceInstanceKey" in scenario
+                && typeof scenario.projectedSourceInstanceKey === "string"
+                ? scenario.projectedSourceInstanceKey
+                : sourceInstanceKey,
+              sourceProviderSlug: "projectedSourceProviderSlug" in scenario
+                && typeof scenario.projectedSourceProviderSlug === "string"
+                ? scenario.projectedSourceProviderSlug
+                : currentSourceProviderSlug,
               status: projectedStatus,
             }],
           }],
@@ -3996,9 +4024,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               sources: {
                 some: {
                   sourceProviderSlug: { in: ["whoop", "whoop_v2", "whoop-v2"] },
-                  status: {
-                    not: "disconnected",
-                  },
                 },
               },
             },
@@ -4006,15 +4031,120 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           sources: {
             some: {
               sourceProviderSlug: { in: ["fitbit"] },
-              status: {
-                not: "disconnected",
-              },
             },
           },
           userId: "user_123",
         }),
       }),
     );
+  });
+
+  it("expands canonical Junction source filters so alias-only candidates remain visible", async () => {
+    const connectionId = "conn_123";
+    const canonicalKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "apple_health_kit",
+    });
+    if (!canonicalKey) {
+      throw new Error("Expected a canonical Apple Health source key.");
+    }
+    const harness = createAuthorityHarness({
+      connectionSources: [{
+        connectionId,
+        sourceInstanceKey: canonicalKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }],
+      record: buildHostedRecord({ id: connectionId, provider: "junction" }),
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          sourceProviderSlug: "apple_health_kit",
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections).toHaveLength(1);
+    expect(response.connections[0]?.sources).toEqual([
+      expect.objectContaining({ sourceProviderSlug: "apple_health_kit" }),
+    ]);
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sources: {
+            some: {
+              sourceProviderSlug: {
+                in: expect.arrayContaining([
+                  "apple_health_kit",
+                  "apple_health",
+                  "apple_healthkit",
+                ]),
+              },
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it("excludes a lower connected alias when canonical lifecycle authority is disconnected", async () => {
+    const connectionId = "conn_123";
+    const canonicalKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "apple_health_kit",
+    });
+    if (!canonicalKey) {
+      throw new Error("Expected a canonical Apple Health source key.");
+    }
+    const harness = createAuthorityHarness({
+      connectionSources: [{
+        connectionId,
+        lifecycleEpoch: 2,
+        sourceInstanceKey: canonicalKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "disconnected",
+      }],
+      record: buildHostedRecord({ id: connectionId, provider: "junction" }),
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    // The outer query may still return this physical candidate because a lower
+    // legacy alias row is connected. The collapsed source projection owns the
+    // final semantic decision.
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          sourceProviderSlug: "apple_health_kit",
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections).toEqual([]);
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+      connectionIds: [connectionId],
+      excludeDisconnected: true,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+      sourceProviderSlugs: expect.arrayContaining([
+        "apple_health_kit",
+        "apple_health",
+        "apple_healthkit",
+      ]),
+    });
   });
 
   it("uses a bounded source projection for limited provider-scoped hosted snapshots", async () => {

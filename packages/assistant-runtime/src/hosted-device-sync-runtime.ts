@@ -6,7 +6,7 @@ import {
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { canonicalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
@@ -61,7 +61,10 @@ import {
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
-import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
+import {
+  canonicalizeHostedJunctionSources,
+  requireHostedRuntimeDeviceSyncStore,
+} from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
@@ -186,7 +189,17 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     ...snapshot.connections.filter((entry) => !isTerminalHostedPrivacyScrub(entry.connection)),
   ];
   let classifyJunctionProviderJob: HostedAccountHydrationInput["classifyProviderJob"];
-  for (const entry of orderedConnections) {
+  for (const rawEntry of orderedConnections) {
+    const entry = rawEntry.connection.provider.trim().toLowerCase() === "junction"
+      && rawEntry.sources !== undefined
+      ? {
+          ...rawEntry,
+          sources: canonicalizeHostedJunctionSources(
+            rawEntry.sources,
+            rawEntry.connection.id,
+          ),
+        }
+      : rawEntry;
     const existingByHostedConnection = store.getAccountByHostedConnectionId(
       entry.connection.id,
     );
@@ -373,6 +386,18 @@ function isTerminalHostedPrivacyScrub(
     && connection.externalAccountId === `opaque:${connection.id}`;
 }
 
+function findSemanticJunctionSource(
+  sources: readonly StoredDeviceConnectionSource[],
+  sourceProviderSlug: string,
+): StoredDeviceConnectionSource | null {
+  const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
+  return canonicalSourceProviderSlug
+    ? canonicalizeHostedJunctionSources(sources).find(
+        (source) => source.sourceProviderSlug === canonicalSourceProviderSlug,
+      ) ?? null
+    : null;
+}
+
 function resolveHostedHydrationSourceInstanceKey(input: {
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
   localSources: readonly StoredDeviceConnectionSource[];
@@ -383,20 +408,14 @@ function resolveHostedHydrationSourceInstanceKey(input: {
     return input.sourceInstanceKey;
   }
 
-  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.entry.connection.id,
-    sourceProviderSlug: input.source.sourceProviderSlug,
-  });
   const matchingSource = input.localSources.find((source) =>
-    source.sourceInstanceKey === canonicalSourceInstanceKey
-  ) ?? input.localSources.find((source) =>
     source.sourceInstanceKey === input.sourceInstanceKey
-  ) ?? input.localSources.find((source) =>
-    source.sourceProviderSlug === input.source.sourceProviderSlug
+  ) ?? findSemanticJunctionSource(
+    input.localSources,
+    input.source.sourceProviderSlug,
   );
 
   return matchingSource?.sourceInstanceKey
-    ?? canonicalSourceInstanceKey
     ?? input.sourceInstanceKey;
 }
 
@@ -417,21 +436,15 @@ function clearNewerHostedJunctionSourceCoverageFromLocalMerge(
     return existing;
   }
 
-  const localSourcesByKey = new Map(
-    localSources.map((source) => [source.sourceInstanceKey, source] as const),
-  );
   let metadata = existing.metadata;
   for (const source of entry.sources ?? []) {
     if (!source.sourceInstanceKey) {
       continue;
     }
-    const sourceInstanceKey = resolveHostedHydrationSourceInstanceKey({
-      entry,
+    const localSource = findSemanticJunctionSource(
       localSources,
-      source,
-      sourceInstanceKey: source.sourceInstanceKey,
-    });
-    const localSource = localSourcesByKey.get(sourceInstanceKey);
+      source.sourceProviderSlug,
+    );
     if (localSource && (source.lifecycleEpoch ?? 1) > localSource.lifecycleEpoch) {
       metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
         metadata,
@@ -1502,6 +1515,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     ? buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
         input.sources,
         input.baseline?.sources ?? [],
+        input.account.provider,
       )
     : [];
   if (sources.length > 0) {
@@ -1648,6 +1662,7 @@ function hasHostedDeviceSyncRuntimeConnectionUpdateChanges(
 function buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
   sources: readonly StoredDeviceConnectionSource[],
   baselineSources: readonly NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number][],
+  provider: string,
 ): HostedDeviceSyncRuntimeConnectionSourceUpdate[] {
   const baselineByInstanceKey = new Map(
     baselineSources
@@ -1657,11 +1672,23 @@ function buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
 
   return sources
     .map((source): HostedDeviceSyncRuntimeConnectionSourceUpdate => {
-      const baseline = baselineByInstanceKey.get(source.sourceInstanceKey) ?? null;
+      const canonicalSourceProviderSlug = provider === "junction"
+        ? canonicalizeJunctionProviderSlug(source.sourceProviderSlug)
+        : null;
+      const baseline = baselineByInstanceKey.get(source.sourceInstanceKey)
+        ?? (
+          canonicalSourceProviderSlug
+            ? baselineSources.find((candidate) =>
+                canonicalizeJunctionProviderSlug(candidate.sourceProviderSlug)
+                  === canonicalSourceProviderSlug
+              )
+            : null
+        )
+        ?? null;
 
       return {
-        sourceInstanceKey: source.sourceInstanceKey,
-        sourceProviderSlug: source.sourceProviderSlug,
+        sourceInstanceKey: baseline?.sourceInstanceKey ?? source.sourceInstanceKey,
+        sourceProviderSlug: canonicalSourceProviderSlug ?? source.sourceProviderSlug,
         observedLastSeenAt: baseline?.lastSeenAt ?? null,
         ...(baseline?.lifecycleEpoch === undefined
           ? {}

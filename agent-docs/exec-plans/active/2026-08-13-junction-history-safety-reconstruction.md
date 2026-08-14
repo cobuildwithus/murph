@@ -100,8 +100,15 @@ Updated: 2026-08-13
 6. [completed] Commit and push a candidate, open a replacement PR with exact intent/load/
    deployment/shape/proof metadata, then run preliminary specialist and final
    ReviewGPT concurrently with CI.
-7. [pending] Resolve accepted findings, perform parent final review, close this plan with
-   `scripts/finish-task`, and land only after ReviewGPT PASS plus required CI.
+7. [completed] Complete and record the required round-2 anomaly retrospective:
+   reject tactical alias guards and a raised 420-key bound, and choose one
+   catalog-derived semantic lifecycle identity with no new persisted owner.
+8. [completed] Collapse Apple Health alias/canonical lifecycle ownership at the
+   existing source boundaries; prove legacy coexistence, reconnect, hydration,
+   scheduling, execution fencing, certification, and hosted apply end to end.
+9. [in_progress] Re-run focused/comprehensive proof, push the remediated head, obtain
+   a later ReviewGPT PASS plus exact-head green CI, perform parent final review,
+   close this plan with `scripts/finish-task`, and land.
 
 ## Decisions
 
@@ -150,6 +157,35 @@ Updated: 2026-08-13
   guard rejects missing lifecycle observations for epochs above one and protects
   against old-runner stragglers; Web-first is unsafe because it can clear
   schedule-time coverage before the cap-one runner behavior is active.
+- Round 2's full-snapshot audit is accepted as a requirement-level
+  `RETROSPECTIVE_REQUIRED` signal. Independent static and executable proof
+  confirmed that the current scheduler constructs 420 active-dedupe keys when
+  canonical Apple Health plus both admitted aliases coexist, exceeds the 396
+  guard, and can resurrect unpublished alias coverage after a canonical
+  reconnect. The same split leaves old alias-bound work admissible.
+- Retrospective decision: the Connect route catalog is the sole lifecycle
+  identity owner. Its canonical route slug defines source-instance identity,
+  reconnect admission, hydration, scheduling/dedupe, lifecycle fences,
+  continuation/certification, and hosted projection. Raw slugs may remain only
+  as provider transport facts where needed. Existing alias rows collapse at
+  the ordinary Web/SQLite source-owner transaction, not through a migration
+  manager, repair loop, new table, second lifecycle, or raised raw-alias bound.
+- Rejected an assistant-only alias match because it repeats the same mechanism
+  while leaving admission, scheduling, execution, and hosted apply split.
+  Rejected raising the lookup guard to 420 because one visible source must own
+  one lifecycle and one set of obligations. Rejected a persisted canonical-ID
+  column because the code-owned catalog already provides the identity.
+- The ordinary Web and SQLite source owners now collapse catalog-equivalent
+  rows on their bounded read/write paths. The collapse keeps the maximum epoch,
+  applies fail-closed same-epoch status and disconnect-fence authority, preserves
+  earliest/most-recent observation timestamps, unions bounded availability
+  deterministically, writes the canonical row before deleting legacy aliases,
+  and adds no migration, repair loop, or second identity owner.
+- All extended-history roots, including blood pressure, now carry the exact
+  lifecycle epoch. Blood pressure remains source-first and independently bounded
+  at 33 roots; the schedule-time active-key lookup remains exactly 33 by 12, or
+  396. Filtered local reads expand only the catalog-equivalent slugs so legacy
+  alias-only rows participate in pre-provider admission and arrival stamping.
 
 ## ReviewGPT evidence and finding ledger
 
@@ -184,6 +220,13 @@ Updated: 2026-08-13
   package internals without proving more authority. The remediation instead
   strengthens the Web, assistant-runtime, device-sync, SQLite, and Postgres
   owner seams individually.
+- Accepted the round-2 Apple Health identity finding and the independent
+  remediation audits: Web now collapses before semantic status filtering and
+  uses deterministic availability order; assistant hydration preserves a
+  same-epoch disconnect fence and bounded availability across all aliases;
+  local filtered reads and arrival stamping include semantic aliases; and
+  blood-pressure work is lifecycle-bound before provider access. Redundant
+  importer, diagnostic, and second-owner rewrites were removed from scope.
 
 ## Verification
 
@@ -244,3 +287,31 @@ Updated: 2026-08-13
   - The hosted stale-residue guard, final diff check, and added-line secret,
     privacy, local-home-path, and email-identifier scans pass on the remediation
     candidate.
+  - Final ReviewGPT round 2 used a fresh sensitive full snapshot of exact head
+    `cf1229b6526daa87c4f017946cfb90907af1635a`. Two earlier staging attempts
+    failed before send, and the prior round-1 URL was unavailable across managed
+    profiles; the valid Mountain retry submitted once in a new full-audit
+    conversation. Response capture reached its three-hour guard, then the
+    read-only thread export recovered one substantive marked response with
+    `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` and `REVIEW_COMPLETE`.
+  - Independent validation reproduced the retrospective trigger: 35 admitted
+    raw slugs produce 420 current-day keys and trip the 396-key store guard;
+    alias epoch-one unpublished coverage survives canonical epoch-two
+    pre-hydration clearing, suppresses replacement scheduling, and an old alias
+    job reaches provider fetch. The PR body records the required retrospective
+    and continuation decision before further remediation.
+  - Final alias-ownership remediation proof passes: device-sync provider/store/
+    service coverage is 4 files and 519 tests; assistant hosted-device-sync is
+    1 file and 102 tests; hosted Web source/runtime/wake coverage is 3 files and
+    226 tests; and the isolated real-Postgres resilience lane remains 6 tests.
+    Device-sync, assistant-runtime, and prepared Web typechecks pass.
+  - Workspace package-cycle verification passes. Workspace-boundary verification
+    still reports only the unchanged sibling Web-test import already present on
+    the candidate head and outside the PR-authored diff.
+  - Production runner assembly passes all six parity probes without a budget
+    ratchet: vault total 9,086,709/9,100,000 bytes and entry 791/20,000 bytes;
+    runner entry 1,701,391 bytes, static closure 8,088,460/8,088,470 bytes, and
+    total 10,238,240/10,251,013 bytes.
+  - The hosted stale-residue guard, final diff check, and added-line credential,
+    privacy, local-home-path, and email-identifier scans pass on the remediated
+    candidate before its scoped commit.

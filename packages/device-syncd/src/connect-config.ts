@@ -35,6 +35,7 @@ export {
   listDirectDeviceConnectRouteEntries,
   listJunctionDeviceConnectRouteEntries,
   listJunctionLinkDeviceConnectRouteEntries,
+  canonicalizeJunctionProviderSlug,
   normalizeDeviceConnectSourceId,
   normalizeJunctionLinkProviderFilter,
   normalizeJunctionProviderSlug,

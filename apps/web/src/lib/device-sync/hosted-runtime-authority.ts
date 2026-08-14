@@ -37,7 +37,10 @@ import {
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  buildJunctionProviderSourceInstanceKey,
+  canonicalizeJunctionProviderSlug,
+} from "@murphai/device-syncd/connect-config";
 import {
   resolveConfiguredDeviceSyncProviderCredentialPolicy,
 } from "@murphai/device-syncd/provider-credential-policy";
@@ -64,6 +67,7 @@ import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import {
   hostedConnectionRecordArgs,
   hostedRuntimeRedactedConnectionRecordArgs,
+  expandCanonicalHostedSourceProviderSlugFilter,
   type HostedDeviceSyncDirtyConnectionRecord,
   type HostedDeviceConnectionSource,
   mapHostedConnectionRecord,
@@ -118,9 +122,13 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     input.trustedUserId,
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
-  const providerKeys = resolveDeviceProviderMatchKeys(parsed.provider);
-  const sourceProviderKeys = resolveDeviceProviderMatchKeys(parsed.sourceProviderSlug);
-  const boundedSourceProviderKeys = sourceProviderKeys.length > 0 ? sourceProviderKeys : providerKeys;
+  const providerKeys = expandCanonicalHostedSourceProviderSlugFilter(
+    resolveDeviceProviderMatchKeys(parsed.provider),
+  );
+  const sourceProviderKeys = expandCanonicalHostedSourceProviderSlugFilter(
+    resolveDeviceProviderMatchKeys(parsed.sourceProviderSlug),
+  );
+  const boundedSourceProviderKeys = [...new Set([...providerKeys, ...sourceProviderKeys])];
   const explicitBlankFilter = (
     parsed.provider !== undefined && parsed.provider !== null && providerKeys.length === 0
   ) || (
@@ -163,9 +171,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
                 sources: {
                   some: {
                     sourceProviderSlug: { in: providerKeys },
-                    status: {
-                      not: "disconnected",
-                    },
                   },
                 },
               },
@@ -177,9 +182,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
             sources: {
               some: {
                 sourceProviderSlug: { in: sourceProviderKeys },
-                status: {
-                  not: "disconnected",
-                },
               },
             },
           }
@@ -198,19 +200,12 @@ export async function readHostedDeviceSyncRuntimeState(input: {
         ...hostedRuntimeRedactedConnectionRecordArgs,
       });
   const hasNextPage = !parsed.connectionId && collectedRecords.length > pageLimit;
-  const records = collectedRecords.slice(0, pageLimit);
-
-  const providerApplicationRuntime = await resolveHostedRuntimeProviderApplications({
-    includeCredentialMaterial: parsed.includeCredentialMaterial,
-    prisma: controlPlane.store.prisma,
-    records,
-    userId: input.trustedUserId,
-  });
+  const pageRecords = collectedRecords.slice(0, pageLimit);
 
   const sourceProjectionFiltered = boundedSourceProviderKeys.length > 0;
   const projectedSources = await controlPlane.store
     .listBoundedConnectionSourcesForConnections({
-      connectionIds: records.map((record) => record.id),
+      connectionIds: pageRecords.map((record) => record.id),
       excludeDisconnected: sourceProjectionFiltered,
       limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
       sourceProviderSlugs: sourceProjectionFiltered ? boundedSourceProviderKeys : null,
@@ -221,6 +216,26 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     sources.push(source);
     sourcesByConnectionId.set(source.connectionId, sources);
   }
+  const records = pageRecords.filter((record) => {
+    const sourceSlugs = new Set(
+      (sourcesByConnectionId.get(record.id) ?? []).map((source) => source.sourceProviderSlug),
+    );
+    return (
+      sourceProviderKeys.length === 0
+      || sourceProviderKeys.some((key) => sourceSlugs.has(key))
+    ) && (
+      providerKeys.length === 0
+      || providerKeys.includes(record.provider)
+      || providerKeys.some((key) => sourceSlugs.has(key))
+    );
+  });
+
+  const providerApplicationRuntime = await resolveHostedRuntimeProviderApplications({
+    includeCredentialMaterial: parsed.includeCredentialMaterial,
+    prisma: controlPlane.store.prisma,
+    records,
+    userId: input.trustedUserId,
+  });
 
   const tokenConnectionIds = new Set<string>();
   if (parsed.includeCredentialMaterial) {
@@ -262,12 +277,19 @@ export async function readHostedDeviceSyncRuntimeState(input: {
           record as HostedRuntimeRedactedConnectionRecord,
         );
     const material = secretMaterial.get(record.id) ?? null;
+    const visibleSourceProviderKeys = sourceProviderKeys.length > 0
+      ? sourceProviderKeys
+      : providerKeys;
+    const visibleSources = (sourcesByConnectionId.get(record.id) ?? []).filter((source) =>
+      visibleSourceProviderKeys.length === 0
+      || visibleSourceProviderKeys.includes(source.sourceProviderSlug)
+    );
     connections.push(buildHostedRuntimeProjectedConnectionSnapshot(
       record,
       mappedRecord,
       material?.externalAccountId ?? null,
       material?.tokenBundle ?? null,
-      sourcesByConnectionId.get(record.id)?.map(toHostedRuntimeConnectionSourceSnapshot) ?? [],
+      visibleSources.map(toHostedRuntimeConnectionSourceSnapshot),
       {
         forceReauthorizationRequired:
           providerApplicationRuntime.blockedConnectionIds.has(record.id),
@@ -284,8 +306,8 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     generatedAt: new Date().toISOString(),
     nextCursor: hasNextPage
       ? {
-          createdAt: records.at(-1)!.createdAt.toISOString(),
-          id: records.at(-1)!.id,
+          createdAt: pageRecords.at(-1)!.createdAt.toISOString(),
+          id: pageRecords.at(-1)!.id,
         }
       : null,
     ...(Object.keys(providerApplicationRuntime.providerConfigs).length > 0
@@ -1430,10 +1452,16 @@ function isHostedRuntimeHistoricalResetStateInconsistent(input: {
     HostedDeviceConnectionSource | HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate
   >();
   for (const source of input.currentSources) {
-    sourcesByProvider.set(source.sourceProviderSlug.trim().toLowerCase(), source);
+    sourcesByProvider.set(
+      canonicalizeJunctionProviderSlug(source.sourceProviderSlug) ?? source.sourceProviderSlug,
+      source,
+    );
   }
   for (const source of input.sourceUpdates) {
-    sourcesByProvider.set(source.sourceProviderSlug.trim().toLowerCase(), source);
+    sourcesByProvider.set(
+      canonicalizeJunctionProviderSlug(source.sourceProviderSlug) ?? source.sourceProviderSlug,
+      source,
+    );
   }
 
   const historicalStatus = readJunctionHistoricalBackfillProgress(
@@ -1576,23 +1604,32 @@ function normalizeHostedRuntimeSourceUpdateForProvider(input: {
     };
   }
 
-  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.connectionId,
-    sourceProviderSlug: input.update.sourceProviderSlug,
-  });
+  const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(
+    input.update.sourceProviderSlug,
+  );
+  const canonicalSourceInstanceKey = canonicalSourceProviderSlug
+    ? buildJunctionProviderSourceInstanceKey({
+        connectionId: input.connectionId,
+        sourceProviderSlug: canonicalSourceProviderSlug,
+      })
+    : null;
 
-  if (!canonicalSourceInstanceKey || canonicalSourceInstanceKey === input.update.sourceInstanceKey) {
+  if (!canonicalSourceInstanceKey || !canonicalSourceProviderSlug) {
     return {
       sourceInstanceKeyCanonicalized: false,
       update: input.update,
     };
   }
 
+  const identityCanonicalized = canonicalSourceInstanceKey !== input.update.sourceInstanceKey
+    || canonicalSourceProviderSlug !== input.update.sourceProviderSlug;
+
   return {
-    sourceInstanceKeyCanonicalized: true,
+    sourceInstanceKeyCanonicalized: identityCanonicalized,
     update: {
       ...input.update,
       sourceInstanceKey: canonicalSourceInstanceKey,
+      sourceProviderSlug: canonicalSourceProviderSlug,
     },
   };
 }

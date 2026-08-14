@@ -678,6 +678,7 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
     historicalWindowStart: "2026-05-12T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
     sourceProviderSlug: "omron",
     windowStart: "2026-05-12T00:00:00.000Z",
     windowEnd: BACKFILL_WINDOW_END,
@@ -1377,7 +1378,7 @@ test("a stale job leaves newer extended-history coverage untouched without egres
   assert.equal(requests.length, 0);
 });
 
-test("schedule-time history binds source lifecycle epochs without binding sibling or source-first-seen work", () => {
+test("history roots bind source lifecycle epochs without binding sibling work", () => {
   const provider = createProvider({
     additionalProviders: [{
       resourceAvailability: { blood_pressure: true, caffeine: true },
@@ -1418,7 +1419,7 @@ test("schedule-time history binds source lifecycle epochs without binding siblin
     offered
       .filter((job) => job.payload?.resource === "blood_pressure")
       .map((job) => [job.payload?.sourceProviderSlug, job.payload?.sourceLifecycleEpoch]),
-    [["omron", undefined], ["withings", undefined]],
+    [["omron", 3], ["withings", 7]],
   );
   const caffeineJob = requireValue(
     offered.find((job) => job.payload?.resource === "caffeine"),
@@ -1558,28 +1559,83 @@ test("schedule-time extended history admits one account root and rotates determi
   assert.deepEqual([...reducedSeen].sort(), ["caffeine:omron", "water:omron"]);
 });
 
+test.each([
+  ["disconnected", "disconnected", null],
+  ["error", "error", null],
+  ["unavailable", "unavailable", null],
+  ["disconnect fence", "connected", DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE],
+] as const)("same-epoch alias state applies fail-closed %s precedence", (
+  _label,
+  status,
+  lastErrorCode,
+) => {
+  const availability = { blood_pressure: true, caffeine: true };
+  const provider = createProvider({
+    providerState: { resourceAvailability: {}, status: "connected" },
+    requests: [],
+    timeseriesResources: ["blood_pressure", "caffeine"],
+  });
+  const canonical = createSourceSummary(
+    "apple_health_kit",
+    "2026-01-01T00:00:00.000Z",
+    "connected",
+    availability,
+    2,
+  );
+  const alias = {
+    ...createSourceSummary(
+      "apple_health",
+      "2026-01-01T00:00:00.000Z",
+      status,
+      availability,
+      2,
+    ),
+    lastErrorCode,
+  };
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+
+  for (const sources of [[canonical, alias], [alias, canonical]]) {
+    assert.equal(
+      createScheduledJobs(createStoredAccount({ sources }), NOW, {
+        findActiveDedupeKeys: () => {
+          throw new Error("A conflicted semantic source must not query active job identity.");
+        },
+      }).jobs.some((job) => job.kind === "resource"),
+      false,
+    );
+  }
+});
+
 test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", () => {
   const resources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
-  const availability = Object.fromEntries(resources.map((resource) => [resource, true]));
+  const availability = Object.fromEntries(
+    ["blood_pressure", ...resources].map((resource) => [resource, true]),
+  );
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     includeNote: true,
     providerState: { resourceAvailability: availability, status: "connected" },
     requests,
-    timeseriesResources: resources,
+    timeseriesResources: ["blood_pressure", ...resources],
   });
   const createScheduledJobs = requireValue(
     requireValue(provider.jobExecutor).createScheduledJobs,
   );
-  const sources = JUNCTION_CONNECT_SOURCE_TARGETS.map((target, index) =>
-    createSourceSummary(
-      target.providerSlug,
-      new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1_000).toISOString(),
-      "connected",
-      availability,
-      index % 2 === 0 ? 1 : 2,
-    )
-  );
+  const sources = [
+    ...JUNCTION_CONNECT_SOURCE_TARGETS.map((target, index) =>
+      createSourceSummary(
+        target.providerSlug,
+        new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1_000).toISOString(),
+        "connected",
+        availability,
+        target.providerSlug === "apple_health_kit" ? 2 : index % 2 === 0 ? 1 : 2,
+      )
+    ),
+    createSourceSummary("apple_health", "2025-12-30T00:00:00.000Z", "connected", availability, 1),
+    createSourceSummary("apple_healthkit", "2025-12-31T00:00:00.000Z", "connected", availability, 1),
+  ];
   const account = createStoredAccount({ sources });
   const slotStart = Date.parse(NOW);
   const seenCoordinates = new Set<string>();
@@ -1594,11 +1650,16 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
   };
 
   for (let slot = 0; slot < 33 * 12; slot += 1) {
-    const roots = createScheduledJobs(
+    const resourceJobs = createScheduledJobs(
       account,
       new Date(slotStart).toISOString(),
       context,
     ).jobs.filter((job) => job.kind === "resource" && job.payload?.historicalBackfill === true);
+    const bloodPressureRoots = resourceJobs.filter(
+      (job) => job.payload?.resource === "blood_pressure",
+    );
+    const roots = resourceJobs.filter((job) => job.payload?.resource !== "blood_pressure");
+    assert.equal(bloodPressureRoots.length, 33);
     assert.equal(roots.length, 1);
     const root = requireValue(roots[0]);
     seenCoordinates.add(`${root.payload?.sourceProviderSlug}:${root.payload?.resource}`);
@@ -1606,7 +1667,11 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
   }
 
   assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
+  assert.equal(sources.length, 35);
   assert.equal(seenCoordinates.size, 33 * 12);
+  assert.equal([...seenCoordinates].some((coordinate) =>
+    coordinate.startsWith("apple_health:") || coordinate.startsWith("apple_healthkit:")
+  ), false);
   assert.equal(membershipQueries, 33 * 12);
   assert.deepEqual(
     createScheduledJobs(
@@ -1632,8 +1697,17 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
       NOW,
       { findActiveDedupeKeys: () => new Set() },
     ).jobs
-      .some((job) => job.kind === "resource"),
+      .some((job) => job.kind === "resource" && job.payload?.resource !== "blood_pressure"),
     false,
+  );
+  assert.equal(
+    createScheduledJobs(
+      createStoredAccount({ metadata: coveredMetadata, sources }),
+      NOW,
+      { findActiveDedupeKeys: () => new Set() },
+    ).jobs.filter((job) => job.kind === "resource" && job.payload?.resource === "blood_pressure")
+      .length,
+    33,
   );
   assert.equal(requests.length, 0);
 });
@@ -1713,6 +1787,156 @@ test.each([
   assert.equal(providerListRequests.count, expectedProviderListRequests);
   assert.equal(requests.length, expectedTimeseriesRequests);
   assert.equal(importCalls, expectedImportCalls);
+});
+
+test("an alias-bound old source epoch fences against the canonical lifecycle before provider access", async () => {
+  const providerListRequests = { count: 0 };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { caffeine: true },
+      slug: "apple_health",
+    }],
+    historicalPullState: {
+      providerSlug: "apple_health",
+      resource: "caffeine",
+      status: "success",
+    },
+    providerListRequests,
+    providerState: { resourceAvailability: {}, status: "connected" },
+    requests,
+    timeseriesResources: ["caffeine"],
+  });
+  const epochOneAlias = createSourceSummary(
+    "apple_health",
+    "2026-01-01T00:00:00.000Z",
+    "connected",
+    { caffeine: true },
+    1,
+  );
+  const epochTwoCanonical = createSourceSummary(
+    "apple_health_kit",
+    "2026-01-01T00:00:00.000Z",
+    "connected",
+    { caffeine: true },
+    2,
+  );
+  const scheduled = findResourceJob(
+    requireValue(requireValue(provider.jobExecutor).createScheduledJobs)(
+      createStoredAccount({ sources: [epochOneAlias] }),
+      NOW,
+    ).jobs,
+    "caffeine",
+  );
+  const oldAliasJob = toJobRecord({
+    ...scheduled,
+    payload: {
+      ...scheduled.payload,
+      sourceProviderSlug: "apple_health",
+    },
+  }, 259);
+
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ sources: [epochTwoCanonical] }),
+      connectionSourceAdmissionMode: "listed_only",
+      listConnectionSources: async () => [epochTwoCanonical],
+    }),
+    oldAliasJob,
+  );
+
+  assert.deepEqual(result, {});
+  assert.equal(providerListRequests.count, 0);
+  assert.equal(requests.length, 0);
+});
+
+test("an alias-bound old blood-pressure epoch fences before provider access while the canonical epoch remains eligible", async () => {
+  const providerListRequests = { count: 0 };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { blood_pressure: true },
+      slug: "apple_health",
+    }],
+    bloodPressureGroups: {
+      apple_health: [{
+        id: "bp-apple-current-lifecycle",
+        timestamp: "2025-12-02T08:30:00.000Z",
+        systolic: 121,
+        diastolic: 79,
+      }],
+    },
+    historicalPullState: {
+      providerSlug: "apple_health",
+      resource: "blood_pressure",
+      status: "success",
+    },
+    providerListRequests,
+    providerState: { resourceAvailability: {}, status: "connected" },
+    requests,
+    timeseriesResources: ["blood_pressure"],
+  });
+  const epochOneAlias = createSourceSummary(
+    "apple_health",
+    "2026-01-01T00:00:00.000Z",
+    "connected",
+    { blood_pressure: true },
+    1,
+  );
+  const epochTwoCanonical = createSourceSummary(
+    "apple_health_kit",
+    "2026-01-01T00:00:00.000Z",
+    "connected",
+    { blood_pressure: true },
+    2,
+  );
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const epochOneJob = findBloodPressureJob(
+    createScheduledJobs(createStoredAccount({ sources: [epochOneAlias] }), NOW).jobs,
+  );
+  const epochTwoJob = findBloodPressureJob(
+    createScheduledJobs(createStoredAccount({ sources: [epochTwoCanonical] }), NOW).jobs,
+  );
+  assert.equal(epochOneJob.payload?.sourceLifecycleEpoch, 1);
+  assert.equal(epochTwoJob.payload?.sourceLifecycleEpoch, 2);
+  assert.notEqual(epochOneJob.dedupeKey, epochTwoJob.dedupeKey);
+
+  const oldAliasResult = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ sources: [epochTwoCanonical] }),
+      connectionSourceAdmissionMode: "listed_only",
+      listConnectionSources: async () => [epochTwoCanonical],
+    }),
+    toJobRecord({
+      ...epochOneJob,
+      payload: {
+        ...epochOneJob.payload,
+        sourceProviderSlug: "apple_health",
+      },
+    }, 260),
+  );
+
+  assert.deepEqual(oldAliasResult, {});
+  assert.equal(providerListRequests.count, 0);
+  assert.equal(requests.length, 0);
+
+  const currentResult = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ sources: [epochTwoCanonical] }),
+      connectionSourceAdmissionMode: "listed_only",
+      listConnectionSources: async () => [epochTwoCanonical],
+    }),
+    toJobRecord(epochTwoJob, 261),
+  );
+
+  assert.equal(providerListRequests.count > 0, true);
+  assert.equal(requests.some((request) => request.resource === "blood_pressure"), true);
+  const followUp = findBloodPressureJob(currentResult.scheduledJobs ?? []);
+  assert.equal(followUp.payload?.sourceProviderSlug, "apple_health_kit");
+  assert.equal(followUp.payload?.sourceLifecycleEpoch, 2);
+  assert.equal(followUp.dedupeKey, epochTwoJob.dedupeKey);
 });
 
 test("maximum source projection uses one shared snapshot while retaining exact-source fences", async () => {
@@ -2183,6 +2407,7 @@ test("sparse history completion resolves supported source aliases", async () => 
   ] as const;
 
   for (const testCase of cases) {
+    const providerListRequests = { count: 0 };
     const requests: TimeseriesRequest[] = [];
     const provider = createProvider({
       additionalProviders: [{
@@ -2197,6 +2422,7 @@ test("sparse history completion resolves supported source aliases", async () => 
         resourceAvailability: { activity: true },
         status: "connected",
       },
+      providerListRequests,
       requests,
       summaryBackfillDays: 2,
       timeseriesRecords: {
@@ -2219,9 +2445,11 @@ test("sparse history completion resolves supported source aliases", async () => 
       { caffeine: true },
     )];
     const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+    const scheduledJob = findResourceJob(scheduled.jobs, "caffeine");
+    assert.equal(scheduledJob.payload?.sourceProviderSlug, "apple_health_kit");
     const completed = await executeImmediateResourceContinuations({
       context: createJobContext(),
-      job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+      job: toJobRecord(scheduledJob, 1),
       provider,
       resource: "caffeine",
     });
@@ -2241,6 +2469,11 @@ test("sparse history completion resolves supported source aliases", async () => 
     assert.equal(
       requests.length,
       testCase.expectedTimeseriesRequests,
+      testCase.label,
+    );
+    assert.equal(
+      providerListRequests.count,
+      testCase.label === "success" ? 2 : 1,
       testCase.label,
     );
   }
@@ -2734,6 +2967,7 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
     historicalWindowStart: "2026-02-18T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
     sourceProviderSlug: "omron",
     windowEnd: "2026-03-20T00:00:00.000Z",
     windowStart: "2026-02-18T00:00:00.000Z",
@@ -3371,7 +3605,7 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
           ? {
               listConnectionSources: async () => {
                 sourceStateReads += 1;
-                if (sourceStateReads <= 2) {
+                if (sourceStateReads <= 3) {
                   return [];
                 }
                 throw failure;
@@ -3453,7 +3687,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       createJobContext({
         listConnectionSources: async () => {
           sourceStateReads += 1;
-          if (sourceStateReads <= 2) {
+          if (sourceStateReads <= 3) {
             return [];
           }
           throw failure;
@@ -3467,7 +3701,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       && error.retryable === true,
   );
 
-  assert.equal(sourceStateReads, 3);
+  assert.equal(sourceStateReads, 4);
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
     1,
@@ -4578,7 +4812,7 @@ test("a source absent from listed-only authority cannot trigger pressure egress"
     toJobRecord(bloodPressure, 81),
   );
 
-  assert.equal(providerListRequests.count, 1);
+  assert.equal(providerListRequests.count, 0);
   assert.equal(projectedSources.length, 0);
   assert.equal(requests.length, 0);
   assert.equal(result.scheduledJobs, undefined);

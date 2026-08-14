@@ -6,11 +6,13 @@ import { test } from "vitest";
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
+import { buildJunctionProviderSourceInstanceKey } from "../src/connect-config.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "../src/junction-historical-backfill-progress.ts";
+import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "../src/store/jobs.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { makeTempDirectory } from "./helpers.ts";
@@ -60,6 +62,55 @@ function downgradeDeviceSyncStoreToV7(databasePath: string): void {
     pragma user_version = 7;
   `);
   database.close();
+}
+
+function insertConnectionSourceRowForTesting(
+  store: SqliteDeviceSyncStore,
+  input: {
+    connectionId: string;
+    displayName?: string | null;
+    firstSeenAt: string;
+    id: string;
+    lastDataAt?: string | null;
+    lastErrorCode?: string | null;
+    lastErrorMessage?: string | null;
+    lastSeenAt: string;
+    lifecycleEpoch: number;
+    resourceAvailabilitySummary?: Record<string, string | number | boolean | null>;
+    sourceInstanceKey: string;
+    sourceProviderSlug: string;
+    status: "connected" | "unavailable" | "error" | "disconnected";
+  },
+): void {
+  const database = openSqliteRuntimeDatabase(store.databasePath);
+  try {
+    database.prepare(`
+      insert into device_connection_source (
+        id, connection_id, source_instance_key, source_provider_slug,
+        display_name, status, resource_availability_summary_json,
+        last_error_code, last_error_message, lifecycle_epoch,
+        first_seen_at, last_seen_at, last_data_at, created_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.connectionId,
+      input.sourceInstanceKey,
+      input.sourceProviderSlug,
+      input.displayName ?? null,
+      input.status,
+      JSON.stringify(input.resourceAvailabilitySummary ?? {}),
+      input.lastErrorCode ?? null,
+      input.lastErrorMessage ?? null,
+      input.lifecycleEpoch,
+      input.firstSeenAt,
+      input.lastSeenAt,
+      input.lastDataAt ?? null,
+      input.firstSeenAt,
+      input.lastSeenAt,
+    );
+  } finally {
+    database.close();
+  }
 }
 
 function requireStoredOAuthCredential(
@@ -452,6 +503,328 @@ test("device sync store commits source admission with initial jobs atomically", 
       store.claimDueJob("worker-a", "2026-07-28T10:04:00.000Z", 60_000)?.id,
       committed[0]?.id,
     );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store canonicalizes legacy Junction aliases and reconnects one merged lifecycle", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-junction-canonical-source");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-canonical-source-account",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-07-28T09:00:00.000Z",
+    });
+    const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    });
+    assert.ok(canonicalSourceInstanceKey);
+
+    const sibling = store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "legacy-garmin-key",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      firstSeenAt: "2026-07-28T09:00:00.000Z",
+      lastSeenAt: "2026-07-28T09:30:00.000Z",
+      resourceAvailabilitySummary: { activity: true },
+    });
+    insertConnectionSourceRowForTesting(store, {
+      connectionId: account.id,
+      firstSeenAt: "2026-07-27T08:00:00.000Z",
+      id: "dcs_legacy_apple_health",
+      lastSeenAt: "2026-07-28T10:00:00.000Z",
+      lifecycleEpoch: 2,
+      resourceAvailabilitySummary: { activity: true },
+      sourceInstanceKey: "legacy-apple-health-key",
+      sourceProviderSlug: "apple_health",
+      status: "connected",
+    });
+    const legacyAuthority = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.equal(legacyAuthority?.id, "dcs_legacy_apple_health");
+    assert.equal(legacyAuthority?.sourceInstanceKey, canonicalSourceInstanceKey);
+    assert.equal(legacyAuthority?.sourceProviderSlug, "apple_health_kit");
+    assert.equal(legacyAuthority?.lifecycleEpoch, 2);
+    assert.equal(
+      store.markConnectionSourceDataReceived({
+        connectionId: account.id,
+        now: "2026-07-28T10:00:30.000Z",
+        sourceProviderSlug: "apple_healthkit",
+      }),
+      1,
+    );
+    assert.equal(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health",
+    })[0]?.lastDataAt, "2026-07-28T10:00:30.000Z");
+    const aliasOnly = store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "ignored-alias-key",
+      sourceProviderSlug: "apple_healthkit",
+      status: "connected",
+      lastSeenAt: "2026-07-28T10:01:00.000Z",
+    });
+    assert.equal(aliasOnly.id, "dcs_legacy_apple_health");
+    assert.equal(aliasOnly.sourceInstanceKey, canonicalSourceInstanceKey);
+    assert.equal(aliasOnly.sourceProviderSlug, "apple_health_kit");
+    assert.equal(aliasOnly.lifecycleEpoch, 2);
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      firstSeenAt: "2026-07-27T08:00:00.000Z",
+      lastDataAt: "2026-07-28T09:30:00.000Z",
+      lastSeenAt: "2026-07-28T10:02:00.000Z",
+      lifecycleEpoch: 3,
+      resourceAvailabilitySummary: { activity: true },
+      sourceInstanceKey: canonicalSourceInstanceKey,
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    });
+    insertConnectionSourceRowForTesting(store, {
+      connectionId: account.id,
+      firstSeenAt: "2026-07-26T08:00:00.000Z",
+      id: "dcs_lower_epoch_apple_health",
+      lastDataAt: "2026-07-28T09:45:00.000Z",
+      lastSeenAt: "2026-07-28T10:04:00.000Z",
+      lifecycleEpoch: 2,
+      resourceAvailabilitySummary: { sleep: true },
+      sourceInstanceKey: "lower-epoch-apple-health-key",
+      sourceProviderSlug: "apple_health",
+      status: "error",
+    });
+    insertConnectionSourceRowForTesting(store, {
+      connectionId: account.id,
+      firstSeenAt: "2026-07-28T08:45:00.000Z",
+      id: "dcs_alias_apple_healthkit",
+      lastDataAt: "2026-07-28T09:40:00.000Z",
+      lastSeenAt: "2026-07-28T10:05:00.000Z",
+      lifecycleEpoch: 3,
+      resourceAvailabilitySummary: { workouts: true },
+      sourceInstanceKey: "legacy-apple-healthkit-key",
+      sourceProviderSlug: "apple_healthkit",
+      status: "disconnected",
+    });
+
+    const preCollapseAuthority = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health",
+    })[0];
+    assert.equal(preCollapseAuthority?.status, "disconnected");
+    assert.equal(preCollapseAuthority?.lifecycleEpoch, 3);
+    assert.equal(preCollapseAuthority?.firstSeenAt, "2026-07-26T08:00:00.000Z");
+    assert.equal(preCollapseAuthority?.lastSeenAt, "2026-07-28T10:05:00.000Z");
+    assert.deepEqual(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    }), []);
+    assert.equal(
+      store.markConnectionSourceDataReceived({
+        connectionId: account.id,
+        now: "2026-07-28T10:05:30.000Z",
+        sourceProviderSlug: "apple_health",
+      }),
+      3,
+    );
+    const authorityAfterArrival = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.equal(authorityAfterArrival?.lastDataAt, "2026-07-28T10:05:30.000Z");
+    assert.equal(authorityAfterArrival?.updatedAt, "2026-07-28T10:05:30.000Z");
+
+    const collapsed = store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "ignored-alias-write-key",
+      sourceProviderSlug: "apple_health",
+      status: "connected",
+      lastSeenAt: "2026-07-28T10:06:00.000Z",
+    }, { preserveDisconnected: true });
+
+    assert.equal(collapsed.id, "dcs_legacy_apple_health");
+    assert.equal(collapsed.sourceInstanceKey, canonicalSourceInstanceKey);
+    assert.equal(collapsed.sourceProviderSlug, "apple_health_kit");
+    assert.equal(collapsed.lifecycleEpoch, 3);
+    assert.equal(collapsed.status, "disconnected");
+    assert.equal(collapsed.firstSeenAt, "2026-07-26T08:00:00.000Z");
+    assert.equal(collapsed.lastSeenAt, "2026-07-28T10:05:00.000Z");
+    assert.equal(collapsed.lastDataAt, "2026-07-28T10:05:30.000Z");
+    assert.equal(collapsed.updatedAt, "2026-07-28T10:05:30.000Z");
+    assert.deepEqual(collapsed.resourceAvailabilitySummary, {
+      activity: true,
+      workouts: true,
+      sleep: true,
+    });
+    assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 2);
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "second-ignored-alias-key",
+      sourceProviderSlug: "apple_health",
+      status: "disconnected",
+      firstSeenAt: collapsed.firstSeenAt,
+      lastSeenAt: "2026-07-28T10:06:00.000Z",
+    });
+    const revisionBeforeCallbacks = store.getAccountById(account.id)?.localConnectionRevision;
+    const stale = store.commitConnectionEstablished({
+      accountId: account.id,
+      expectedSourceLastSeenAt: "2026-07-28T10:05:00.000Z",
+      provider: "junction",
+      source: {
+        connectionId: account.id,
+        sourceInstanceKey: "stale-alias-callback-key",
+        sourceProviderSlug: "apple_healthkit",
+        status: "connected",
+        firstSeenAt: collapsed.firstSeenAt,
+        lastSeenAt: "2026-07-28T10:07:00.000Z",
+      },
+      jobs: [{
+        availableAt: "2026-07-28T10:07:00.000Z",
+        kind: "reconcile",
+        payload: {},
+      }],
+    });
+    assert.equal(stale, null);
+    const afterStale = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.equal(afterStale?.lastSeenAt, "2026-07-28T10:06:00.000Z");
+    assert.equal(afterStale?.lifecycleEpoch, 3);
+    assert.equal(store.getAccountById(account.id)?.localConnectionRevision, revisionBeforeCallbacks);
+    assert.equal(store.listPendingJobsForAccount(account.id, 20).length, 0);
+
+    const committed = store.commitConnectionEstablished({
+      accountId: account.id,
+      expectedSourceLastSeenAt: "2026-07-28T10:06:00.000Z",
+      provider: "junction",
+      source: {
+        connectionId: account.id,
+        sourceInstanceKey: "current-alias-callback-key",
+        sourceProviderSlug: "apple_health",
+        status: "connected",
+        firstSeenAt: collapsed.firstSeenAt,
+        lastSeenAt: "2026-07-28T10:08:00.000Z",
+      },
+      jobs: [{
+        availableAt: "2026-07-28T10:08:00.000Z",
+        kind: "reconcile",
+        payload: {},
+      }],
+    });
+    assert.equal(committed?.length, 1);
+    const reconnected = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.equal(reconnected?.status, "connected");
+    assert.equal(reconnected?.lifecycleEpoch, 4);
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      (revisionBeforeCallbacks ?? 0) + 1,
+    );
+    assert.deepEqual(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    })[0], sibling);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store preserves current Junction disconnect fences independent of alias row order", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-junction-source-fence");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    for (const order of ["canonical-first", "alias-first"] as const) {
+      const account = store.upsertAccount({
+        provider: "junction",
+        externalAccountId: `junction-source-fence-${order}`,
+        displayName: "Junction",
+        scopes: [],
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        connectedAt: "2026-07-29T09:00:00.000Z",
+      });
+      const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: account.id,
+        sourceProviderSlug: "apple_health_kit",
+      });
+      assert.ok(canonicalSourceInstanceKey);
+      const canonical = {
+        connectionId: account.id,
+        firstSeenAt: "2026-07-29T09:00:00.000Z",
+        id: `dcs_${order}_canonical`,
+        lastSeenAt: "2026-07-29T10:01:00.000Z",
+        lifecycleEpoch: 4,
+        sourceInstanceKey: canonicalSourceInstanceKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected" as const,
+      };
+      const fencedAlias = {
+        connectionId: account.id,
+        firstSeenAt: "2026-07-29T09:00:00.000Z",
+        id: `dcs_${order}_alias`,
+        lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+        lastErrorMessage: "Reconnect required.",
+        lastSeenAt: "2026-07-29T10:00:00.000Z",
+        lifecycleEpoch: 4,
+        sourceInstanceKey: `legacy-${order}-alias`,
+        sourceProviderSlug: "apple_health",
+        status: "connected" as const,
+      };
+
+      for (const row of order === "canonical-first"
+        ? [canonical, fencedAlias]
+        : [fencedAlias, canonical]) {
+        insertConnectionSourceRowForTesting(store, row);
+      }
+
+      const projected = store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "apple_healthkit",
+      })[0];
+      assert.equal(projected?.status, "connected");
+      assert.equal(projected?.lastErrorCode, DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE);
+      assert.equal(projected?.lastErrorMessage, "Reconnect required.");
+
+      const collapsed = store.upsertConnectionSource({
+        connectionId: account.id,
+        lastSeenAt: "2026-07-29T10:02:00.000Z",
+        sourceInstanceKey: "ignored-provider-key",
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }, { preserveDisconnected: true });
+      assert.equal(collapsed.lastErrorCode, DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE);
+      assert.equal(collapsed.lastErrorMessage, "Reconnect required.");
+      assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 1);
+    }
   } finally {
     store.close();
     await rm(tempDir, {
@@ -3577,26 +3950,35 @@ test("device sync store consolidates a pre-v8 terminal identity fork", async () 
     payload: {},
     provider: "junction",
   });
-  legacyStore.upsertConnectionSource({
+  insertConnectionSourceRowForTesting(legacyStore, {
     connectionId: original.id,
     displayName: "Original Garmin",
+    firstSeenAt: "2026-07-13T01:01:00.000Z",
+    id: "dcs_original_garmin",
     lastSeenAt: "2026-07-13T01:01:00.000Z",
+    lifecycleEpoch: 1,
     sourceInstanceKey: "src_original_garmin",
     sourceProviderSlug: "garmin",
     status: "connected",
   });
-  legacyStore.upsertConnectionSource({
+  insertConnectionSourceRowForTesting(legacyStore, {
     connectionId: original.id,
     displayName: "Original WHOOP",
+    firstSeenAt: "2026-07-13T01:01:00.000Z",
+    id: "dcs_original_whoop",
     lastSeenAt: "2026-07-13T01:01:00.000Z",
+    lifecycleEpoch: 1,
     sourceInstanceKey: "src_shared_whoop",
     sourceProviderSlug: "whoop",
     status: "connected",
   });
-  legacyStore.upsertConnectionSource({
+  insertConnectionSourceRowForTesting(legacyStore, {
     connectionId: fork.id,
     displayName: "Canonical WHOOP",
+    firstSeenAt: "2026-07-13T01:01:30.000Z",
+    id: "dcs_canonical_whoop",
     lastSeenAt: "2026-07-13T01:01:30.000Z",
+    lifecycleEpoch: 1,
     sourceInstanceKey: "src_shared_whoop",
     sourceProviderSlug: "whoop",
     status: "disconnected",

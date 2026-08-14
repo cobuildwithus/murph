@@ -1,6 +1,6 @@
 import {
   buildJunctionProviderSourceInstanceKey,
-  normalizeJunctionProviderSlug,
+  canonicalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -99,7 +99,7 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw deviceSyncError({
       code: "CONNECTION_SOURCE_INVALID",
@@ -321,7 +321,7 @@ export async function captureHostedDeviceSyncConnectionSourceReconnect(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<HostedDeviceSyncConnectionSourceReconnectProof> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw connectionSourceNotFoundError();
   }
@@ -359,7 +359,7 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
   userId: string;
 }): Promise<void> {
   const { connection: expectedConnection, source: expectedSource } = input.proof;
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.proof.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.proof.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw connectionSourceNotFoundError();
   }
@@ -440,7 +440,7 @@ export async function reconcileHostedDeviceSyncConnectionSourceRegistration(inpu
   sourceProviderSlug: string;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<"admitted" | "not_ready" | "removed"> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   const userId = await input.store.getConnectionOwnerId(input.account.id);
   if (!sourceProviderSlug || !userId) {
     return "not_ready";
@@ -568,7 +568,7 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<StartConnectionSourceLifecycleProof> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw sourceStartCleanupUnavailableError();
   }
@@ -779,7 +779,7 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
   sourceProviderSlug: string;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<void> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   const userId = await input.store.getConnectionOwnerId(input.account.id);
   if (!sourceProviderSlug || !userId) {
     return;
@@ -1667,7 +1667,7 @@ function resolveHostedJunctionLinkedSource(input: {
     return null;
   }
 
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     return null;
   }
@@ -1729,7 +1729,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
-    dataSourceProviderSlug: normalizeJunctionProviderSlug(
+    dataSourceProviderSlug: canonicalizeJunctionProviderSlug(
       input.webhook.dataSourceProviderSlug,
     ),
     expectedConnectedAt: input.account.connectedAt,
@@ -1866,7 +1866,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
           });
         }
 
-        const sourceProviderSlug = normalizeJunctionProviderSlug(
+        const sourceProviderSlug = canonicalizeJunctionProviderSlug(
           input.resource.resource === COMPANION_HRV_RMSSD_RESOURCE
             ? JUNCTION_COMPANION_HRV_SOURCE_PROVIDER
             : input.resource.sourceProviderSlug,
@@ -2308,7 +2308,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           httpStatus: 503,
         });
       }
-      const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+      const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
       if (sourceProviderSlug) {
         const matchingSources = await input.store.listConnectionSources({
           connectionId: input.connectionId,

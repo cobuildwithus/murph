@@ -66,8 +66,9 @@ import {
 import {
   listConnectionSources as listStoredConnectionSources,
   markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
+  prepareConnectionSourceWriteInTransaction,
   upsertConnectionSource as upsertStoredConnectionSource,
-  upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
+  upsertPreparedConnectionSourceInTransaction as upsertPreparedStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
 import {
   markSyncFailed as markStoredSyncFailed,
@@ -105,6 +106,13 @@ class DeviceSyncSuccessFenceRejectedError extends Error {
   constructor() {
     super("Device sync success fence rejected.");
     this.name = "DeviceSyncSuccessFenceRejectedError";
+  }
+}
+
+class DeviceConnectionSourceAdmissionRejectedError extends Error {
+  constructor() {
+    super("Device connection source admission was rejected.");
+    this.name = "DeviceConnectionSourceAdmissionRejectedError";
   }
 }
 
@@ -428,73 +436,88 @@ export class SqliteDeviceSyncStore {
     provider: string;
     source?: UpsertDeviceConnectionSourceInput | null;
   }): DeviceSyncJobRecord[] | null {
-    return withImmediateTransaction(this.database, () => {
-      if (input.source) {
-        const existingSource = input.provider === "junction" && input.source.status === "connected"
-          ? listStoredConnectionSources(this.database, {
-              connectionId: input.source.connectionId,
-              sourceProviderSlug: input.source.sourceProviderSlug,
-            }).find((source) => source.sourceInstanceKey === input.source?.sourceInstanceKey)
-          : null;
-        if (
-          input.provider === "junction"
-          && input.source.status === "connected"
-          && (
-            existingSource?.status !== "disconnected"
-            || existingSource.lastSeenAt !== input.expectedSourceLastSeenAt
-          )
-        ) {
-          return null;
-        }
-        const reconnectsJunctionSource = existingSource?.status === "disconnected";
-
-        if (reconnectsJunctionSource) {
-          const account = getStoredAccountById(this.database, input.accountId);
-          if (!account) {
-            throw new TypeError(`Unknown account ${input.accountId}`);
-          }
-          const metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
-            metadata: account.metadata,
-            providerSlug: input.source.sourceProviderSlug,
-          });
-          this.database.prepare(`
-            update device_connection
-            set metadata_json = ?, updated_at = ?
-            where id = ?
-          `).run(
-            stringifyJson(metadata),
-            input.source.lastSeenAt,
-            input.accountId,
+    try {
+      return withImmediateTransaction(this.database, () => {
+        if (input.source) {
+          const preparedSource = prepareConnectionSourceWriteInTransaction(
+            this.database,
+            input.source,
           );
-          this.database.prepare(`
-            update device_observation_state
-            set local_connection_revision = local_connection_revision + 1,
-                updated_at = ?
-            where account_id = ?
-          `).run(input.source.lastSeenAt, input.accountId);
+          const source = preparedSource.input;
+          const existingSource = input.provider === "junction" && source.status === "connected"
+            ? preparedSource.existing
+            : null;
+          if (
+            input.provider === "junction"
+            && source.status === "connected"
+            && (
+              existingSource?.status !== "disconnected"
+              || existingSource.lastSeenAt !== input.expectedSourceLastSeenAt
+            )
+          ) {
+            // Rolling the immediate transaction back also rolls back any
+            // legacy alias collapse performed while resolving this source.
+            throw new DeviceConnectionSourceAdmissionRejectedError();
+          }
+          const reconnectsJunctionSource = existingSource?.status === "disconnected";
+
+          if (reconnectsJunctionSource) {
+            const account = getStoredAccountById(this.database, input.accountId);
+            if (!account) {
+              throw new TypeError(`Unknown account ${input.accountId}`);
+            }
+            const metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+              metadata: account.metadata,
+              providerSlug: source.sourceProviderSlug,
+            });
+            this.database.prepare(`
+              update device_connection
+              set metadata_json = ?, updated_at = ?
+              where id = ?
+            `).run(
+              stringifyJson(metadata),
+              source.lastSeenAt,
+              input.accountId,
+            );
+            this.database.prepare(`
+              update device_observation_state
+              set local_connection_revision = local_connection_revision + 1,
+                  updated_at = ?
+              where account_id = ?
+            `).run(source.lastSeenAt, input.accountId);
+          }
+
+          upsertPreparedStoredConnectionSourceInTransaction(
+            this.database,
+            preparedSource,
+            {
+              ...source,
+              ...(reconnectsJunctionSource
+                ? { lifecycleEpoch: existingSource.lifecycleEpoch + 1 }
+                : {}),
+            },
+          );
         }
 
-        upsertStoredConnectionSourceInTransaction(this.database, {
-          ...input.source,
-          ...(reconnectsJunctionSource
-            ? { lifecycleEpoch: existingSource.lifecycleEpoch + 1 }
-            : {}),
-        });
+        return input.jobs.map((job) =>
+          enqueueDeviceSyncJobInTransaction(this.database, {
+            provider: input.provider,
+            accountId: input.accountId,
+            kind: job.kind,
+            payload: job.payload ?? {},
+            priority: job.priority ?? 0,
+            availableAt: job.availableAt,
+            maxAttempts: job.maxAttempts,
+            dedupeKey: job.dedupeKey,
+          })
+        );
+      });
+    } catch (error) {
+      if (error instanceof DeviceConnectionSourceAdmissionRejectedError) {
+        return null;
       }
-
-      return input.jobs.map((job) =>
-        enqueueDeviceSyncJobInTransaction(this.database, {
-          provider: input.provider,
-          accountId: input.accountId,
-          kind: job.kind,
-          payload: job.payload ?? {},
-          priority: job.priority ?? 0,
-          availableAt: job.availableAt,
-          maxAttempts: job.maxAttempts,
-          dedupeKey: job.dedupeKey,
-        })
-      );
-    });
+      throw error;
+    }
   }
 
   enqueueJobsAndCompleteWebhookTrace(input: {

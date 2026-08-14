@@ -71,7 +71,6 @@ import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
-  isDeviceSyncSourceAdmitted,
   isDeviceSyncSourceDisconnectFenced,
   isJunctionHistoricalResetProviderSlug,
   requiresHistoricalResetDeviceSyncSource,
@@ -109,7 +108,10 @@ import {
   type JunctionProviderConnection,
   type JunctionWindowInput,
 } from "./junction-client.ts";
-import { resolveJunctionDeviceConnectRouteByProviderSlug } from "../config/connect-routes.ts";
+import {
+  canonicalizeJunctionProviderSlug,
+  resolveJunctionDeviceConnectRouteByProviderSlug,
+} from "../config/connect-routes.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
@@ -725,7 +727,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug: string,
   ): Promise<void> {
     const userId = normalizeString(account.externalAccountId);
-    const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+    const targetProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
     if (!userId || !targetProviderSlug) {
       throw deviceSyncError({
         code: "JUNCTION_SOURCE_DEREGISTER_INPUT_INVALID",
@@ -739,8 +741,8 @@ export function createJunctionDeviceSyncProvider(
     const targetIsRegistered = providers.some((provider) =>
       mapJunctionSourceStatus(provider.status) !== "disconnected"
       && (
-        normalizeProviderSlug(provider.origin.sourceProviderSlug)
-        ?? normalizeProviderSlug(provider.slug)
+        canonicalizeJunctionProviderSlug(provider.origin.sourceProviderSlug)
+        ?? canonicalizeJunctionProviderSlug(provider.slug)
       ) === targetProviderSlug
     );
     if (!targetIsRegistered) {
@@ -758,7 +760,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug: string,
   ): Promise<boolean> {
     const userId = normalizeString(account.externalAccountId);
-    const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+    const targetProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
     if (!userId || !targetProviderSlug) {
       throw deviceSyncError({
         code: "JUNCTION_SOURCE_STATUS_INPUT_INVALID",
@@ -771,8 +773,8 @@ export function createJunctionDeviceSyncProvider(
     return (await client.listUserProviders(userId)).some((provider) =>
       mapJunctionSourceStatus(provider.status) !== "disconnected"
       && (
-        normalizeProviderSlug(provider.origin.sourceProviderSlug)
-        ?? normalizeProviderSlug(provider.slug)
+        canonicalizeJunctionProviderSlug(provider.origin.sourceProviderSlug)
+        ?? canonicalizeJunctionProviderSlug(provider.slug)
       ) === targetProviderSlug
     );
   }
@@ -812,6 +814,10 @@ export function createJunctionDeviceSyncProvider(
     now: string,
     context?: ProviderScheduleContext,
   ): DeviceSyncJobInput[] {
+    const currentSourcesByProviderSlug = buildJunctionCurrentLifecycleSourceMap(
+      account.sources ?? [],
+    );
+
     const candidates = extendedBackfillTimeseriesResources.flatMap((resource) => {
       const policy = resolveJunctionExtendedTimeseriesBackfillPolicy(resource);
       if (!policy) {
@@ -825,19 +831,21 @@ export function createJunctionDeviceSyncProvider(
         return [];
       }
 
-      const scheduledSources = new Map<string, {
+      const scheduledSources: Array<{
         firstSeenAt: string;
         lifecycleEpoch: number;
-      }>();
-      for (const source of account.sources ?? []) {
-        const sourceProviderSlug = normalizeProviderSlug(source.sourceProviderSlug);
-        if (
-          !sourceProviderSlug
-          || !isDeviceSyncSourceAdmitted(account.sources ?? [], sourceProviderSlug)
-          || !isJunctionResourceAvailableInSummary(
+        sourceProviderSlug: string;
+      }> = [];
+      for (const [sourceProviderSlug, sources] of currentSourcesByProviderSlug) {
+        const availableSources = sources.filter((source) =>
+          isJunctionResourceAvailableInSummary(
             source.resourceAvailabilitySummary,
             resource,
           )
+        );
+        if (
+          !isJunctionLifecycleSourceGroupAdmitted(sources, "connected")
+          || availableSources.length === 0
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
             account.metadata,
             sourceProviderSlug,
@@ -853,19 +861,20 @@ export function createJunctionDeviceSyncProvider(
         ) {
           continue;
         }
-        const existingSource = scheduledSources.get(sourceProviderSlug);
-        if (
-          !existingSource
-          || Date.parse(source.firstSeenAt) < Date.parse(existingSource.firstSeenAt)
-        ) {
-          scheduledSources.set(sourceProviderSlug, {
-            firstSeenAt: source.firstSeenAt,
-            lifecycleEpoch: source.lifecycleEpoch ?? 1,
-          });
-        }
+        const firstSeenAt = availableSources.reduce(
+          (earliest, source) => Date.parse(source.firstSeenAt) < Date.parse(earliest)
+            ? source.firstSeenAt
+            : earliest,
+          availableSources[0]!.firstSeenAt,
+        );
+        scheduledSources.push({
+          firstSeenAt,
+          lifecycleEpoch: readJunctionSourceLifecycleEpoch(sources[0]!),
+          sourceProviderSlug,
+        });
       }
 
-      return [...scheduledSources.entries()].map(([sourceProviderSlug, source]) => {
+      return scheduledSources.map((source) => {
         // Exact blood-pressure history is anchored to source admission. Other
         // sparse resources catch up the current extended-history window once.
         const window = buildExtendedTimeseriesBackfillWindow({
@@ -873,16 +882,15 @@ export function createJunctionDeviceSyncProvider(
           days: extendedTimeseriesBackfillDays,
         });
         return {
+          anchor: policy.anchor,
           availableAt: now,
           ...(resource === "note"
             ? { historicalBackfillVersion: policy.version }
             : {}),
           historicalWindowStart: window.windowStart,
           resource,
-          ...(policy.anchor === "current_day"
-            ? { sourceLifecycleEpoch: source.lifecycleEpoch }
-            : {}),
-          sourceProviderSlug,
+          sourceLifecycleEpoch: source.lifecycleEpoch,
+          sourceProviderSlug: source.sourceProviderSlug,
           windowEnd: window.windowEnd,
           windowStart: window.windowStart,
         };
@@ -897,10 +905,10 @@ export function createJunctionDeviceSyncProvider(
       || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
     );
     const sourceFirstCandidates = candidates.filter(
-      (candidate) => candidate.sourceLifecycleEpoch === undefined,
+      (candidate) => candidate.anchor === "source_first_seen",
     );
     const scheduleTimeCandidates = candidates.filter(
-      (candidate) => candidate.sourceLifecycleEpoch !== undefined,
+      (candidate) => candidate.anchor === "current_day",
     );
     const scheduleSlot = Math.floor(Date.parse(now) / reconcileIntervalMs);
     const scheduleTimeJobs = scheduleTimeCandidates.map(
@@ -913,7 +921,7 @@ export function createJunctionDeviceSyncProvider(
       ([, job]) => !activeDedupeKeys.has(job.dedupeKey!),
     );
     const reopenedInactiveJobs = context
-      ? inactiveJobs.filter(([candidate]) => candidate.sourceLifecycleEpoch! > 1)
+      ? inactiveJobs.filter(([candidate]) => candidate.sourceLifecycleEpoch > 1)
       : [];
     if (reopenedInactiveJobs.length > 0) {
       inactiveJobs = reopenedInactiveJobs;
@@ -1119,7 +1127,7 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
   ): Promise<ProviderJobResult> {
-    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(job.payload.sourceProviderSlug);
     const silentSinceAt = normalizeString(job.payload.silentSinceAt);
 
     if (!sourceProviderSlug || !silentSinceAt) {
@@ -1477,7 +1485,7 @@ export function createJunctionDeviceSyncProvider(
     );
     const recoveryProviderSlugs = new Set(
       pendingProviderSlugs
-        .map(normalizeProviderSlug)
+        .map(canonicalizeJunctionProviderSlug)
         .filter((providerSlug): providerSlug is string => providerSlug !== null),
     );
 
@@ -1496,7 +1504,7 @@ export function createJunctionDeviceSyncProvider(
 
       const existing = existingByInstanceKey.get(projectedSourceInstanceKey) ?? existingSources.find(
         (source) =>
-          normalizeProviderSlug(source.sourceProviderSlug) === providerSlug,
+          canonicalizeJunctionProviderSlug(source.sourceProviderSlug) === providerSlug,
       );
       if (
         existing?.status === "error"
@@ -1976,7 +1984,7 @@ export function createJunctionDeviceSyncProvider(
 
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
-    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(job.payload.sourceProviderSlug);
     if (
       sourceProviderSlug
       && !isJunctionSourceAdmittedForImport(
@@ -2158,11 +2166,11 @@ export function createJunctionDeviceSyncProvider(
             retryable: false,
           });
         }
-        const sourceLifecycleEpoch = extendedHistoricalPolicy?.anchor === "current_day"
+        const sourceLifecycleEpoch = extendedHistoricalPolicy
           ? readSafeInteger(job.payload.sourceLifecycleEpoch)
           : null;
         if (
-          extendedHistoricalPolicy?.anchor === "current_day"
+          extendedHistoricalPolicy
           && (sourceLifecycleEpoch === null || sourceLifecycleEpoch < 1)
         ) {
           return {};
@@ -2492,6 +2500,7 @@ export function createJunctionDeviceSyncProvider(
             : undefined;
         if (
           extendedHistoricalBackfill
+          && extendedHistoricalPolicy?.anchor === "current_day"
           && sourceProviderSlug
           && sourceLifecycleEpoch !== null
           && await resolveJunctionCurrentSourceAdmission(
@@ -2637,7 +2646,7 @@ export function createJunctionDeviceSyncProvider(
       return input.result;
     }
 
-    const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.job.payload.sourceProviderSlug);
     const historicalWindowStart =
       toIsoTimestampIfValid(normalizeString(input.job.payload.historicalWindowStart))
       ?? input.window.windowStart;
@@ -2918,7 +2927,7 @@ export function createJunctionDeviceSyncProvider(
       && providerSlug !== null
       && importResult.normalizationEvidence.some((entry) =>
         entry.resource === directInput.resource
-        && canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug) === providerSlug
+        && canonicalizeJunctionProviderSlug(entry.sourceProviderSlug) === providerSlug
       );
     if (
       !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata)
@@ -4152,7 +4161,7 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
-    const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.job.payload.sourceProviderSlug);
     return buildExactWindowJob({
       kind: input.job.kind,
       payload: {
@@ -4188,7 +4197,7 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
-    const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.job.payload.sourceProviderSlug);
 
     if (input.job.kind !== "resource") {
       return null;
@@ -4279,7 +4288,7 @@ export function createJunctionDeviceSyncProvider(
     now: string,
     sourceProviderSlug?: string | null,
   ): DeviceSyncJobInput[] {
-    const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+    const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
     const payload = normalizedSourceProviderSlug
       ? { sourceProviderSlug: normalizedSourceProviderSlug }
       : undefined;
@@ -5905,10 +5914,18 @@ function filterJunctionImportSnapshots(
   sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
-  const hasPendingSourceAdmission = sources.some((source) =>
-    sourceStatusRequirement === "connected"
-      ? !isDeviceSyncSourceAdmitted([source], source.sourceProviderSlug)
-      : source.status === "disconnected" || isDeviceSyncSourceDisconnectFenced(source)
+  const sourceProviderSlugs = new Set(
+    sources
+      .map((source) => canonicalizeJunctionProviderSlug(source.sourceProviderSlug))
+      .filter((sourceProviderSlug): sourceProviderSlug is string => sourceProviderSlug !== null),
+  );
+  const hasPendingSourceAdmission = [...sourceProviderSlugs].some((sourceProviderSlug) =>
+    !isJunctionSourceAdmittedForImport(
+      sources,
+      sourceProviderSlug,
+      false,
+      sourceStatusRequirement,
+    )
   );
 
   return Object.fromEntries(
@@ -5942,7 +5959,7 @@ function isJunctionImportRecordAdmitted(
   }
 
   const fallback = readJunctionSourceReference(record, sourceReferences);
-  const sourceProviderSlug = normalizeProviderSlug(
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(
     resolveJunctionOrigin(record, fallback).sourceProviderSlug,
   );
   if (sourceProviderSlug) {
@@ -6940,16 +6957,13 @@ function resolveJunctionHistoricalPullReadiness(input: {
   snapshot: JunctionHistoricalPullSnapshot | null;
   sourceProviderSlug: string | null;
 }): JunctionHistoricalPullReadiness {
-  const sourceProviderSlug =
-    canonicalizeJunctionHistoricalProviderSlug(input.sourceProviderSlug)
-    ?? normalizeProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug || !input.snapshot?.matchedUser) {
     return "unavailable";
   }
-  const source = input.snapshot.sources.find((entry) => (
-    canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug)
-    ?? normalizeProviderSlug(entry.sourceProviderSlug)
-  ) === sourceProviderSlug);
+  const source = input.snapshot.sources.find(
+    (entry) => canonicalizeJunctionProviderSlug(entry.sourceProviderSlug) === sourceProviderSlug,
+  );
   if (!source) {
     return "unavailable";
   }
@@ -7096,7 +7110,7 @@ function evaluateJunctionHistoricalBackfillCoverage(
 
       const coveredBySummary = summaryEvidence.some((entry) =>
         entry.resource === resource
-        && canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug) === providerSlug
+        && canonicalizeJunctionProviderSlug(entry.sourceProviderSlug) === providerSlug
       );
       const coveredByPush = hasJunctionHistoricalBackfillEvidence(
         historicalPushEvidence,
@@ -7133,21 +7147,11 @@ function evaluateJunctionHistoricalBackfillCoverage(
   };
 }
 
-function canonicalizeJunctionHistoricalProviderSlug(value: unknown): string | null {
-  const providerSlug = normalizeProviderSlug(value);
-  if (!providerSlug) {
-    return null;
-  }
-
-  return resolveJunctionDeviceConnectRouteByProviderSlug(providerSlug)?.route.sourceProviderSlug
-    ?? null;
-}
-
 function resolveJunctionHistoricalCoverageProviderSlug(
   value: unknown,
   providerFilter: readonly string[],
 ): string | null {
-  const providerSlug = canonicalizeJunctionHistoricalProviderSlug(value);
+  const providerSlug = canonicalizeJunctionProviderSlug(value);
   if (!providerSlug) {
     return null;
   }
@@ -7183,7 +7187,7 @@ function readJunctionDirectHistoricalEvidenceWindow(
     || !isJunctionHistoricalBackfillRequiredSummaryResource(input.resource)
     || !evidence.some((entry) =>
       entry.resource === input.resource
-      && canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug) === providerSlug
+      && canonicalizeJunctionProviderSlug(entry.sourceProviderSlug) === providerSlug
     )
   ) {
     return null;
@@ -7231,7 +7235,8 @@ function isJunctionSourceResourceCurrentlyAvailable(input: {
   resource: string;
   sourceProviderSlug: string | null;
 }): boolean {
-  if (!input.sourceProviderSlug) {
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
+  if (!sourceProviderSlug) {
     return false;
   }
 
@@ -7239,7 +7244,7 @@ function isJunctionSourceResourceCurrentlyAvailable(input: {
     input.connectionId,
     input.providers,
   ).some((source) =>
-    source.sourceProviderSlug === input.sourceProviderSlug
+    source.sourceProviderSlug === sourceProviderSlug
     && source.status === "connected"
     && isJunctionResourceAvailableInSummary(
       source.resourceAvailabilitySummary,
@@ -7717,7 +7722,7 @@ function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
   priority: number;
 }): DeviceSyncJobInput {
   const windowPayload: { sourceProviderSlug?: string } | undefined = input.payload;
-  const sourceProviderSlug = normalizeString(windowPayload?.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(windowPayload?.sourceProviderSlug);
   const dedupeIdentity = [
     "junction",
     input.kind,
@@ -7763,8 +7768,8 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
 
   const sourceLifecycleEpoch = readSafeInteger(payload.sourceLifecycleEpoch);
   if (
-    policy.anchor === "current_day"
-    && (sourceLifecycleEpoch === null || sourceLifecycleEpoch < 1)
+    sourceLifecycleEpoch === null
+    || sourceLifecycleEpoch < 1
   ) {
     return null;
   }
@@ -7776,9 +7781,9 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return sha256Text(JSON.stringify([
       "junction",
       "extended-timeseries-backfill",
-      normalizeProviderSlug(payload.sourceProviderSlug),
+      canonicalizeJunctionProviderSlug(payload.sourceProviderSlug),
       resource,
-      policy.anchor === "current_day" ? sourceLifecycleEpoch : null,
+      sourceLifecycleEpoch,
       coverageVersion,
     ]));
   }
@@ -7786,9 +7791,9 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
   return sha256Text(JSON.stringify([
     "junction",
     "extended-timeseries-backfill",
-    normalizeProviderSlug(payload.sourceProviderSlug),
+    canonicalizeJunctionProviderSlug(payload.sourceProviderSlug),
     resource,
-    policy.anchor === "current_day" ? sourceLifecycleEpoch : null,
+    sourceLifecycleEpoch,
     historicalWindowStart,
     windowEnd,
   ]));
@@ -7829,6 +7834,10 @@ function buildExtendedTimeseriesBackfillFollowUp(
     ...(input.payload?.historicalRecordsSeen === false
       ? { historicalRecordsSeen: undefined }
       : {}),
+    sourceProviderSlug:
+      canonicalizeJunctionProviderSlug(
+        input.payload?.sourceProviderSlug ?? job.payload.sourceProviderSlug,
+      ) ?? undefined,
     windowEnd: input.windowEnd,
     windowStart: input.windowStart,
   });
@@ -7846,6 +7855,7 @@ function buildExtendedTimeseriesBackfillFollowUp(
 function buildExtendedTimeseriesBackfillJob(
   input: JunctionExtendedHistoryJobInput,
 ): DeviceSyncJobInput {
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   const payload = {
     ...(input.emptyBackfillAttempts && input.emptyBackfillAttempts > 0
       ? { emptyBackfillAttempts: input.emptyBackfillAttempts }
@@ -7879,8 +7889,8 @@ function buildExtendedTimeseriesBackfillJob(
     ...(input.sourceLifecycleEpoch === undefined
       ? {}
       : { sourceLifecycleEpoch: input.sourceLifecycleEpoch }),
-    ...(input.sourceProviderSlug
-      ? { sourceProviderSlug: input.sourceProviderSlug }
+    ...(sourceProviderSlug
+      ? { sourceProviderSlug }
       : {}),
     windowEnd: input.windowEnd,
     windowStart: input.windowStart,
@@ -7919,6 +7929,7 @@ function buildJunctionWebhookJobs(input: {
   webhookDataJsons: readonly string[];
   window: { windowStart: string; windowEnd: string };
 }): DeviceSyncJobInput[] {
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (isJunctionProviderConnectionEvent(input.eventType)) {
     const backfillWindowStart = subtractDays(input.window.windowEnd, input.summaryBackfillDays);
 
@@ -7956,7 +7967,7 @@ function buildJunctionWebhookJobs(input: {
         occurredAt: input.occurredAt,
         resource: input.resource?.name ?? "",
         resourceCategory: input.resource?.category ?? "",
-        sourceProviderSlug: input.sourceProviderSlug ?? "",
+        sourceProviderSlug: sourceProviderSlug ?? "",
         ...(webhookDataJson ? { webhookDataJson } : {}),
         windowStart: input.window.windowStart,
         windowEnd: input.window.windowEnd,
@@ -7966,7 +7977,7 @@ function buildJunctionWebhookJobs(input: {
         ? sha256Text(JSON.stringify([
             "junction-webhook",
             "resource-data",
-            input.sourceProviderSlug,
+            sourceProviderSlug,
             input.resource?.category,
             input.resource?.name,
             input.objectId ?? "",
@@ -7977,7 +7988,7 @@ function buildJunctionWebhookJobs(input: {
         : sha256Text(JSON.stringify([
             "junction-webhook",
             "resource",
-            input.sourceProviderSlug,
+            sourceProviderSlug,
             input.resource?.category,
             input.resource?.name,
             input.window.windowStart,
@@ -8371,9 +8382,9 @@ function readJunctionWebhookResourceFromEventType(eventType: string): string | n
 }
 
 function extractJunctionWebhookSourceProviderSlug(data: Record<string, unknown> | null): string | null {
-  return (
-    normalizeProviderSlug(resolveJunctionOrigin(data ?? undefined).sourceProviderSlug)
-    ?? extractJunctionWebhookSourceProviderSlugFallback(data)
+  return canonicalizeJunctionProviderSlug(
+    resolveJunctionOrigin(data ?? undefined).sourceProviderSlug
+    ?? extractJunctionWebhookSourceProviderSlugFallback(data),
   );
 }
 
@@ -8977,7 +8988,11 @@ async function projectJunctionSources(
   const preserveHistoricalReconnectProviderSlugs =
     options.preserveHistoricalReconnectProviderSlugs === undefined
       ? null
-      : new Set(options.preserveHistoricalReconnectProviderSlugs);
+      : new Set(
+          options.preserveHistoricalReconnectProviderSlugs
+            .map(canonicalizeJunctionProviderSlug)
+            .filter((providerSlug): providerSlug is string => providerSlug !== null),
+        );
   const existingSources = context.listConnectionSources
     ? await context.listConnectionSources()
     : [];
@@ -9013,7 +9028,7 @@ async function projectJunctionSources(
     }
     const existing = existingByInstanceKey.get(source.sourceInstanceKey) ?? existingSources.find(
       (candidate) =>
-        normalizeProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,
+        canonicalizeJunctionProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,
     );
     const keepHistoricalReconnect =
       preserveHistoricalReconnect
@@ -9055,55 +9070,106 @@ async function projectJunctionSources(
   }
 }
 
+function readJunctionSourceLifecycleEpoch(source: { lifecycleEpoch?: number }): number {
+  const lifecycleEpoch = source.lifecycleEpoch;
+  return typeof lifecycleEpoch === "number" && Number.isSafeInteger(lifecycleEpoch) && lifecycleEpoch >= 1
+    ? lifecycleEpoch
+    : 1;
+}
+
+function buildJunctionCurrentLifecycleSourceMap<TSource extends JunctionImportAdmissionSource>(
+  sources: readonly TSource[],
+): Map<string, TSource[]> {
+  const currentByProviderSlug = new Map<string, TSource[]>();
+  for (const source of sources) {
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(source.sourceProviderSlug);
+    if (!sourceProviderSlug) {
+      continue;
+    }
+    const lifecycleEpoch = readJunctionSourceLifecycleEpoch(source);
+    const current = currentByProviderSlug.get(sourceProviderSlug);
+    const currentLifecycleEpoch = current?.[0]
+      ? readJunctionSourceLifecycleEpoch(current[0])
+      : 0;
+    if (!current || lifecycleEpoch > currentLifecycleEpoch) {
+      currentByProviderSlug.set(sourceProviderSlug, [source]);
+    } else if (lifecycleEpoch === currentLifecycleEpoch) {
+      current.push(source);
+    }
+  }
+  return currentByProviderSlug;
+}
+
+function selectCurrentJunctionLifecycleSources(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string,
+): JunctionImportAdmissionSource[] {
+  const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
+  if (!canonicalSourceProviderSlug) {
+    return [];
+  }
+  return buildJunctionCurrentLifecycleSourceMap(sources).get(canonicalSourceProviderSlug) ?? [];
+}
+
+function isJunctionLifecycleSourceGroupAdmitted(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceStatusRequirement: JunctionImportSourceStatusRequirement,
+): boolean {
+  if (sources.length === 0 || sources.some(isDeviceSyncSourceDisconnectFenced)) {
+    return false;
+  }
+  const status = sources
+    .map((source) => source.status)
+    .reduce(mergeJunctionSourceStatus);
+  return sourceStatusRequirement === "connected"
+    ? status === "connected"
+    : status !== "disconnected";
+}
+
 function isJunctionSourceAdmittedForImport(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
   allowUnlistedSources = true,
   sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): boolean {
-  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   if (!normalizedSourceProviderSlug) {
     return true;
   }
 
-  const matchingSources = sources.filter((source) =>
-    normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
+  const matchingSources = selectCurrentJunctionLifecycleSources(
+    sources,
+    normalizedSourceProviderSlug,
   );
   return matchingSources.length === 0
     ? allowUnlistedSources
-    : matchingSources.some((source) =>
-      sourceStatusRequirement === "connected"
-        ? isDeviceSyncSourceAdmitted([source], source.sourceProviderSlug)
-        : source.status !== "disconnected" && !isDeviceSyncSourceDisconnectFenced(source)
-    );
+    : isJunctionLifecycleSourceGroupAdmitted(matchingSources, sourceStatusRequirement);
 }
 
 function isJunctionSourceProjectionFenced(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
 ): boolean {
-  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   if (!normalizedSourceProviderSlug) {
     return false;
   }
 
-  return sources.some((source) =>
-    normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
-    && isDeviceSyncSourceDisconnectFenced(source)
-  );
+  return selectCurrentJunctionLifecycleSources(sources, normalizedSourceProviderSlug)
+    .some(isDeviceSyncSourceDisconnectFenced);
 }
 
 function hasJunctionSourceListing(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
 ): boolean {
-  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   if (!normalizedSourceProviderSlug) {
     return true;
   }
 
   return sources.some((source) =>
-    normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
+    canonicalizeJunctionProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
   );
 }
 
@@ -9115,22 +9181,29 @@ async function resolveJunctionCurrentSourceAdmission(
   const sources = context.listConnectionSources
     ? await context.listConnectionSources({ sourceProviderSlug })
     : context.account.sources ?? [];
-  if (isJunctionSourceProjectionFenced(sources, sourceProviderSlug)) {
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
+  if (!normalizedSourceProviderSlug) {
+    return "fenced";
+  }
+  const matchingSources = selectCurrentJunctionLifecycleSources(
+    sources,
+    normalizedSourceProviderSlug,
+  );
+  if (matchingSources.some(isDeviceSyncSourceDisconnectFenced)) {
     return "fenced";
   }
   if (
     expectedLifecycleEpoch !== undefined
-    && (sources.length > 0 || context.connectionSourceAdmissionMode === "listed_only")
-    && !sources.some((source) =>
-      normalizeProviderSlug(source.sourceProviderSlug) === sourceProviderSlug
-      && (source.lifecycleEpoch ?? 1) === expectedLifecycleEpoch
+    && (matchingSources.length > 0 || context.connectionSourceAdmissionMode === "listed_only")
+    && !matchingSources.some((source) =>
+      (source.lifecycleEpoch ?? 1) === expectedLifecycleEpoch
     )
   ) {
     return "fenced";
   }
   return isJunctionSourceAdmittedForImport(
-    sources,
-    sourceProviderSlug,
+    matchingSources,
+    normalizedSourceProviderSlug,
     context.connectionSourceAdmissionMode !== "listed_only",
     "connected",
   )
@@ -9142,7 +9215,7 @@ async function isJunctionCompanionSourceCurrentlyAdmitted(
   context: ProviderJobContext,
   sourceProviderSlug: string,
 ): Promise<boolean> {
-  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   if (!context.listConnectionSources) {
     throw junctionCompanionSourceStateUnavailableError();
   }
@@ -9162,7 +9235,12 @@ async function isJunctionCompanionSourceCurrentlyAdmitted(
     throw junctionCompanionSourceStateUnavailableError(error);
   }
 
-  if (isDeviceSyncSourceAdmitted(sources, normalizedSourceProviderSlug)) {
+  if (isJunctionSourceAdmittedForImport(
+    sources,
+    normalizedSourceProviderSlug,
+    true,
+    "connected",
+  )) {
     return true;
   }
   if (sources.some(
@@ -9221,7 +9299,8 @@ function projectJunctionSourcesByProviderSlug(
       },
     );
     const sourceProviderSlug =
-      normalizeProviderSlug(origin.sourceProviderSlug) ?? normalizeProviderSlug(provider.slug);
+      canonicalizeJunctionProviderSlug(origin.sourceProviderSlug)
+      ?? canonicalizeJunctionProviderSlug(provider.slug);
     if (!sourceProviderSlug) {
       continue;
     }
@@ -9316,8 +9395,8 @@ function mergeJunctionSourceStatus(
   existing: DeviceConnectionSourceStatus,
   next: DeviceConnectionSourceStatus,
 ): DeviceConnectionSourceStatus {
-  if (existing === "connected" || next === "connected") {
-    return "connected";
+  if (existing === "disconnected" || next === "disconnected") {
+    return "disconnected";
   }
 
   if (existing === "error" || next === "error") {
@@ -9328,7 +9407,7 @@ function mergeJunctionSourceStatus(
     return "unavailable";
   }
 
-  return "disconnected";
+  return "connected";
 }
 
 // Derive import identity from the stable Junction user id, never from the

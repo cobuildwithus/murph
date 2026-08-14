@@ -3,7 +3,7 @@ import {
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
 import {
-  normalizeJunctionProviderSlug,
+  canonicalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -153,7 +153,7 @@ export class HostedDeviceSyncPublicIngressService {
           sourceProviderSlug,
         }) => {
           if (
-            normalizeJunctionProviderSlug(sourceProviderSlug)
+            canonicalizeJunctionProviderSlug(sourceProviderSlug)
               !== COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
           ) {
             return;
@@ -836,7 +836,7 @@ function buildPreparedSourceLifecycleKey(
   provider: string,
   sourceProviderSlug: string | null,
 ): string | null {
-  const normalizedSourceProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   return provider === "junction" && normalizedSourceProviderSlug
     ? `${userId}\u0000${normalizedSourceProviderSlug}`
     : null;

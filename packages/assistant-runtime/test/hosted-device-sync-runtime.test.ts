@@ -23,6 +23,7 @@ import {
 } from "@murphai/device-syncd/junction-historical-backfill-progress";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "@murphai/device-syncd/public-account";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
@@ -48,6 +49,7 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 
 import {
+  canonicalizeHostedJunctionSources,
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
   requireHostedRuntimeDeviceSyncStore,
@@ -1636,6 +1638,456 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("semantic Junction source ties prefer fail-closed status and deterministic timestamps", () => {
+    const source = (
+      status: "connected" | "unavailable" | "error" | "disconnected",
+      displayName: string,
+      lastSeenAt?: string,
+    ) => ({
+      displayName,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lifecycleEpoch: 1,
+      sourceProviderSlug: displayName.includes("alias") ? "apple_health" : "apple_health_kit",
+      status,
+      ...(lastSeenAt === undefined ? {} : { lastSeenAt }),
+    });
+    const statusOrder = ["connected", "unavailable", "error", "disconnected"] as const;
+    for (let index = 1; index < statusOrder.length; index += 1) {
+      const lower = source(statusOrder[index - 1]!, "alias-lower", "2026-04-07T00:00:00.000Z");
+      const higher = source(statusOrder[index]!, "canonical-higher");
+      assert.equal(canonicalizeHostedJunctionSources([lower, higher])[0]?.status, higher.status);
+      assert.equal(canonicalizeHostedJunctionSources([higher, lower])[0]?.status, higher.status);
+    }
+
+    const missingTimestamp = source("connected", "alias-missing");
+    const validTimestamp = source("connected", "canonical-valid", "2026-04-06T00:00:00.000Z");
+    assert.equal(
+      canonicalizeHostedJunctionSources([missingTimestamp, validTimestamp])[0]?.displayName,
+      validTimestamp.displayName,
+    );
+    assert.equal(
+      canonicalizeHostedJunctionSources([validTimestamp, missingTimestamp])[0]?.displayName,
+      validTimestamp.displayName,
+    );
+
+    const connectionId = "hosted_conn_same_epoch_merge";
+    const merged = canonicalizeHostedJunctionSources([
+      {
+        ...source("connected", "alias-fenced", "2026-04-05T00:00:00.000Z"),
+        firstSeenAt: "2026-04-02T00:00:00.000Z",
+        lastDataAt: "2026-04-05T01:00:00.000Z",
+        lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+        lastErrorMessage: "Disconnect is still being finalized.",
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { activity: true },
+        sourceInstanceKey: "legacy-alias-key",
+      },
+      {
+        ...source("connected", "canonical-current", "2026-04-06T00:00:00.000Z"),
+        firstSeenAt: "2026-04-03T00:00:00.000Z",
+        lastDataAt: "2026-04-04T01:00:00.000Z",
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { sleep: true },
+        sourceInstanceKey: "canonical-current-key",
+      },
+      {
+        ...source("disconnected", "alias-legacy", "2026-04-07T00:00:00.000Z"),
+        firstSeenAt: "2026-03-01T00:00:00.000Z",
+        lastDataAt: "2026-04-06T01:00:00.000Z",
+        lastErrorCode: "LEGACY_DISCONNECT",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { weight: true },
+        sourceInstanceKey: "legacy-older-key",
+      },
+    ], connectionId)[0];
+    assert.ok(merged);
+    assert.equal(merged.sourceProviderSlug, "apple_health_kit");
+    assert.equal(
+      merged.sourceInstanceKey,
+      buildJunctionProviderSourceInstanceKey({
+        connectionId,
+        sourceProviderSlug: "apple_health_kit",
+      }),
+    );
+    assert.equal(merged.lastErrorCode, DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE);
+    assert.deepEqual(merged.resourceAvailabilitySummary, {
+      activity: true,
+      sleep: true,
+      weight: true,
+    });
+    assert.equal(merged.firstSeenAt, "2026-03-01T00:00:00.000Z");
+    assert.equal(merged.lastSeenAt, "2026-04-07T00:00:00.000Z");
+    assert.equal(merged.lastDataAt, "2026-04-06T01:00:00.000Z");
+  });
+
+  test("sync treats Apple Health aliases as one lifecycle before metadata merge and provider admission", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-apple-lifecycle-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const providerRequests: string[] = [];
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async (request) => {
+          providerRequests.push(readTestUrl(request));
+          throw new Error("A stale Apple Health lifecycle must be fenced before provider access.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity", "sleep"],
+        timeseriesResources: ["blood_pressure", "caffeine"],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const hostedConnectionId = "hosted_conn_junction_apple_lifecycle";
+    const externalAccountId = "junction-apple-lifecycle";
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const retryingMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillEvidence: `e2|${windowStart}|${windowEnd}|apple-health:1`,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    };
+    let hostedSnapshot = buildRuntimeSnapshot({
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId,
+      metadata: retryingMetadata,
+      provider: "junction",
+    });
+    const applyRequests: ApplyUpdatesRequest[] = [];
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(input) {
+        applyRequests.push(input);
+        return {
+          appliedAt: "2026-04-06T09:40:00.000Z",
+          updates: input.updates.map((update) => ({
+            connection: null,
+            connectionId: update.connectionId,
+            status: "updated" as const,
+            tokenUpdate: "unchanged" as const,
+            writeUpdate: "applied" as const,
+          })),
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during source hydration.");
+      },
+      async fetchSnapshot() {
+        return hostedSnapshot;
+      },
+    };
+
+    try {
+      let state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const legacyAppleSourceInstanceKey = `jxn_src_${createHash("sha256")
+        .update(JSON.stringify([
+          "junction-provider-source",
+          localAccountId,
+          "apple_health",
+        ]))
+        .digest("hex")
+        .slice(0, 32)}`;
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        displayName: "Apple Health",
+        firstSeenAt: "2026-04-01T09:00:00.000Z",
+        lastSeenAt: "2026-04-06T09:20:00.000Z",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { blood_pressure: true, caffeine: true },
+        sourceInstanceKey: legacyAppleSourceInstanceKey,
+        sourceProviderSlug: "apple_health",
+        status: "connected",
+      });
+      const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+      try {
+        database.prepare(`
+          update device_connection_source
+          set source_instance_key = ?, source_provider_slug = ?
+          where connection_id = ?
+        `).run(
+          legacyAppleSourceInstanceKey,
+          "apple_health",
+          localAccountId,
+        );
+      } finally {
+        database.close();
+      }
+      const withingsSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: localAccountId,
+        sourceProviderSlug: "withings",
+      });
+      assert.ok(withingsSourceInstanceKey);
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        firstSeenAt: "2026-04-02T09:00:00.000Z",
+        lastSeenAt: "2026-04-06T09:20:00.000Z",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { caffeine: true },
+        sourceInstanceKey: withingsSourceInstanceKey,
+        sourceProviderSlug: "withings",
+        status: "connected",
+      });
+      let unpublishedMetadata = retryingMetadata as Record<string, unknown>;
+      for (const [providerSlug, resource] of [
+        ["apple_health", "blood_pressure"],
+        ["apple_health", "caffeine"],
+        ["withings", "caffeine"],
+      ] as const) {
+        const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+          metadata: unpublishedMetadata,
+          providerSlug,
+          resource,
+          version: 1,
+        });
+        assert.ok(update);
+        unpublishedMetadata = { ...unpublishedMetadata, [update.metadataKey]: update.value };
+      }
+      getStore(service).patchAccount(localAccountId, { metadata: unpublishedMetadata });
+
+      const canonicalHostedSourceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: hostedConnectionId,
+        sourceProviderSlug: "apple_health_kit",
+      });
+      const legacyHostedSourceKey = `jxn_src_${createHash("sha256")
+        .update(JSON.stringify([
+          "junction-provider-source",
+          hostedConnectionId,
+          "apple_health",
+        ]))
+        .digest("hex")
+        .slice(0, 32)}`;
+      assert.ok(canonicalHostedSourceKey);
+      assert.notEqual(legacyHostedSourceKey, canonicalHostedSourceKey);
+      const buildHostedAppleSource = (input: {
+        lastErrorCode?: string | null;
+        lastErrorMessage?: string | null;
+        lifecycleEpoch: number;
+        resourceAvailabilitySummary?: Record<string, boolean>;
+        sourceInstanceKey: string;
+        sourceProviderSlug: string;
+        timestamp: string;
+      }) => ({
+        displayName: "Apple Health",
+        firstSeenAt: input.timestamp,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.timestamp,
+        lastDataAt: null,
+        lifecycleEpoch: input.lifecycleEpoch,
+        resourceCount: 2,
+        resourceAvailabilitySummary: input.resourceAvailabilitySummary
+          ?? { blood_pressure: true, caffeine: true },
+        sourceInstanceKey: input.sourceInstanceKey,
+        sourceProviderSlug: input.sourceProviderSlug,
+        status: "connected" as const,
+      });
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:30:00.000Z",
+        metadata: retryingMetadata,
+        provider: "junction",
+        sources: [
+          buildHostedAppleSource({
+            lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+            lastErrorMessage: "Disconnect is still being finalized.",
+            lifecycleEpoch: 2,
+            resourceAvailabilitySummary: { blood_pressure: true },
+            sourceInstanceKey: legacyHostedSourceKey,
+            sourceProviderSlug: "apple_health",
+            timestamp: "2026-04-06T09:20:00.000Z",
+          }),
+          buildHostedAppleSource({
+            lifecycleEpoch: 2,
+            resourceAvailabilitySummary: { caffeine: true },
+            sourceInstanceKey: canonicalHostedSourceKey,
+            sourceProviderSlug: "apple_health_kit",
+            timestamp: "2026-04-06T09:30:00.000Z",
+          }),
+        ],
+      });
+
+      state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const sources = getStore(service).listConnectionSources({ connectionId: localAccountId });
+      const appleSources = sources.filter((source) =>
+        ["apple_health", "apple_health_kit", "apple_healthkit"].includes(
+          source.sourceProviderSlug,
+        )
+      );
+      assert.equal(appleSources.length, 1);
+      assert.equal(appleSources[0]?.sourceProviderSlug, "apple_health_kit");
+      assert.equal(
+        appleSources[0]?.sourceInstanceKey,
+        buildJunctionProviderSourceInstanceKey({
+          connectionId: localAccountId,
+          sourceProviderSlug: "apple_health_kit",
+        }),
+      );
+      assert.equal(appleSources[0]?.lifecycleEpoch, 2);
+      assert.equal(
+        appleSources[0]?.lastErrorCode,
+        DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+      );
+      assert.deepEqual(appleSources[0]?.resourceAvailabilitySummary, {
+        blood_pressure: true,
+        caffeine: true,
+      });
+      assert.equal(sources.find((source) => source.sourceProviderSlug === "withings")?.lifecycleEpoch, 1);
+
+      const hydratedMetadata = getStore(service).getAccountById(localAccountId)?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          hydratedMetadata,
+          "apple_health_kit",
+          "caffeine",
+          1,
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          hydratedMetadata,
+          "apple_health_kit",
+          "blood_pressure",
+          1,
+        ),
+        true,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          hydratedMetadata,
+          "withings",
+          "caffeine",
+          1,
+        ),
+        true,
+      );
+
+      const staleJob = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:35:00.000Z",
+        dedupeKey: "stale-apple-health-epoch-one",
+        kind: "resource",
+        payload: {
+          historicalBackfill: true,
+          historicalBackfillVersion: 1,
+          historicalWindowStart: "2026-03-01T00:00:00.000Z",
+          resource: "caffeine",
+          resourceCategory: "timeseries",
+          sourceLifecycleEpoch: 1,
+          sourceProviderSlug: "apple_health",
+          windowEnd: "2026-04-06T00:00:00.000Z",
+          windowStart: "2026-03-01T00:00:00.000Z",
+        },
+        priority: 1_000,
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(staleJob.id)?.status, "succeeded");
+      const fencedCurrentJob = getStore(service).enqueueJob({
+        ...staleJob,
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:35:00.000Z",
+        dedupeKey: "fenced-apple-health-epoch-two",
+        kind: "resource",
+        payload: { ...staleJob.payload, sourceLifecycleEpoch: 2 },
+        priority: 1_000,
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(fencedCurrentJob.id)?.status, "succeeded");
+      assert.deepEqual(providerRequests, []);
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:31:00.000Z",
+        metadata: retryingMetadata,
+        provider: "junction",
+        sources: [buildHostedAppleSource({
+          lifecycleEpoch: 2,
+          sourceInstanceKey: canonicalHostedSourceKey,
+          sourceProviderSlug: "apple_health_kit",
+          timestamp: "2026-04-06T09:31:00.000Z",
+        })],
+      });
+      state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:36:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      getStore(service).patchAccount(localAccountId, {
+        nextReconcileAt: "2026-04-06T09:30:00.000Z",
+      });
+      const scheduled = await service.runSchedulerOnce(localAccountId);
+      const caffeineJob = scheduled.find((job) => job.payload.resource === "caffeine");
+      assert.equal(caffeineJob?.payload.sourceProviderSlug, "apple_health_kit");
+      assert.equal(caffeineJob?.payload.sourceLifecycleEpoch, 2);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+        wake: buildCronWake("2026-04-06T09:40:00.000Z"),
+      });
+      const appliedMetadata = applyRequests.at(-1)?.updates[0]?.connection?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          appliedMetadata,
+          "apple_health_kit",
+          "caffeine",
+          1,
+        ),
+        false,
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test.each([
     {
       initialTargetStatus: "missing",
@@ -1950,7 +2402,7 @@ describe("hosted device-sync runtime", () => {
           finalSources.find((source) => source.sourceProviderSlug === "garmin")
             ?.sourceInstanceKey,
           buildJunctionProviderSourceInstanceKey({
-            connectionId: hostedConnectionId,
+            connectionId: localAccountId,
             sourceProviderSlug: "garmin",
           }),
         );

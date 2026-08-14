@@ -88,6 +88,7 @@ export {
   generateHostedAgentBearerToken,
 } from "./prisma-store/agent-sessions";
 export {
+  expandCanonicalHostedSourceProviderSlugFilter,
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
