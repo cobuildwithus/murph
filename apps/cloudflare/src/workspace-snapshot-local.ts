@@ -253,13 +253,17 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
         signal: input.signal,
       });
     } catch (error) {
+      const constructionInterruption =
+        readHostedWorkspaceSnapshotConstructionInterruption(error, input.signal);
       tar.kill("SIGTERM");
       zstd.kill("SIGTERM");
       const processFailure = await readHostedWorkspaceSnapshotProcessFailure([
         tarExit,
         zstdExit,
       ]);
-      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+      if (constructionInterruption) {
+        throw constructionInterruption;
+      }
       if (
         processFailure
         && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -320,6 +324,37 @@ function assertHostedWorkspaceSnapshotConstructionLive(
   throw signal.reason instanceof Error
     ? signal.reason
     : new Error("Hosted workspace snapshot construction was interrupted.");
+}
+
+function readHostedWorkspaceSnapshotConstructionInterruption(
+  error: unknown,
+  signal: AbortSignal | null | undefined,
+): Error | null {
+  if (!signal?.aborted || !isHostedWorkspaceSnapshotAbortFailure(error, signal.reason)) {
+    return null;
+  }
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace snapshot construction was interrupted.");
+}
+
+export function isHostedWorkspaceSnapshotAbortFailure(
+  error: unknown,
+  abortReason: unknown,
+): boolean {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    if (Object.is(current, abortReason)) {
+      return true;
+    }
+    seen.add(current);
+    if (current instanceof Error && current.name === "AbortError") {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function isSameOrDescendantPath(candidate: string, root: string): boolean {

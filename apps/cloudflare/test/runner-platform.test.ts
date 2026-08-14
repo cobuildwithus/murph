@@ -1503,6 +1503,56 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("preserves the handoff timeout when a runtime wake arrives afterward", async () => {
+    const timeoutControllers: Array<{
+      controller: AbortController;
+      delayMs: number;
+    }> = [];
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((delayMs) => {
+      const controller = new AbortController();
+      timeoutControllers.push({ controller, delayMs });
+      return controller.signal;
+    });
+    const fetchMock = vi.fn(async () => new Response(
+      new ReadableStream<Uint8Array>({ start: () => undefined }),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    ));
+    const snapshotAbort = new AbortController();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 30_000,
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    try {
+      const startSnapshotSession = platform.workspaceSnapshotPort!.startSnapshotSession({
+        expectedWorkspaceVersion: "4",
+        reason: "idle_shutdown",
+        signal: snapshotAbort.signal,
+      });
+      await vi.waitFor(() =>
+        expect(timeoutControllers.some(({ delayMs }) => delayMs === 6_000)).toBe(true)
+      );
+      const startTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 6_000);
+      if (!startTimeout) {
+        throw new Error("Workspace snapshot start timeout was not created.");
+      }
+      const timeoutError = new Error("The operation timed out.");
+      timeoutError.name = "TimeoutError";
+      const wakeError = new Error("runtime wake arrived after handoff timeout");
+      startTimeout.controller.abort(timeoutError);
+      snapshotAbort.abort(wakeError);
+
+      await expect(startSnapshotSession).rejects.toBe(timeoutError);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it("starts the next serialized heartbeat without another idle interval", async () => {
     vi.useFakeTimers();
     const startedAtMs = Date.parse("2026-04-27T00:00:00.000Z");

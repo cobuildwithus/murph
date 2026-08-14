@@ -30,7 +30,10 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
   HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
 } from "../workspace-snapshot-store.ts";
-import { restoreEncryptedWorkspaceSnapshotFromEncryptedStream } from "../workspace-snapshot-local.ts";
+import {
+  isHostedWorkspaceSnapshotAbortFailure,
+  restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
+} from "../workspace-snapshot-local.ts";
 import {
   requireHostedWorkspaceSnapshotPreparedRestoreForRef,
   type HostedWorkspaceSnapshotPreparedRestore,
@@ -526,7 +529,14 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ),
         });
       } catch (error) {
-        assertHostedWorkspaceSnapshotOperationLive(signal);
+        if (
+          signal?.aborted
+          && startSignal.signal.aborted
+          && Object.is(startSignal.signal.reason, signal.reason)
+          && isHostedWorkspaceSnapshotAbortFailure(error, signal.reason)
+        ) {
+          assertHostedWorkspaceSnapshotOperationLive(signal);
+        }
         throw error;
       } finally {
         startSignal.dispose();
