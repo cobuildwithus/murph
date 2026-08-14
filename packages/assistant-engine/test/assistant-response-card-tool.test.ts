@@ -552,6 +552,15 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
       'not styled plain text',
     )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'By default, include at least one useful returned catalog image for every exercise that has one.',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'Omit exercise images only when the user explicitly asks for a routine without them.',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'Never promise images for an exercise that has none.',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent',
     )
