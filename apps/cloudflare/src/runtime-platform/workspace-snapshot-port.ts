@@ -38,6 +38,7 @@ import {
 import { requireHostedRuntimeWriteFenceHeaders, type HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
   combineAbortSignalsWithCleanup,
+  isRetryableHostedRuntimeReplaySafeReadTransportError,
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
 } from "./control-plane-fetch.ts";
 import {
