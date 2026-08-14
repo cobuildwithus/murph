@@ -276,6 +276,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // measurements while retaining the existing cross-platform tolerances and
 // forbidden-startup-input guards.
 //
+// Later reviewed current-main additions extended the existing lazy output
+// without adding a forbidden boot input. Exact Linux hosted-local assembly
+// measured 10,361,173B on 2026-08-14.
+//
 // Exact reminder-occurrence authority and due-reminder wake priority extend
 // existing lazy assistant/runtime output without adding a forbidden boot
 // input. Linux CI measured 10,362,146B total and exact macOS assembly measured
