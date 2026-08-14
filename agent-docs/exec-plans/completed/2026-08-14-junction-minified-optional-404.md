@@ -1,6 +1,6 @@
 # Restore first-time Junction device connections in production
 
-Status: active
+Status: completed
 Created: 2026-08-14
 Updated: 2026-08-14
 
@@ -65,6 +65,26 @@ Updated: 2026-08-14
   directly owns the HTTP response and remains stable when the SDK bundle's
   constructor names are minified.
 
+## Progress
+
+- The production failure was traced to an upstream optional 404 whose SDK error
+  class name was rewritten by minification. A focused minified-bundle
+  reproduction proved the existing literal-name check was the failing boundary.
+- PR #1813 merged the transport-owned correction as commit `ea9d023663`. Focused
+  Junction tests, package and Web typechecks, changelog validation, the
+  minified-bundle proof, required CI, and the final cross-cutting review passed.
+- The preliminary coverage review requested stronger journey and cancellation
+  proof. The follow-up tests now exercise resolve-404 -> create-user ->
+  sign-in-token under a rewritten SDK class name, plus caller cancellation
+  during unread 404-body cleanup. The full Junction test file and package
+  typecheck pass locally.
+- The first production build of the merge commit was OOM-killed by Vercel's
+  Standard build machine during the Next.js compile. A later `main` deployment
+  containing the hotfix completed successfully and owns the public production
+  aliases. The homepage returned 200 after its canonical redirect, the
+  unauthenticated companion sign-in-token probe failed closed with 401, and the
+  deployment showed no device-sync server errors after activation.
+
 ## Verification
 
 - Commands to run: focused `device-syncd` Junction tests, package typecheck, a
@@ -74,3 +94,4 @@ Updated: 2026-08-14
 - Expected outcomes: a first-time lookup returns `null`, create-or-resolve can
   create the provider user, all required checks pass, and the production route
   stops emitting the diagnosed lookup failure.
+Completed: 2026-08-14
