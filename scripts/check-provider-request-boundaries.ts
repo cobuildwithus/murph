@@ -2493,11 +2493,11 @@ const officialSdkFetchHookApprovals = Object.freeze([
   },
   {
     adapterReferenceMode: "same-owner",
-    authorityFileSha256: "53e3c60d56811285fb3f7f17647160301252583e8440cec8c511d03362a29db5",
+    authorityFileSha256: "90198aa61651d946bf90f8f9d2ecf7d0d07edfaf97a78d5332c524a01c00dd5c",
     authorityFunctions: [],
     functionName: "requestSdkResource",
     implementationSha256:
-      "6f53c31185895fd9706dd0cc60e8234ae6435ed89caf34be71aa8b10e1d646e8",
+      "d2b290aebff0879e53a88d61e9ebc573a6fa0e102d69a0116b2b746adc5efcab",
     moduleName: "@junction-api/sdk/activity",
     providerId: "junction",
     relativePath: "packages/device-syncd/src/providers/junction-client.ts",
@@ -2505,7 +2505,7 @@ const officialSdkFetchHookApprovals = Object.freeze([
     transportPath: "this.fetchImpl",
     wiringFunctionName: "requestSdkResource",
     wiringImplementationSha256:
-      "6f53c31185895fd9706dd0cc60e8234ae6435ed89caf34be71aa8b10e1d646e8",
+      "d2b290aebff0879e53a88d61e9ebc573a6fa0e102d69a0116b2b746adc5efcab",
   },
   {
     adapterReferenceMode: "exclusive-sdk-wiring",
