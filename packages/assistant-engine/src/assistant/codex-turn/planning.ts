@@ -522,6 +522,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const exerciseRoutineResponseCardsAvailable =
     responseCardsAvailable &&
     resolvedChannel?.trim().toLowerCase() === 'telegram'
+  const telegramRichContentResponseCardsAvailable =
+    responseCardsAvailable &&
+    resolvedChannel?.trim().toLowerCase() === 'telegram'
   const groupChallengeResponseCardsAvailable =
     authenticatedGroupChatRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -960,6 +963,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
         exerciseRoutineResponseCardsAvailable,
+        telegramRichContentResponseCardsAvailable,
         groupChallengeResponseCardsAvailable,
         physicalNotesAvailable:
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&

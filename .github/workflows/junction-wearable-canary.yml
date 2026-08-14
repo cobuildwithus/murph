@@ -79,8 +79,11 @@ jobs:
           MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"
           MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop
           MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: member_e2e_junction_whoop_github_canary
-          MURPH_E2E_WEARABLE_HEADLESS: "1"
+          # WHOOP's identity boundary challenges headless Chromium. Run the
+          # same protected browser proof headed inside the runner's isolated
+          # virtual display; authorization and callback assertions stay exact.
+          MURPH_E2E_WEARABLE_HEADLESS: "0"
           MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
           MURPH_E2E_WHOOP_EMAIL: ${{ secrets.WHOOP_CANARY_EMAIL }}
           MURPH_E2E_WHOOP_PASSWORD: ${{ secrets.WHOOP_CANARY_PASSWORD }}
-        run: pnpm hosted-local e2e device-connect
+        run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect

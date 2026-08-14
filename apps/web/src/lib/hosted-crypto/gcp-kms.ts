@@ -735,7 +735,9 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
     throwIfCallerAborted(input.signal);
     const keyName = normalizeKmsCryptoKeyName(input.keyName, "Local KMS Decrypt keyName");
     if (!input.ciphertext.startsWith(LOCAL_KMS_CIPHERTEXT_PREFIX)) {
-      throw new TypeError("Local KMS ciphertext must use the local-kms-v1 envelope.");
+      throw new Error(
+        "Local KMS ciphertext must use the local-kms-v1 envelope.",
+      );
     }
 
     const packed = decodeBoundedBase64(

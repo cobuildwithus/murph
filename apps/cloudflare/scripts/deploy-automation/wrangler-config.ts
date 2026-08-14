@@ -15,6 +15,8 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
 const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
 const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
+const DEVICE_WEBHOOK_QUEUE_SUFFIX = "device-webhooks";
+const DEVICE_WEBHOOK_DLQ_SUFFIX = "device-webhooks-dlq";
 
 function resolveContainerRolloutStepPercentage(maxInstances: number): number[] {
   if (maxInstances >= CONTAINER_ROLLOUT_STEP_PERCENTAGE.length) {
@@ -54,6 +56,8 @@ export function buildHostedWranglerDeployConfig(
   }
 
   const sendEmailBindings = buildHostedEmailSendBindings(environment.workerVars);
+  const deviceWebhookQueueName = `${environment.workerName}-${DEVICE_WEBHOOK_QUEUE_SUFFIX}`;
+  const deviceWebhookDlqName = `${environment.workerName}-${DEVICE_WEBHOOK_DLQ_SUFFIX}`;
   const buildRunnerContainerConfig = (input: {
     className: string;
     maxInstances: number;
@@ -107,6 +111,10 @@ export function buildHostedWranglerDeployConfig(
           class_name: "DatabaseHealthDurableObject",
         },
         {
+          name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
+          class_name: "DeviceWebhookQueueHealthDurableObject",
+        },
+        {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
         },
@@ -136,9 +144,36 @@ export function buildHostedWranglerDeployConfig(
         tag: "v4",
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
       },
+      {
+        tag: "v5",
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+      },
     ],
     triggers: {
       crons: ["*/5 * * * *"],
+    },
+    queues: {
+      producers: [
+        {
+          binding: "DEVICE_WEBHOOK_QUEUE",
+          queue: deviceWebhookQueueName,
+        },
+        {
+          binding: "DEVICE_WEBHOOK_DLQ",
+          queue: deviceWebhookDlqName,
+        },
+      ],
+      consumers: [
+        {
+          dead_letter_queue: deviceWebhookDlqName,
+          max_batch_size: 100,
+          max_batch_timeout: 5,
+          max_concurrency: 1,
+          max_retries: 10,
+          retry_delay: 30,
+          queue: deviceWebhookQueueName,
+        },
+      ],
     },
     r2_buckets: [
       {

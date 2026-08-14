@@ -23,6 +23,15 @@ const PGBOUNCER_POOL_LABEL = "planetscale_pgbouncer_pool";
 const PORT_LABEL = "planetscale_port";
 const REGION_LABEL = "planetscale_region";
 
+export const DATABASE_CONNECTION_ERROR_PORTS = ["5432", "6432"] as const;
+
+export type DatabaseConnectionErrorPort =
+  typeof DATABASE_CONNECTION_ERROR_PORTS[number];
+
+export type DatabaseConnectionErrorDeltas = Readonly<
+  Record<DatabaseConnectionErrorPort, number | null>
+>;
+
 export const DATABASE_CLIENT_WAIT_ALERT_SECONDS = 5;
 export const DATABASE_CONNECTION_UTILIZATION_ALERT_RATIO = 0.9;
 export const DATABASE_IDLE_IN_TRANSACTION_ALERT_COUNT = 5;
@@ -31,7 +40,7 @@ export const DATABASE_SERVER_POOL_ALERT_RATIO = 0.9;
 export interface DatabaseMetricSnapshot {
   clientWaitSeconds: number;
   clientWaitingConnections: number;
-  directConnectionErrorCounters: Record<string, number>;
+  connectionErrorCounters: Record<string, number>;
   postgresConnections: number;
   postgresConnectionStates: Record<string, number>;
   postgresMaxConnections: number;
@@ -44,7 +53,7 @@ export interface DatabaseMetricSnapshot {
 export interface DatabaseMetricObservationSnapshot {
   clientWaitSeconds: number | null;
   clientWaitingConnections: number | null;
-  directConnectionErrorCounters: Record<string, number> | null;
+  connectionErrorCounters: Record<string, number> | null;
   postgresConnections: number | null;
   postgresConnectionStates: Record<string, number> | null;
   postgresMaxConnections: number | null;
@@ -92,6 +101,10 @@ export type DatabaseHealthCondition =
   | {
       count: number;
       kind: "direct_migration_admission_failures";
+    }
+  | {
+      count: number;
+      kind: "pooled_application_connection_errors";
     }
   | {
       failures: number;
@@ -146,7 +159,7 @@ export function requireCompleteDatabaseMetricSnapshot(
   if (
     snapshot.clientWaitSeconds === null
     || snapshot.clientWaitingConnections === null
-    || snapshot.directConnectionErrorCounters === null
+    || snapshot.connectionErrorCounters === null
     || snapshot.postgresConnections === null
     || snapshot.postgresConnectionStates === null
     || snapshot.postgresMaxConnections === null
@@ -160,8 +173,7 @@ export function requireCompleteDatabaseMetricSnapshot(
   return {
     clientWaitSeconds: snapshot.clientWaitSeconds,
     clientWaitingConnections: snapshot.clientWaitingConnections,
-    directConnectionErrorCounters:
-      snapshot.directConnectionErrorCounters,
+    connectionErrorCounters: snapshot.connectionErrorCounters,
     postgresConnections: snapshot.postgresConnections,
     postgresConnectionStates: snapshot.postgresConnectionStates,
     postgresMaxConnections: snapshot.postgresMaxConnections,
@@ -200,14 +212,21 @@ export function parsePlanetScaleDatabaseMetricObservation(
     (point) =>
       point.name === "planetscale_postgres_settings_max_connections",
   );
-  const directErrorPoints = points.filter(
+  const connectionErrorPoints = points.filter(
     (point) =>
       point.name === "planetscale_edge_postgres_connection_errors_total"
-      && point.labels[PORT_LABEL] === "5432",
+      && isDatabaseConnectionErrorPort(point.labels[PORT_LABEL]),
+  );
+  const observedConnectionErrorPorts = new Set(
+    connectionErrorPoints.map((point) => point.labels[PORT_LABEL]),
   );
 
   const missingMetricSet = new Set<DatabaseHealthRequiredMetricName>();
-  if (directErrorPoints.length === 0) {
+  if (
+    DATABASE_CONNECTION_ERROR_PORTS.some(
+      (port) => !observedConnectionErrorPorts.has(port),
+    )
+  ) {
     missingMetricSet.add(
       "planetscale_edge_postgres_connection_errors_total",
     );
@@ -310,13 +329,9 @@ export function parsePlanetScaleDatabaseMetricObservation(
         ? null
         : maximumMetricValue(clientWaitPoints),
       clientWaitingConnections,
-      directConnectionErrorCounters: directErrorPoints.length === 0
+      connectionErrorCounters: connectionErrorPoints.length === 0
         ? null
-        : sumByOptionalLabel(
-          directErrorPoints,
-          REGION_LABEL,
-          "unknown",
-        ),
+        : sumConnectionErrorsByPortAndRegion(connectionErrorPoints),
       postgresConnections: postgresConnectionStates
         ? sumMapValues(new Map(Object.entries(postgresConnectionStates)))
         : null,
@@ -333,32 +348,73 @@ export function parsePlanetScaleDatabaseMetricObservation(
   };
 }
 
-export function calculateDirectConnectionErrorDelta(
+export function calculateConnectionErrorDeltas(
   current: Readonly<Record<string, number>>,
   previous: Readonly<Record<string, number>> | null,
-): number {
-  if (!previous) {
-    return 0;
+): DatabaseConnectionErrorDeltas {
+  const deltas: Record<DatabaseConnectionErrorPort, number | null> = {
+    "5432": null,
+    "6432": null,
+  };
+  for (const port of DATABASE_CONNECTION_ERROR_PORTS) {
+    const currentSeries = Object.entries(current).filter(([series]) =>
+      readConnectionErrorSeriesPort(series) === port
+    );
+    if (currentSeries.length === 0) {
+      continue;
+    }
+    if (!previous) {
+      deltas[port] = 0;
+      continue;
+    }
+    deltas[port] = Math.trunc(
+      currentSeries.reduce((total, [series, currentValue]) => {
+        const previousValue = previous[series];
+        if (
+          typeof previousValue !== "number"
+          || !Number.isFinite(previousValue)
+          || currentValue < previousValue
+        ) {
+          return total;
+        }
+        return total + currentValue - previousValue;
+      }, 0),
+    );
   }
+  return deltas;
+}
 
-  return Math.trunc(
-    Object.entries(current).reduce((total, [series, currentValue]) => {
-      const previousValue = previous[series];
-      if (
-        typeof previousValue !== "number"
-        || !Number.isFinite(previousValue)
-        || currentValue < previousValue
-      ) {
-        return total;
-      }
-      return total + currentValue - previousValue;
-    }, 0),
+export function advanceConnectionErrorCounterBaseline(
+  current: Readonly<Record<string, number>>,
+  previous: Readonly<Record<string, number>> | null,
+): Record<string, number> {
+  const nextBaseline: Record<string, number> = {};
+  for (const port of DATABASE_CONNECTION_ERROR_PORTS) {
+    const currentEntries = readConnectionErrorEntriesForPort(current, port);
+    const entries = currentEntries.length > 0
+      ? currentEntries
+      : readConnectionErrorEntriesForPort(previous ?? {}, port);
+    for (const [series, value] of entries) {
+      nextBaseline[series] = value;
+    }
+  }
+  return nextBaseline;
+}
+
+export function hasExpectedConnectionErrorPorts(
+  counters: Readonly<Record<string, number>>,
+): boolean {
+  const observedPorts = new Set(
+    Object.keys(counters).map(readConnectionErrorSeriesPort),
+  );
+  return DATABASE_CONNECTION_ERROR_PORTS.every(
+    (port) => observedPorts.has(port),
   );
 }
 
 export function evaluateDatabaseMetricSnapshot(
   snapshot: DatabaseMetricObservationSnapshot,
-  directConnectionErrorDelta: number | null,
+  connectionErrorDeltas: DatabaseConnectionErrorDeltas | null,
 ): DatabaseHealthCondition[] {
   const conditions: DatabaseHealthCondition[] = [];
   if (
@@ -434,13 +490,26 @@ export function evaluateDatabaseMetricSnapshot(
       kind: "postgres_idle_in_transaction",
     });
   }
+  const directConnectionErrorDelta = connectionErrorDeltas?.["5432"];
   if (
     directConnectionErrorDelta !== null
+    && directConnectionErrorDelta !== undefined
     && directConnectionErrorDelta > 0
   ) {
     conditions.push({
       count: directConnectionErrorDelta,
       kind: "direct_migration_admission_failures",
+    });
+  }
+  const pooledConnectionErrorDelta = connectionErrorDeltas?.["6432"];
+  if (
+    pooledConnectionErrorDelta !== null
+    && pooledConnectionErrorDelta !== undefined
+    && pooledConnectionErrorDelta > 0
+  ) {
+    conditions.push({
+      count: pooledConnectionErrorDelta,
+      kind: "pooled_application_connection_errors",
     });
   }
   return conditions;
@@ -577,17 +646,57 @@ function sumByLabel(
   return totals;
 }
 
-function sumByOptionalLabel(
+function sumConnectionErrorsByPortAndRegion(
   points: readonly PrometheusMetricPoint[],
-  label: string,
-  fallback: string,
 ): Record<string, number> {
   const totals: Record<string, number> = {};
   for (const point of points) {
-    const key = point.labels[label] ?? fallback;
+    const port = point.labels[PORT_LABEL];
+    if (!isDatabaseConnectionErrorPort(port)) {
+      continue;
+    }
+    const key = JSON.stringify([
+      port,
+      point.labels[REGION_LABEL] ?? "unknown",
+    ]);
     totals[key] = (totals[key] ?? 0) + point.value;
   }
   return totals;
+}
+
+function isDatabaseConnectionErrorPort(
+  value: string | undefined,
+): value is DatabaseConnectionErrorPort {
+  return DATABASE_CONNECTION_ERROR_PORTS.some((port) => port === value);
+}
+
+function readConnectionErrorSeriesPort(
+  series: string,
+): DatabaseConnectionErrorPort | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(series);
+  } catch {
+    return null;
+  }
+  if (
+    !Array.isArray(value)
+    || value.length !== 2
+    || !isDatabaseConnectionErrorPort(value[0])
+    || typeof value[1] !== "string"
+  ) {
+    return null;
+  }
+  return value[0];
+}
+
+function readConnectionErrorEntriesForPort(
+  counters: Readonly<Record<string, number>>,
+  port: DatabaseConnectionErrorPort,
+): Array<[string, number]> {
+  return Object.entries(counters).filter(
+    ([series]) => readConnectionErrorSeriesPort(series) === port,
+  );
 }
 
 function sumByPod(

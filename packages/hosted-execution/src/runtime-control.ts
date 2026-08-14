@@ -3251,6 +3251,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.snapshot_failed",
   "checkpoint.snapshot_finished",
   "checkpoint.snapshot_plan",
+  "checkpoint.snapshot_preempted",
   "checkpoint.snapshot_size_progress",
   "checkpoint.snapshot_started",
   "workspace.codex_home_snapshot_failed",

@@ -16,7 +16,6 @@ type HiddenPromptReadline = ReturnType<typeof createInterface> & {
 }
 
 const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
-const EMAIL_API_KEY_KEYS = ['AGENTMAIL_API_KEY'] as const
 const JUNCTION_API_KEY_KEYS = ['JUNCTION_API_KEY'] as const
 const JUNCTION_CLIENT_USER_ID_SECRET_KEYS = ['JUNCTION_CLIENT_USER_ID_SECRET'] as const
 const JUNCTION_ENV_KEYS = ['JUNCTION_ENV'] as const
@@ -118,10 +117,6 @@ export function resolveSetupChannelMissingEnv(
       return hasAnyEnv(env, TELEGRAM_TOKEN_KEYS)
         ? []
         : [TELEGRAM_TOKEN_KEYS[0]]
-    case 'email':
-      return hasAnyEnv(env, EMAIL_API_KEY_KEYS)
-        ? []
-        : [EMAIL_API_KEY_KEYS[0]]
   }
 }
 
@@ -162,22 +157,6 @@ export function describeSetupChannelStatus(
             badge: 'needs token',
             detail:
               'Add TELEGRAM_BOT_TOKEN to the current environment to enable Telegram auto-reply.',
-            missingEnv,
-            ready: false,
-          }
-    case 'email':
-      return missingEnv.length === 0
-        ? {
-            badge: 'ready',
-            detail:
-              'AgentMail API key is available for inbox discovery or provisioning in the current environment.',
-            missingEnv,
-            ready: true,
-          }
-        : {
-            badge: 'needs key',
-            detail:
-              'Add AGENTMAIL_API_KEY to the current environment to enable the email channel.',
             missingEnv,
             ready: false,
           }

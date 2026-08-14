@@ -34,7 +34,6 @@ const outboundMocks = vi.hoisted(() => ({
   resolveAssistantSession: vi.fn(),
   resolveDeliveryCandidates: vi.fn(() => []),
   saveAssistantSession: vi.fn(),
-  sendEmailMessage: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
   updateAssistantTurnReceipt: vi.fn(),
@@ -51,7 +50,6 @@ vi.mock('../src/assistant/channel-adapters.js', () => ({
   getAssistantChannelAdapter: outboundMocks.getAssistantChannelAdapter,
   normalizeAssistantDeliverySubject: outboundMocks.normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates: outboundMocks.resolveDeliveryCandidates,
-  sendEmailMessage: outboundMocks.sendEmailMessage,
   sendLinqMessage: outboundMocks.sendLinqMessage,
   sendTelegramMessage: outboundMocks.sendTelegramMessage,
 }))
