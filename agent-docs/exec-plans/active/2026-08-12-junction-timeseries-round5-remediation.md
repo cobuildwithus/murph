@@ -502,3 +502,8 @@ Updated: 2026-08-14
   proved the ordinary retry remains queued across disconnect, so the rejected
   lifecycle scenario was removed instead of adding test-only machinery around
   a false premise.
+- Integrated current `main` at `9aff00cd7d` with one inspected conflict pair:
+  both runner-bundle files take `main`'s newer Browser Vault/Query measured
+  baselines. The 42 runner-budget tests, Cloudflare and device-sync typechecks,
+  all 80 extended-history tests, docs drift, provider request boundaries, the
+  206-scenario integrity check, and the post-merge merge-tree proof pass.
