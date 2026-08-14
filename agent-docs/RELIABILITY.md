@@ -564,6 +564,13 @@ Last verified: 2026-08-14
   retryable obligation. Replay-safe cleanup or notification work does not gain
   blanket retry authority merely because it runs post-commit. No second queue
   owns redrive.
+- A completed Stripe receipt persists the exact mailbox item identifiers for
+  every `member.activated` result it committed. Runtime-wake replay reads only
+  those identifiers and revalidates the mailbox kind; a malformed non-null
+  projection fails closed. Receipts written before this additive field was
+  deployed retain the legacy lookup solely as a mixed-deploy transition, while
+  account deletion may legitimately cascade a pointed-to mailbox item without
+  changing the completed billing outcome.
 - Immediate paid-plan upgrades use a one-item Customer Portal
   `subscription_update_confirm` session rather than a Murph-owned Subscription
   mutation or pending-invoice retry loop. Web takes the member lock only to
