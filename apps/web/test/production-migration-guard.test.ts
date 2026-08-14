@@ -1761,7 +1761,7 @@ describe("hosted web production migration guard", () => {
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
   });
 
-  test("enables only production and the explicit Webpack proof branch", async () => {
+  test("enables only production deployments", async () => {
     const vercelJson = JSON.parse(
       await readFile(path.join(appRoot, "vercel.json"), "utf8"),
     ) as {
@@ -1772,7 +1772,6 @@ describe("hosted web production migration guard", () => {
 
     assert.deepEqual(vercelJson.git?.deploymentEnabled, {
       main: true,
-      "codex/vercel-build-oom": true,
       "*": false,
     });
   });
