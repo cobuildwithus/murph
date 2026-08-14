@@ -2,8 +2,12 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
-  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
+  HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -12,10 +16,15 @@ import {
 
 const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
+  isHostedRuntimeInactiveAccessError: vi.fn(),
+  requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
+  isHostedRuntimeInactiveAccessError: mocks.isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeActiveAccessForUpdateTx:
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx,
 }));
 
 import {
@@ -31,6 +40,9 @@ import {
   parseHostedVaultShareProjectionSnapshot,
   serializeHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-snapshot";
+import {
+  replaceHostedVaultShareProjectionSnapshot,
+} from "@/src/lib/hosted-vault-share/projection-store";
 
 const RUNTIME_MEMBER_ID = "member_group_runtime";
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
@@ -43,6 +55,9 @@ const DEEP_SLEEP_SOURCES_SCOPE = hostedVaultShareProjectionKindToScope(
 const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
 const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
   "workouts.v0",
+);
+const HEART_RATE_ZONES_SCOPE = hostedVaultShareProjectionKindToScope(
+  "heart-rate-zones-days.v0",
 );
 const DEVICE_SCOPE = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
 const PROTEIN_KEY = buildHostedVaultShareProjectionScopeKey(PROTEIN_SCOPE);
@@ -57,6 +72,7 @@ const WORKOUTS_KEY = buildHostedVaultShareProjectionScopeKey(
 );
 const DEVICE_KEY = buildHostedVaultShareProjectionScopeKey(DEVICE_SCOPE);
 const GRANTED_AT = new Date("2026-07-30T12:00:00.000Z");
+const MAXIMUM_WIDTH_WORKOUT_MINUTES = 0.0000030024105450300988;
 
 type TestProjectionScope =
   | typeof PROFILE_SCOPE
@@ -66,11 +82,14 @@ type TestProjectionScope =
   | typeof DEEP_SLEEP_SOURCES_SCOPE
   | typeof REM_SLEEP_SCOPE
   | typeof WORKOUTS_SCOPE
+  | typeof HEART_RATE_ZONES_SCOPE
   | typeof DEVICE_SCOPE;
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+  mocks.isHostedRuntimeInactiveAccessError.mockReturnValue(false);
+  mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -116,6 +135,42 @@ function snapshot(input: {
       projectionScopeKey: share.projectionScopeKey,
     },
   });
+}
+
+function maximumWidthWorkoutRecords(): HostedVaultShareDeliveryRecord[] {
+  return Array.from(
+    { length: HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS },
+    (_, dayIndex): HostedVaultShareDeliveryRecord => {
+      const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+      return {
+        data: {
+          calendarClosedThroughDate: "2026-07-23",
+          date,
+          timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+          workouts: Array.from(
+            { length: HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY },
+            (_, workoutIndex) => {
+              const sourceIndex = Math.floor(
+                workoutIndex / HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+              );
+              const source = `${String.fromCharCode(97 + sourceIndex)}${"x".repeat(79)}`;
+              return {
+                kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
+                minutes: MAXIMUM_WIDTH_WORKOUT_MINUTES,
+                source: { label: source, source },
+                startLocalMs: 86_399_999 - workoutIndex,
+              };
+            },
+          ),
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "A".repeat(
+          HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+        ),
+      };
+    },
+  );
 }
 
 function installCiphertexts(values: Record<string, string>): void {
@@ -194,6 +249,86 @@ function createPrisma(input: {
     prisma: createPrismaClientTestDouble({ $transaction: transaction }),
     transaction,
   };
+}
+
+async function replaceAndReadProjectionRecords(input: {
+  id: string;
+  memberId: string;
+  participantId: string;
+  projectionScope: TestProjectionScope;
+  records: HostedVaultShareDeliveryRecord[];
+}): Promise<readonly HostedVaultShareDeliveryRecord[]> {
+  const row = shareRow(input);
+  let projectionSnapshotCiphertext: string | null = null;
+  const plaintextByCiphertext = new Map<string, string>();
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(value) {
+      const plaintext = plaintextByCiphertext.get(value.value);
+      if (plaintext === undefined) {
+        throw new Error("Synthetic projection ciphertext was not stored.");
+      }
+      return plaintext;
+    },
+    encrypt(value) {
+      const ciphertext = `ciphertext_${input.id}`;
+      plaintextByCiphertext.set(ciphertext, value.value);
+      return ciphertext;
+    },
+  });
+
+  const hostedVaultShareFindMany = vi.fn().mockImplementation(
+    (args: { where?: { id?: unknown } }) => Promise.resolve(
+      args.where?.id
+        ? [{ id: row.id, projectionSnapshotCiphertext }]
+        : [row],
+    ),
+  );
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ version: 7n }]),
+    deviceConnection: { findMany: vi.fn().mockResolvedValue([]) },
+    hostedGroup: {
+      findUnique: vi.fn().mockResolvedValue({
+        members: [{ id: input.participantId, memberId: input.memberId }],
+      }),
+    },
+    hostedVaultShare: {
+      findMany: hostedVaultShareFindMany,
+      updateMany: vi.fn().mockImplementation((value: {
+        data: { projectionSnapshotCiphertext: string };
+      }) => {
+        projectionSnapshotCiphertext = value.data.projectionSnapshotCiphertext;
+        return Promise.resolve({ count: 1 });
+      }),
+    },
+  };
+  const prisma = createPrismaClientTestDouble({
+    $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+      await callback(tx)
+    ),
+  });
+
+  await expect(replaceHostedVaultShareProjectionSnapshot({
+    prisma,
+    records: input.records,
+    share: {
+      destinationMemberId: row.destinationMemberId,
+      grantorMemberId: row.grantorMemberId,
+      id: row.id,
+      projectionKind: input.projectionScope.projectionKind,
+      projectionScope: input.projectionScope,
+      projectionScopeKey: row.projectionScopeKey,
+    },
+    sourceWorkspaceVersion: "7",
+  })).resolves.toBe("replaced");
+  const result = await readHostedGroupSharedDataByRuntimeMemberId({
+    prisma,
+    projectionScopes: [input.projectionScope],
+    runtimeMemberId: RUNTIME_MEMBER_ID,
+  });
+  if (result.status !== "ok") {
+    throw new Error("Expected the projected group snapshot to be readable.");
+  }
+  return result.members[0]?.projections[0]?.records ?? [];
 }
 
 describe("readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId", () => {
@@ -439,37 +574,8 @@ describe("readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId", () 
 
 describe("workouts.v0 snapshot bounds", () => {
   it("keeps the maximum parser-valid eight-date workout snapshot within its byte limit", () => {
-    // This finite in-range value exercises the longest JSON number spelling used
-    // by the bounded duration field rather than relying only on integer minutes.
-    const maximumWidthMinutes = 0.0000030024105450300988;
-    expect(JSON.stringify(maximumWidthMinutes)).toHaveLength(24);
-
-    const records = Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
-      (_, dayIndex): HostedVaultShareDeliveryRecord => {
-        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
-        return {
-          data: {
-            calendarClosedThroughDate: "2026-07-23",
-            date,
-            timeSemantics: "canonical-event-zone-or-vault-zone.v0",
-            workouts: Array.from(
-              { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
-              (_, workoutIndex) => ({
-                kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
-                minutes: maximumWidthMinutes,
-                startLocalMs: 86_399_999 - workoutIndex,
-              }),
-            ),
-          },
-          occurredAt: `${date}T00:00:00.000Z`,
-          recordKey: date,
-          sourceRevision: "A".repeat(
-            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
-          ),
-        };
-      },
-    );
+    expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
+    const records = maximumWidthWorkoutRecords();
 
     const serialized = snapshot({
       id: "share_workouts_maximum",
@@ -480,9 +586,26 @@ describe("workouts.v0 snapshot bounds", () => {
     const encoder = new TextEncoder();
 
     const snapshotBytes = encoder.encode(serialized).byteLength;
-    expect(snapshotBytes).toBe(18_352);
+    expect(snapshotBytes).toBeGreaterThan(250 * 1024);
     expect(snapshotBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+    );
+    const firstRecord = records[0];
+    if (!firstRecord || !("workouts" in firstRecord.data)) {
+      throw new Error("Missing maximum workouts fixture.");
+    }
+    const sourceCounts = new Map<string, number>();
+    for (const workout of firstRecord.data.workouts) {
+      const source = workout.source?.source;
+      if (!source) throw new Error("Missing maximum workout source fixture.");
+      sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+    }
+    expect(sourceCounts.size).toBe(HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+    expect([...sourceCounts.values()]).toEqual(
+      Array.from(
+        { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+        () => HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
+      ),
     );
   });
 
@@ -511,7 +634,115 @@ describe("workouts.v0 snapshot bounds", () => {
   });
 });
 
+describe("heart-rate-zones-days.v0 snapshot bounds", () => {
+  it("keeps the maximum parser-valid source-aware snapshot within its byte limit", () => {
+    const maximumWidthNumber = 0.0000030024105450300988;
+    const sources = Array.from({ length: 8 }, (_, index) => ({
+      label: `${"x".repeat(78)}-${index}`,
+      source: `${"x".repeat(78)}-${index}`,
+    }));
+    const records = Array.from(
+      { length: 7 * sources.length },
+      (_, recordIndex): HostedVaultShareDeliveryRecord => {
+        const dayIndex = Math.floor(recordIndex / sources.length);
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        const source = sources[recordIndex % sources.length];
+        if (!source) {
+          throw new Error("Missing bounded public source fixture.");
+        }
+        return {
+          data: {
+            date,
+            zones: Array.from(
+              { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+              (_, zone) => ({
+                durationMinutes: maximumWidthNumber,
+                label: "é".repeat(
+                  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+                ),
+                zone,
+              }),
+            ),
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.${source.source}`,
+          source,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    );
+
+    const serialized = snapshot({
+      id: "share_heart_rate_zones_maximum",
+      memberId: "member_heart_rate_zones_maximum",
+      projectionScope: HEART_RATE_ZONES_SCOPE,
+      records,
+    });
+    expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+    );
+  });
+});
+
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
+  it("reads source-recorded sleep times from the encrypted replacement snapshot", async () => {
+    const memberId = "member_projected_sleep";
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1_000)
+      .toISOString()
+      .slice(0, 10);
+    const records: HostedVaultShareDeliveryRecord[] = [
+      {
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          recordedAt: `${date}T06:58:00.000Z`,
+          unit: "minutes",
+          value: 64,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: `${date}.fitbit`,
+        source: { label: "fitbit", source: "fitbit" },
+      },
+      {
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          recordedAt: `${date}T07:01:00.000Z`,
+          unit: "minutes",
+          value: 88,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: `${date}.garmin`,
+        source: { label: "Garmin", source: "garmin" },
+      },
+    ];
+    await expect(replaceAndReadProjectionRecords({
+      id: "share_projected_sleep",
+      memberId,
+      participantId: "participant_projected_sleep",
+      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+      records,
+    })).resolves.toEqual(records);
+  });
+
+  it("reads the maximum source-tagged workout snapshot after encrypted replacement", async () => {
+    const records = maximumWidthWorkoutRecords();
+    const readRecords = await replaceAndReadProjectionRecords({
+      id: "share_projected_maximum_workouts",
+      memberId: "member_projected_maximum_workouts",
+      participantId: "participant_projected_maximum_workouts",
+      projectionScope: WORKOUTS_SCOPE,
+      records,
+    });
+    expect(readRecords).toEqual(records.map((record) => ({
+      data: record.data,
+      occurredAt: record.occurredAt,
+      recordKey: record.recordKey,
+    })));
+  });
+
   it("reports an active readable grant as pending until its first snapshot materializes", async () => {
     const pendingShare = shareRow({
       id: "share_steps_pending",
@@ -583,7 +814,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           value: 8123,
         },
         occurredAt: `${yesterday.toISOString().slice(0, 10)}T00:00:00.000Z`,
-        recordKey: yesterday.toISOString().slice(0, 10),
+        recordKey: `${yesterday.toISOString().slice(0, 10)}.garmin`,
+        source: { label: "Garmin", source: "garmin" },
       }],
     });
     const stepsB = snapshot({
@@ -645,6 +877,10 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     });
     expect(result.members[0]?.projections[1]?.records[0]?.data).toMatchObject({
       sources: [],
+    });
+    expect(result.members[0]?.projections[0]?.records[0]?.source).toEqual({
+      label: "Garmin",
+      source: "garmin",
     });
     expect(result.members[1]).toMatchObject({
       displayName: "Alex",
@@ -945,7 +1181,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(JSON.stringify(result)).not.toContain("sourceRevision");
   });
 
-  it("lets a frozen v0 sleep read consume only the canonical value from a v1 grant", async () => {
+  it("lets a frozen v0 sleep read retain every tagged value from a v1 grant", async () => {
     const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
@@ -953,36 +1189,34 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       id: "share_deep_sources_for_legacy_read",
       memberId: "member_legacy_reader",
       projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
-      records: [{
-        data: {
-          date,
-          metricKey: "deep-sleep-minutes",
-          projectedAt: `${date}T12:00:00.000Z`,
-          sources: [
-            {
-              label: "fitbit",
-              recordedAt: `${date}T06:58:00.000Z`,
-              source: "fitbit",
-              unit: "minutes",
-              value: 64,
-            },
-            {
-              label: "Garmin",
-              recordedAt: `${date}T07:01:00.000Z`,
-              selected: true as const,
-              source: "garmin",
-              unit: "minutes",
-              value: 88,
-            },
-          ],
-          sourcesDisagree: true,
-          unit: "minutes",
-          value: 88,
+      records: [
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T06:58:00.000Z`,
+            unit: "minutes",
+            value: 64,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.fitbit`,
+          source: { label: "fitbit", source: "fitbit" },
+          sourceRevision: "E".repeat(32),
         },
-        occurredAt: `${date}T00:00:00.000Z`,
-        recordKey: date,
-        sourceRevision: "E".repeat(32),
-      }],
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T07:01:00.000Z`,
+            unit: "minutes",
+            value: 88,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.garmin`,
+          source: { label: "Garmin", source: "garmin" },
+          sourceRevision: "F".repeat(32),
+        },
+      ],
     });
     installCiphertexts({ sourceAwareSleep });
     const { prisma } = createPrisma({
@@ -1015,20 +1249,34 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       grantStatus: "granted",
       projectionScope: DEEP_SLEEP_SCOPE,
       projectionScopeKey: DEEP_SLEEP_KEY,
-      records: [{
-        data: {
-          date,
-          metricKey: "deep-sleep-minutes",
-          unit: "minutes",
-          value: 88,
+      records: [
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T06:58:00.000Z`,
+            unit: "minutes",
+            value: 64,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.fitbit`,
+          source: { label: "fitbit", source: "fitbit" },
         },
-        occurredAt: `${date}T00:00:00.000Z`,
-        recordKey: date,
-      }],
+        {
+          data: {
+            date,
+            metricKey: "deep-sleep-minutes",
+            recordedAt: `${date}T07:01:00.000Z`,
+            unit: "minutes",
+            value: 88,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.garmin`,
+          source: { label: "Garmin", source: "garmin" },
+        },
+      ],
     });
-    expect(JSON.stringify(result)).not.toMatch(
-      /fitbit|Garmin|garmin|projectedAt|recordedAt|selected|sourcesDisagree|sourceRevision/u,
-    );
+    expect(JSON.stringify(result)).not.toMatch(/projectedAt|selected|sourcesDisagree|sourceRevision/u);
   });
 
   it("prefers an exact v0 sleep grant over a v1 compatibility fallback", async () => {

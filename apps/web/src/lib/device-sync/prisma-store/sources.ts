@@ -5,6 +5,11 @@ import type {
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import {
+  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "@murphai/device-syncd/public-account";
 
 import {
   generateHostedRandomPrefixedId,
@@ -36,6 +41,21 @@ export const hostedConnectionSourceRecordArgs = {
 
 export type HostedConnectionSourceRecord =
   Prisma.DeviceConnectionSourceGetPayload<typeof hostedConnectionSourceRecordArgs>;
+
+const hostedConnectionSourceAdmissionArgs = {
+  select: {
+    id: true,
+    lastErrorCode: true,
+    lastErrorMessage: true,
+    lastSeenAt: true,
+    sourceInstanceKey: true,
+    sourceProviderSlug: true,
+    status: true,
+  },
+} satisfies Prisma.DeviceConnectionSourceDefaultArgs;
+
+export type HostedConnectionSourceAdmissionCandidate =
+  Prisma.DeviceConnectionSourceGetPayload<typeof hostedConnectionSourceAdmissionArgs>;
 
 export interface HostedDeviceConnectionSource {
   id: string;
@@ -273,6 +293,61 @@ export class PrismaHostedConnectionSourceStore {
     });
 
     return records.map(mapHostedConnectionSourceRecord);
+  }
+
+  async listConnectionSourceAdmissionCandidates(input: {
+    connectionId: string;
+    sourceProviderSlug: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
+    const prisma = input.tx ?? this.prisma;
+    const connectionId = requireConnectionId(input.connectionId);
+    const sourceProviderSlug = normalizeSourceProviderSlug(input.sourceProviderSlug);
+    const admitted = await prisma.deviceConnectionSource.findMany({
+      where: {
+        connectionId,
+        sourceProviderSlug,
+        status: "connected",
+        OR: [
+          { lastErrorCode: null },
+          {
+            NOT: {
+              lastErrorCode: {
+                in: [
+                  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+                  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+                  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+                ],
+              },
+            },
+          },
+        ],
+      },
+      orderBy: [
+        { lastSeenAt: "desc" },
+        { sourceInstanceKey: "asc" },
+        { id: "asc" },
+      ],
+      take: 1,
+      ...hostedConnectionSourceAdmissionArgs,
+    });
+    if (admitted.length > 0) {
+      return admitted;
+    }
+
+    return prisma.deviceConnectionSource.findMany({
+      where: {
+        connectionId,
+        sourceProviderSlug,
+      },
+      orderBy: [
+        { lastSeenAt: "desc" },
+        { sourceInstanceKey: "asc" },
+        { id: "asc" },
+      ],
+      take: 1,
+      ...hostedConnectionSourceAdmissionArgs,
+    });
   }
 
   async listConnectionSourcesForConnections(

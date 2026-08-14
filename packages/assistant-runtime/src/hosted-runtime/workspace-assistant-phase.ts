@@ -46,6 +46,7 @@ import {
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
+  type AssistantAutomationTimingVerificationIssue,
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
@@ -76,6 +77,7 @@ import {
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
+  type AutomationRecord,
 } from "@murphai/core";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
@@ -940,6 +942,7 @@ function readHostedInitialAssistantInputIds(
 
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  redactedLogEntries: HostedExecutionRedactedLogEntry[],
 ): AssistantAutomationOperationScope {
   return {
     async runAutoReplyGroup<T>(scopeInput: {
@@ -977,6 +980,7 @@ function createHostedAssistantAutomationOperationScope(
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
+        redactedLogEntries,
         route,
         vaultRoot: input.restored.vaultRoot,
       });
@@ -1388,6 +1392,7 @@ type HostedAssistantAutomationTool = NonNullable<
 
 function scopeHostedAutomationToolToAssistantOperation(input: {
   executionContext: AssistantExecutionContext;
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute | null;
   vaultRoot: string;
 }): AssistantExecutionContext {
@@ -1405,6 +1410,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
       && input.route.threadIsDirect === false
     )
     ? createHostedAssistantAutomationTool({
+        redactedLogEntries: input.redactedLogEntries,
         route: input.route,
         vaultRoot: input.vaultRoot,
       })
@@ -1419,6 +1425,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
 }
 
 function createHostedAssistantAutomationTool(input: {
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute;
   vaultRoot: string;
 }): HostedAssistantAutomationTool {
@@ -1513,6 +1520,7 @@ function createHostedAssistantAutomationTool(input: {
             : { assistantTargetOverride: request.assistantTargetOverride }),
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
+          createOnly: true,
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
@@ -1539,6 +1547,7 @@ function createHostedAssistantAutomationTool(input: {
         });
         return await buildHostedAutomationToolResponse({
           action: "save",
+          redactedLogEntries: input.redactedLogEntries,
           result,
           routeBinding: "current_conversation",
           vaultRoot: input.vaultRoot,
@@ -1557,6 +1566,14 @@ function createHostedAssistantAutomationTool(input: {
         );
       }
       context?.signal?.throwIfAborted();
+      if (request.action === "inspect") {
+        return await buildHostedAutomationToolResponse({
+          action: "inspect",
+          record: existing,
+          routeBinding: "preserved",
+          vaultRoot: input.vaultRoot,
+        });
+      }
       const route = request.retargetToCurrentConversation === true
         ? currentRoute
         : existing.route;
@@ -1574,6 +1591,7 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.continuityPolicy === undefined
           ? {}
           : { continuityPolicy: request.continuityPolicy }),
+        expectedUpdatedAt: request.expectedUpdatedAt,
         ...(request.instructions === undefined
           ? {}
           : {
@@ -1608,6 +1626,7 @@ function createHostedAssistantAutomationTool(input: {
       });
       return await buildHostedAutomationToolResponse({
         action: "patch",
+        redactedLogEntries: input.redactedLogEntries,
         result,
         routeBinding: request.retargetToCurrentConversation === true
           ? "current_conversation"
@@ -1629,6 +1648,33 @@ function stripHostedAssistantAvailabilityConflictBlock(
     }
     throw error;
   }
+}
+
+function buildHostedAutomationTimingVerificationLogEntry(input: {
+  action: "patch" | "save";
+  issues: readonly AssistantAutomationTimingVerificationIssue[];
+  recovered: boolean;
+  stage: "initial" | "readback";
+}): HostedExecutionRedactedLogEntry {
+  return {
+    component: "automation.tool",
+    level: "info",
+    message: input.recovered
+      ? "Hosted automation timing verification recovered after automatic readback."
+      : "Hosted automation timing verification was incomplete.",
+    phase: "timing-verification",
+    redacted: {
+      ...(input.recovered
+        ? {}
+        : { errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED" }),
+      automationTimingVerificationAction: input.action,
+      automationTimingVerificationIssues: [...input.issues],
+      automationTimingVerificationRecovered: input.recovered,
+      automationTimingVerificationStage: input.stage,
+      schema: "murph.hosted-automation-timing-verification.v1",
+      type: "automation.timing-verification",
+    },
+  };
 }
 
 function normalizeHostedAutomationSupportTags(input: {
@@ -1675,19 +1721,34 @@ function assertActiveHostedAutomationRoute(input: {
   }
 }
 
-async function buildHostedAutomationToolResponse(input: {
-  action: "patch" | "save";
-  result: Awaited<ReturnType<typeof upsertAutomation>>;
-  routeBinding: "current_conversation" | "preserved";
+type HostedAutomationToolResponseInput =
+  | {
+      action: "inspect";
+      record: AutomationRecord;
+      routeBinding: "preserved";
+      vaultRoot: string;
+    }
+  | {
+      action: "patch" | "save";
+      redactedLogEntries: HostedExecutionRedactedLogEntry[];
+      result: Awaited<ReturnType<typeof upsertAutomation>>;
+      routeBinding: "current_conversation" | "preserved";
+      vaultRoot: string;
+    };
+
+async function projectHostedAutomationResponseFields(input: {
+  record: AutomationRecord;
   vaultRoot: string;
-}): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
-  const schedule = input.result.record.schedule;
+}) {
+  const schedule = input.record.schedule;
   let effectiveTimeZone =
     schedule.kind === "cron" || schedule.kind === "dailyLocal"
       ? schedule.timeZone ?? null
       : null;
   let nextOccurrenceAt: string | null = null;
-  let timingVerified = true;
+  const timingVerificationIssues = new Set<
+    AssistantAutomationTimingVerificationIssue
+  >();
   let defaultTimeZone: string | undefined;
   if (schedule.kind !== "deviceActivity") {
     const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
@@ -1700,12 +1761,12 @@ async function buildHostedAutomationToolResponse(input: {
     ) {
       effectiveTimeZone = timeZoneProjection.timeZone;
       if (!timeZoneProjection.vaultTimeZoneVerified) {
-        timingVerified = false;
+        timingVerificationIssues.add("default_timezone_unverified");
       }
     }
   }
   if (
-    input.result.record.status !== "archived"
+    input.record.status !== "archived"
     && schedule.kind !== "deviceActivity"
   ) {
     try {
@@ -1714,35 +1775,141 @@ async function buildHostedAutomationToolResponse(input: {
       }
       const projection = await getAssistantCronAutomationTimingProjection(
         input.vaultRoot,
-        input.result.record.relativePath,
+        input.record.relativePath,
         defaultTimeZone,
       );
       const { job } = projection;
       nextOccurrenceAt = projection.nextOccurrenceAt;
       if (!projection.occurrenceVerified) {
-        timingVerified = false;
+        timingVerificationIssues.add(
+          projection.occurrenceUnverifiedReason ?? "projection_unavailable",
+        );
       }
       if (
-        job.updatedAt !== input.result.record.updatedAt
+        job.updatedAt !== input.record.updatedAt
         || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
       ) {
-        timingVerified = false;
+        timingVerificationIssues.add("record_readback_mismatch");
       }
     } catch {
-      timingVerified = false;
+      timingVerificationIssues.add("projection_unavailable");
     }
   }
+  const timingVerificationIssueList = [...timingVerificationIssues];
   return {
-    action: input.action,
-    automationId: input.result.record.automationId,
-    created: input.result.created,
+    automationId: input.record.automationId,
     effectiveTimeZone,
-    lookupId: input.result.record.slug,
+    lookupId: input.record.slug,
     nextOccurrenceAt,
-    routeBinding: input.routeBinding,
     schedule,
-    status: input.result.record.status,
-    timingVerified,
+    status: input.record.status,
+    timingVerificationIssues: timingVerificationIssueList,
+    timingVerified: timingVerificationIssueList.length === 0,
+    updatedAt: input.record.updatedAt,
+  };
+}
+
+async function buildHostedAutomationToolResponse(
+  input: HostedAutomationToolResponseInput,
+): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
+  const record = input.action === "inspect" ? input.record : input.result.record;
+  const responseFields = await projectHostedAutomationResponseFields({
+    record,
+    vaultRoot: input.vaultRoot,
+  });
+  if (input.action === "inspect") {
+    return {
+      action: "inspect" as const,
+      ...responseFields,
+      routeBinding: "preserved" as const,
+    };
+  }
+
+  const response: HostedAssistantAutomationWriteResponse = {
+    action: input.action,
+    ...responseFields,
+    created: input.result.created,
+    routeBinding: input.routeBinding,
+  };
+  if (response.timingVerified) {
+    return response;
+  }
+  input.redactedLogEntries.push(
+    buildHostedAutomationTimingVerificationLogEntry({
+      action: input.action,
+      issues: response.timingVerificationIssues ?? [],
+      recovered: false,
+      stage: "initial",
+    }),
+  );
+
+  let readbackResponse = response;
+  try {
+    const readbackRecord = await showAutomation({
+      automationId: record.automationId,
+      vaultRoot: input.vaultRoot,
+    });
+    if (!readbackRecord) {
+      readbackResponse = markHostedAutomationTimingUnverified(
+        response,
+        "record_readback_mismatch",
+      );
+    } else {
+      const readbackFields = await projectHostedAutomationResponseFields({
+        record: readbackRecord,
+        vaultRoot: input.vaultRoot,
+      });
+      const projectedReadback: HostedAssistantAutomationWriteResponse = {
+        action: input.action,
+        ...readbackFields,
+        created: input.result.created,
+        routeBinding: input.routeBinding,
+      };
+      const recordChanged =
+        readbackRecord.updatedAt !== record.updatedAt
+        || JSON.stringify(readbackRecord.schedule)
+          !== JSON.stringify(record.schedule);
+      readbackResponse = recordChanged
+        ? markHostedAutomationTimingUnverified(
+            projectedReadback,
+            "record_readback_mismatch",
+          )
+        : projectedReadback;
+    }
+  } catch {
+    readbackResponse = markHostedAutomationTimingUnverified(
+      response,
+      "projection_unavailable",
+    );
+  }
+  input.redactedLogEntries.push(
+    buildHostedAutomationTimingVerificationLogEntry({
+      action: input.action,
+      issues: readbackResponse.timingVerificationIssues ?? [],
+      recovered: readbackResponse.timingVerified,
+      stage: "readback",
+    }),
+  );
+  return readbackResponse;
+}
+
+type HostedAssistantAutomationWriteResponse = Extract<
+  Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>,
+  { action: "patch" | "save" }
+>;
+
+function markHostedAutomationTimingUnverified(
+  response: HostedAssistantAutomationWriteResponse,
+  issue: AssistantAutomationTimingVerificationIssue,
+): HostedAssistantAutomationWriteResponse {
+  return {
+    ...response,
+    nextOccurrenceAt: null,
+    timingVerificationIssues: [...new Set([
+      ...(response.timingVerificationIssues ?? []),
+      issue,
+    ])],
+    timingVerified: false,
   };
 }
 
@@ -2042,7 +2209,11 @@ export async function runHostedWorkspaceAssistantPhase(
     },
   );
   const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
-  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
+  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(
+    input,
+    assistantAutomationRedactedLogEntries,
+  );
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const systemMailboxMaintenanceStartedAt = Date.now();
@@ -2168,7 +2339,6 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
-    const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
@@ -3804,8 +3974,8 @@ function shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
 function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
   typeof recordHostedDeviceSyncDirtyPostCheckpointRecord
 >[0]): DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
-  return {
-    afterDurableCheckpoint: async () => {
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
+    async () => {
       try {
         const result = await recordHostedDeviceSyncDirtyPostCheckpointRecord(input);
         return result.nextWakeAt
@@ -3840,6 +4010,16 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
         };
       }
     },
+    {
+      vaultShareProjectionFailureWake: {
+        nextWakeAt: resolveHostedDeviceSyncDirtyAckFailureWakeAt(input.record),
+        nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+        requiresFollowUpCheckpoint: true,
+      },
+    },
+  );
+  return {
+    afterDurableCheckpoint,
     nextWakeAt: input.record.nextWakeAt ?? null,
     redactedStatus: {
       hostedDeviceSyncDirtyAckDeferred: true,

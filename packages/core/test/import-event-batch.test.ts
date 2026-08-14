@@ -7,7 +7,9 @@ import { test } from "vitest";
 import type { AuditRecord, EventRecord } from "@murphai/contracts";
 
 import {
+  deleteEvent,
   findEventByExternalRef,
+  findEventsByRawRefs,
   importEventBatch,
   initializeVault,
   listHistoryEvents,
@@ -88,6 +90,56 @@ function buildClinicalMeasurementPayload(version: string, value = 72) {
     },
   };
 }
+
+test("findEventsByRawRefs returns immutable attachments and latest lifecycle state", async () => {
+  const vaultRoot = await makeVault("event-raw-ref-batch");
+  const rawRef = "raw/workouts/2026/03/batch/source.csv";
+  await importEventBatch({
+    vaultRoot,
+    payloads: [
+      { ...buildObservationPayload(1, "efficiency", 90), rawRefs: [rawRef] },
+      { ...buildObservationPayload(2, "efficiency", 91), rawRefs: [rawRef] },
+    ],
+    apply: true,
+  });
+
+  const firstLookup = await findEventsByRawRefs({
+    vaultRoot,
+    rawRefs: [rawRef, "raw/workouts/missing.csv"],
+    system: "whoop",
+    resourceType: "sleep",
+  });
+
+  assert.deepEqual(
+    firstLookup[0]?.map((match) => match.latest.externalRef?.resourceId),
+    ["sleep-2026-03-01", "sleep-2026-03-02"],
+  );
+  assert.deepEqual(firstLookup[1], []);
+
+  const firstEventId = firstLookup[0]![0]!.latest.id;
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      ...buildObservationPayload(1, "efficiency", 90),
+      id: firstEventId,
+      occurredAt: "2026-03-05T06:50:00.000Z",
+      title: "Edited title",
+      rawRefs: [],
+    },
+  });
+  await deleteEvent({ vaultRoot, eventId: firstEventId });
+
+  const [matches] = await findEventsByRawRefs({
+    vaultRoot,
+    rawRefs: [rawRef],
+    system: "whoop",
+    resourceType: "sleep",
+  });
+  assert.equal(matches?.[0]?.attachment.title, "Sleep efficiency 2026-03-01");
+  assert.equal(matches?.[0]?.latest.title, "Edited title");
+  assert.equal(matches?.[0]?.latest.lifecycle?.state, "deleted");
+  assert.equal(matches?.[0]?.latest.rawRefs, undefined);
+});
 
 function buildClinicalTestPayload(version: string) {
   return {
@@ -193,6 +245,89 @@ test("importEventBatch apply writes all rows once and re-runs are idempotent", a
 
   const recordsAfterRerun = await readEventShard(vaultRoot, shardPath);
   assert.equal(recordsAfterRerun.length, 4);
+});
+
+test("importEventBatch expected-latest fences reject edit and delete races atomically", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-expected-latest");
+  const initialPayloads = [10, 11].map((day) => {
+    const payload = buildSleepSessionPayload(day);
+    return {
+      ...payload,
+      externalRef: {
+        ...payload.externalRef,
+        version: `2026-03-${day}T08:00:00.000Z`,
+      },
+    };
+  });
+  const seeded = await importEventBatch({
+    vaultRoot,
+    decisions: initialPayloads.map((payload) => ({ action: "upsert", payload })),
+    apply: true,
+  });
+  const [firstId, secondId] = seeded.eventIds;
+  assert.ok(firstId);
+  assert.ok(secondId);
+
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      ...initialPayloads[0],
+      id: firstId,
+      title: "Member-edited sleep",
+    },
+  });
+  const shardPath = seeded.eventShardPaths[0]!;
+  const auditPath = seeded.auditPath!;
+  const rowsAfterEdit = (await readEventShard(vaultRoot, shardPath)).length;
+  const auditsAfterEdit = (await readJsonlRecords({ vaultRoot, relativePath: auditPath })).length;
+  const correctionDecisions = initialPayloads.map((payload, index) => ({
+    action: "upsert" as const,
+    payload: {
+      ...payload,
+      title: `Corrected sleep ${index + 1}`,
+      externalRef: {
+        ...payload.externalRef,
+        version: "2026-04-01T00:00:00.000Z",
+      },
+    },
+    expectedLatest: {
+      eventId: index === 0 ? firstId : secondId,
+      lifecycleRevision: 1,
+    },
+  }));
+
+  await assert.rejects(
+    importEventBatch({ vaultRoot, decisions: correctionDecisions, apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_EXPECTED_LATEST_MISMATCH");
+      return true;
+    },
+  );
+  assert.equal((await readEventShard(vaultRoot, shardPath)).length, rowsAfterEdit);
+  assert.equal(
+    (await readJsonlRecords({ vaultRoot, relativePath: auditPath })).length,
+    auditsAfterEdit,
+  );
+
+  await deleteEvent({ vaultRoot, eventId: firstId });
+  const rowsAfterDelete = (await readEventShard(vaultRoot, shardPath)).length;
+  const auditsAfterDelete = (await readJsonlRecords({ vaultRoot, relativePath: auditPath })).length;
+  correctionDecisions[0]!.expectedLatest.lifecycleRevision = 2;
+
+  await assert.rejects(
+    importEventBatch({ vaultRoot, decisions: correctionDecisions, apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_EXPECTED_LATEST_MISMATCH");
+      return true;
+    },
+  );
+  assert.equal((await readEventShard(vaultRoot, shardPath)).length, rowsAfterDelete);
+  assert.equal(
+    (await readJsonlRecords({ vaultRoot, relativePath: auditPath })).length,
+    auditsAfterDelete,
+  );
 });
 
 test("importEventBatch aborts interruptible history planning before the canonical commit", async () => {

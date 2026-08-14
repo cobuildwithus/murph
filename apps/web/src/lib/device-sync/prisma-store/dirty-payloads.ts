@@ -1,9 +1,23 @@
 import { promisify } from "node:util";
 import { zstdCompress, zstdDecompress } from "node:zlib";
 
+import type { Prisma } from "@prisma/client";
 import {
+  getHostedCryptoDomainForLane,
+  type HostedCryptoDomain,
+} from "@murphai/runtime-state";
+
+import {
+  prepareHostedDomainRootForWeb,
+  readPreparedHostedDomainRootForWebLocal,
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
+} from "../../hosted-crypto/domain-root-store";
+import {
+  isHostedSecureBoxStringTestCodecConfiguredForTests,
   openHostedUserSecureBoxString,
   sealHostedUserSecureBoxString,
+  sealHostedUserSecureBoxStringFromPreparedRoot,
   type HostedSecureBoxPrismaClient,
 } from "../../hosted-crypto/secure-box";
 
@@ -11,6 +25,26 @@ const zstdCompressAsync = promisify(zstdCompress);
 const zstdDecompressAsync = promisify(zstdDecompress);
 
 const HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_SCHEMA = "murph.hosted-device-sync-dirty-payload.v1";
+const HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_DOMAIN =
+  getHostedCryptoDomainForLane("device-sync-payload");
+
+type PreparedHostedDeviceSyncDirtyPayloadCryptoDetails =
+  | { mode: "test-codec" }
+  | {
+      mode: "prepared-root";
+      preparedRoot: PreparedHostedDomainRootForWeb;
+    };
+
+const preparedHostedDeviceSyncDirtyPayloadCrypto = new WeakMap<
+  PreparedHostedDeviceSyncDirtyPayloadCrypto,
+  PreparedHostedDeviceSyncDirtyPayloadCryptoDetails
+>();
+
+export interface PreparedHostedDeviceSyncDirtyPayloadCrypto {
+  readonly domain: HostedCryptoDomain;
+  readonly rootKeyId: string;
+  readonly userId: string;
+}
 
 type HostedDeviceSyncDirtyPayloadEnvelopeV1 = {
   data: string;
@@ -18,6 +52,55 @@ type HostedDeviceSyncDirtyPayloadEnvelopeV1 = {
   encoding: "base64url";
   schema: typeof HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_SCHEMA;
 };
+
+export async function prepareHostedDeviceSyncDirtyPayloadCrypto(input: {
+  prisma: HostedSecureBoxPrismaClient;
+  userId: string;
+}): Promise<PreparedHostedDeviceSyncDirtyPayloadCrypto> {
+  if (isHostedSecureBoxStringTestCodecConfiguredForTests()) {
+    const prepared = Object.freeze({
+      domain: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_DOMAIN,
+      rootKeyId: "test-codec",
+      userId: input.userId,
+    });
+    preparedHostedDeviceSyncDirtyPayloadCrypto.set(prepared, {
+      mode: "test-codec",
+    });
+    return prepared;
+  }
+
+  const preparedRoot = await prepareHostedDomainRootForWeb({
+    domain: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_DOMAIN,
+    prepareMissing: false,
+    prisma: input.prisma,
+    reason: "device-sync.dirty-payload",
+    userId: input.userId,
+  });
+  const prepared = Object.freeze({
+    domain: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_DOMAIN,
+    rootKeyId: preparedRoot.rootKeyId,
+    userId: input.userId,
+  });
+  preparedHostedDeviceSyncDirtyPayloadCrypto.set(prepared, {
+    mode: "prepared-root",
+    preparedRoot,
+  });
+  return prepared;
+}
+
+export async function revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx(input: {
+  prepared: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const details = requirePreparedHostedDeviceSyncDirtyPayloadCrypto(input.prepared);
+  if (details.mode === "test-codec") {
+    return;
+  }
+  await revalidatePreparedHostedDomainRootForWebTx({
+    prepared: details.preparedRoot,
+    tx: input.tx,
+  });
+}
 
 export async function sealHostedDeviceSyncDirtyPayloadJson(input: {
   connectionId: string;
@@ -49,6 +132,57 @@ export async function sealHostedDeviceSyncDirtyPayloadJson(input: {
     throw new TypeError("Hosted device-sync dirty payload encryption returned an empty ciphertext.");
   }
 
+  return encrypted;
+}
+
+export async function sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto(input: {
+  connectionId: string;
+  dirtyRevision: bigint;
+  payloadId: string;
+  prepared: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  provider: string;
+  userId: string;
+  value: unknown;
+}): Promise<string> {
+  const details = requirePreparedHostedDeviceSyncDirtyPayloadCrypto(input.prepared);
+  if (
+    input.prepared.domain !== HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_DOMAIN
+    || input.prepared.userId !== input.userId
+    || input.prepared.rootKeyId.trim().length === 0
+  ) {
+    throw new TypeError(
+      "Hosted device-sync dirty payload prepared crypto identity does not match the payload.",
+    );
+  }
+
+  const plaintext = Buffer.from(JSON.stringify(input.value), "utf8");
+  const compressed = await zstdCompressAsync(plaintext);
+  const envelope: HostedDeviceSyncDirtyPayloadEnvelopeV1 = {
+    compression: "zstd",
+    data: compressed.toString("base64url"),
+    encoding: "base64url",
+    schema: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_SCHEMA,
+  };
+  const sealInput = {
+    aad: buildHostedDeviceSyncDirtyPayloadAad(input),
+    lane: "device-sync-payload" as const,
+    scope: buildHostedDeviceSyncDirtyPayloadScope(input.payloadId),
+    userId: input.userId,
+    value: JSON.stringify(envelope),
+  };
+  const encrypted = details.mode === "test-codec"
+    ? await sealHostedUserSecureBoxString(sealInput)
+    : await sealHostedUserSecureBoxStringFromPreparedRoot({
+        ...sealInput,
+        preparedRoot: readPreparedHostedDomainRootForWebLocal(
+          details.preparedRoot,
+        ).root,
+        preparedRootKeyId: input.prepared.rootKeyId,
+      });
+
+  if (!encrypted) {
+    throw new TypeError("Hosted device-sync dirty payload encryption returned an empty ciphertext.");
+  }
   return encrypted;
 }
 
@@ -123,4 +257,19 @@ function parseHostedDeviceSyncDirtyPayloadEnvelope(
     encoding: "base64url",
     schema: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_SCHEMA,
   };
+}
+
+function requirePreparedHostedDeviceSyncDirtyPayloadCrypto(
+  prepared: PreparedHostedDeviceSyncDirtyPayloadCrypto,
+): PreparedHostedDeviceSyncDirtyPayloadCryptoDetails {
+  if (!prepared || typeof prepared !== "object") {
+    throw new TypeError("Hosted device-sync dirty payload requires prepared crypto.");
+  }
+  const details = preparedHostedDeviceSyncDirtyPayloadCrypto.get(prepared);
+  if (!details) {
+    throw new TypeError(
+      "Hosted device-sync dirty payload prepared crypto is not the exact request-local capability.",
+    );
+  }
+  return details;
 }

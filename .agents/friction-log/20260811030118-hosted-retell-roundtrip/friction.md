@@ -1,6 +1,7 @@
 ---
 title: 'Hosted Retell roundtrip E2E combines its TypeScript preload with the tsx loader'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1652'
 ---
 
 ## Expected Behavior

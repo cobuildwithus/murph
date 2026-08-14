@@ -246,7 +246,7 @@ describe('assistant current delivery route', () => {
     })
   })
 
-  it('validates email automation delivery routes by runtime profile', () => {
+  it('hard-cuts local email automations while preserving hosted email validation', () => {
     expect(
       getAssistantAutomationRouteDeliverabilityIssue({
         channel: 'email',
@@ -256,7 +256,28 @@ describe('assistant current delivery route', () => {
         threadId: null,
       }),
     ).toMatchObject({
-      code: 'email_identity_required',
+      code: 'email_local_unsupported',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: serializeHostedEmailThreadTarget({
+            cc: [],
+            lastMessageId: '<message@example.test>',
+            references: [],
+            subject: 'Status',
+            to: ['friend@example.test'],
+          }),
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        'local',
+      ),
+    ).toMatchObject({
+      code: 'email_local_unsupported',
     })
 
     expect(
@@ -265,31 +286,6 @@ describe('assistant current delivery route', () => {
           channel: 'email',
           deliveryTarget: 'friend@example.test',
           identityId: null,
-          participantId: null,
-          threadId: null,
-        },
-        'hosted',
-      ),
-    ).toBeNull()
-
-    expect(
-      getAssistantAutomationRouteDeliverabilityIssue({
-        channel: 'email',
-        deliveryTarget: 'friend@example.test',
-        identityId: 'hid_email_identity',
-        participantId: null,
-        threadId: null,
-      }),
-    ).toMatchObject({
-      code: 'email_identity_required',
-    })
-
-    expect(
-      getAssistantAutomationRouteDeliverabilityIssue(
-        {
-          channel: 'email',
-          deliveryTarget: 'friend@example.test',
-          identityId: 'hid_email_identity',
           participantId: null,
           threadId: null,
         },
@@ -342,27 +338,6 @@ describe('assistant current delivery route', () => {
             lastMessageId: '<message@example.test>',
             references: [],
             subject: 'Status',
-            to: [],
-          }),
-          identityId: 'inbox_123',
-          participantId: null,
-          threadId: null,
-        },
-        'local',
-      ),
-    ).toMatchObject({
-      code: 'email_hosted_thread_target_recipient_required',
-    })
-
-    expect(
-      getAssistantAutomationRouteDeliverabilityIssue(
-        {
-          channel: 'email',
-          deliveryTarget: serializeHostedEmailThreadTarget({
-            cc: [],
-            lastMessageId: '<message@example.test>',
-            references: [],
-            subject: 'Status',
             to: ['friend@example.test'],
           }),
           identityId: null,
@@ -374,95 +349,30 @@ describe('assistant current delivery route', () => {
     ).toBeNull()
 
     expect(
-      getAssistantAutomationRouteDeliverabilityIssue({
-        channel: 'email',
-        deliveryTarget: 'h1_333333333333333333333333',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      }),
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: 'h1_333333333333333333333333',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        'hosted',
+      ),
     ).toMatchObject({
       code: 'email_private_delivery_target',
     })
 
     expect(
-      getAssistantAutomationRouteDeliverabilityIssue({
-        channel: 'email',
-        deliveryTarget: null,
-        identityId: null,
-        participantId: null,
-        threadId: 'h1_333333333333333333333333',
-      }),
-    ).toMatchObject({
-      code: 'email_delivery_target_required',
-    })
-
-    expect(
       getAssistantAutomationRouteDeliverabilityIssue(
         {
           channel: 'email',
           deliveryTarget: null,
-          identityId: 'inbox_123',
+          identityId: null,
           participantId: null,
           threadId: 'thread_123',
         },
         'hosted',
-      ),
-    ).toMatchObject({
-      code: 'email_delivery_target_required',
-    })
-
-    expect(
-      getAssistantAutomationRouteDeliverabilityIssue(
-        {
-          channel: 'email',
-          deliveryTarget: null,
-          identityId: 'inbox_123',
-          participantId: null,
-          threadId: 'thread_123',
-        },
-        'local',
-      ),
-    ).toBeNull()
-
-    expect(
-      getAssistantAutomationRouteDeliverabilityIssue(
-        {
-          channel: 'email',
-          deliveryTarget: null,
-          identityId: 'inbox_123',
-          participantId: 'friend@example.test',
-          threadId: null,
-        },
-        'hosted',
-      ),
-    ).toMatchObject({
-      code: 'email_delivery_target_required',
-    })
-
-    expect(
-      getAssistantAutomationRouteDeliverabilityIssue(
-        {
-          channel: 'email',
-          deliveryTarget: null,
-          identityId: 'inbox_123',
-          participantId: 'friend@example.test',
-          threadId: null,
-        },
-        'local',
-      ),
-    ).toBeNull()
-
-    expect(
-      getAssistantAutomationRouteDeliverabilityIssue(
-        {
-          channel: 'email',
-          deliveryTarget: null,
-          identityId: 'hid_email_identity',
-          participantId: null,
-          threadId: 'hid_email_thread',
-        },
-        'local',
       ),
     ).toMatchObject({
       code: 'email_delivery_target_required',

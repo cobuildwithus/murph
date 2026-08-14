@@ -40,6 +40,16 @@ const HOSTED_USAGE_CREDIT_RETRYABLE_POSTGRES_CODES = new Set([
   "57014",
   "57P01",
 ]);
+const HOSTED_USAGE_CREDIT_RETRYABLE_GCP_KMS_PROVIDER_REASONS = new Set([
+  "ABORTED",
+  "ALREADY_EXISTS",
+  "CANCELLED",
+  "DEADLINE_EXCEEDED",
+  "INTERNAL",
+  "RESOURCE_EXHAUSTED",
+  "UNAVAILABLE",
+  "UNKNOWN",
+]);
 
 export const HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET = {
   kmsMaxOperations: HOSTED_USAGE_CREDIT_KMS_MAX_OPERATIONS,
@@ -454,19 +464,33 @@ export function isRetryableHostedUsageCreditDependencyError(error: unknown): boo
   if (!error || typeof error !== "object") {
     return false;
   }
-  if (
-    "code" in error &&
-    typeof error.code === "string" &&
-    error.code === "GOOGLE_CLOUD_API_ERROR"
-  ) {
+  if (!("code" in error) || typeof error.code !== "string") {
+    return error instanceof TypeError && error.message === "fetch failed";
+  }
+  if (error.code === "GOOGLE_CLOUD_API_ERROR") {
     const status = "status" in error && typeof error.status === "number"
       ? error.status
       : null;
     return status === null || status === 409 || status === 429 || status >= 500;
   }
+  if (error.code === "HOSTED_GCP_KMS_PROVIDER_ERROR") {
+    const status = "status" in error && typeof error.status === "number"
+      ? error.status
+      : null;
+    if (status !== null) {
+      return status === 408 || status === 409 || status === 429 || status >= 500;
+    }
+    const providerReason = "providerReason" in error &&
+        typeof error.providerReason === "string"
+      ? error.providerReason
+      : null;
+    // The KMS client performs no immediate provider retry. Its `retryable`
+    // field describes that local policy; durable reconciliation still retries
+    // transient provider outcomes on a later attempt.
+    return providerReason !== null &&
+      HOSTED_USAGE_CREDIT_RETRYABLE_GCP_KMS_PROVIDER_REASONS.has(providerReason);
+  }
   if (
-    "code" in error &&
-    typeof error.code === "string" &&
     (
       error.code === "ECONNABORTED" ||
       error.code === "ECONNREFUSED" ||
@@ -477,7 +501,7 @@ export function isRetryableHostedUsageCreditDependencyError(error: unknown): boo
   ) {
     return true;
   }
-  return error instanceof TypeError && error.message === "fetch failed";
+  return false;
 }
 
 function isDefinitiveHostedUsageCreditStripeRequestRejection(

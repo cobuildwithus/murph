@@ -1380,7 +1380,7 @@ export interface HostedRuntimeGroupSharedReadRequest {
 
 export type HostedRuntimeGroupSharedRecord = Pick<
   HostedVaultShareDeliveryRecord,
-  "data" | "occurredAt" | "recordKey"
+  "data" | "occurredAt" | "recordKey" | "source"
 >;
 
 export interface HostedRuntimeGroupSharedProjection {

@@ -695,11 +695,19 @@ export interface HostedRuntimeActionApprovalPort {
 export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(input?: {
     projectionMode?: HostedVaultShareProjectionMode;
+    signal?: AbortSignal | null;
   }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
-  ): Promise<HostedVaultShareDeliverResponse>;
+  ): Promise<HostedRuntimeVaultShareDeliverResult>;
 }
+
+export type HostedRuntimeVaultShareDeliverResult =
+  | HostedVaultShareDeliverResponse
+  | {
+    /** Web reached a terminal response, but this scope still needs retry. */
+    status: "scope-failed";
+  };
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;

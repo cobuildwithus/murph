@@ -1,6 +1,7 @@
 ---
 title: 'Sanctioned worktree install fails on transient storage-guard lock contention'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1741'
 ---
 
 ## Expected Behavior

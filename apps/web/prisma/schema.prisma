@@ -549,6 +549,16 @@ enum HostedPhysicalNoteStatus {
   failed
 }
 
+enum HostedPhysicalNoteFailureReason {
+  recipient_address
+  artwork
+  service_unavailable
+  request_invalid
+  prior_note_unresolved
+  prior_note_accepted
+  unknown
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -909,6 +919,7 @@ model HostedPhysicalNote {
   provider                 String                   @default("lob")
   providerLetterId         String?                  @unique @map("provider_letter_id")
   status                   HostedPhysicalNoteStatus @default(starting)
+  failureReason            HostedPhysicalNoteFailureReason? @map("failure_reason")
   complimentaryOfferCode   String?                  @map("complimentary_offer_code")
   providerCostUsdMicros    BigInt                   @map("provider_cost_usd_micros")
   pricingVersion           String                   @map("pricing_version")
@@ -919,6 +930,7 @@ model HostedPhysicalNote {
 
   @@unique([memberId, requestKey])
   @@unique([memberId, complimentaryOfferCode])
+  @@index([memberId, status, failureReason, createdAt])
   @@map("hosted_physical_note")
 }
 

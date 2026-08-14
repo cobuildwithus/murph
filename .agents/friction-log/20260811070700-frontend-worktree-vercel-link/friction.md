@@ -1,6 +1,7 @@
 ---
 title: 'Frontend-only worktree proof requires an unstated Vercel link'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1714'
 ---
 
 ## Expected Behavior

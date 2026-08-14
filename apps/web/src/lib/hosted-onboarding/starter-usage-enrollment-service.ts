@@ -28,8 +28,10 @@ import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import {
   activateHostedMemberForPositiveSourceTx,
+  buildHostedMemberActivationEventId,
 } from "./member-activation";
 import {
+  type HostedMemberActivationRuntimeWakeBestEffortResult,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import { readActiveHostedFamilySponsorship } from "./member-access";
@@ -94,18 +96,22 @@ export interface HostedLinqInstantStartStarterUsageEnrollmentResult
 }
 
 type HostedStarterUsageEnrollmentPolicy = {
+  allowSignupWelcomeWithoutAssignableLinqLine: boolean;
   instantStartAdmission?: {
     eventId: string;
     inviteCode: string;
   };
+  requireActivationRuntimeWake: boolean;
   requireLaunchConsent: boolean;
   source: HostedStarterUsageSource;
+  suppressSignupWelcomeEmail: boolean;
   suppressSignupWelcome: boolean;
 };
 
 type HostedStarterUsagePostCommitEffects = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -136,10 +142,16 @@ type PreparedHostedStarterUsageActivationCrypto = {
 export async function ensureHostedStarterUsageEnrollment(
   input: HostedStarterUsageEnrollmentInput,
 ): Promise<HostedStarterUsageEnrollmentResult> {
+  const suppressSignupWelcome = input.suppressSignupWelcome ?? false;
+  const companionOnboarding = input.source === "companion_onboarding";
   const enrollment = await ensureHostedStarterUsageEnrollmentWithPolicy(input, {
+    allowSignupWelcomeWithoutAssignableLinqLine: companionOnboarding,
+    requireActivationRuntimeWake: companionOnboarding,
     requireLaunchConsent: true,
     source: input.source,
-    suppressSignupWelcome: input.suppressSignupWelcome ?? false,
+    suppressSignupWelcome,
+    suppressSignupWelcomeEmail:
+      suppressSignupWelcome || companionOnboarding,
   });
   return enrollment.result;
 }
@@ -162,12 +174,15 @@ export async function ensureHostedLinqInstantStartStarterUsageEnrollment(
     ...(input.now ? { now: input.now } : {}),
     ...(input.prisma ? { prisma: input.prisma } : {}),
   }, {
+    allowSignupWelcomeWithoutAssignableLinqLine: false,
     instantStartAdmission: {
       eventId: input.admissionEventId,
       inviteCode: input.inviteCode,
     },
+    requireActivationRuntimeWake: false,
     requireLaunchConsent: false,
     source: "linq_instant_start",
+    suppressSignupWelcomeEmail: true,
     suppressSignupWelcome: true,
   });
   return {
@@ -187,6 +202,43 @@ export async function runHostedLinqInstantStartDeferredActivationWakeBestEffort(
     memberId: input.continuation.memberId,
     ...(input.prisma ? { prisma: input.prisma } : {}),
     source: "starter-usage.activation",
+  });
+}
+
+export async function retryPendingHostedStarterUsageActivationRuntimeWake(
+  input: {
+    memberId: string;
+    prisma?: PrismaClient;
+  },
+): Promise<HostedMemberActivationRuntimeWakeBestEffortResult | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const hostedExecutionEventId = buildHostedMemberActivationEventId({
+    memberId: input.memberId,
+    sourceEventId: buildHostedStarterUsageSemanticSourceKey(input.memberId),
+    sourceType: "hosted.starter_usage.enrolled",
+  });
+  const activation = await prisma.hostedMailboxItem.findUnique({
+    select: {
+      consumedAt: true,
+      id: true,
+    },
+    where: {
+      userId_dedupeKey: {
+        dedupeKey: hostedExecutionEventId,
+        userId: input.memberId,
+      },
+    },
+  });
+  if (!activation || activation.consumedAt) {
+    return null;
+  }
+
+  return signalHostedMemberActivationRuntimeWakeBestEffortResult({
+    hostedExecutionEventId,
+    mailboxItemId: activation.id,
+    memberId: input.memberId,
+    prisma,
+    source: "starter-usage.activation.retry",
   });
 }
 
@@ -328,6 +380,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
 
       const activation = shouldEnsureStarterGrant
         ? await activateHostedMemberForPositiveSourceTx({
+            allowSignupWelcomeWithoutAssignableLinqLine:
+              policy.allowSignupWelcomeWithoutAssignableLinqLine,
             dispatchContext: {
               eventCreatedAt: existingGrant?.effectiveAt ?? now,
               occurredAt: (existingGrant?.effectiveAt ?? now).toISOString(),
@@ -358,17 +412,29 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         : existingGrant
           ? "already_enrolled"
           : "enrolled";
+      const shouldWakeActivationRuntime = Boolean(
+        activation
+        && (
+          activation.activated
+          || (
+            policy.requireActivationRuntimeWake
+            && activation.hostedExecutionMailboxItemId
+          )
+        ),
+      );
       return {
         effects: {
-          activatedMemberId: activation?.activated
+          activatedMemberId: shouldWakeActivationRuntime
             ? invite.member.id
             : null,
-          hostedExecutionEventId:
-            activation?.activated
-              ? activation.hostedExecutionEventId
-              : null,
+          hostedExecutionEventId: shouldWakeActivationRuntime
+            ? activation?.hostedExecutionEventId ?? null
+            : null,
+          hostedExecutionMailboxItemId: shouldWakeActivationRuntime
+            ? activation?.hostedExecutionMailboxItemId ?? null
+            : null,
           welcomeEmailMemberId:
-            activation?.activated && !policy.suppressSignupWelcome
+            activation?.activated && !policy.suppressSignupWelcomeEmail
               ? invite.member.id
               : null,
         } satisfies HostedStarterUsagePostCommitEffects,
@@ -417,7 +483,7 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
   const deferredActivationWake = policy.instantStartAdmission
     ? buildHostedLinqInstantStartDeferredActivationWake(outcome.effects)
     : null;
-  await runHostedStarterUsagePostCommitEffects({
+  const postCommit = await runHostedStarterUsagePostCommitEffects({
     ...outcome.effects,
     ...(deferredActivationWake
       ? {
@@ -427,6 +493,18 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       : {}),
     prisma,
   });
+  if (
+    policy.requireActivationRuntimeWake
+    && postCommit.activationRuntimeWake
+    && !postCommit.activationRuntimeWake.accepted
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_STARTER_USAGE_RUNTIME_WAKE_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted Starter usage activation is waiting for runtime recovery.",
+      retryable: true,
+    });
+  }
 
   return {
     deferredActivationWake,
@@ -627,14 +705,19 @@ async function clearHostedLinqInstantStartAdmissionTx(input: {
 
 async function runHostedStarterUsagePostCommitEffects(
   input: HostedStarterUsagePostCommitEffects & { prisma: PrismaClient },
-): Promise<void> {
+): Promise<{
+  activationRuntimeWake: HostedMemberActivationRuntimeWakeBestEffortResult | null;
+}> {
+  let activationRuntimeWake: HostedMemberActivationRuntimeWakeBestEffortResult | null = null;
   if (input.activatedMemberId && input.hostedExecutionEventId) {
-    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
-      hostedExecutionEventId: input.hostedExecutionEventId,
-      memberId: input.activatedMemberId,
-      prisma: input.prisma,
-      source: "starter-usage.activation",
-    });
+    activationRuntimeWake =
+      await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+        hostedExecutionEventId: input.hostedExecutionEventId,
+        mailboxItemId: input.hostedExecutionMailboxItemId,
+        memberId: input.activatedMemberId,
+        prisma: input.prisma,
+        source: "starter-usage.activation",
+      });
   }
   if (input.welcomeEmailMemberId) {
     await sendHostedSignupWelcomeEmailForMemberBestEffort({
@@ -642,6 +725,7 @@ async function runHostedStarterUsagePostCommitEffects(
       prisma: input.prisma,
     });
   }
+  return { activationRuntimeWake };
 }
 
 function buildHostedLinqInstantStartDeferredActivationWake(

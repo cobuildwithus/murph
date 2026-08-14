@@ -18,6 +18,7 @@ import { ensureAssistantState } from './store/persistence.js'
 import {
   ASSISTANT_INPUT_EVENT_SCHEMA,
   readAssistantInputEvent,
+  resolveAssistantInputEventReferenceAt,
   type AssistantInputEventRecord,
 } from './input-store.js'
 import {
@@ -271,6 +272,11 @@ export type AssistantAcceptedTurnInputContentRef = z.infer<
   typeof assistantAcceptedTurnInputContentRefSchema
 >
 
+export interface AssistantAcceptedTurnInputReferenceWindow {
+  earliestAt: string
+  latestAt: string
+}
+
 export interface AssistantAcceptedTurnInputItemInput {
   acceptedAt?: string
   captureIds?: readonly string[]
@@ -286,6 +292,36 @@ export interface AssistantAcceptedTurnInputItemInput {
 export interface AssistantAcceptedTurnInputTranscriptRefUpdateInput {
   inputId: string
   transcriptRef: z.input<typeof assistantAcceptedTurnInputTranscriptRefSchema>
+}
+
+export function resolveAssistantAcceptedTurnInputReferenceWindow(
+  inputs: readonly AssistantAcceptedTurnInputItemInput[],
+): AssistantAcceptedTurnInputReferenceWindow | null {
+  if (inputs.length === 0) {
+    return null
+  }
+
+  let earliestAtMs: number | null = null
+  let latestAtMs: number | null = null
+  for (const input of inputs) {
+    const acceptedAtMs = Date.parse(input.acceptedAt ?? '')
+    if (!Number.isFinite(acceptedAtMs)) {
+      return null
+    }
+    if (earliestAtMs === null || acceptedAtMs < earliestAtMs) {
+      earliestAtMs = acceptedAtMs
+    }
+    if (latestAtMs === null || acceptedAtMs > latestAtMs) {
+      latestAtMs = acceptedAtMs
+    }
+  }
+  if (earliestAtMs === null || latestAtMs === null) {
+    return null
+  }
+  return {
+    earliestAt: new Date(earliestAtMs).toISOString(),
+    latestAt: new Date(latestAtMs).toISOString(),
+  }
 }
 
 export async function readAssistantAcceptedTurnInputJournal(
@@ -334,10 +370,7 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
     let appendedInputCount = 0
 
     for (const item of input.inputs) {
-      const parsed = parseAssistantAcceptedTurnInputItemInput({
-        acceptedAt: now,
-        input: item,
-      })
+      const parsed = parseAssistantAcceptedTurnInputItemInput(item)
       if (existingIds.has(parsed.id)) {
         continue
       }
@@ -415,6 +448,7 @@ export async function assertAssistantAcceptedTurnInputItemInputsAssistantInputEv
       )
     }
     assertAssistantAcceptedTurnInputEventMatchesRef({
+      acceptedAt: item.acceptedAt,
       event,
       inputId: item.id,
     })
@@ -751,23 +785,22 @@ async function writeAssistantAcceptedTurnInputJournalAtPaths(
   )
 }
 
-function parseAssistantAcceptedTurnInputItemInput(input: {
-  acceptedAt: string
-  input: AssistantAcceptedTurnInputItemInput
-}): AssistantAcceptedTurnInputItem {
+function parseAssistantAcceptedTurnInputItemInput(
+  input: AssistantAcceptedTurnInputItemInput,
+): AssistantAcceptedTurnInputItem {
   return assistantAcceptedTurnInputItemSchema.parse({
-    id: input.input.id,
-    acceptedAt: input.input.acceptedAt ?? input.acceptedAt,
-    source: input.input.source,
-    captureIds: [...(input.input.captureIds ?? [])],
-    transcriptRef: input.input.transcriptRef ?? null,
-    contentRef: input.input.contentRef ?? null,
+    id: input.id,
+    acceptedAt: input.acceptedAt,
+    source: input.source,
+    captureIds: [...(input.captureIds ?? [])],
+    transcriptRef: input.transcriptRef ?? null,
+    contentRef: input.contentRef ?? null,
     promptFallback:
-      input.input.promptFallback ??
+      input.promptFallback ??
       createAssistantAcceptedTurnInputPromptFallback({
-        promptFallbackReason: input.input.promptFallbackReason,
-        promptFallbackText: input.input.promptFallbackText,
-    }),
+        promptFallbackReason: input.promptFallbackReason,
+        promptFallbackText: input.promptFallbackText,
+      }),
   })
 }
 
@@ -825,19 +858,21 @@ function assertAssistantAcceptedTurnInputProviderRequestOrdinal(input: {
 }
 
 function assertAssistantAcceptedTurnInputEventMatchesRef(input: {
+  acceptedAt: string | undefined
   event: AssistantInputEventRecord
   inputId: string
 }): void {
   if (
     input.event.inputId === input.inputId &&
-    input.event.schema === ASSISTANT_INPUT_EVENT_SCHEMA
+    input.event.schema === ASSISTANT_INPUT_EVENT_SCHEMA &&
+    input.acceptedAt === resolveAssistantInputEventReferenceAt(input.event)
   ) {
     return
   }
 
   throw new VaultCliError(
     'ASSISTANT_TURN_INPUT_JOURNAL_ASSISTANT_INPUT_EVENT_MISMATCH',
-    'Accepted assistant input event ref must resolve to the matching assistant input event.',
+    'Accepted assistant input event ref and reference time must match the stored assistant input event.',
     {
       inputId: input.inputId,
     },
