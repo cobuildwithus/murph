@@ -25,12 +25,18 @@ describe.skipIf(!runPostgresProof)(
   () => {
     let prisma: PrismaClient | null = null;
     const memberIds: string[] = [];
+    const referralIds: string[] = [];
 
     beforeAll(() => {
       prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
     });
 
     afterAll(async () => {
+      if (prisma && referralIds.length > 0) {
+        await prisma.hostedUsageReferral.deleteMany({
+          where: { id: { in: referralIds } },
+        });
+      }
       if (prisma && memberIds.length > 0) {
         await prisma.hostedMember.deleteMany({
           where: { id: { in: memberIds } },
@@ -89,11 +95,58 @@ describe.skipIf(!runPostgresProof)(
 
       const genericHeadId = createId("mailbox_generic_head");
       const blockedReferralId = createId("mailbox_blocked_referral");
+      const blockedReferralOwnerId = createId("usage_referral_blocked");
       const retiredPrefixId = createId("mailbox_retired_prefix");
       const retainedFloorReferralId = createId("mailbox_retained_floor_referral");
+      const retainedFloorReferralOwnerId = createId("usage_referral_retained");
       const consumedLivePrefixId = createId("mailbox_consumed_live_prefix");
       const advancedCursorHeadId = createId("mailbox_advanced_cursor_head");
       const advancedCursorReferralId = createId("mailbox_advanced_cursor_referral");
+      const advancedCursorReferralOwnerId = createId("usage_referral_advanced");
+      referralIds.push(
+        blockedReferralOwnerId,
+        retainedFloorReferralOwnerId,
+        advancedCursorReferralOwnerId,
+      );
+      const armedAt = new Date(now.getTime() - 4 * 60_000);
+      const targetBoundAt = new Date(now.getTime() - 3 * 60_000);
+      const qualifiedAt = new Date(now.getTime() - 2 * 60_000);
+      const rewardedAt = new Date(now.getTime() - 90_000);
+      const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000);
+      await client.hostedUsageReferral.createMany({
+        data: [
+          usageReferral({
+            armedAt,
+            beneficiaryMemberId: blockedMemberId,
+            celebrationQueuedAt: liveCreatedAt,
+            expiresAt,
+            id: blockedReferralOwnerId,
+            qualifiedAt,
+            rewardedAt,
+            targetBoundAt,
+          }),
+          usageReferral({
+            armedAt,
+            beneficiaryMemberId: retainedFloorMemberId,
+            celebrationQueuedAt: laterLiveCreatedAt,
+            expiresAt,
+            id: retainedFloorReferralOwnerId,
+            qualifiedAt,
+            rewardedAt,
+            targetBoundAt,
+          }),
+          usageReferral({
+            armedAt,
+            beneficiaryMemberId: advancedCursorMemberId,
+            celebrationQueuedAt: latestLiveCreatedAt,
+            expiresAt,
+            id: advancedCursorReferralOwnerId,
+            qualifiedAt,
+            rewardedAt,
+            targetBoundAt,
+          }),
+        ],
+      });
       await client.hostedMailboxItem.createMany({
         data: [
           mailboxItem({
@@ -107,7 +160,7 @@ describe.skipIf(!runPostgresProof)(
           mailboxItem({
             createdAt: liveCreatedAt,
             dedupeKey:
-              `assistant.notification.requested:usage-referral-reward:${createId("blocked")}`,
+              `assistant.notification.requested:usage-referral-reward:${blockedReferralOwnerId}`,
             id: blockedReferralId,
             laneSeq: 2n,
             userId: blockedMemberId,
@@ -123,7 +176,7 @@ describe.skipIf(!runPostgresProof)(
           mailboxItem({
             createdAt: laterLiveCreatedAt,
             dedupeKey:
-              `assistant.notification.requested:usage-referral-reward:${createId("retained")}`,
+              `assistant.notification.requested:usage-referral-reward:${retainedFloorReferralOwnerId}`,
             id: retainedFloorReferralId,
             laneSeq: 2n,
             userId: retainedFloorMemberId,
@@ -147,7 +200,7 @@ describe.skipIf(!runPostgresProof)(
           mailboxItem({
             createdAt: new Date(now.getTime() - 10_000),
             dedupeKey:
-              `assistant.notification.requested:usage-referral-reward:${createId("advanced")}`,
+              `assistant.notification.requested:usage-referral-reward:${advancedCursorReferralOwnerId}`,
             id: advancedCursorReferralId,
             laneSeq: 3n,
             userId: advancedCursorMemberId,
@@ -181,6 +234,32 @@ describe.skipIf(!runPostgresProof)(
     });
   },
 );
+
+function usageReferral(input: {
+  armedAt: Date;
+  beneficiaryMemberId: string;
+  celebrationQueuedAt: Date;
+  expiresAt: Date;
+  id: string;
+  qualifiedAt: Date;
+  rewardedAt: Date;
+  targetBoundAt: Date;
+}) {
+  return {
+    armedAt: input.armedAt,
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    celebrationQueuedAt: input.celebrationQueuedAt,
+    expiresAt: input.expiresAt,
+    id: input.id,
+    policyCode: "new_person_activation_v1" as const,
+    policyVersion: "usage-referral-recovery-postgres.v1",
+    qualifiedAt: input.qualifiedAt,
+    rewardUsdMicros: 1n,
+    rewardedAt: input.rewardedAt,
+    status: "rewarded" as const,
+    targetBoundAt: input.targetBoundAt,
+  };
+}
 
 function mailboxItem(input: {
   createdAt: Date;

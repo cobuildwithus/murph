@@ -169,22 +169,34 @@ export async function readHostedUsageReferralRecoveryHeads(input: {
   const limit = input.limit ?? HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE;
 
   return input.prisma.$queryRaw<HostedUsageReferralRecoveryHead[]>(Prisma.sql`
-    WITH pending_referral_lane AS (
-      SELECT DISTINCT
-        referral.user_id,
-        referral.lane,
+    WITH candidate_referral_lane AS (
+      SELECT
+        notification.user_id,
+        notification.lane,
         COALESCE(counter.consumed_seq, 0::bigint) AS consumed_seq
-      FROM hosted_mailbox_item AS referral
+      FROM hosted_usage_referral AS referral
+      JOIN hosted_mailbox_item AS notification
+        ON notification.user_id = referral.beneficiary_member_id
+        AND notification.dedupe_key = (
+          ${HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX} || referral.id
+        )
       LEFT JOIN hosted_mailbox_lane_counter AS counter
-        ON counter.user_id = referral.user_id
-        AND counter.lane = referral.lane
-      WHERE referral.dedupe_key LIKE
-          ${`${HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX}%`}
-        AND referral.kind = 'assistant.notification.requested'
-        AND referral.consumed_at IS NULL
-        AND referral.lane_seq > COALESCE(counter.consumed_seq, 0::bigint)
-        AND referral.created_at > ${retainedAt}
-        AND (referral.expires_at IS NULL OR referral.expires_at > ${now})
+        ON counter.user_id = notification.user_id
+        AND counter.lane = notification.lane
+      WHERE notification.kind = 'assistant.notification.requested'
+        AND referral.status = 'rewarded'
+        AND referral.celebration_queued_at > ${retainedAt}
+        AND notification.consumed_at IS NULL
+        AND notification.lane_seq > COALESCE(counter.consumed_seq, 0::bigint)
+        AND notification.created_at > ${retainedAt}
+        AND (notification.expires_at IS NULL OR notification.expires_at > ${now})
+    ), pending_referral_lane AS (
+      SELECT DISTINCT ON (user_id, lane)
+        user_id,
+        lane,
+        consumed_seq
+      FROM candidate_referral_lane
+      ORDER BY user_id, lane
     )
     SELECT
       head.id,
