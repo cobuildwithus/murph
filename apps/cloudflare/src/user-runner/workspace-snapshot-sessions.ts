@@ -200,7 +200,10 @@ export function createWorkspaceSnapshotSessionService(input: {
         workspaceSnapshotUploadSessionCurrentStorageKey(),
         updatedSession,
       );
-      await service.syncOrphanCandidateAlarm(updatedSession.userId);
+      await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+        candidates: buildWorkspaceSnapshotOrphanCandidatesFromUploadSession(updatedSession),
+        state: input.state,
+      });
       input.state.waitUntil(
         service.cleanupOrphanCandidatesBestEffort(updatedSession.userId),
       );
@@ -223,6 +226,7 @@ export function createWorkspaceSnapshotSessionService(input: {
       if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)) {
         return null;
       }
+      const newOrphanCandidates: HostedWorkspaceSnapshotOrphanCandidate[] = [];
       if (previousCurrent !== undefined) {
         const previousSession = parseHostedWorkspaceSnapshotUploadSession(previousCurrent);
         if (
@@ -232,26 +236,41 @@ export function createWorkspaceSnapshotSessionService(input: {
           const previousReplacedCandidate =
             buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(previousSession);
           if (previousReplacedCandidate) {
-            await service.recordOrphanCandidate(previousReplacedCandidate);
+            newOrphanCandidates.push(previousReplacedCandidate);
           }
-          const orphanCandidate: HostedWorkspaceSnapshotOrphanCandidate = {
+          newOrphanCandidates.push({
             createdAt: new Date().toISOString(),
             objectKey: previousSession.objectKey,
             schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
             snapshotId: previousSession.snapshotId,
             userId: previousSession.userId,
-          };
-          await service.recordOrphanCandidate(orphanCandidate);
+          });
         }
+      }
+      for (const candidate of newOrphanCandidates) {
+        await input.state.storage.put(
+          workspaceSnapshotOrphanCandidateStorageKey(candidate.snapshotId),
+          candidate,
+        );
       }
       if (
         previousCurrent !== undefined
         && !await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)
       ) {
+        await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+          candidates: newOrphanCandidates,
+          state: input.state,
+        });
         return null;
       }
       await input.state.storage.put(workspaceSnapshotUploadSessionCurrentStorageKey(), session);
-      await service.syncOrphanCandidateAlarm(session.userId);
+      await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+        candidates: [
+          ...newOrphanCandidates,
+          ...buildWorkspaceSnapshotOrphanCandidatesFromUploadSession(session),
+        ],
+        state: input.state,
+      });
       input.state.waitUntil(
         service.cleanupOrphanCandidatesBestEffort(sessionInput.userId),
       );
@@ -323,7 +342,10 @@ export function createWorkspaceSnapshotSessionService(input: {
         workspaceSnapshotOrphanCandidateStorageKey(candidate.snapshotId),
         candidate,
       );
-      await service.syncOrphanCandidateAlarm(candidate.userId);
+      await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+        candidates: [candidate],
+        state: input.state,
+      });
       return candidate;
     },
 
@@ -345,7 +367,10 @@ export function createWorkspaceSnapshotSessionService(input: {
         browserVaultReplicaOrphanCandidateStorageKey(candidate.objectKey),
         candidate,
       );
-      await service.syncOrphanCandidateAlarm(candidate.userId);
+      await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+        candidates: [candidate],
+        state: input.state,
+      });
       return candidate;
     },
 
@@ -804,6 +829,20 @@ function buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(
   };
 }
 
+function buildWorkspaceSnapshotOrphanCandidatesFromUploadSession(
+  session: HostedWorkspaceSnapshotUploadSession,
+): HostedWorkspaceSnapshotOrphanCandidate[] {
+  const candidates: HostedWorkspaceSnapshotOrphanCandidate[] = [
+    buildWorkspaceSnapshotOrphanCandidateFromUploadSessionObject(session),
+  ];
+  const replacedCandidate =
+    buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(session);
+  if (replacedCandidate) {
+    candidates.push(replacedCandidate);
+  }
+  return candidates;
+}
+
 function selectEarliestHostedR2OrphanCleanupAlarm(
   previous: number | null,
   createdAt: string,
@@ -820,6 +859,30 @@ function isHostedR2OrphanCleanupCreatedAtEligible(createdAt: string, nowMs: numb
   const createdAtMs = Date.parse(createdAt);
   return Number.isFinite(createdAtMs)
     && nowMs - createdAtMs >= WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS;
+}
+
+async function scheduleHostedR2OrphanCandidateAlarmForNewCandidates(input: {
+  candidates: ReadonlyArray<{ createdAt: string }>;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  let nextAtMs: number | null = null;
+  for (const candidate of input.candidates) {
+    nextAtMs = selectEarliestHostedR2OrphanCleanupAlarm(
+      nextAtMs,
+      candidate.createdAt,
+    );
+  }
+  if (nextAtMs === null) {
+    return;
+  }
+
+  // Insertions can only move the earliest eligibility earlier. Cleanup owns
+  // full recomputation because deletion can move the alarm later or clear it.
+  const currentAlarm = await input.state.storage.getAlarm();
+  if (currentAlarm !== null && currentAlarm <= nextAtMs) {
+    return;
+  }
+  await input.state.storage.setAlarm(nextAtMs);
 }
 
 async function syncHostedR2OrphanCandidateAlarm(input: {
