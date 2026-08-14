@@ -1,6 +1,6 @@
 # Restore the private integration gate on current public main
 
-Status: active
+Status: completed
 Created: 2026-08-14
 Updated: 2026-08-14
 
@@ -64,6 +64,10 @@ Updated: 2026-08-14
   production validators rejecting obsolete fixtures, and the missing group
   workspace is caused by setup activating only one of two participants.
 - Do not duplicate the active shell-sandbox change in PR #1815.
+- Accept both preliminary coverage findings. Bind each activation wake to its
+  actual participant, and seed the deletion receipt through the production
+  encryption and persistence helpers instead of retaining a second fixture
+  format.
 
 ## Verification
 
@@ -75,8 +79,21 @@ Updated: 2026-08-14
   60-second budget while the shared host was heavily CPU-bound; the same case
   completed in about two seconds in the source CI failure run.
 - Focused member-lock PostgreSQL proof — the principal-recovery case passed with
-  the real local KMS signer and verification keyring. The deletion case advanced
-  through the formerly failing signing path and expired its 15-second Prisma
-  transaction by 58 milliseconds during cleanup under the same local host load.
-- Still required before merge: exact-head specialist review and GitHub CI.
+  the real local KMS signer and verification keyring. Before the specialist
+  correction, the deletion case advanced through the formerly failing signing
+  path and expired its 15-second Prisma transaction by 58 milliseconds. After
+  the correction, it reached the production-encrypted receipt path, then a
+  10-second seed transaction took 23.8 seconds on the same saturated host and
+  expired before the concurrency assertion.
+- Preliminary specialist review completed against the pushed candidate and
+  returned two accepted coverage findings. Both were corrected without new
+  abstractions or production changes.
+- Paid bounded `pnpm test:diff` verification on the exact corrected tree passed:
+  hosted Web verified 739 files and 10,090 tests; Cloudflare verified 146 files
+  and 2,514 tests, with the changed-area builds and typechecks also passing.
+- The one-time base update retained the production-shaped local KMS fixture when
+  current main's older signing-only mock overlapped it; the second remediation
+  commit replayed unchanged.
+- Exact-head GitHub CI remains the merge gate after this archived plan commit.
 - Still required after merge: a fresh private `Public Murph Integration` run.
+Completed: 2026-08-14
