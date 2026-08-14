@@ -469,6 +469,63 @@ touch hook-installed
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
+  it('keeps a marked authorized worktree when checkout materialization fails', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'partial-materialization')
+    const markerObserved = path.join(harness.root, 'marker-observed-before-failure')
+    const hookInvoked = path.join(harness.root, 'post-checkout-after-failure')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+touch ${JSON.stringify(hookInvoked)}
+`,
+    )
+    runGit(harness.primary, [
+      'config',
+      'filter.materialization-failure.smudge',
+      `test -f .metadata_never_index && touch ${JSON.stringify(markerObserved)} && exit 29`,
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.materialization-failure.clean',
+      'cat',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.materialization-failure.required',
+      'true',
+    ])
+    writeFileSync(
+      path.join(harness.primary, '.gitattributes'),
+      'materialization-probe.txt filter=materialization-failure\n',
+    )
+    writeFileSync(path.join(harness.primary, 'materialization-probe.txt'), 'probe\n')
+    runGit(harness.primary, ['add', '.gitattributes', 'materialization-probe.txt'])
+    runGit(harness.primary, ['commit', '-m', 'add failing materialization probe'])
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'partial-materialization-failure',
+      target,
+    ])
+
+    expect(creation.status).not.toBe(0)
+    expect(creation.stderr).toContain('smudge filter materialization-failure failed')
+    expect(existsSync(markerObserved)).toBe(true)
+    expect(existsSync(hookInvoked)).toBe(false)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(target)
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    const adminDir = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(existsSync(path.join(adminDir, 'murph-storage-guard-authorized'))).toBe(true)
+
+    const guard = runScript(harness, 'worktree-storage-guard')
+    expect(guard.status, guard.stderr).toBe(0)
+  })
+
   it('ratchets unmanaged temporary clones to zero and rejects new paths', () => {
     const harness = createHarness()
     const origin = 'https://example.test/example/murph.git'
