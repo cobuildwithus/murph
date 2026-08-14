@@ -41,7 +41,7 @@ import {
 import type {
   BrowserVaultEntity,
   BrowserVaultMetricRow,
-  BrowserVaultQueryClient,
+  BrowserVaultMetricSeriesCapableQueryClient as BrowserVaultMetricsCapableQueryClient,
   BrowserVaultSummaryConfidence,
 } from "./shared.ts";
 import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
@@ -369,7 +369,7 @@ const ACTIVE_EXPERIMENT_RUN_STATUSES = new Set([
 ]);
 
 export function selectBrowserVaultExperimentResults(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   lookup: BrowserVaultExperimentResultsLookup,
   options: BrowserVaultExperimentResultsOptions = {},
 ): BrowserVaultExperimentResultsView | null {
@@ -421,7 +421,7 @@ export function selectBrowserVaultExperimentResults(
 }
 
 function findBrowserVaultExperimentRun(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   lookup: BrowserVaultExperimentResultsLookup,
 ): BrowserVaultEntity | null {
   const candidates = client.replica.entities.filter((entity) => entity.family === "experiment");
@@ -484,7 +484,7 @@ function isActiveExperimentRunStatus(status: string | null | undefined): boolean
 }
 
 function buildRunContext(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   entity: BrowserVaultEntity,
   asOf: string,
   referencedOutcome: ExperimentOutcome | null,
@@ -659,7 +659,7 @@ function clampRunWindowsToTerminalDate(
 }
 
 function findReferencedExperimentOutcome(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   entity: BrowserVaultEntity,
 ): ExperimentOutcome | null {
   const parsedRef = experimentOutcomeRefSchema.safeParse(
@@ -721,7 +721,7 @@ function buildPersistedOutcomeResult(
 }
 
 function buildPersistedOutcomeBiomarkers(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   outcome: ExperimentOutcome,
 ): BrowserVaultExperimentBiomarkerResult[] {
   const metricWindow = buildMetricWindowContext(outcome.windows, outcome.asOf);
@@ -851,7 +851,7 @@ function isBrowserSupportedAdherenceTarget(target: ExperimentAdherenceTarget): b
 }
 
 function selectExperimentEvents(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   experiment: BrowserVaultEntity,
   run: BrowserVaultExperimentResultRun,
   evidenceThrough: string,
@@ -890,7 +890,7 @@ function selectExperimentEvents(
 }
 
 function selectAdherenceEvidenceEvents(input: {
-  client: BrowserVaultQueryClient;
+  client: BrowserVaultMetricsCapableQueryClient;
   evidenceThrough: string;
   eventTimeZone: string | null;
   linkedEvents: readonly BrowserVaultEntity[];
@@ -967,7 +967,7 @@ function buildMetricWindowContext(
 }
 
 function buildBiomarkerResults(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   context: BrowserVaultExperimentRunContext,
   metricWindow: MetricWindowContext,
 ): BrowserVaultExperimentBiomarkerResult[] {
@@ -987,7 +987,7 @@ function buildBiomarkerResults(
 }
 
 function buildBiomarkerResult(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   context: BrowserVaultExperimentRunContext,
   metricWindow: MetricWindowContext,
   biomarkerKey: string,
@@ -1118,7 +1118,7 @@ interface BrowserMeasurementAnchor {
 
 function buildAnchoredBiomarkerResult(input: {
   biomarkerKey: string;
-  client: BrowserVaultQueryClient;
+  client: BrowserVaultMetricsCapableQueryClient;
   context: BrowserVaultExperimentRunContext;
   expectedEffect: BrowserVaultExperimentExpectedEffect;
   label: string;
@@ -1268,7 +1268,7 @@ function buildAnchoredBiomarkerResult(input: {
 }
 
 function collectMetricRows(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
   metricWindow: MetricWindowContext,
 ): BrowserVaultMetricRowWithValue[] {
@@ -1281,7 +1281,7 @@ function collectMetricRows(
 }
 
 function collectAnchoredMetricRows(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
   anchors: readonly BrowserMeasurementAnchor[],
   evidenceThrough: string,

@@ -20,6 +20,9 @@ import {
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
+  readHostedLinqLinePhoneNumberByLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-line-phone-resolver";
+import {
   encryptHostedLinqLinePhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 
@@ -148,6 +151,84 @@ describe("hasActiveHostedLinqManagedLine", () => {
         phoneNumberLookupKey: { in: ["lookup:line"] },
       },
     });
+  });
+});
+
+describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
+  it("resolves a locally encrypted line only when its blind lookup key matches", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: TEST_KEYRING_ENTRIES,
+    });
+    const phoneNumber = "+15550100001";
+    const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
+    if (!phoneNumberLookupKey) {
+      throw new Error("Expected a hosted phone lookup key for the test line.");
+    }
+    const findUnique = vi.fn().mockResolvedValue({
+      phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+    });
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey,
+      prisma: {
+        hostedLinqLine: { findUnique },
+      } as never,
+    })).resolves.toBe(phoneNumber);
+
+    expect(findUnique).toHaveBeenCalledWith({
+      select: { phoneNumberEncrypted: true },
+      where: { phoneNumberLookupKey },
+    });
+  });
+
+  it("fails closed for absent keys, missing rows, and mismatched lines", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: TEST_KEYRING_ENTRIES,
+    });
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({
+        phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber("+15550100001"),
+      });
+    const prisma = {
+      hostedLinqLine: { findUnique },
+    } as never;
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "  ",
+      prisma,
+    })).resolves.toBeNull();
+    expect(findUnique).not.toHaveBeenCalled();
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "hbidx:phone:v1:missing-line",
+      prisma,
+    })).resolves.toBeNull();
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "hbidx:phone:v1:mismatched-line",
+      prisma,
+    })).resolves.toBeNull();
+  });
+
+  it("surfaces a malformed local line envelope for the caller to isolate", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: TEST_KEYRING_ENTRIES,
+    });
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "hbidx:phone:v1:malformed-line",
+      prisma: {
+        hostedLinqLine: {
+          findUnique: vi.fn().mockResolvedValue({
+            phoneNumberEncrypted: "malformed-envelope",
+          }),
+        },
+      } as never,
+    })).rejects.toBeInstanceOf(Error);
   });
 });
 

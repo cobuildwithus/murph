@@ -10,24 +10,33 @@ import {
 import { ResultsSummarySkeleton } from "@/src/components/experiments/experiment-detail/results-summary";
 import { Button } from "@/src/components/ui/button";
 import { formatIsoDate } from "@/src/lib/browser-vault/display";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import {
+  isBrowserVaultMetricsCapable,
+  useBrowserVault,
+  useBrowserVaultExperimentMetricBucketDemand,
+} from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRunById } from "@/src/lib/browser-vault/experiment-run";
 
 export function PrivateRunResultsClient({ experimentId }: { experimentId: string }) {
+  const metricBucketsLoaded = useBrowserVaultExperimentMetricBucketDemand({ experimentId });
   const browserVault = useBrowserVault();
+  const metricsClient = metricBucketsLoaded
+    && isBrowserVaultMetricsCapable(browserVault.client)
+    ? browserVault.client
+    : null;
   const privateRun = useMemo(
     () => resolveBrowserVaultExperimentRunById({
-      client: browserVault.client,
+      client: metricsClient,
       experimentId,
     }),
-    [browserVault.client, experimentId],
+    [experimentId, metricsClient],
   );
 
   if (!privateRun) {
     return (
       <PrivateRunRouteState
         error={browserVault.error}
-        loading={browserVault.status === "loading"}
+        loading={browserVault.status === "loading" || !metricBucketsLoaded}
         onRetry={browserVault.refresh}
       />
     );

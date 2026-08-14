@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
     createElement("div", { "data-results-title": props.experiment.title })
   ),
   useBrowserVault: vi.fn(),
+  useBrowserVaultExperimentMetricBucketDemand: vi.fn(() => true),
 }));
 
 vi.mock("next/link", () => ({
@@ -42,7 +43,10 @@ vi.mock("@/src/components/experiments/experiment-detail/results-tab", () => ({
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
+  isBrowserVaultMetricsCapable: (client: unknown) => client !== null,
   useBrowserVault: mocks.useBrowserVault,
+  useBrowserVaultExperimentMetricBucketDemand:
+    mocks.useBrowserVaultExperimentMetricBucketDemand,
 }));
 
 vi.mock("@/src/lib/browser-vault/experiment-run", () => ({

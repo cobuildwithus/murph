@@ -1,9 +1,21 @@
 import {
   type BrowserVaultEntity,
   type BrowserVaultEntityFilters,
+  type BrowserVaultExperimentRunCard,
+  type BrowserVaultExperimentRunCardLookup,
+  type BrowserVaultCoreQueryClient,
+  type BrowserVaultCoreReplica,
+  type BrowserVaultLabsQueryClient,
+  type BrowserVaultLabsReplica,
+  type BrowserVaultInteractiveMetricsQueryClient,
+  type BrowserVaultInteractiveQueryClient,
+  type BrowserVaultLabResultFilters,
   type BrowserVaultMetricFilters,
   type BrowserVaultMetricGoalProgressRow,
   type BrowserVaultMetricRow,
+  type BrowserVaultMetricsQueryClient,
+  type BrowserVaultMetricsReplica,
+  type BrowserVaultMetricsIndexReplica,
   type BrowserVaultMetricSelectionFilters,
   type BrowserVaultMetricSelectionRow,
   type BrowserVaultQueryClient,
@@ -12,6 +24,27 @@ import {
   type BrowserVaultTimelineFilters,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
+import {
+  assembleBrowserVaultCoreReplica,
+  assembleBrowserVaultLabsReplica,
+  assembleBrowserVaultLoadedMetricRows,
+  assembleBrowserVaultMetricsIndexReplica,
+  assembleBrowserVaultMetricsReplica,
+  assembleBrowserVaultReplicaShards,
+  hasAllBrowserVaultMetricBuckets,
+  type BrowserVaultCoreShard,
+  type BrowserVaultLabsShard,
+  type BrowserVaultMetricsShard,
+  type BrowserVaultMetricBucketShard,
+  type BrowserVaultReplicaShardSelection,
+  type BrowserVaultReplicaShardSet,
+  BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
+} from "./shards.ts";
+import {
+  BROWSER_VAULT_METRIC_BUCKET_IDS,
+  canonicalizeBrowserVaultMetricKey,
+  type BrowserVaultMetricBucketId,
+} from "./metric-buckets.ts";
 import {
   labResultRowMatchesFilters,
   sortBrowserVaultLabResultRows,
@@ -24,21 +57,312 @@ import {
 } from "@murphai/health-metrics";
 
 export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): BrowserVaultQueryClient {
-  const frozenReplica = deepFreezeBrowserVaultValue(replica);
-  const byLookupId = new Map<string, BrowserVaultEntity>();
-  const metricSelectionById = new Map<string, BrowserVaultMetricSelectionRow>();
-  const metricSelectionsByMetricKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
-  const metricSelectionsByBiomarkerKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
-  const labResultRows = frozenReplica.labResultRows ?? [];
+  return createBrowserVaultQueryClientAccess(deepFreezeBrowserVaultValue(
+    normalizeBrowserVaultReplica(replica),
+  ));
+}
 
-  for (const entity of frozenReplica.entities) {
+/** Internal producer path: the replica-under-construction must remain mutable. */
+export function createBrowserVaultProjectionQueryClient(
+  replica: BrowserVaultReplica,
+): BrowserVaultQueryClient {
+  return createBrowserVaultQueryClientAccess(normalizeBrowserVaultReplica(replica));
+}
+
+function normalizeBrowserVaultReplica(replica: BrowserVaultReplica): BrowserVaultQueryClient["replica"] {
+  return {
+    ...replica,
+    experimentRunCards: replica.experimentRunCards ?? [],
+    hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
+  };
+}
+
+function createBrowserVaultQueryClientAccess(
+  frozenReplica: BrowserVaultQueryClient["replica"],
+): BrowserVaultQueryClient {
+  return {
+    capability: "core+metrics+labs",
+    ...createCoreQueryAccess(frozenReplica),
+    ...createMetricsQueryAccess(frozenReplica),
+    ...createLabsQueryAccess(frozenReplica),
+    replica: frozenReplica,
+  };
+}
+
+export function createBrowserVaultCoreQueryClient(
+  core: BrowserVaultCoreShard,
+): BrowserVaultCoreQueryClient {
+  const replica = deepFreezeBrowserVaultValue(assembleBrowserVaultCoreReplica(core));
+  return {
+    capability: "core",
+    ...createCoreQueryAccess(replica),
+    replica,
+  };
+}
+
+export function createBrowserVaultMetricsQueryClient(
+  core: BrowserVaultCoreShard,
+  metrics: BrowserVaultMetricsShard,
+  metricBuckets: Record<BrowserVaultMetricBucketId, BrowserVaultMetricBucketShard>,
+): BrowserVaultMetricsQueryClient {
+  const replica = deepFreezeBrowserVaultValue(
+    assembleBrowserVaultMetricsReplica(core, metrics, metricBuckets),
+  );
+  return {
+    capability: "core+metrics",
+    ...createCoreQueryAccess(replica),
+    ...createMetricsQueryAccess(replica),
+    replica,
+  };
+}
+
+export class BrowserVaultMetricBucketUnavailableError extends Error {
+  readonly bucketId: BrowserVaultMetricBucketId;
+  readonly metricKey: string;
+
+  constructor(metricKey: string, bucketId: BrowserVaultMetricBucketId) {
+    super(`Browser vault metric bucket ${bucketId} is not loaded for ${metricKey}.`);
+    this.name = "BrowserVaultMetricBucketUnavailableError";
+    this.bucketId = bucketId;
+    this.metricKey = metricKey;
+  }
+}
+
+export function createBrowserVaultInteractiveMetricsQueryClient(
+  core: BrowserVaultCoreShard,
+  metrics: BrowserVaultMetricsShard,
+  metricBuckets: Partial<Record<BrowserVaultMetricBucketId, BrowserVaultMetricBucketShard>> = {},
+): BrowserVaultInteractiveMetricsQueryClient {
+  const replica = deepFreezeBrowserVaultValue(
+    assembleBrowserVaultMetricsIndexReplica(core, metrics),
+  );
+  const loadedMetricBuckets = BROWSER_VAULT_METRIC_BUCKET_IDS.filter(
+    (bucketId) => metricBuckets[bucketId] !== undefined,
+  );
+  const loadedRows = assembleBrowserVaultLoadedMetricRows(metrics, metricBuckets);
+  const directoryByMetricKey = new Map(metrics.metricDirectory.map((entry) => [
+    canonicalizeBrowserVaultMetricKey(entry.metricKey),
+    entry,
+  ]));
+  const access = createMetricsQueryAccess(replica, loadedRows, (metricKey) => {
+    const canonicalKey = canonicalizeBrowserVaultMetricKey(metricKey);
+    const entry = directoryByMetricKey.get(canonicalKey);
+    if (!entry) return;
+    if (!metricBuckets[entry.bucketId]) {
+      throw new BrowserVaultMetricBucketUnavailableError(canonicalKey, entry.bucketId);
+    }
+  });
+  const loadedBucketSet = new Set(loadedMetricBuckets);
+  return {
+    capability: "core+metrics-partial",
+    ...createCoreQueryAccess(replica),
+    ...access,
+    loadedMetricBuckets,
+    metricCoverage: {
+      get(metricKey: string) {
+        const entry = directoryByMetricKey.get(canonicalizeBrowserVaultMetricKey(metricKey));
+        if (!entry) return { bucketId: null, rowCount: 0, status: "loaded-empty" };
+        if (!loadedBucketSet.has(entry.bucketId)) {
+          return { bucketId: entry.bucketId, status: "unloaded" };
+        }
+        return entry.rowCount === 0
+          ? { bucketId: entry.bucketId, rowCount: 0, status: "loaded-empty" }
+          : { bucketId: entry.bucketId, rowCount: entry.rowCount, status: "loaded" };
+      },
+    },
+    replica,
+  };
+}
+
+export function createBrowserVaultInteractiveQueryClient(
+  core: BrowserVaultCoreShard,
+  metrics: BrowserVaultMetricsShard,
+  labs: BrowserVaultLabsShard,
+  metricBuckets: Partial<Record<BrowserVaultMetricBucketId, BrowserVaultMetricBucketShard>> = {},
+): BrowserVaultInteractiveQueryClient {
+  const metricsClient = createBrowserVaultInteractiveMetricsQueryClient(
+    core,
+    metrics,
+    metricBuckets,
+  );
+  const labsReplica = assembleBrowserVaultLabsReplica(core, labs);
+  const replica = deepFreezeBrowserVaultValue({
+    ...metricsClient.replica,
+    labResultRows: labsReplica.labResultRows,
+  });
+  return {
+    capability: "core+metrics-partial+labs",
+    ...createCoreQueryAccess(replica),
+    labResults: createLabsQueryAccess(labsReplica).labResults,
+    loadedMetricBuckets: metricsClient.loadedMetricBuckets,
+    metricCoverage: metricsClient.metricCoverage,
+    metricGoals: metricsClient.metricGoals,
+    metrics: metricsClient.metrics,
+    metricSelections: metricsClient.metricSelections,
+    replica,
+  };
+}
+
+export function createBrowserVaultLabsQueryClient(
+  core: BrowserVaultCoreShard,
+  labs: BrowserVaultLabsShard,
+): BrowserVaultLabsQueryClient {
+  const replica = deepFreezeBrowserVaultValue(assembleBrowserVaultLabsReplica(core, labs));
+  return {
+    capability: "core+labs",
+    ...createCoreQueryAccess(replica),
+    ...createLabsQueryAccess(replica),
+    replica,
+  };
+}
+
+export interface BrowserVaultLoadedQueryClients {
+  core: BrowserVaultCoreQueryClient;
+  full: BrowserVaultQueryClient | null;
+  interactiveMetrics: BrowserVaultInteractiveMetricsQueryClient | null;
+  interactive: BrowserVaultInteractiveQueryClient | null;
+  labs: BrowserVaultLabsQueryClient | null;
+  metrics: BrowserVaultMetricsQueryClient | null;
+}
+
+export function createBrowserVaultLoadedQueryClients(
+  shards: BrowserVaultReplicaShardSelection,
+): BrowserVaultLoadedQueryClients {
+  return {
+    core: createBrowserVaultCoreQueryClient(shards.core),
+    full: shards.metrics && shards.labs && hasAllBrowserVaultMetricBuckets(shards.metricBuckets)
+      ? createBrowserVaultQueryClient(
+          assembleBrowserVaultReplicaShards(toShardSet(
+            shards.core,
+            shards.metrics,
+            shards.labs,
+            shards.metricBuckets,
+          )),
+        )
+      : null,
+    interactiveMetrics: shards.metrics
+      ? createBrowserVaultInteractiveMetricsQueryClient(
+          shards.core,
+          shards.metrics,
+          shards.metricBuckets,
+        )
+      : null,
+    interactive: shards.metrics && shards.labs
+      ? createBrowserVaultInteractiveQueryClient(
+          shards.core,
+          shards.metrics,
+          shards.labs,
+          shards.metricBuckets,
+        )
+      : null,
+    labs: shards.labs ? createBrowserVaultLabsQueryClient(shards.core, shards.labs) : null,
+    metrics: shards.metrics && hasAllBrowserVaultMetricBuckets(shards.metricBuckets)
+      ? createBrowserVaultMetricsQueryClient(shards.core, shards.metrics, shards.metricBuckets)
+      : null,
+  };
+}
+
+type BrowserVaultCoreQueryAccess = Pick<
+  BrowserVaultCoreQueryClient,
+  "entities" | "experimentRunCards" | "search" | "timeline"
+>;
+type BrowserVaultMetricsQueryAccess = Pick<
+  BrowserVaultMetricsQueryClient,
+  "metricGoals" | "metrics" | "metricSelections"
+>;
+type BrowserVaultLabsQueryAccess = Pick<BrowserVaultLabsQueryClient, "labResults">;
+
+function createCoreQueryAccess(replica: BrowserVaultCoreReplica): BrowserVaultCoreQueryAccess {
+  const byLookupId = new Map<string, BrowserVaultEntity>();
+  const experimentRunCardById = new Map<string, BrowserVaultExperimentRunCard>();
+
+  for (const entity of replica.entities) {
     byLookupId.set(entity.id, entity);
     for (const lookupId of entity.lookupIds) {
       byLookupId.set(lookupId, entity);
     }
   }
+  for (const card of replica.experimentRunCards) {
+    experimentRunCardById.set(card.id, card);
+  }
 
-  for (const selection of frozenReplica.metricSelectionRows) {
+  return {
+    entities: {
+      get(idOrLookupId: string) {
+        return byLookupId.get(idOrLookupId) ?? null;
+      },
+      list(filters: BrowserVaultEntityFilters = {}) {
+        return replica.entities.filter((entity) => matchesEntityFilters(entity, filters));
+      },
+    },
+    experimentRunCards: {
+      find(lookup: BrowserVaultExperimentRunCardLookup) {
+        return replica.experimentRunCards.find((card) =>
+          matchesExperimentRunCardLookup(card, lookup)
+        ) ?? null;
+      },
+      get(experimentId: string) {
+        return experimentRunCardById.get(experimentId) ?? null;
+      },
+      list() {
+        return replica.experimentRunCards.slice();
+      },
+    },
+    search(query: string, filters: BrowserVaultSearchFilters = {}) {
+      const normalizedQuery = normalizeSearch(query);
+      const familySet = filters.families ? new Set(filters.families) : null;
+
+      if (normalizedQuery.length === 0) return [];
+
+      return replica.searchRows.filter((row) => {
+        if (familySet && !familySet.has(row.family)) return false;
+        return normalizeSearch(row.text).includes(normalizedQuery);
+      });
+    },
+    timeline: {
+      list(filters: BrowserVaultTimelineFilters = {}) {
+        return replica.timelineRows.filter((row) => matchesTimelineFilters(row, filters));
+      },
+    },
+  };
+}
+
+function matchesExperimentRunCardLookup(
+  card: BrowserVaultExperimentRunCard,
+  lookup: BrowserVaultExperimentRunCardLookup,
+): boolean {
+  if (typeof lookup === "string") {
+    return card.lookupKeys.experimentIds.includes(lookup)
+      || card.lookupKeys.slugs.includes(lookup)
+      || card.lookupKeys.protocolKeys.includes(lookup);
+  }
+  if (
+    lookup.experimentId
+    && card.lookupKeys.experimentIds.includes(lookup.experimentId)
+  ) return true;
+  if (lookup.slug && card.lookupKeys.slugs.includes(lookup.slug)) return true;
+  return lookup.protocolKeys?.some((key) => card.lookupKeys.protocolKeys.includes(key))
+    ?? false;
+}
+
+function createMetricsQueryAccess(
+  replica: BrowserVaultMetricsReplica | BrowserVaultMetricsIndexReplica,
+  metricRows: readonly BrowserVaultMetricRow[] = "metricRows" in replica ? replica.metricRows : [],
+  requireMetricLoaded?: (metricKey: string) => void,
+): BrowserVaultMetricsQueryAccess {
+  const metricSelectionById = new Map<string, BrowserVaultMetricSelectionRow>();
+  const metricSelectionsByMetricKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
+  const metricSelectionsByBiomarkerKey = new Map<string, BrowserVaultMetricSelectionRow[]>();
+  const sortedMetricRows = sortMetricRowsAsc(metricRows);
+  const metricRowsByMetricKey = new Map<string, BrowserVaultMetricRow[]>();
+  const metricRowsByBiomarkerKey = new Map<string, BrowserVaultMetricRow[]>();
+
+  for (const row of sortedMetricRows) {
+    appendMetricRow(metricRowsByMetricKey, row.metricKey, row);
+    if (row.biomarkerKey) appendMetricRow(metricRowsByBiomarkerKey, row.biomarkerKey, row);
+  }
+
+  for (const selection of replica.metricSelectionRows) {
     metricSelectionById.set(selection.id, selection);
     appendMetricSelection(metricSelectionsByMetricKey, selection.metricKey, selection);
     if (selection.biomarkerKey) {
@@ -47,48 +371,30 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
   }
 
   return {
-    entities: {
-      get(idOrLookupId) {
-        return byLookupId.get(idOrLookupId) ?? null;
-      },
-      list(filters = {}) {
-        return frozenReplica.entities.filter((entity) => matchesEntityFilters(entity, filters));
-      },
-    },
     metricGoals: {
-      progress(filters = {}) {
-        return frozenReplica.metricGoalProgressRows.filter((row) => matchesMetricGoalFilters(row, normalizeMetricGoalFilters(filters)));
-      },
-    },
-    labResults: {
-      list(filters = {}) {
-        return sortBrowserVaultLabResultRows(
-          labResultRows.filter((row) => labResultRowMatchesFilters(row, filters)),
-        );
+      progress(filters: { goalId?: string; metricKey?: string } = {}) {
+        return replica.metricGoalProgressRows.filter((row) => matchesMetricGoalFilters(row, normalizeMetricGoalFilters(filters)));
       },
     },
     metrics: {
-      latestRow(filters = {}) {
+      latestRow(filters: BrowserVaultMetricFilters = {}) {
         const normalizedFilters = normalizeMetricFilters(filters);
-        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters))).at(-1) ?? null;
+        return matchingMetricRows(normalizedFilters).at(-1) ?? null;
       },
-      list(filters = {}) {
+      list(filters: BrowserVaultMetricFilters = {}) {
         const normalizedFilters = normalizeMetricFilters(filters);
-        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters)));
+        return matchingMetricRows(normalizedFilters);
       },
-      series(filters = {}) {
+      series(filters: BrowserVaultMetricFilters = {}) {
         const normalizedFilters = normalizeMetricFilters(filters);
-        return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters)));
+        return matchingMetricRows(normalizedFilters);
       },
-      seriesMany(filters) {
-        return filters.map((filter) => {
-          const normalizedFilters = normalizeMetricFilters(filter);
-          return sortMetricRowsAsc(frozenReplica.metricRows.filter((row) => metricRowMatchesFilters(row, normalizedFilters)));
-        });
+      seriesMany(filters: readonly BrowserVaultMetricFilters[]) {
+        return filters.map((filter) => matchingMetricRows(normalizeMetricFilters(filter)));
       },
     },
     metricSelections: {
-      get(idOrMetricKey) {
+      get(idOrMetricKey: string) {
         const direct = metricSelectionById.get(idOrMetricKey);
         if (direct) return direct;
         const normalizedMetricKey = normalizeMetricFilterKey(idOrMetricKey);
@@ -97,35 +403,55 @@ export function createBrowserVaultQueryClient(replica: BrowserVaultReplica): Bro
         }
         return chooseDefaultBiomarkerMetricSelection(metricSelectionsByBiomarkerKey.get(idOrMetricKey) ?? [], idOrMetricKey);
       },
-      getByBiomarker(biomarkerKey) {
+      getByBiomarker(biomarkerKey: string) {
         return chooseDefaultBiomarkerMetricSelection(metricSelectionsByBiomarkerKey.get(biomarkerKey) ?? [], biomarkerKey);
       },
-      list(filters = {}) {
-        return frozenReplica.metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, normalizeMetricSelectionFilters(filters)));
+      list(filters: BrowserVaultMetricSelectionFilters = {}) {
+        return replica.metricSelectionRows.filter((row) => matchesMetricSelectionFilters(row, normalizeMetricSelectionFilters(filters)));
       },
     },
-    replica: frozenReplica,
-    search(query, filters = {}) {
-      const normalizedQuery = normalizeSearch(query);
-      const familySet = filters.families ? new Set(filters.families) : null;
+  };
 
-      if (normalizedQuery.length === 0) {
-        return [];
+  function matchingMetricRows(filters: BrowserVaultMetricFilters): BrowserVaultMetricRow[] {
+    if (requireMetricLoaded) {
+      if (!filters.metricKey) {
+        throw new TypeError("A metricKey is required when querying partially loaded browser vault metrics.");
       }
+      requireMetricLoaded(filters.metricKey);
+    }
+    const candidates = filters.metricKey
+      ? metricRowsByMetricKey.get(filters.metricKey) ?? []
+      : filters.biomarkerKey
+        ? metricRowsByBiomarkerKey.get(filters.biomarkerKey) ?? []
+        : sortedMetricRows;
+    return candidates.filter((row) => metricRowMatchesFilters(row, filters));
+  }
+}
 
-      return frozenReplica.searchRows.filter((row) => {
-        if (familySet && !familySet.has(row.family)) {
-          return false;
-        }
-
-        return normalizeSearch(row.text).includes(normalizedQuery);
-      });
-    },
-    timeline: {
-      list(filters = {}) {
-        return frozenReplica.timelineRows.filter((row) => matchesTimelineFilters(row, filters));
+function createLabsQueryAccess(replica: BrowserVaultLabsReplica): BrowserVaultLabsQueryAccess {
+  return {
+    labResults: {
+      list(filters: BrowserVaultLabResultFilters = {}) {
+        return sortBrowserVaultLabResultRows(
+          replica.labResultRows.filter((row) => labResultRowMatchesFilters(row, filters)),
+        );
       },
     },
+  };
+}
+
+function toShardSet(
+  core: BrowserVaultCoreShard,
+  metrics: BrowserVaultMetricsShard,
+  labs: BrowserVaultLabsShard,
+  metricBuckets: Record<BrowserVaultMetricBucketId, BrowserVaultMetricBucketShard>,
+): BrowserVaultReplicaShardSet {
+  return {
+    core,
+    labs,
+    metricBuckets,
+    metrics,
+    schema: BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
   };
 }
 
@@ -228,6 +554,16 @@ function appendMetricSelection(
   const existing = map.get(metricKey) ?? [];
   existing.push(selection);
   map.set(metricKey, existing);
+}
+
+function appendMetricRow(
+  map: Map<string, BrowserVaultMetricRow[]>,
+  key: string,
+  row: BrowserVaultMetricRow,
+): void {
+  const existing = map.get(key) ?? [];
+  existing.push(row);
+  map.set(key, existing);
 }
 
 function chooseDefaultMetricSelection(rows: readonly BrowserVaultMetricSelectionRow[], metricKey: string): BrowserVaultMetricSelectionRow | null {

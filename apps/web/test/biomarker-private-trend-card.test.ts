@@ -15,11 +15,14 @@ import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useBrowserVault: vi.fn(),
+  useBrowserVaultMetricKeyDemand: vi.fn(() => true),
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
   BrowserVaultProvider: ({ children }: { children: ReactNode }) => createElement("section", { "data-browser-vault-provider": true }, children),
+  isBrowserVaultMetricsCapable: (client: unknown) => client !== null,
   useBrowserVault: mocks.useBrowserVault,
+  useBrowserVaultMetricKeyDemand: mocks.useBrowserVaultMetricKeyDemand,
 }));
 
 import { BiomarkerOverview } from "@/src/components/biomarkers/biomarker-detail/biomarker-overview";

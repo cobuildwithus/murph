@@ -15,6 +15,7 @@ import {
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
+  getBrowserVaultMetricBucketId,
   hashBrowserVaultReplicaData,
   parseBrowserVaultReplica,
   selectBrowserVaultExperimentResults,
@@ -475,6 +476,16 @@ test("legacy outcomes stay immutable while results show current daily measuremen
 
   const persistedOutcome = replica.experimentOutcomes?.[0];
   assert.deepEqual(persistedOutcome, legacyOutcome);
+  assert.deepEqual(replica.experimentRunCards?.[0]?.runSummary.metric, {
+    baseline: "61 minutes",
+    biomarkerKey: "biomarker:deep-sleep-minutes",
+    current: "71 minutes",
+    label: "Deep Sleep Minutes",
+  });
+  assert.deepEqual(replica.experimentRunCards?.[0]?.runSummary.metrics, []);
+  assert.deepEqual(replica.experimentRunCards?.[0]?.requiredMetricBuckets, [
+    await getBrowserVaultMetricBucketId("deep-sleep-minutes"),
+  ]);
   const results = selectBrowserVaultExperimentResults(
     createBrowserVaultQueryClient(replica),
     { experimentId },
@@ -500,8 +511,12 @@ test("browser vault parser defaults legacy replicas without outcomes to an empty
   });
   const legacyReplica = { ...replica };
   delete legacyReplica.experimentOutcomes;
+  delete legacyReplica.experimentRunCards;
+  delete legacyReplica.hasLabBiomarkers;
 
   assert.deepEqual(parseBrowserVaultReplica(legacyReplica).experimentOutcomes, []);
+  assert.deepEqual(parseBrowserVaultReplica(legacyReplica).experimentRunCards, []);
+  assert.equal(parseBrowserVaultReplica(legacyReplica).hasLabBiomarkers, false);
 });
 
 test("browser vault replica keeps metric adherence targets", async () => {

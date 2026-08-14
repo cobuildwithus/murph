@@ -12,13 +12,28 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
-import { type BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 
-import { type BrowserVaultFreshness, type BrowserVaultSessionMetadata } from "./loader";
+import {
+  getBrowserVaultMetricBucketId,
+  type BrowserVaultExperimentRunCardLookup,
+  type BrowserVaultLabsCapableQueryClient,
+  type BrowserVaultMetricBucketId,
+  type BrowserVaultMetricSeriesCapableQueryClient,
+  type BrowserVaultQueryClient,
+} from "@murphai/query/browser-replica-client";
+import {
+  type BrowserVaultAnyQueryClient,
+  type BrowserVaultFreshness,
+  type BrowserVaultSessionMetadata,
+} from "./loader";
 import { browserVaultReplicaRefsMatch } from "./ref";
+import {
+  normalizeBrowserVaultMetricBucketDemand,
+  planBrowserVaultRouteShards,
+} from "./route-shards";
 import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation";
 import {
   abortBrowserVaultInFlightLoad,
@@ -45,7 +60,7 @@ const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
 };
 
 type BrowserVaultRuntimeRefreshCompletion = (
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultAnyQueryClient,
   ref: HostedBrowserVaultReplicaRef,
 ) => boolean;
 
@@ -77,7 +92,7 @@ export interface BrowserVaultContextValue {
    * the projected data they need. This raw client remains for current callers and
    * narrow escape hatches.
    */
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultAnyQueryClient | null;
   dataVersion: string | null;
   deviceSyncImportPending: boolean;
   error: string | null;
@@ -91,6 +106,14 @@ export interface BrowserVaultContextValue {
 }
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
+type RegisterBrowserVaultMetricBucketDemand = (
+  owner: symbol,
+  pathname: string,
+  bucketIds: readonly BrowserVaultMetricBucketId[],
+) => () => void;
+const BrowserVaultMetricDemandContext = createContext<
+  RegisterBrowserVaultMetricBucketDemand
+>(() => () => {});
 const DISABLED_BROWSER_VAULT_CONTEXT: BrowserVaultContextValue = {
   client: null,
   dataVersion: null,
@@ -137,9 +160,11 @@ function DisabledBrowserVaultProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <BrowserVaultContext.Provider value={DISABLED_BROWSER_VAULT_CONTEXT}>
-      {children}
-    </BrowserVaultContext.Provider>
+    <BrowserVaultMetricDemandContext.Provider value={() => () => {}}>
+      <BrowserVaultContext.Provider value={DISABLED_BROWSER_VAULT_CONTEXT}>
+        {children}
+      </BrowserVaultContext.Provider>
+    </BrowserVaultMetricDemandContext.Provider>
   );
 }
 
@@ -158,11 +183,15 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const [runtimeRefreshPending, setRuntimeRefreshPending] = useState(false);
   const [runtimeRefreshPolling, setRuntimeRefreshPolling] = useState(false);
   const [workspaceVersion, setWorkspaceVersion] = useState<string | null>(null);
-  const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
+  const [client, setClient] = useState<BrowserVaultAnyQueryClient | null>(null);
   const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(false);
   const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
   const [admittedPathname, setAdmittedPathname] = useState<string | null>(null);
-  const clientRef = useRef<BrowserVaultQueryClient | null>(null);
+  const [metricBucketDemands, setMetricBucketDemands] = useState(new Map<
+    symbol,
+    { bucketIds: readonly BrowserVaultMetricBucketId[]; pathname: string }
+  >());
+  const clientRef = useRef<BrowserVaultAnyQueryClient | null>(null);
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const providerStartedLoadRef = useRef(false);
@@ -174,6 +203,39 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const runtimeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+
+  const registerMetricBucketDemand = useCallback((
+    owner: symbol,
+    demandPathname: string,
+    bucketIds: readonly BrowserVaultMetricBucketId[],
+  ) => {
+    const normalized = normalizeBrowserVaultMetricBucketDemand(bucketIds);
+    setMetricBucketDemands((current) => {
+      const next = new Map(current);
+      next.set(owner, { bucketIds: normalized, pathname: demandPathname });
+      return next;
+    });
+    return () => {
+      setMetricBucketDemands((current) => {
+        if (!current.has(owner)) return current;
+        const next = new Map(current);
+        next.delete(owner);
+        return next;
+      });
+    };
+  }, []);
+
+  const activeMetricBucketDemand = useMemo(() => {
+    const bucketIds: BrowserVaultMetricBucketId[] = [];
+    for (const demand of metricBucketDemands.values()) {
+      if (demand.pathname === pathname) bucketIds.push(...demand.bucketIds);
+    }
+    return normalizeBrowserVaultMetricBucketDemand(bucketIds);
+  }, [metricBucketDemands, pathname]);
+  const activeMetricBucketDemandRef = useRef(activeMetricBucketDemand);
+  useLayoutEffect(() => {
+    activeMetricBucketDemandRef.current = activeMetricBucketDemand;
+  }, [activeMetricBucketDemand]);
 
   const clearRuntimeRefreshWait = useCallback(() => {
     runtimeRefreshCompletionRef.current = null;
@@ -447,8 +509,19 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         );
       }
 
+      const targetPathname = authorityPathname ?? pathname;
+      const routeShards = planBrowserVaultRouteShards(targetPathname);
+      const requestedMetricBuckets = targetPathname === pathname
+        ? activeMetricBucketDemandRef.current
+        : [];
+      const requestedShards = requestedMetricBuckets.length > 0
+        && !routeShards.includes("metricsIndex")
+        ? [...routeShards, "metricsIndex" as const]
+        : routeShards;
       const outcome = await startBrowserVaultWarmLoad({
         expectedMemberId: initialMemberId,
+        requestedMetricBuckets,
+        requestedShards,
         requestRefresh: requestRuntimeRefresh,
       });
       if (startedLoad && !peekBrowserVaultInFlightLoad()) {
@@ -500,6 +573,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       beginRuntimeRefreshWait,
       clearRuntimeRefreshWait,
       initialMemberId,
+      pathname,
       pausePostRequestPolling,
     ],
   );
@@ -626,6 +700,42 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, [pathname, revalidateAuthority]);
 
   useEffect(() => {
+    if (admittedPathname !== pathname || status !== "ready") {
+      return;
+    }
+    const snapshot = getBrowserVaultReadySnapshot();
+    if (!snapshot) {
+      return;
+    }
+    const routeShards = planBrowserVaultRouteShards(pathname);
+    const requestedShards = activeMetricBucketDemand.length > 0
+      && !routeShards.includes("metricsIndex")
+      ? [...routeShards, "metricsIndex" as const]
+      : routeShards;
+    const demandAlreadyLoaded =
+      snapshot.loadedShards.length === requestedShards.length
+      && requestedShards.every((shard) => snapshot.loadedShards.includes(shard))
+      && snapshot.loadedMetricBuckets.length === activeMetricBucketDemand.length
+      && activeMetricBucketDemand.every((bucketId) =>
+        snapshot.loadedMetricBuckets.includes(bucketId)
+      );
+    if (demandAlreadyLoaded) {
+      return;
+    }
+    void Promise.resolve().then(() => {
+      if (mountedRef.current && admittedPathname === pathname) {
+        return runProviderLoad({ background: true });
+      }
+    });
+  }, [
+    activeMetricBucketDemand,
+    admittedPathname,
+    pathname,
+    runProviderLoad,
+    status,
+  ]);
+
+  useEffect(() => {
     const refreshPending = sessionRefreshPending || runtimeRefreshPolling;
     if (status === "error" || !refreshPending) {
       return;
@@ -694,9 +804,11 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }), [authorityAdmitted, client, deviceSyncImportPending, error, freshness, ref, refresh, refreshPending, runtimeRefreshPending, status, workspaceVersion]);
 
   return (
-    <BrowserVaultContext.Provider value={value}>
-      {children}
-    </BrowserVaultContext.Provider>
+    <BrowserVaultMetricDemandContext.Provider value={registerMetricBucketDemand}>
+      <BrowserVaultContext.Provider value={value}>
+        {children}
+      </BrowserVaultContext.Provider>
+    </BrowserVaultMetricDemandContext.Provider>
   );
 }
 
@@ -710,8 +822,138 @@ export function useBrowserVault(): BrowserVaultContextValue {
   return value;
 }
 
-export function useBrowserVaultSelector<T>(selector: (client: BrowserVaultQueryClient) => T): T | null {
+export function useBrowserVaultSelector<T>(selector: (client: BrowserVaultAnyQueryClient) => T): T | null {
   const { client } = useBrowserVault();
 
   return useMemo(() => client ? selector(client) : null, [client, selector]);
+}
+
+export function useBrowserVaultMetricsSelector<T>(
+  selector: (client: BrowserVaultMetricSeriesCapableQueryClient) => T,
+): T | null {
+  const { client } = useBrowserVault();
+  const metricsClient = isBrowserVaultMetricsCapable(client) ? client : null;
+  return useMemo(
+    () => metricsClient ? selector(metricsClient) : null,
+    [metricsClient, selector],
+  );
+}
+
+export function useBrowserVaultLabsSelector<T>(
+  selector: (client: BrowserVaultLabsCapableQueryClient) => T,
+): T | null {
+  const { client } = useBrowserVault();
+  const labsClient = isBrowserVaultLabsCapable(client) ? client : null;
+  return useMemo(
+    () => labsClient ? selector(labsClient) : null,
+    [labsClient, selector],
+  );
+}
+
+export function useBrowserVaultFullSelector<T>(
+  selector: (client: BrowserVaultQueryClient) => T,
+): T | null {
+  const { client } = useBrowserVault();
+  const fullClient = client?.capability === "core+metrics+labs" ? client : null;
+  return useMemo(
+    () => fullClient ? selector(fullClient) : null,
+    [fullClient, selector],
+  );
+}
+
+export function isBrowserVaultMetricsCapable(
+  client: BrowserVaultAnyQueryClient | null,
+): client is BrowserVaultMetricSeriesCapableQueryClient {
+  return client?.capability === "core+metrics-partial"
+    || client?.capability === "core+metrics-partial+labs"
+    || client?.capability === "core+metrics"
+    || client?.capability === "core+metrics+labs";
+}
+
+export function isBrowserVaultLabsCapable(
+  client: BrowserVaultAnyQueryClient | null,
+): client is BrowserVaultLabsCapableQueryClient {
+  return client?.capability === "core+labs"
+    || client?.capability === "core+metrics-partial+labs"
+    || client?.capability === "core+metrics+labs";
+}
+
+export function useBrowserVaultMetricBucketDemand(
+  bucketIds: readonly BrowserVaultMetricBucketId[],
+): boolean {
+  const { client } = useBrowserVault();
+  const registerMetricBucketDemand = useContext(BrowserVaultMetricDemandContext);
+  const pathname = usePathname();
+  const ownerRef = useRef(Symbol("browser-vault-metric-bucket-demand"));
+  const demandKey = [...new Set(bucketIds)].sort().join(",");
+  const normalized = useMemo(
+    () => normalizeBrowserVaultMetricBucketDemand(
+      demandKey.length === 0
+        ? []
+        : demandKey.split(",") as BrowserVaultMetricBucketId[],
+    ),
+    [demandKey],
+  );
+  useEffect(() => registerMetricBucketDemand(
+    ownerRef.current,
+    pathname,
+    normalized,
+  ), [normalized, pathname, registerMetricBucketDemand]);
+  if (normalized.length === 0) return true;
+  if (
+    client?.capability === "core+metrics"
+    || client?.capability === "core+metrics+labs"
+  ) return true;
+  if (!client || !("loadedMetricBuckets" in client)) return false;
+  return normalized.every((bucketId) => client.loadedMetricBuckets.includes(bucketId));
+}
+
+export function useBrowserVaultMetricKeyDemand(
+  metricKeys: readonly string[],
+): boolean {
+  const [bucketIds, setBucketIds] = useState<BrowserVaultMetricBucketId[]>([]);
+  const metricKeyDemand = [...new Set(metricKeys.filter((key) => key.length > 0))]
+    .sort()
+    .join("\n");
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      metricKeyDemand.length === 0
+        ? []
+        : metricKeyDemand.split("\n").map(getBrowserVaultMetricBucketId),
+    ).then((resolved) => {
+      if (!cancelled) setBucketIds(normalizeBrowserVaultMetricBucketDemand(resolved));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [metricKeyDemand]);
+  const bucketsLoaded = useBrowserVaultMetricBucketDemand(bucketIds);
+  return metricKeyDemand.length === 0 || (bucketIds.length > 0 && bucketsLoaded);
+}
+
+export function useBrowserVaultExperimentMetricBucketDemand(input: {
+  experimentId?: string;
+  lookups?: readonly BrowserVaultExperimentRunCardLookup[];
+}): boolean {
+  const { client } = useBrowserVault();
+  const lookups = input.lookups ?? [];
+  const lookupKey = JSON.stringify(lookups);
+  const stableLookups = useMemo(
+    () => JSON.parse(lookupKey) as BrowserVaultExperimentRunCardLookup[],
+    [lookupKey],
+  );
+  const card = useMemo(() => {
+    if (!client) return null;
+    if (input.experimentId) {
+      const exact = client.experimentRunCards.get(input.experimentId);
+      if (exact) return exact;
+    }
+    return stableLookups.map((lookup) => client.experimentRunCards.find(lookup))
+      .find((candidate) => candidate !== null) ?? null;
+  }, [client, input.experimentId, stableLookups]);
+  const bucketsLoaded = useBrowserVaultMetricBucketDemand(
+    card?.requiredMetricBuckets ?? [],
+  );
+  return client !== null && (card === null || bucketsLoaded);
 }

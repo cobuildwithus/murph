@@ -463,6 +463,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       userId: "user-123",
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
@@ -497,6 +498,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
 
   it("keeps a legacy Worker response pending without deleteAll completion evidence", async () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
@@ -540,6 +542,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       { name: "CloudflareDeletionError" },
     ));
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),

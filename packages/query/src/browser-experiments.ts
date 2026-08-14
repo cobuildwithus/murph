@@ -9,7 +9,13 @@ export type {
 export { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
 export { selectBrowserVaultExperimentResults } from "./browser-replica/experiments.ts";
 export { isActiveOverviewExperimentStatus } from "./overview-status.ts";
-export type { BrowserVaultQueryClient } from "./browser-replica/shared.ts";
+export type {
+  BrowserVaultMetricsCapableQueryClient,
+  BrowserVaultMetricSeriesCapableQueryClient,
+  BrowserVaultInteractiveMetricsQueryClient,
+  BrowserVaultInteractiveQueryClient,
+  BrowserVaultQueryClient,
+} from "./browser-replica/shared.ts";
 export type {
   BrowserVaultExperimentAdherenceResult,
   BrowserVaultExperimentBiomarkerResult,

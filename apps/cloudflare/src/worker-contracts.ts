@@ -162,6 +162,17 @@ export interface WorkerUserRunnerStubLike {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     expiresAt: string;
   }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  admitHostedBrowserVaultReplicaDirectPut?(input: {
+    admittedAt: string;
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    writeId: string;
+  }): Promise<boolean>;
+  releaseHostedBrowserVaultReplicaDirectPut?(input: {
+    userId: string;
+    writeId: string;
+  }): Promise<void>;
   deleteHostedWorkspaceSnapshotUploadSession?(input: {
     snapshotId: string;
     userId: string;

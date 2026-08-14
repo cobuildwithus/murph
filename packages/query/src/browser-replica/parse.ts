@@ -5,9 +5,13 @@ import { experimentOutcomeSchema } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
+  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
   type BrowserVaultAssistantSummary,
   type BrowserVaultEntity,
   type BrowserVaultEntityLink,
+  type BrowserVaultExperimentRunCard,
+  type BrowserVaultExperimentRunCardMetric,
+  type BrowserVaultExperimentRunCardSummary,
   type BrowserVaultLabResultReferenceRange,
   type BrowserVaultLabResultRow,
   type BrowserVaultLabSpecimenKind,
@@ -21,7 +25,32 @@ import {
   type BrowserVaultSourceHealthRow,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
+import {
+  assembleBrowserVaultReplicaShards,
+  BROWSER_VAULT_CORE_SHARD_SCHEMA,
+  BROWSER_VAULT_LABS_SHARD_SCHEMA,
+  BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
+  BROWSER_VAULT_METRICS_SHARD_SCHEMA,
+  BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
+  hasAllBrowserVaultMetricBuckets,
+  markBrowserVaultMetricBucketShardVerified,
+  type BrowserVaultCoreShard,
+  type BrowserVaultLabsShard,
+  type BrowserVaultMetricsShard,
+  type BrowserVaultMetricBucketRow,
+  type BrowserVaultMetricBucketShard,
+  type BrowserVaultMetricBucketShards,
+  type BrowserVaultReplicaShardIdentity,
+  type BrowserVaultReplicaShardSet,
+} from "./shards.ts";
+import {
+  BROWSER_VAULT_METRIC_BUCKET_IDS,
+  getBrowserVaultMetricBucketId,
+  requireBrowserVaultMetricBucketId,
+  type BrowserVaultMetricBucketId,
+} from "./metric-buckets.ts";
 import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
+import { BROWSER_VAULT_METRIC_ROW_SCHEMA } from "./metric-points.ts";
 import {
   type PersonalPatternCell,
   type PersonalPatternFactor,
@@ -37,6 +66,9 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     throw new TypeError(`${label}.schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
   }
   const generatedAt = requireIsoDateTime(record.generatedAt, `${label}.generatedAt`);
+  const metricRows = requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) =>
+    parseMetricRow(entry, `${label}.metricRows[${index}]`)
+  );
 
   return {
     assistantSummary: parseAssistantSummary(record.assistantSummary, `${label}.assistantSummary`),
@@ -46,15 +78,28 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
       : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
           experimentOutcomeSchema.parse(entry)
         ),
+    experimentRunCards: readOptionalArray(
+      record.experimentRunCards,
+      `${label}.experimentRunCards`,
+    ).map((entry, index) =>
+      parseExperimentRunCard(entry, `${label}.experimentRunCards[${index}]`)
+    ),
     generatedAt,
     ...(record.generation === undefined
       ? {}
       : { generation: requirePositiveSafeInteger(record.generation, `${label}.generation`) }),
+    hasLabBiomarkers: record.hasLabBiomarkers === undefined
+      ? metricRows.some((row) =>
+          row.sourceKind === "test-result"
+          && row.biomarkerKey !== null
+          && row.value !== null
+        )
+      : requireBoolean(record.hasLabBiomarkers, `${label}.hasLabBiomarkers`),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
     ),
     metricGoalProgressRows: requireArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
-    metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) => parseMetricRow(entry, `${label}.metricRows[${index}]`)),
+    metricRows,
     metricSelectionRows: requireArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) => parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)),
     ...(record.personalPatterns === undefined
       ? {}
@@ -71,6 +116,365 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     sourceHealthRows: requireArray(record.sourceHealthRows, `${label}.sourceHealthRows`).map((entry, index) => parseSourceHealthRow(entry, `${label}.sourceHealthRows[${index}]`)),
     timelineRows: requireArray(record.timelineRows, `${label}.timelineRows`).map((entry, index) => parseTimelineRow(entry, `${label}.timelineRows[${index}]`)),
     weeklySampleSummaries: requireArray(record.weeklySampleSummaries, `${label}.weeklySampleSummaries`).map((entry, index) => parseWeeklySampleSummary(entry, `${label}.weeklySampleSummaries[${index}]`)),
+  };
+}
+
+export function parseBrowserVaultCoreShard(
+  value: unknown,
+  label = "Browser vault core shard",
+): BrowserVaultCoreShard {
+  const record = requireRecord(value, label);
+  requireExpectedSchema(record.schema, BROWSER_VAULT_CORE_SHARD_SCHEMA, `${label}.schema`);
+
+  return {
+    assistantSummary: parseAssistantSummary(record.assistantSummary, `${label}.assistantSummary`),
+    entities: requireArray(record.entities, `${label}.entities`).map((entry, index) =>
+      parseEntity(entry, `${label}.entities[${index}]`)
+    ),
+    experimentOutcomes: record.experimentOutcomes === undefined
+      ? []
+      : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
+          experimentOutcomeSchema.parse(entry)
+        ),
+    experimentRunCards: requireArray(
+      record.experimentRunCards,
+      `${label}.experimentRunCards`,
+    ).map((entry, index) =>
+      parseExperimentRunCard(entry, `${label}.experimentRunCards[${index}]`)
+    ),
+    hasLabBiomarkers: requireBoolean(
+      record.hasLabBiomarkers,
+      `${label}.hasLabBiomarkers`,
+    ),
+    identity: parseShardIdentity(record.identity, `${label}.identity`),
+    ...(record.personalPatterns === undefined
+      ? {}
+      : {
+          personalPatterns: parsePersonalPatternReport(
+            record.personalPatterns,
+            `${label}.personalPatterns`,
+          ),
+        }),
+    policy: parsePolicy(record.policy, `${label}.policy`),
+    schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
+    timelineRows: requireArray(record.timelineRows, `${label}.timelineRows`).map((entry, index) =>
+      parseTimelineRow(entry, `${label}.timelineRows[${index}]`)
+    ),
+    weeklySampleSummaries: requireArray(
+      record.weeklySampleSummaries,
+      `${label}.weeklySampleSummaries`,
+    ).map((entry, index) =>
+      parseWeeklySampleSummary(entry, `${label}.weeklySampleSummaries[${index}]`)
+    ),
+  };
+}
+
+function parseExperimentRunCard(
+  value: unknown,
+  label: string,
+): BrowserVaultExperimentRunCard {
+  const record = requireRecord(value, label);
+  const schema = requireExpectedSchema(
+    record.schema,
+    BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
+    `${label}.schema`,
+  );
+  const lookupKeys = requireRecord(record.lookupKeys, `${label}.lookupKeys`);
+  const status = requireString(record.status, `${label}.status`);
+  if (
+    status !== "active"
+    && status !== "paused"
+    && status !== "finished"
+    && status !== "stopped"
+  ) {
+    throw new TypeError(`${label}.status must be active, paused, finished, or stopped.`);
+  }
+
+  return {
+    id: requireString(record.id, `${label}.id`),
+    lookupKeys: {
+      experimentIds: requireStringArray(
+        lookupKeys.experimentIds,
+        `${label}.lookupKeys.experimentIds`,
+      ),
+      protocolKeys: requireStringArray(
+        lookupKeys.protocolKeys,
+        `${label}.lookupKeys.protocolKeys`,
+      ),
+      slugs: requireStringArray(lookupKeys.slugs, `${label}.lookupKeys.slugs`),
+    },
+    requiredMetricBuckets: readOptionalArray(
+      record.requiredMetricBuckets,
+      `${label}.requiredMetricBuckets`,
+    ).map((entry, index) => requireBrowserVaultMetricBucketId(
+      entry,
+      `${label}.requiredMetricBuckets[${index}]`,
+    )),
+    runSummary: parseExperimentRunCardSummary(
+      record.runSummary,
+      `${label}.runSummary`,
+    ),
+    schema,
+    slug: readNullableString(record.slug),
+    startedOn: readNullableString(record.startedOn),
+    status,
+    statusLabel: requireString(record.statusLabel, `${label}.statusLabel`),
+    summary: readNullableString(record.summary),
+    summaryDetail: readNullableString(record.summaryDetail),
+    tags: requireStringArray(record.tags, `${label}.tags`),
+    title: requireString(record.title, `${label}.title`),
+  };
+}
+
+function parseExperimentRunCardSummary(
+  value: unknown,
+  label: string,
+): BrowserVaultExperimentRunCardSummary {
+  const record = requireRecord(value, label);
+  return {
+    ...(record.completionPercent === undefined
+      ? {}
+      : {
+          completionPercent: requireNonNegativeInteger(
+            record.completionPercent,
+            `${label}.completionPercent`,
+          ),
+        }),
+    ...(record.dailyCadence === undefined
+      ? {}
+      : {
+          dailyCadence: parseExperimentRunCardDailyCadence(
+            record.dailyCadence,
+            `${label}.dailyCadence`,
+          ),
+        }),
+    ...(record.dateRange === undefined
+      ? {}
+      : { dateRange: requireString(record.dateRange, `${label}.dateRange`) }),
+    ...(record.day === undefined
+      ? {}
+      : { day: requireNonNegativeInteger(record.day, `${label}.day`) }),
+    ...(record.metric === undefined
+      ? {}
+      : { metric: parseExperimentRunCardMetric(record.metric, `${label}.metric`) }),
+    metrics: requireArray(record.metrics, `${label}.metrics`).map((entry, index) =>
+      parseExperimentRunCardMetric(entry, `${label}.metrics[${index}]`)
+    ),
+  };
+}
+
+function parseExperimentRunCardDailyCadence(
+  value: unknown,
+  label: string,
+): NonNullable<BrowserVaultExperimentRunCardSummary["dailyCadence"]> {
+  const record = requireRecord(value, label);
+  return {
+    cadence: requireString(record.cadence, `${label}.cadence`),
+    completed: requireNonNegativeInteger(record.completed, `${label}.completed`),
+    expected: requireNonNegativeInteger(record.expected, `${label}.expected`),
+    ...(record.label === undefined
+      ? {}
+      : { label: requireString(record.label, `${label}.label`) }),
+  };
+}
+
+function parseExperimentRunCardMetric(
+  value: unknown,
+  label: string,
+): BrowserVaultExperimentRunCardMetric {
+  const record = requireRecord(value, label);
+  const direction = record.direction === undefined
+    ? undefined
+    : requireString(record.direction, `${label}.direction`);
+  if (
+    direction !== undefined
+    && direction !== "down"
+    && direction !== "neutral"
+    && direction !== "up"
+  ) {
+    throw new TypeError(`${label}.direction must be down, neutral, or up.`);
+  }
+  return {
+    ...(record.baseline === undefined
+      ? {}
+      : { baseline: requireString(record.baseline, `${label}.baseline`) }),
+    ...(record.biomarkerKey === undefined
+      ? {}
+      : { biomarkerKey: requireString(record.biomarkerKey, `${label}.biomarkerKey`) }),
+    current: requireString(record.current, `${label}.current`),
+    ...(record.delta === undefined
+      ? {}
+      : { delta: requireString(record.delta, `${label}.delta`) }),
+    ...(direction === undefined ? {} : { direction }),
+    label: requireString(record.label, `${label}.label`),
+  };
+}
+
+export function parseBrowserVaultMetricsShard(
+  value: unknown,
+  label = "Browser vault metrics shard",
+): BrowserVaultMetricsShard {
+  const record = requireRecord(value, label);
+  requireExpectedSchema(record.schema, BROWSER_VAULT_METRICS_SHARD_SCHEMA, `${label}.schema`);
+
+  return {
+    identity: parseShardIdentity(record.identity, `${label}.identity`),
+    metricGoalProgressRows: requireArray(
+      record.metricGoalProgressRows,
+      `${label}.metricGoalProgressRows`,
+    ).map((entry, index) =>
+      parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)
+    ),
+    metricDirectory: requireArray(record.metricDirectory, `${label}.metricDirectory`).map(
+      (entry, index) => {
+        const directoryEntry = requireRecord(entry, `${label}.metricDirectory[${index}]`);
+        return {
+          bucketId: requireBrowserVaultMetricBucketId(
+            directoryEntry.bucketId,
+            `${label}.metricDirectory[${index}].bucketId`,
+          ),
+          metricKey: requireString(
+            directoryEntry.metricKey,
+            `${label}.metricDirectory[${index}].metricKey`,
+          ),
+          rowCount: requireNonNegativeInteger(
+            directoryEntry.rowCount,
+            `${label}.metricDirectory[${index}].rowCount`,
+          ),
+        };
+      },
+    ),
+    metricRowCount: requireNonNegativeInteger(record.metricRowCount, `${label}.metricRowCount`),
+    metricSelectionRows: requireArray(
+      record.metricSelectionRows,
+      `${label}.metricSelectionRows`,
+    ).map((entry, index) =>
+      parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)
+    ),
+    schema: BROWSER_VAULT_METRICS_SHARD_SCHEMA,
+    sourceHealthRows: requireArray(record.sourceHealthRows, `${label}.sourceHealthRows`).map(
+      (entry, index) => parseSourceHealthRow(entry, `${label}.sourceHealthRows[${index}]`),
+    ),
+  };
+}
+
+export async function parseBrowserVaultMetricBucketShard(
+  value: unknown,
+  expectedBucketId?: BrowserVaultMetricBucketId,
+  label = "Browser vault metric bucket shard",
+): Promise<BrowserVaultMetricBucketShard> {
+  const record = requireRecord(value, label);
+  requireExpectedSchema(
+    record.schema,
+    BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
+    `${label}.schema`,
+  );
+  const bucketId = requireBrowserVaultMetricBucketId(record.bucketId, `${label}.bucketId`);
+  if (expectedBucketId !== undefined && bucketId !== expectedBucketId) {
+    throw new TypeError(`${label}.bucketId must be ${expectedBucketId}.`);
+  }
+  const series = requireArray(record.series, `${label}.series`).map((entry, index) => {
+    const seriesRecord = requireRecord(entry, `${label}.series[${index}]`);
+    const metricKey = requireString(seriesRecord.metricKey, `${label}.series[${index}].metricKey`);
+    return {
+      metricKey,
+      rows: requireArray(seriesRecord.rows, `${label}.series[${index}].rows`).map(
+        (row, rowIndex) => parseMetricBucketRow(
+          row,
+          `${label}.series[${index}].rows[${rowIndex}]`,
+        ),
+      ),
+    };
+  });
+  for (const entry of series) {
+    const actualBucketId = await getBrowserVaultMetricBucketId(entry.metricKey);
+    if (actualBucketId !== bucketId) {
+      throw new TypeError(`${label} contains a metric key assigned to bucket ${actualBucketId}.`);
+    }
+  }
+  return markBrowserVaultMetricBucketShardVerified({
+    bucketId,
+    identity: parseShardIdentity(record.identity, `${label}.identity`),
+    schema: BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
+    series,
+  });
+}
+
+export function parseBrowserVaultLabsShard(
+  value: unknown,
+  label = "Browser vault labs shard",
+): BrowserVaultLabsShard {
+  const record = requireRecord(value, label);
+  requireExpectedSchema(record.schema, BROWSER_VAULT_LABS_SHARD_SCHEMA, `${label}.schema`);
+
+  return {
+    identity: parseShardIdentity(record.identity, `${label}.identity`),
+    labResultRows: requireArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
+      parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
+    ),
+    schema: BROWSER_VAULT_LABS_SHARD_SCHEMA,
+  };
+}
+
+export async function parseBrowserVaultReplicaShards(
+  value: unknown,
+  label = "Browser vault replica shard set",
+): Promise<BrowserVaultReplicaShardSet> {
+  const record = requireRecord(value, label);
+  requireExpectedSchema(record.schema, BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA, `${label}.schema`);
+
+  const rawBuckets = requireRecord(record.metricBuckets, `${label}.metricBuckets`);
+  const metricBuckets: Partial<Record<BrowserVaultMetricBucketId, BrowserVaultMetricBucketShard>> = {};
+  const parsedBuckets = await Promise.all(BROWSER_VAULT_METRIC_BUCKET_IDS.map(async (bucketId) => ({
+    bucket: await parseBrowserVaultMetricBucketShard(
+      rawBuckets[bucketId],
+      bucketId,
+      `${label}.metricBuckets.${bucketId}`,
+    ),
+    bucketId,
+  })));
+  for (const { bucket, bucketId } of parsedBuckets) metricBuckets[bucketId] = bucket;
+  if (!hasAllBrowserVaultMetricBuckets(metricBuckets)) {
+    throw new TypeError(`${label}.metricBuckets must contain all fixed metric buckets.`);
+  }
+  return {
+    core: parseBrowserVaultCoreShard(record.core, `${label}.core`),
+    labs: parseBrowserVaultLabsShard(record.labs, `${label}.labs`),
+    metricBuckets,
+    metrics: parseBrowserVaultMetricsShard(record.metrics, `${label}.metrics`),
+    schema: BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
+  };
+}
+
+export async function parseBrowserVaultReplicaPayload(
+  value: unknown,
+  label = "Browser vault replica payload",
+): Promise<BrowserVaultReplica> {
+  const record = requireRecord(value, label);
+  if (record.schema === BROWSER_VAULT_REPLICA_SCHEMA) {
+    return parseBrowserVaultReplica(record, label);
+  }
+  return assembleBrowserVaultReplicaShards(await parseBrowserVaultReplicaShards(record, label));
+}
+
+function parseShardIdentity(
+  value: unknown,
+  label: string,
+): BrowserVaultReplicaShardIdentity {
+  const record = requireRecord(value, label);
+  requireExpectedSchema(
+    record.replicaSchema,
+    BROWSER_VAULT_REPLICA_SCHEMA,
+    `${label}.replicaSchema`,
+  );
+  return {
+    dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
+    generatedAt: requireIsoDateTime(record.generatedAt, `${label}.generatedAt`),
+    ...(record.generation === undefined
+      ? {}
+      : { generation: requirePositiveSafeInteger(record.generation, `${label}.generation`) }),
+    replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
+    sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
   };
 }
 
@@ -258,8 +662,8 @@ function readNullableLabSpecimenKind(
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
   const record = requireRecord(value, label);
   const rowSchema = requireString(record.rowSchema, `${label}.rowSchema`);
-  if (rowSchema !== "murph.browser-vault.metric-row.v1") {
-    throw new TypeError(`${label}.rowSchema must be murph.browser-vault.metric-row.v1.`);
+  if (rowSchema !== BROWSER_VAULT_METRIC_ROW_SCHEMA) {
+    throw new TypeError(`${label}.rowSchema must be ${BROWSER_VAULT_METRIC_ROW_SCHEMA}.`);
   }
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
@@ -282,6 +686,19 @@ function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
     value: readNullableFiniteNumber(record.value),
     valueLabel: readNullableString(record.valueLabel),
   };
+}
+
+function parseMetricBucketRow(value: unknown, label: string): BrowserVaultMetricBucketRow {
+  const parsed = parseMetricRow(
+    {
+      ...requireRecord(value, label),
+      metricKey: "physical-metric-key-restored-by-series",
+      rowSchema: BROWSER_VAULT_METRIC_ROW_SCHEMA,
+    },
+    label,
+  );
+  const { metricKey: _metricKey, rowSchema: _rowSchema, ...bucketRow } = parsed;
+  return bucketRow;
 }
 
 function parseMetricSelectionRow(value: unknown, label: string): BrowserVaultMetricSelectionRow {
@@ -410,6 +827,15 @@ function readOptionalArray(value: unknown, label: string): unknown[] {
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) throw new TypeError(`${label} must be a non-empty string.`);
   return value;
+}
+function requireExpectedSchema<TSchema extends string>(
+  value: unknown,
+  expected: TSchema,
+  label: string,
+): TSchema {
+  const schema = requireString(value, label);
+  if (schema !== expected) throw new TypeError(`${label} must be ${expected}.`);
+  return expected;
 }
 function requireStringArray(value: unknown, label: string): string[] {
   return requireArray(value, label).map((entry, index) => requireString(entry, `${label}[${index}]`));

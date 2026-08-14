@@ -1,19 +1,56 @@
 export {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
+  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
 } from "./browser-replica/shared.ts";
+export {
+  assembleBrowserVaultCoreReplica,
+  assembleBrowserVaultLabsReplica,
+  assembleBrowserVaultLoadedMetricRows,
+  assembleBrowserVaultMetricsIndexReplica,
+  assembleBrowserVaultMetricsReplica,
+  assembleBrowserVaultReplicaShards,
+  BROWSER_VAULT_CORE_SHARD_SCHEMA,
+  BROWSER_VAULT_LABS_SHARD_SCHEMA,
+  BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
+  BROWSER_VAULT_METRICS_SHARD_SCHEMA,
+  BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
+  splitBrowserVaultReplica,
+  hasAllBrowserVaultMetricBuckets,
+} from "./browser-replica/shards.ts";
 export type {
   BrowserVaultAssistantSummary,
+  BrowserVaultCoreCapableQueryClient,
+  BrowserVaultCoreQueryClient,
+  BrowserVaultCoreReplica,
   BrowserVaultEntity,
   BrowserVaultEntityFamily,
   BrowserVaultEntityFilters,
   BrowserVaultEntityLink,
+  BrowserVaultExperimentRunCard,
+  BrowserVaultExperimentRunCardDailyCadence,
+  BrowserVaultExperimentRunCardLookup,
+  BrowserVaultExperimentRunCardLookupKeys,
+  BrowserVaultExperimentRunCardMetric,
+  BrowserVaultExperimentRunCardStatus,
+  BrowserVaultExperimentRunCardSummary,
+  BrowserVaultLabsCapableQueryClient,
+  BrowserVaultLabsQueryClient,
+  BrowserVaultLabsReplica,
   BrowserVaultMetricFilters,
   BrowserVaultMetricGoalProgressRow,
   BrowserVaultMetricRow,
   BrowserVaultMetricSelectionFilters,
   BrowserVaultMetricSelectionRow,
   BrowserVaultMetricSelectionWarning,
+  BrowserVaultMetricsCapableQueryClient,
+  BrowserVaultMetricSeriesCapableQueryClient,
+  BrowserVaultMetricSeriesCoverage,
+  BrowserVaultInteractiveMetricsQueryClient,
+  BrowserVaultInteractiveQueryClient,
+  BrowserVaultMetricsQueryClient,
+  BrowserVaultMetricsReplica,
+  BrowserVaultMetricsIndexReplica,
   BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultReplica,
@@ -26,5 +63,49 @@ export type {
   BrowserVaultTimelineFilters,
   BrowserVaultTimelineRow,
 } from "./browser-replica/shared.ts";
-export { parseBrowserVaultReplica } from "./browser-replica/parse.ts";
-export { createBrowserVaultQueryClient } from "./browser-replica/query.ts";
+export type {
+  BrowserVaultCoreShard,
+  BrowserVaultLabsShard,
+  BrowserVaultMetricsShard,
+  BrowserVaultMetricsIndexShard,
+  BrowserVaultMetricBucketRow,
+  BrowserVaultMetricBucketSeries,
+  BrowserVaultMetricBucketShard,
+  BrowserVaultMetricBucketShards,
+  BrowserVaultMetricDirectoryEntry,
+  BrowserVaultReplicaPayload,
+  BrowserVaultReplicaShardIdentity,
+  BrowserVaultReplicaShardKind,
+  BrowserVaultReplicaShardSelection,
+  BrowserVaultReplicaShardSet,
+} from "./browser-replica/shards.ts";
+export {
+  parseBrowserVaultCoreShard,
+  parseBrowserVaultLabsShard,
+  parseBrowserVaultMetricsShard,
+  parseBrowserVaultMetricBucketShard,
+  parseBrowserVaultReplica,
+  parseBrowserVaultReplicaPayload,
+  parseBrowserVaultReplicaShards,
+} from "./browser-replica/parse.ts";
+export {
+  BrowserVaultMetricBucketUnavailableError,
+  createBrowserVaultCoreQueryClient,
+  createBrowserVaultLabsQueryClient,
+  createBrowserVaultLoadedQueryClients,
+  createBrowserVaultInteractiveMetricsQueryClient,
+  createBrowserVaultInteractiveQueryClient,
+  createBrowserVaultMetricsQueryClient,
+  createBrowserVaultQueryClient,
+} from "./browser-replica/query.ts";
+export {
+  BROWSER_VAULT_METRIC_BUCKET_COUNT,
+  BROWSER_VAULT_METRIC_BUCKET_IDS,
+  canonicalizeBrowserVaultMetricKey,
+  getBrowserVaultMetricBucketId,
+  isBrowserVaultMetricBucketId,
+  requireBrowserVaultMetricBucketId,
+} from "./browser-replica/metric-buckets.ts";
+export type { BrowserVaultMetricBucketId } from "./browser-replica/metric-buckets.ts";
+export type { BrowserVaultLoadedQueryClients } from "./browser-replica/query.ts";
+export { buildBrowserVaultExperimentRunCards } from "./browser-replica/experiment-run-cards.ts";

@@ -2493,12 +2493,17 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  const authorized = await writeRequestOwnsRuntimeWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!authorized) {
+  let writeAuthority: Awaited<ReturnType<typeof requireRunnerRuntimeWriteFenceWrite>>;
+  try {
+    writeAuthority = await requireRunnerRuntimeWriteFenceWrite({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+  } catch (error) {
+    if (!(error instanceof RunnerRuntimeWriteFenceError)) {
+      throw error;
+    }
     return unauthorized();
   }
 
@@ -2536,20 +2541,83 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
       userId: input.userId,
     });
   }
-  const replicaRef = await replicaStore.writeBrowserVaultReplica({
-    beforeWrite: async (plannedReplicaRef) => {
-      await recordBrowserVaultReplicaOrphanCandidate(input.env, {
-        createdAt: new Date().toISOString(),
-        objectKey: plannedReplicaRef.objectKey,
-        schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+  let activePutWriteId: string | null = null;
+  try {
+    return json({
+      replicaRef: await replicaStore.writeBrowserVaultReplica({
+        beforeWrite: async (plannedReplicaRef) => {
+          const writeId = globalThis.crypto.randomUUID();
+          const admittedAtMs = Date.now();
+          const putAdmitted = await admitBrowserVaultReplicaDirectPut({
+            admittedAt: new Date(admittedAtMs).toISOString(),
+            attemptId: writeAuthority.attemptId,
+            env: input.env,
+            leaseGeneration: writeAuthority.generation,
+            userId: input.userId,
+            writeId,
+          });
+          if (!putAdmitted) {
+            throw new RunnerRuntimeWriteFenceError();
+          }
+          activePutWriteId = writeId;
+          await recordBrowserVaultReplicaOrphanCandidate(input.env, {
+            createdAt: new Date().toISOString(),
+            objectKey: plannedReplicaRef.objectKey,
+            schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+            userId: input.userId,
+          });
+        },
+        replica: body.replica,
         userId: input.userId,
+      }),
+    });
+  } finally {
+    if (activePutWriteId) {
+      await releaseBrowserVaultReplicaDirectPut({
+        env: input.env,
+        userId: input.userId,
+        writeId: activePutWriteId,
       });
-    },
-    replica: body.replica,
-    userId: input.userId,
-  });
+    }
+  }
+}
 
-  return json({ replicaRef });
+async function admitBrowserVaultReplicaDirectPut(input: {
+  admittedAt: string;
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  userId: string;
+  writeId: string;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "admitHostedBrowserVaultReplicaDirectPut",
+  );
+  return await stub.admitHostedBrowserVaultReplicaDirectPut({
+    admittedAt: input.admittedAt,
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
+    userId: input.userId,
+    writeId: input.writeId,
+  });
+}
+
+async function releaseBrowserVaultReplicaDirectPut(input: {
+  env: RunnerOutboundEnvironmentSource;
+  userId: string;
+  writeId: string;
+}): Promise<void> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "releaseHostedBrowserVaultReplicaDirectPut",
+  );
+  await stub.releaseHostedBrowserVaultReplicaDirectPut({
+    userId: input.userId,
+    writeId: input.writeId,
+  });
 }
 
 async function writeRequestOwnsRuntimeWriteFence(input: {

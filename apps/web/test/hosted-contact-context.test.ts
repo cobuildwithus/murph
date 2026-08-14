@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -5,7 +7,6 @@ const mocks = vi.hoisted(() => {
 
   return {
     createHostedMemberReplyAliasRouteFromLookupKey: vi.fn(),
-    decryptHostedWebNullableString: vi.fn(),
     findUnique,
     getHostedPageAuthSnapshot: vi.fn(),
     getPrisma: vi.fn(),
@@ -14,11 +15,7 @@ const mocks = vi.hoisted(() => {
         findUnique,
       },
     },
-    readHostedMemberIdentityPhoneNumber: vi.fn(),
-    readHostedMemberRoutingTelegramPrivateState: vi.fn(),
-    runWithHostedDomainRootUnwrapCache: vi.fn(
-      async (run: () => Promise<unknown>) => await run(),
-    ),
+    readHostedLinqLinePhoneNumberByLookupKey: vi.fn(),
   };
 });
 
@@ -28,25 +25,14 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
-  runWithHostedDomainRootUnwrapCache:
-    mocks.runWithHostedDomainRootUnwrapCache,
-}));
-
-vi.mock("@/src/lib/hosted-web/encryption", () => ({
-  decryptHostedWebNullableString: mocks.decryptHostedWebNullableString,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/hosted-email-reply-alias", () => ({
   createHostedMemberReplyAliasRouteFromLookupKey:
     mocks.createHostedMemberReplyAliasRouteFromLookupKey,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
-  readHostedMemberIdentityPhoneNumber:
-    mocks.readHostedMemberIdentityPhoneNumber,
-  readHostedMemberRoutingTelegramPrivateState:
-    mocks.readHostedMemberRoutingTelegramPrivateState,
+vi.mock("@/src/lib/hosted-onboarding/linq-line-phone-resolver", () => ({
+  readHostedLinqLinePhoneNumberByLookupKey:
+    mocks.readHostedLinqLinePhoneNumberByLookupKey,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -73,20 +59,8 @@ describe("hosted contact context", () => {
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticatedMember: { id: "member-1" },
     });
-    mocks.readHostedMemberIdentityPhoneNumber.mockResolvedValue("+15550000001");
-    mocks.readHostedMemberRoutingTelegramPrivateState.mockResolvedValue({
-      telegramThreadId: "direct:telegram-1",
-      telegramUserId: "telegram-1",
-    });
-    mocks.decryptHostedWebNullableString.mockImplementation(
-      async ({ value }: { value: string | null | undefined }) => {
-        const decryptedByCiphertext = new Map([
-          ["linq-phone-ciphertext", "+15550000002"],
-          ["stripe-email-ciphertext", "checkout@example.test"],
-          ["verified-email-ciphertext", "verified@example.test"],
-        ]);
-        return value ? decryptedByCiphertext.get(value) ?? null : null;
-      },
+    mocks.readHostedLinqLinePhoneNumberByLookupKey.mockResolvedValue(
+      "+15550000002",
     );
     mocks.createHostedMemberReplyAliasRouteFromLookupKey.mockResolvedValue({
       address: "assistant+reply@example.test",
@@ -95,7 +69,7 @@ describe("hosted contact context", () => {
     mocks.findUnique.mockResolvedValue(createContactRecord());
   });
 
-  it("returns anonymous defaults without reading or decrypting member data", async () => {
+  it("returns anonymous defaults without reading member data", async () => {
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticatedMember: null,
     });
@@ -108,14 +82,15 @@ describe("hosted contact context", () => {
       },
       murphEmailAddress: null,
       murphPhoneNumber: null,
-      userEmailAddress: null,
     });
     expect(mocks.getPrisma).not.toHaveBeenCalled();
     expect(mocks.findUnique).not.toHaveBeenCalled();
-    expect(mocks.runWithHostedDomainRootUnwrapCache).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedLinqLinePhoneNumberByLookupKey,
+    ).not.toHaveBeenCalled();
   });
 
-  it("uses one narrow member read and one unwrap-cache scope for contact options", async () => {
+  it("uses opaque channel markers and the local Linq line without member-root decrypts", async () => {
     await expect(readHostedMurphContactContext()).resolves.toEqual({
       initialContactChannels: {
         email: true,
@@ -124,7 +99,6 @@ describe("hosted contact context", () => {
       },
       murphEmailAddress: "assistant+reply@example.test",
       murphPhoneNumber: "+15550000002",
-      userEmailAddress: "verified@example.test",
     });
 
     expect(mocks.findUnique).toHaveBeenCalledTimes(1);
@@ -132,9 +106,6 @@ describe("hosted contact context", () => {
       select: {
         emailAuthorization: {
           select: {
-            memberId: true,
-            stripeCheckoutEmailAddressEncrypted: true,
-            stripeCheckoutEmailCollectedAt: true,
             verifiedEmailAddressEncrypted: true,
             verifiedEmailLookupKey: true,
             verifiedEmailVerifiedAt: true,
@@ -142,62 +113,34 @@ describe("hosted contact context", () => {
         },
         identity: {
           select: {
-            memberId: true,
+            phoneLookupKey: true,
             phoneNumberEncrypted: true,
+            phoneNumberVerifiedAt: true,
           },
         },
         routing: {
           select: {
-            linqRecipientPhoneEncrypted: true,
-            memberId: true,
+            linqRecipientPhoneLookupKey: true,
             replyAliasLookupKey: true,
+            telegramUserLookupKey: true,
             telegramUserIdEncrypted: true,
           },
         },
       },
       where: { id: "member-1" },
     });
-    expect(mocks.runWithHostedDomainRootUnwrapCache).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberIdentityPhoneNumber).toHaveBeenCalledWith(
-      {
-        memberId: "member-1",
-        phoneNumberEncrypted: "phone-ciphertext",
-      },
-      mocks.prisma,
-    );
-    expect(mocks.readHostedMemberRoutingTelegramPrivateState).toHaveBeenCalledWith(
-      {
-        linqRecipientPhoneEncrypted: "linq-phone-ciphertext",
-        memberId: "member-1",
-        replyAliasLookupKey: "reply-alias-key",
-        telegramUserIdEncrypted: "telegram-ciphertext",
-      },
-      mocks.prisma,
-    );
-    expect(mocks.decryptHostedWebNullableString).toHaveBeenNthCalledWith(1, {
-      field: "hosted-member-routing.home-linq-recipient-phone",
-      memberId: "member-1",
+    expect(
+      mocks.readHostedLinqLinePhoneNumberByLookupKey,
+    ).toHaveBeenCalledWith({
+      phoneNumberLookupKey: "linq-phone-key",
       prisma: mocks.prisma,
-      value: "linq-phone-ciphertext",
-    });
-    expect(mocks.decryptHostedWebNullableString).toHaveBeenNthCalledWith(2, {
-      field: "hosted-member-email-authorization.verified-email",
-      memberId: "member-1",
-      prisma: mocks.prisma,
-      value: "verified-email-ciphertext",
-    });
-    expect(mocks.decryptHostedWebNullableString).toHaveBeenNthCalledWith(3, {
-      field: "hosted-member-email-authorization.stripe-checkout-email",
-      memberId: "member-1",
-      prisma: mocks.prisma,
-      value: "stripe-email-ciphertext",
     });
     expect(mocks.createHostedMemberReplyAliasRouteFromLookupKey).toHaveBeenCalledWith({
       replyAliasLookupKey: "reply-alias-key",
     });
   });
 
-  it("returns defaults without decrypting when the authenticated member no longer exists", async () => {
+  it("returns defaults when the authenticated member no longer exists", async () => {
     mocks.findUnique.mockResolvedValue(null);
 
     await expect(readHostedMurphContactContext()).resolves.toEqual({
@@ -208,16 +151,17 @@ describe("hosted contact context", () => {
       },
       murphEmailAddress: null,
       murphPhoneNumber: null,
-      userEmailAddress: null,
     });
     expect(mocks.findUnique).toHaveBeenCalledTimes(1);
-    expect(mocks.runWithHostedDomainRootUnwrapCache).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberIdentityPhoneNumber).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberRoutingTelegramPrivateState).not.toHaveBeenCalled();
-    expect(mocks.decryptHostedWebNullableString).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedLinqLinePhoneNumberByLookupKey,
+    ).not.toHaveBeenCalled();
+    expect(
+      mocks.createHostedMemberReplyAliasRouteFromLookupKey,
+    ).not.toHaveBeenCalled();
   });
 
-  it("skips decrypts for absent optional private-state relations", async () => {
+  it("skips optional resolution for absent private-state relations", async () => {
     mocks.findUnique.mockResolvedValue({
       emailAuthorization: null,
       identity: null,
@@ -232,81 +176,193 @@ describe("hosted contact context", () => {
       },
       murphEmailAddress: null,
       murphPhoneNumber: null,
-      userEmailAddress: null,
     });
-    expect(mocks.readHostedMemberIdentityPhoneNumber).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberRoutingTelegramPrivateState).not.toHaveBeenCalled();
-    expect(mocks.decryptHostedWebNullableString).not.toHaveBeenCalled();
-    expect(mocks.createHostedMemberReplyAliasRouteFromLookupKey).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedLinqLinePhoneNumberByLookupKey,
+    ).not.toHaveBeenCalled();
+    expect(
+      mocks.createHostedMemberReplyAliasRouteFromLookupKey,
+    ).not.toHaveBeenCalled();
   });
 
-  it("uses the checkout email fallback unless the verified email fact is complete", async () => {
-    mocks.findUnique.mockResolvedValue(createContactRecord({
-      verifiedEmailLookupKey: null,
-      verifiedEmailVerifiedAt: null,
-    }));
+  it.each([
+    {
+      channel: "email",
+      record: createContactRecord({
+        emailAuthorization: { verifiedEmailAddressEncrypted: null },
+      }),
+    },
+    {
+      channel: "email",
+      record: createContactRecord({
+        emailAuthorization: { verifiedEmailLookupKey: null },
+      }),
+    },
+    {
+      channel: "email",
+      record: createContactRecord({
+        emailAuthorization: { verifiedEmailVerifiedAt: null },
+      }),
+    },
+    {
+      channel: "text",
+      record: createContactRecord({ identity: { phoneLookupKey: null } }),
+    },
+    {
+      channel: "text",
+      record: createContactRecord({ identity: { phoneNumberEncrypted: null } }),
+    },
+    {
+      channel: "text",
+      record: createContactRecord({ identity: { phoneNumberVerifiedAt: null } }),
+    },
+    {
+      channel: "telegram",
+      record: createContactRecord({
+        routing: { telegramUserLookupKey: null },
+      }),
+    },
+    {
+      channel: "telegram",
+      record: createContactRecord({
+        routing: { telegramUserIdEncrypted: null },
+      }),
+    },
+  ] as const)(
+    "fails $channel closed when one required opaque marker is absent",
+    async ({ channel, record }) => {
+      mocks.findUnique.mockResolvedValue(record);
 
-    await expect(readHostedMurphContactContext()).resolves.toEqual({
-      initialContactChannels: {
-        email: false,
-        telegram: true,
-        text: true,
-      },
-      murphEmailAddress: null,
-      murphPhoneNumber: "+15550000002",
-      userEmailAddress: "checkout@example.test",
-    });
-    expect(mocks.createHostedMemberReplyAliasRouteFromLookupKey).not.toHaveBeenCalled();
-  });
+      const context = await readHostedMurphContactContext();
 
-  it("does not expose a checkout email without its collection timestamp", async () => {
-    mocks.findUnique.mockResolvedValue(createContactRecord({
-      stripeCheckoutEmailCollectedAt: null,
-      verifiedEmailLookupKey: null,
-      verifiedEmailVerifiedAt: null,
-    }));
+      expect(context.initialContactChannels).toEqual({
+        email: channel !== "email",
+        telegram: channel !== "telegram",
+        text: channel !== "text",
+      });
+      expect(context.murphEmailAddress).toBe(
+        channel === "email" ? null : "assistant+reply@example.test",
+      );
+      expect(context.murphPhoneNumber).toBe("+15550000002");
+      if (channel === "email") {
+        expect(
+          mocks.createHostedMemberReplyAliasRouteFromLookupKey,
+        ).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("fails email closed when the signed reply alias cannot be resolved", async () => {
+    mocks.createHostedMemberReplyAliasRouteFromLookupKey.mockResolvedValue(null);
 
     const context = await readHostedMurphContactContext();
 
     expect(context.initialContactChannels.email).toBe(false);
     expect(context.murphEmailAddress).toBeNull();
-    expect(context.userEmailAddress).toBeNull();
-    expect(mocks.createHostedMemberReplyAliasRouteFromLookupKey).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      failure: "missing",
+      reject: false,
+    },
+    {
+      failure: "malformed",
+      reject: true,
+    },
+  ])(
+    "keeps email and Telegram available when the local Linq line is $failure",
+    async ({ reject }) => {
+      if (reject) {
+        mocks.readHostedLinqLinePhoneNumberByLookupKey.mockRejectedValueOnce(
+          new Error("Malformed local Linq line envelope."),
+        );
+      } else {
+        mocks.readHostedLinqLinePhoneNumberByLookupKey.mockResolvedValueOnce(null);
+      }
+
+      await expect(readHostedMurphContactContext()).resolves.toEqual({
+        initialContactChannels: {
+          email: true,
+          telegram: true,
+          text: true,
+        },
+        murphEmailAddress: "assistant+reply@example.test",
+        murphPhoneNumber: null,
+      });
+    },
+  );
+
+  it("keeps private member contact decryptors outside the generic projection", async () => {
+    const [contextSource, wrapperSource] = await Promise.all([
+      readFile(
+        new URL(
+          "../src/lib/hosted-onboarding/hosted-contact-context.ts",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../src/components/murph/hosted-murph-contact-action.tsx",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ]);
+    const genericContactSource = `${contextSource}\n${wrapperSource}`;
+
+    expect(genericContactSource).not.toMatch(
+      /domain-root-unwrap-cache|hosted-web\/encryption|member-private-codecs/u,
+    );
+    expect(genericContactSource).not.toContain("stripeCheckoutEmail");
+    expect(genericContactSource).not.toContain("userEmailAddress");
   });
 });
 
-function createContactRecord(emailOverrides: {
-  stripeCheckoutEmailCollectedAt?: Date | null;
-  verifiedEmailLookupKey?: string | null;
-  verifiedEmailVerifiedAt?: Date | null;
+function createContactRecord(input: {
+  emailAuthorization?: null | Partial<{
+    verifiedEmailAddressEncrypted: string | null;
+    verifiedEmailLookupKey: string | null;
+    verifiedEmailVerifiedAt: Date | null;
+  }>;
+  identity?: null | Partial<{
+    phoneLookupKey: string | null;
+    phoneNumberEncrypted: string | null;
+    phoneNumberVerifiedAt: Date | null;
+  }>;
+  routing?: null | Partial<{
+    linqRecipientPhoneLookupKey: string | null;
+    replyAliasLookupKey: string | null;
+    telegramUserIdEncrypted: string | null;
+    telegramUserLookupKey: string | null;
+  }>;
 } = {}) {
   return {
-    emailAuthorization: {
-      memberId: "member-1",
-      stripeCheckoutEmailAddressEncrypted: "stripe-email-ciphertext",
-      stripeCheckoutEmailCollectedAt:
-        emailOverrides.stripeCheckoutEmailCollectedAt === undefined
-          ? new Date("2026-01-02T00:00:00.000Z")
-          : emailOverrides.stripeCheckoutEmailCollectedAt,
-      verifiedEmailAddressEncrypted: "verified-email-ciphertext",
-      verifiedEmailLookupKey:
-        emailOverrides.verifiedEmailLookupKey === undefined
-          ? "verified-email-key"
-          : emailOverrides.verifiedEmailLookupKey,
-      verifiedEmailVerifiedAt:
-        emailOverrides.verifiedEmailVerifiedAt === undefined
-          ? new Date("2026-01-01T00:00:00.000Z")
-          : emailOverrides.verifiedEmailVerifiedAt,
-    },
-    identity: {
-      memberId: "member-1",
-      phoneNumberEncrypted: "phone-ciphertext",
-    },
-    routing: {
-      linqRecipientPhoneEncrypted: "linq-phone-ciphertext",
-      memberId: "member-1",
-      replyAliasLookupKey: "reply-alias-key",
-      telegramUserIdEncrypted: "telegram-ciphertext",
-    },
+    emailAuthorization: input.emailAuthorization === null
+      ? null
+      : {
+          verifiedEmailAddressEncrypted: "verified-email-ciphertext",
+          verifiedEmailLookupKey: "verified-email-key",
+          verifiedEmailVerifiedAt: new Date("2026-01-01T00:00:00.000Z"),
+          ...input.emailAuthorization,
+        },
+    identity: input.identity === null
+      ? null
+      : {
+          phoneLookupKey: "member-phone-key",
+          phoneNumberEncrypted: "phone-ciphertext",
+          phoneNumberVerifiedAt: new Date("2026-01-01T00:00:00.000Z"),
+          ...input.identity,
+        },
+    routing: input.routing === null
+      ? null
+      : {
+          linqRecipientPhoneLookupKey: "linq-phone-key",
+          replyAliasLookupKey: "reply-alias-key",
+          telegramUserIdEncrypted: "telegram-ciphertext",
+          telegramUserLookupKey: "telegram-user-key",
+          ...input.routing,
+        },
   };
 }

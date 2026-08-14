@@ -28,6 +28,55 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Browser Vault Shard Rollout
+
+Deploy the Web dual reader first. It advertises fixed `core`, `metrics-index`,
+and `labs` demand plus explicit metric-bucket IDs only when the browser supports
+gzip decompression, accepts the legacy encrypted monolith, and retries that
+legacy transport when an older Web deployment ignores a missing-shard request.
+Next deploy the Worker and runner bundle together with
+`container_rollout=immediate`; the generation-10 runner rebuilds the replica
+while the Worker atomically publishes the legacy monolith, the three fixed
+children, and all 32 deterministic metric buckets. Each child independently
+uses identity or gzip encoding before encryption, whichever is smaller. Old Web
+and old browser clients omit the capability and continue to receive the
+monolith.
+
+Do not roll the Worker or runner below this release after the first
+generation-10 bucketed ref is written. That write establishes the bucket-aware
+Worker and producer as a hard rollback floor: an older cleanup alarm can consume
+the sole top-level orphan candidate without deleting its child objects, leaving
+those encrypted objects with no durable cleanup owner. The safe recovery is a
+forward fix on this Worker/runner bundle or newer. New Web still accepts an
+older Worker legacy response during the pre-write deploy window, but sharded
+responses always require an exact ref and authenticated child AAD match.
+
+Browser Vault orphan cleanup records only the top-level object candidate. An
+older Worker therefore cannot mistake a current child for an orphan. Current
+cleanup deletes the deterministic `.core`, `.metrics-index`, `.labs`, and 32
+metric-bucket siblings when their noncurrent top-level candidate becomes
+eligible. Because an older cleanup implementation cannot later rediscover
+those siblings after consuming the candidate, it is not an eligible rollback
+after bucketed publication. If an older Web restore is required, first stop
+generation-10 replica production, wait for every admitted Browser Vault direct
+PUT to drain, and keep the bucket-aware Worker/runner at or above the hard floor
+while the Web restore serves the retained legacy monolith. Keep producing that
+monolith until the dual-reader Web release has remained the production and
+rollback floor for at least 30 days, matching
+`HOSTED_APP_SESSION_MAX_AGE_SECONDS` in Web. After that authenticated
+open-browser window has drained and rollback artifacts below the reader floor
+are retired, a separate release may remove the legacy producer/ref/reader
+together.
+
+Browser Vault publication also participates in account-deletion draining. The
+UserRunner admits each publication under the exact runtime write fence, all 36
+bounded-concurrency object writes settle before that admission is released, and
+deletion stops the runner before inspecting the durable admission. If the
+publishing request died without releasing it, deletion establishes a 60-second
+post-stop drain before its final prefix sweep; this is longer than the Workers
+30-second post-disconnect extension window and prevents a late encrypted object
+from recreating member data after deletion completes.
+
 ## Vault-Share Delivery Contract Rollout
 
 Deploy the Cloudflare Worker and runner bundle first with

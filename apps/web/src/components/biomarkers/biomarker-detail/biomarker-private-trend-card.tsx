@@ -9,7 +9,7 @@ import {
   selectBrowserVaultBiomarkerPanel,
   type BrowserVaultBiomarkerPanelStatus,
   type BrowserVaultBiomarkerTrend,
-  type BrowserVaultQueryClient,
+  type BrowserVaultMetricSeriesCapableQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
 import { Button } from "@/src/components/ui/button";
@@ -22,7 +22,9 @@ import {
 } from "@/src/components/ui/chart";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import {
+  isBrowserVaultMetricsCapable,
   useBrowserVault,
+  useBrowserVaultMetricKeyDemand,
   type BrowserVaultStatus,
 } from "@/src/lib/browser-vault/context";
 import { formatMetricValue } from "@/src/lib/browser-vault/trend-comparison";
@@ -75,10 +77,20 @@ export function BiomarkerPrivateTrendCard({
 }: {
   biomarker: BiomarkerOverviewProjection;
 }) {
+  const metricBucketsLoaded = useBrowserVaultMetricKeyDemand(
+    biomarker.privateMetricBindings.map((binding) => binding.metricKey),
+  );
   const { client, deviceSyncImportPending, error, refresh, status } = useBrowserVault();
+  const metricsClient = isBrowserVaultMetricsCapable(client) ? client : null;
   const trend = useMemo(
-    () => resolvePrivateTrend({ biomarker, browserVaultStatus: status, client, deviceSyncImportPending, error }),
-    [biomarker, client, deviceSyncImportPending, error, status],
+    () => resolvePrivateTrend({
+      biomarker,
+      browserVaultStatus: metricBucketsLoaded ? status : "loading",
+      client: metricBucketsLoaded ? metricsClient : null,
+      deviceSyncImportPending,
+      error,
+    }),
+    [biomarker, deviceSyncImportPending, error, metricBucketsLoaded, metricsClient, status],
   );
 
   const { avg7, avg30, pctChange, pctDirection } = useMemo(
@@ -256,7 +268,7 @@ function TrendLineChart({ series, unit, precision }: { precision: number; series
 function resolvePrivateTrend(input: {
   biomarker: BiomarkerOverviewProjection;
   browserVaultStatus: BrowserVaultStatus;
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultMetricSeriesCapableQueryClient | null;
   deviceSyncImportPending: boolean;
   error: string | null;
 }): PrivateTrendState {

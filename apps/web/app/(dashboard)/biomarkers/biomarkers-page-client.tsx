@@ -8,8 +8,9 @@ import {
   selectBrowserVaultMeasuredBiomarkers,
   type BrowserVaultBiomarkerMetricBinding,
   type BrowserVaultDeviceMetricSummary,
+  type BrowserVaultLabsCapableQueryClient,
+  type BrowserVaultMetricSeriesCapableQueryClient,
   type BrowserVaultMeasuredBiomarker,
-  type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
@@ -34,7 +35,9 @@ import { Input } from "@/src/components/ui/input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   useBrowserVault,
-  useBrowserVaultSelector,
+  useBrowserVaultLabsSelector,
+  useBrowserVaultMetricKeyDemand,
+  useBrowserVaultMetricsSelector,
 } from "@/src/lib/browser-vault/context";
 import {
   formatLabFlag,
@@ -97,13 +100,23 @@ export function BiomarkersPageClient({
     refreshPending,
     status,
   } = useBrowserVault();
-  const biomarkers = useBrowserVaultSelector(selectBrowserVaultMeasuredBiomarkers) ?? [];
+  const demandedMetricKeys = deviceBiomarkers.flatMap((entry) => {
+    const binding = entry.privateMetricBindings.find(
+      (candidate) => candidate.role === "primary",
+    ) ?? entry.privateMetricBindings[0];
+    return binding ? [binding.metricKey] : [];
+  });
+  const deviceMetricBucketsLoaded = useBrowserVaultMetricKeyDemand(demandedMetricKeys);
+  const biomarkers = useBrowserVaultLabsSelector(selectBrowserVaultMeasuredBiomarkers) ?? [];
   const selectDeviceMetrics = useCallback(
-    (client: BrowserVaultQueryClient) => selectDeviceMetricItems(client, deviceBiomarkers),
-    [deviceBiomarkers],
+    (client: BrowserVaultMetricSeriesCapableQueryClient) =>
+      deviceMetricBucketsLoaded
+        ? selectDeviceMetricItems(client, deviceBiomarkers)
+        : [],
+    [deviceBiomarkers, deviceMetricBucketsLoaded],
   );
-  const deviceMetrics = useBrowserVaultSelector(selectDeviceMetrics) ?? [];
-  const savedLabResultCount = useBrowserVaultSelector(countSavedLabResults) ?? 0;
+  const deviceMetrics = useBrowserVaultMetricsSelector(selectDeviceMetrics) ?? [];
+  const savedLabResultCount = useBrowserVaultLabsSelector(countSavedLabResults) ?? 0;
   const normalizedQuery = query.trim().toLowerCase();
   const groups = groupMeasuredBiomarkers(
     biomarkers.filter((biomarker) => {
@@ -237,7 +250,7 @@ function UnclassifiedLabsNotice() {
  * can never render, count, or decide staleness under this heading.
  */
 function selectDeviceMetricItems(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
   deviceBiomarkers: readonly DeviceTrackedBiomarker[],
 ): DeviceMetricListItem[] {
   return deviceBiomarkers.flatMap((entry) => {
@@ -256,7 +269,7 @@ function selectDeviceMetricItems(
   });
 }
 
-function countSavedLabResults(client: BrowserVaultQueryClient): number {
+function countSavedLabResults(client: BrowserVaultLabsCapableQueryClient): number {
   return client.labResults.list().length;
 }
 

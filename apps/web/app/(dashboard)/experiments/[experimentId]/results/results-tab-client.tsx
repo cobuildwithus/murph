@@ -6,8 +6,15 @@ import {
   ResultsTab,
   type ResultsTabExperiment,
 } from "@/src/components/experiments/experiment-detail/results-tab";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
-import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
+import {
+  isBrowserVaultMetricsCapable,
+  useBrowserVault,
+  useBrowserVaultExperimentMetricBucketDemand,
+} from "@/src/lib/browser-vault/context";
+import {
+  buildBrowserVaultExperimentResultLookups,
+  resolveBrowserVaultExperimentRun,
+} from "@/src/lib/browser-vault/experiment-run";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 
 export function ResultsTabClient({
@@ -17,13 +24,22 @@ export function ResultsTabClient({
   protocol: ExperimentResultsPublicProjection;
   startAction?: ReactNode;
 }) {
+  const lookups = useMemo(
+    () => buildBrowserVaultExperimentResultLookups(protocol),
+    [protocol],
+  );
+  const metricBucketsLoaded = useBrowserVaultExperimentMetricBucketDemand({ lookups });
   const browserVault = useBrowserVault();
+  const metricsClient = metricBucketsLoaded
+    && isBrowserVaultMetricsCapable(browserVault.client)
+    ? browserVault.client
+    : null;
   const privateRun = useMemo(
     () => resolveBrowserVaultExperimentRun({
-      client: browserVault.client,
+      client: metricsClient,
       protocol,
     }),
-    [browserVault.client, protocol],
+    [metricsClient, protocol],
   );
   const experiment = useMemo<ResultsTabExperiment>(
     () => ({
@@ -53,7 +69,7 @@ export function ResultsTabClient({
     <ResultsTab
       experiment={experiment}
       privateRunError={browserVault.error}
-      privateRunStatus={browserVault.status}
+      privateRunStatus={metricBucketsLoaded ? browserVault.status : "loading"}
       onPrivateRunRetry={browserVault.refresh}
       startAction={startAction}
     />

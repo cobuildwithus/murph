@@ -28,6 +28,15 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault() {
     return browserVaultMock.value;
   },
+  useBrowserVaultLabsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
+  },
+  useBrowserVaultMetricKeyDemand() {
+    return true;
+  },
+  useBrowserVaultMetricsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
+  },
   useBrowserVaultSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
     return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
   },

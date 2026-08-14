@@ -18,8 +18,29 @@ export function browserVaultReplicaRefsMatch(
     && left.runtimeRootKeyId === right.runtimeRootKeyId
     && left.schema === right.schema
     && left.sourceBundleHash === right.sourceBundleHash
+    && canonicalJson(left.metricBuckets ?? null)
+      === canonicalJson(right.metricBuckets ?? null)
+    && canonicalJson(left.shards ?? null) === canonicalJson(right.shards ?? null)
     && canonicalJson(left.dataKeyEnvelope ?? null)
       === canonicalJson(right.dataKeyEnvelope ?? null);
+}
+
+/**
+ * Compatibility check for an older Web/Worker parser that echoed the exact
+ * logical replica identity but omitted additive shard metadata.
+ */
+export function browserVaultReplicaLegacyFieldsMatch(
+  left: HostedBrowserVaultReplicaRef | null,
+  right: HostedBrowserVaultReplicaRef | null,
+): boolean {
+  if (!left || !right) {
+    return false;
+  }
+
+  return browserVaultReplicaRefsMatch(
+    { ...left, metricBuckets: undefined, shards: undefined },
+    { ...right, metricBuckets: undefined, shards: undefined },
+  );
 }
 
 function canonicalJson(value: unknown): string {

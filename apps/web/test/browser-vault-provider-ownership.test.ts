@@ -61,9 +61,10 @@ test("dashboard route consumers no longer wrap their own BrowserVaultProvider", 
   }
 });
 
-test("the landing page only warms the browser vault for authenticated visitors", () => {
+test("the landing page does not start private browser-vault work", () => {
   const landingSource = readSource("app/page.tsx");
-  assert.match(landingSource, /authenticated \? <LandingBrowserVaultWarm \/> : null/u);
+  assert.doesNotMatch(landingSource, /LandingBrowserVaultWarm/u);
+  assert.doesNotMatch(landingSource, /startBrowserVaultWarmLoad/u);
 });
 
 test("authenticated landing links fetch current dashboard authority on click", () => {

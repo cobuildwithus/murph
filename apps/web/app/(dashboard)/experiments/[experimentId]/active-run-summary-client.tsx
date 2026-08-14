@@ -7,8 +7,15 @@ import {
   ResultsSummarySkeleton,
 } from "@/src/components/experiments/experiment-detail/results-summary";
 import { ShareResultsCard } from "@/src/components/experiments/experiment-detail/share-results-card";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
-import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
+import {
+  isBrowserVaultMetricsCapable,
+  useBrowserVault,
+  useBrowserVaultExperimentMetricBucketDemand,
+} from "@/src/lib/browser-vault/context";
+import {
+  buildBrowserVaultExperimentResultLookups,
+  resolveBrowserVaultExperimentRun,
+} from "@/src/lib/browser-vault/experiment-run";
 import {
   EXPERIMENT_CARD_MAX_SIGNALS,
   type ExperimentCardChart,
@@ -26,14 +33,23 @@ interface ActiveRunSummaryProps {
 }
 
 export function ActiveRunSummaryClient({ protocol, protocolFacts }: ActiveRunSummaryProps) {
+  const lookups = useMemo(
+    () => buildBrowserVaultExperimentResultLookups(protocol),
+    [protocol],
+  );
+  const metricBucketsLoaded = useBrowserVaultExperimentMetricBucketDemand({ lookups });
   const browserVault = useBrowserVault();
+  const metricsClient = metricBucketsLoaded
+    && isBrowserVaultMetricsCapable(browserVault.client)
+    ? browserVault.client
+    : null;
   const privateRun = useMemo(
     () =>
       resolveBrowserVaultExperimentRun({
-        client: browserVault.client,
+        client: metricsClient,
         protocol,
       }),
-    [browserVault.client, protocol],
+    [metricsClient, protocol],
   );
 
   const cardData = useMemo<ExperimentCardData | null>(
@@ -42,7 +58,7 @@ export function ActiveRunSummaryClient({ protocol, protocolFacts }: ActiveRunSum
     [protocol, privateRun, protocolFacts],
   );
 
-  if (browserVault.status === "loading") {
+  if (browserVault.status === "loading" || !metricBucketsLoaded) {
     return <ResultsSummarySkeleton />;
   }
 

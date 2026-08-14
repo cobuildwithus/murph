@@ -13,7 +13,10 @@ import type {
   AssistantTonePreference,
   AssistantVoiceOptionId,
 } from "@murphai/contracts";
-import type {
+import {
+  BROWSER_VAULT_METRIC_BUCKET_COUNT,
+  BROWSER_VAULT_METRIC_BUCKET_IDS,
+  type BrowserVaultMetricBucketId,
   BROWSER_VAULT_REPLICA_SCHEMA,
 } from "@murphai/contracts/browser-vault";
 import type {
@@ -890,6 +893,56 @@ export type HostedExecutionBundleRef = RuntimeHostedExecutionBundleRef;
 
 export const HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA = "murph.hosted-browser-vault-replica-ref.v1";
 
+export const HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA =
+  "murph.hosted-browser-vault-replica-shards.v1";
+
+export const HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS = [
+  "core",
+  "labs",
+  "metricsIndex",
+] as const;
+
+export type HostedBrowserVaultReplicaShardKind =
+  (typeof HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS)[number];
+
+export const HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT =
+  BROWSER_VAULT_METRIC_BUCKET_COUNT;
+export const HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS =
+  BROWSER_VAULT_METRIC_BUCKET_IDS;
+export const HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA =
+  "murph.hosted-browser-vault-replica-metric-buckets.v1";
+
+export type HostedBrowserVaultReplicaMetricBucketId =
+  BrowserVaultMetricBucketId;
+
+export type HostedBrowserVaultReplicaContentEncoding = "gzip" | "identity";
+
+export interface HostedBrowserVaultReplicaShardRef {
+  byteLength: number;
+  contentEncoding: HostedBrowserVaultReplicaContentEncoding;
+  encodedByteLength: number;
+  objectKey: string;
+}
+
+export type HostedBrowserVaultReplicaMetricBucketRef =
+  HostedBrowserVaultReplicaShardRef;
+
+export interface HostedBrowserVaultReplicaShardSetRef {
+  core: HostedBrowserVaultReplicaShardRef;
+  labs: HostedBrowserVaultReplicaShardRef;
+  metricsIndex: HostedBrowserVaultReplicaShardRef;
+  schema: typeof HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA;
+}
+
+export interface HostedBrowserVaultReplicaMetricBucketSetRef {
+  bucketCount: typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT;
+  buckets: Record<
+    HostedBrowserVaultReplicaMetricBucketId,
+    HostedBrowserVaultReplicaMetricBucketRef
+  >;
+  schema: typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA;
+}
+
 export interface HostedBrowserVaultReplicaRef {
   byteLength: number;
   dataKeyEnvelope?: HostedDataKeyEnvelopeV1;
@@ -902,6 +955,10 @@ export interface HostedBrowserVaultReplicaRef {
   replicaSchema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   runtimeRootKeyId: string;
   schema: typeof HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA;
+  /** Absent together with shards on legacy refs created before route-aware children shipped. */
+  metricBuckets?: HostedBrowserVaultReplicaMetricBucketSetRef;
+  /** Absent together with metricBuckets on legacy refs created before route-aware children shipped. */
+  shards?: HostedBrowserVaultReplicaShardSetRef;
   sourceBundleHash: string;
 }
 

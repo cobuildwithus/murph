@@ -43,6 +43,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionWorkingSnapshotRef,
+  parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
 import {
   createAssistantUsageReportingUserId,
@@ -103,6 +104,7 @@ import {
 } from "../src/crypto.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+  listHostedBrowserVaultReplicaObjectKeys,
   type HostedBrowserVaultReplicaOrphanCandidate,
 } from "../src/browser-vault-store.ts";
 import {
@@ -9299,13 +9301,19 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    const responseBody = requireTestObject(
+      await response.json(),
+      "Browser vault replica write response",
+    );
+    const publishedReplicaRef = parseHostedBrowserVaultReplicaRef(responseBody.replicaRef);
+    expect(responseBody).toEqual({
       replicaRef: expect.objectContaining({
         replicaSchema: "murph.browser-vault-replica",
         schema: "murph.hosted-browser-vault-replica-ref.v1",
         sourceBundleHash,
       }),
     });
+    expect(publishedReplicaRef?.shards).toBeDefined();
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
     expect(runner.recordHostedBrowserVaultReplicaOrphanCandidate).toHaveBeenCalledTimes(2);
@@ -9317,16 +9325,80 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     });
     const plannedReplicaCandidate = runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock
       .calls[1]?.[0];
-    expect(plannedReplicaCandidate).toMatchObject({
-      createdAt: expect.any(String),
-      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
-      userId: "member_123",
-    });
-    expect(events).toEqual([
+    const plannedObjectKeys = publishedReplicaRef
+      ? listHostedBrowserVaultReplicaObjectKeys(publishedReplicaRef)
+      : [];
+    expect(plannedReplicaCandidate?.objectKey).toBe(plannedObjectKeys[0]);
+    expect(events.slice(0, 2)).toEqual([
       `record:${replacedReplicaRef.objectKey}`,
       `record:${plannedReplicaCandidate?.objectKey}`,
-      `put:${plannedReplicaCandidate?.objectKey}`,
     ]);
+    expect(new Set(events.slice(2))).toEqual(
+      new Set(plannedObjectKeys.map((objectKey) => `put:${objectKey}`)),
+    );
+  });
+
+  it("keeps the browser-vault write admitted until every planned PUT settles", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const defaultEnv = createRunnerOutboundEnv();
+    const putKeys: string[] = [];
+    let releaseDelayedPut = (): void => {};
+    const delayedPutGate = new Promise<void>((resolve) => {
+      releaseDelayedPut = resolve;
+    });
+    let markDelayedPutStarted = (): void => {};
+    const delayedPutStarted = new Promise<void>((resolve) => {
+      markDelayedPutStarted = resolve;
+    });
+    let delayedPutCompleted = false;
+    const bucket = {
+      ...defaultEnv.BUNDLES,
+      async put(key: string, value: R2PutValueLike) {
+        putKeys.push(key);
+        if (key.endsWith(".metric-bucket-00.json")) {
+          throw new Error("synthetic metric bucket write failure");
+        }
+        if (key.endsWith(".labs.json")) {
+          markDelayedPutStarted();
+          await delayedPutGate;
+          delayedPutCompleted = true;
+        }
+        await defaultEnv.BUNDLES.put(key, value);
+      },
+    };
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      BUNDLES: bucket,
+      USER_RUNNER: { getByName: runner.getByName },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const writePromise = handleRunnerOutboundRequest(
+      createBrowserVaultReplicaWriteRequest({
+        replica: createBrowserVaultReplica("d".repeat(64)),
+        workspaceVersion: "5",
+      }),
+      env,
+      "member_123",
+    );
+
+    await delayedPutStarted;
+    expect(putKeys.some((key) => key.endsWith(".labs.json"))).toBe(true);
+    expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+    expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
+
+    releaseDelayedPut();
+    await expect(writePromise).rejects.toThrow("synthetic metric bucket write failure");
+
+    const plannedReplicaCandidate = runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock
+      .calls[0]?.[0];
+    expect(plannedReplicaCandidate?.objectKey).toMatch(/\.json$/u);
+    expect(putKeys).toHaveLength(36);
+    expect(putKeys).toContain(plannedReplicaCandidate?.objectKey);
+    expect(delayedPutCompleted).toBe(true);
+    expect(runner.releaseHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+    expect(runner.browserVaultReplicaOrphanCandidates.size).toBe(1);
   });
 
   it("accepts browser-vault replica writes when the workspace version header is stale", async () => {
@@ -10495,12 +10567,29 @@ function createBrowserVaultReplicaWriteRequest(input: {
 
 function createBrowserVaultReplica(sourceBundleHash: string) {
   return {
+    assistantSummary: { highlights: [], latestDate: null },
+    entities: [],
     generatedAt: "2026-04-26T00:00:00.000Z",
+    labResultRows: [],
+    metricGoalProgressRows: [],
+    metricRows: [],
+    metricSelectionRows: [],
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: "health-vault-browser",
+      includedFamilies: [],
+      metricLookbackDays: 365,
+    },
     schema: "murph.browser-vault-replica",
+    searchRows: [],
     source: {
       dataVersion: "runner-outbound-test",
       sourceBundleHash,
     },
+    sourceHealthRows: [],
+    timelineRows: [],
+    weeklySampleSummaries: [],
   };
 }
 
@@ -10693,6 +10782,27 @@ function createWorkspaceVersionAwareUserRunner(input: {
     workspaceSnapshotUploadSessions.set(current.snapshotId, updatedSession);
     return updatedSession;
   });
+  const admitHostedBrowserVaultReplicaDirectPut = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      admittedAt: string;
+      attemptId: string;
+      leaseGeneration: string;
+      userId: string;
+      writeId: string;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
+    return request.attemptId === attemptId
+      && request.leaseGeneration === leaseGeneration
+      && request.userId === userId;
+  });
+  const releaseHostedBrowserVaultReplicaDirectPut = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    _request: { userId: string; writeId: string },
+  ) {
+    assertSnapshotRpcReceiver(this);
+  });
   const readHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
     this: WorkerUserRunnerStubLike,
     request: {
@@ -10768,12 +10878,14 @@ function createWorkspaceVersionAwareUserRunner(input: {
     createHostedWorkspaceSnapshotUploadSession,
     deleteHostedWorkspaceSnapshotUploadSession,
     heartbeatHostedWorkspaceSnapshotUploadSession,
+    admitHostedBrowserVaultReplicaDirectPut,
     rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
     recordHostedBrowserVaultReplicaOrphanCandidate,
     recordHostedWorkspaceSnapshotOrphanCandidate,
+    releaseHostedBrowserVaultReplicaDirectPut,
     validateRuntimeWriteFence,
   };
 
@@ -10787,11 +10899,13 @@ function createWorkspaceVersionAwareUserRunner(input: {
       return userRunnerStub;
     },
     heartbeatHostedWorkspaceSnapshotUploadSession,
+    admitHostedBrowserVaultReplicaDirectPut,
     ownsActiveInvocationLease,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
     recordHostedBrowserVaultReplicaOrphanCandidate,
     recordHostedWorkspaceSnapshotOrphanCandidate,
+    releaseHostedBrowserVaultReplicaDirectPut,
     rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
     setActiveWriteFence(input: {
