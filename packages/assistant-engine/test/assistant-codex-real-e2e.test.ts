@@ -9,11 +9,13 @@ import {
   readHabitatAspect,
   upsertHabitatAspect,
 } from '@murphai/core'
+import { workoutSessionSchema } from '@murphai/contracts'
 import {
   assistantOnboardingResumeContextResultSchema,
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { readVaultRawTolerant } from '@murphai/query'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -514,6 +516,119 @@ describe('onboarding policy read detection', () => {
       skillsRoot,
     })).resolves.toEqual([2, 3, 4, 6, 8])
   })
+})
+
+describeRealCodex('real Codex live workout prescription e2e', () => {
+  it(
+    'reuses one exact active-workout prescription for later terse set completions',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-fixed-workout-prescription-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic workout proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeRealWorkoutVaultCli({ binDirectory }),
+        ])
+
+        const commonInput: Omit<
+          CodexAppServerTurnInput,
+          'dynamicTools' | 'prompt'
+        > = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout active --format json',
+              'vault-cli workout start [name] [--routine <format>]',
+              'vault-cli workout exercise add <name> --order <n>',
+              'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>]',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-08-13',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+            WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
+            WORKOUT_E2E_VAULT: workingDirectory,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+        const started = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Start a live workout for seated cable curl with four sets.',
+            'Every set is exactly 9 reps; use that fixed value throughout this active workout.',
+          ].join(' '),
+        })
+        const firstCompletion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Seated cable curl set 1 complete.',
+          resumeSessionId: started.sessionId,
+        })
+        const secondCompletion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Second set complete.',
+          resumeSessionId: firstCompletion.sessionId,
+        })
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const workout = vault.events
+          .map((event) => workoutSessionSchema.safeParse(event.attributes.workout))
+          .find((result) => result.success)?.data
+
+        expect(started.finalMessage).toMatch(/0\/4 sets complete/iu)
+        expect(firstCompletion.finalMessage).toMatch(/actual 9 reps/iu)
+        expect(secondCompletion.finalMessage).toMatch(/2\/4 sets complete/iu)
+        expect(secondCompletion.finalMessage).toMatch(/actual 9 reps/iu)
+        expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
+        expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
+        expect(
+          workout?.exercises[0]?.sets.map((set) => set.reps ?? null),
+        ).toEqual([9, 9, null, null])
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
 })
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
@@ -7533,6 +7648,29 @@ async function materializeHabitatVoiceVaultCli(input: {
       'fi',
       'printf \'%s\\n\' "$*" >> "$HABITAT_E2E_COMMAND_LOG"',
       'exec "$HABITAT_E2E_TSX_BIN" "$HABITAT_E2E_CLI_ENTRYPOINT" "$@" --vault "$HABITAT_E2E_VAULT"',
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function materializeRealWorkoutVaultCli(input: {
+  binDirectory: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
+      '  exit 70',
+      'fi',
+      'exec "$WORKOUT_E2E_TSX_BIN" "$WORKOUT_E2E_CLI_ENTRYPOINT" "$@" --vault "$WORKOUT_E2E_VAULT"',
       '',
     ].join('\n'),
     {
