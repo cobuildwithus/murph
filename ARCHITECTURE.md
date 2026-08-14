@@ -423,42 +423,107 @@ Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.
 
-The `group_sender` adapter is a one-time first-party disclosure path, not a
-grant shortcut. The group model supplies only one opaque Message ref from the
-accepted inputs in the current group turn. Web reopens the exact encrypted
-conversation wake under the synthetic group runtime, revalidates its live
-non-direct route, resolves its author through the channel's canonical identity
-index, and derives the exact authored text plus a fixed self-only permission.
-The transport's optional `senderMemberId` remains attribution metadata and is
-never runtime authority. The target must be an active personal runtime rather
-than another thread container. A deterministic request id binds the group
-runtime, accepted input, and fixed permission; admission, personal-read
-preparation, completion, and final group egress all re-open the same authority.
-Linq and Telegram repeat that disclosure check at their existing provider-entry
-authority boundary; if it has become stale, the outbox durably supersedes the
-reviewed answer with the fixed non-disclosing fallback before any provider call.
-Textless, oversized, direct, email, stale-route, unresolved-sender,
-cross-runtime, scheduled, or replay-conflicting requests fail closed. This path
-creates no group, membership, permission, grant, queue, workflow, or table and
-grants no future disclosure authority.
+Assistant Ask and Assistant Notification are complementary cross-context
+boundaries. An Ask runs a read-only pass inside the selected target context and
+returns one bounded answer without writing there. A Notification delivers one
+route-bound payload without opening the destination context. Trusted adapters
+may select an existing membership or exact current-sender relationship, but
+they do not copy, mount, or merge conversation state between contexts.
 
-The sibling `group_sender_private` adapter powers `message_current_sender` only
-for the exact accepted group input whose author explicitly requested a private
-continuation. Web derives the canonical sender and targets only that sender's
-active personal runtime; thread-container, direct, unknown-audience, scheduled,
-stale-route, and unresolved-sender contexts fail closed. A reviewed completion
-never returns to the group. Web appends one deterministic, queue-only
-`assistant.notification.requested` for the same member's current same-channel
-`direct-member` route, with `threadIsDirect: true`, no external group-thread
-authority, and the exact reviewed text. The personal runtime consumes that
-notification through the existing delivery primitive while retaining the
-original completion expiry and proof anchor. Immediately before provider entry,
-Web reopens that proof and revalidates the unexpired private Assistant Ask, the
-exact reviewed-text digest, the same personal member, and the current
-same-channel `direct-member` route. Expired, revoked, text-mismatched, or
-route-drifted proof fails terminally with no group fallback. Replay cannot
-redirect the completion after member or route drift. This adds no second model
-turn, group wake, group outbox intent, route selector, queue, or table.
+The current-sender Assistant Ask adapter is a single first-party, one-time
+personal-runtime request path, not a grant shortcut. The group model exposes
+`ask_current_sender` with one opaque `message_ref`, allowing each independent
+request in a mixed-sender turn to be submitted once. Trusted runtime code
+accepts only a ref from the current non-direct group turn and sends that
+server-owned origin. The model infers group, private, or genuine audience
+ambiguity for that exact ref. It cannot supply a sender, member, question,
+destination address, or route.
+
+Web is the sole admission owner. In one transaction it reopens the exact
+encrypted source wake, preserves native reply evidence, revalidates the live
+group route, resolves the source author through the canonical channel identity
+index, and translates the inferred audience into a result destination bound to
+that source. A group read first
+requires a trusted notice delivered against the same exact accepted message.
+A private request must resolve a current same-channel direct-member route before
+enqueue or it returns immediate recovery guidance. Genuine audience ambiguity
+stores one ten-minute group-and-sender clarification pointer containing only
+the exact original input/session, causal sequence, expiry, and resolution. Its
+replacement is causally monotonic, and only a later exact input from the same
+sender may resume the original request. Failed admission rolls the provisional
+claim back. Within one assistant invocation, current-sender clarification and
+continuation transitions use the existing stateful dynamic-tool chain in
+provider request order, so a later continuation cannot start its notice or Web
+effect while an earlier clarification is unsettled. Independent new exact-ref
+requests retain their existing concurrent path.
+
+At the accepted App Server request boundary, immediately after strict tool
+parsing and before dynamic-tool lane selection or the pre-tool hook, the
+runtime records one turn-local decision claim per exact accepted ref in App
+Server request arrival order: clarification, group delivery, or private
+delivery, including whether that action starts or continues a request. A
+different same-ref decision fails before a notice, Web admission, or
+clarification write. Exact repeated group decisions share one in-flight notice;
+notice failure retains the group claim for the rest of the invocation rather
+than permitting a private switch. Different exact refs remain independently
+concurrent. This invocation-local claim adds no persisted state; Web's
+canonical exact-source request identity remains the durable replay fence.
+
+The canonical deterministic request id binds the group runtime and exact
+accepted input. The mailbox request persists one `current_sender_personal`
+read target and a separate fixed result destination: `origin_context` or a
+same-channel `requester_direct` route. The permission digest remains the
+destination-specific disclosure policy. The result destination is not part of
+request identity, so replay may reuse the exact choice but a replay that tries
+to switch it conflicts against the stored request. Admission locks the
+canonical id with the bounded former request ids and admits or replays at most
+one representation. The personal candidate pass and outgoing reviewer receive
+the already-fixed permission; the reviewer returns only `allow` or `deny` and
+cannot choose a member, route, or result destination.
+
+Group completion and non-disclosing fallback use the shared canonical
+`assistant.ask.completed` identity for the originating group. Private
+completion uses a separate deterministic queue-only
+`assistant.notification.requested` containing the exact reviewed text for the
+same sender's current same-channel direct route, with no external group-route
+authority. Completion revalidates the persisted request, exact source, fixed
+result destination, expiry, runtime fences, and route. If an answered
+`origin_context` completion was validly persisted but the current sender loses
+personal runtime access before group provider dispatch, provider-entry
+authority requests the existing fixed non-disclosing fallback instead of
+stranding the group terminal. Malformed completion envelopes or destination
+mismatches still fail closed. If a private route is lost after admission or at
+provider entry, or if the request expires before prepare, Web
+discards the private answer and persists a fresh fixed `cannot_answer`
+completion to the already-authorized originating group. The private delivery
+identity cannot occupy that group fallback identity. Exact replay returns the
+persisted terminal experience. Once the group fallback commits, private
+provider-entry replay recognizes it before considering a recovered route and
+returns that same terminal. If a private completion commits but its detached
+control response is lost, expired control replay re-hands the existing private
+effect; its provider-entry owner alone may convert it to the group fallback.
+The expired control path never creates a competing terminal beside a valid
+private effect. A terminal or unavailable control response
+without a valid persisted completion is never successful consumption.
+
+Rolling-deploy compatibility is transport-only. New Cloudflare callers send one
+strict body marker, which old Web rejects as an unknown field. New Web rejects
+deployed unmarked `ask_current_sender` calls because an old runtime cannot prove
+that the required exact-room notice preceded the personal read; during Web-first
+rollout, those optional group consultations fail closed until the runtime is
+recycled. New Web continues to accept deployed unmarked
+`message_current_sender` calls because their private destination has no room
+notice prerequisite. The undeployed dual URL marker, model-authored destination
+dialect, and intermediate request-id alias are absent. Already-accepted former
+`group_sender` / `group_sender_private` mailbox work drains under its stored
+request id, target kind, and permission digest, while new work writes only the
+unified target and separate destination. After all old runners are
+recycled, wait the ten-minute request TTL plus the one-minute detached-queue
+retry margin (eleven minutes total), then remove the old action parser, former
+request-id readers, and neutral-permission drain branch together. This path adds
+no classifier turn, service, queue, workflow, grant, route selector, or
+reconciliation owner. Its one clarification table reuses existing retention and
+account-deletion owners.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
@@ -480,23 +545,18 @@ owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
-For a consented member, one-time current-sender disclosure, or private
-current-sender continuation, the private read-only child receives the exact
-permission context and produces a candidate from the member workspace. One
-separate fresh-context outgoing reviewer receives only that immutable
-permission, the question, and the candidate; it has no member workspace,
-history, application tools, network, or delivery authority and returns only
-`allow` or `deny`. There is no incoming reviewer or rewrite loop. An allowed
-answer enters only its target-bound completion adapter. `consented_member` and
-`group_sender` retain the caller group's isolated output-only continuation and
-provider-entry authority recheck. `group_sender_private` instead seals the exact
-reviewed text into the personal queue-only notification above; no group
-continuation or second generation runs. Denial or a candidate-declared
-cannot-answer uses fixed non-disclosing copy. Invalid review output, provider
-failure, or stale authority discloses nothing and follows the existing retry,
-expiry, or terminal lifecycle. A denied candidate never becomes durable
-operation state. This adds no fan-out, scheduler, policy engine, result table,
-or second service.
+For a consented member or a fixed-audience current-sender request, the
+private read-only child receives the exact permission context and produces a
+candidate from the member workspace. One separate fresh-context outgoing
+reviewer receives only that immutable permission, the exact question, and the
+candidate; it has no member workspace, history, application tools, network, or
+delivery authority. It returns only `allow` or `deny` and cannot rewrite,
+redact, select an audience, or select a recipient. A candidate `cannot_answer`
+returns directly without another model turn. An allowed answer enters only the
+target-bound completion adapter. A denied, invalid, failed, or stale result
+uses the existing non-disclosing terminal behavior and never changes the
+persisted audience. This adds no fan-out, scheduler, policy engine, result
+table, or second service.
 
 ## Hosted Connected Apps
 

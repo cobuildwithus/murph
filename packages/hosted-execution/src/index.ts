@@ -4,6 +4,7 @@ export * from "./assistant-usage.ts";
 export * from "./assistant-personalization.ts";
 export * from "./pending-group-setup.ts";
 export {
+  createHostedExecutionAssistantAskCompletionId,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,

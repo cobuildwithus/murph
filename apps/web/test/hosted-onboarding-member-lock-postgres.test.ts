@@ -261,28 +261,61 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-crypto/env", () => ({
-  getHostedWebCryptoConfig: () => ({
-    env: "test",
-    gcpKms: {
-      decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
-        plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
-      }),
-      encrypt: async ({
-        keyName,
-        plaintext,
-      }: {
-        keyName: string;
-        plaintext: Uint8Array;
-      }) => ({
-        ciphertext: Buffer.from(plaintext).toString("base64"),
-        keyName,
-      }),
-    },
-    webWrapKmsKeyName:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
-  }),
-}));
+vi.mock("@/src/lib/hosted-crypto/env", async () => {
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const authoritySignKeyVersionName =
+    "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKeyPair = generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+  });
+  const authoritySignPublicKeyPem = authorityKeyPair.publicKey.export({
+    format: "pem",
+    type: "spki",
+  }).toString();
+
+  return {
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName,
+      authoritySignPublicKeyPem,
+      authorityVerifyKeyring: {
+        [authoritySignKeyVersionName]: {
+          keyVersionName: authoritySignKeyVersionName,
+          publicKeyPem: authoritySignPublicKeyPem,
+          status: "active",
+        },
+      },
+      env: "test",
+      gcpKms: {
+        asymmetricSign: async ({
+          keyVersionName,
+          message,
+        }: {
+          keyVersionName: string;
+          message: Uint8Array;
+        }) => ({
+          keyVersionName,
+          signature: sign("sha256", message, authorityKeyPair.privateKey)
+            .toString("base64"),
+        }),
+        decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
+          plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
+        }),
+        encrypt: async ({
+          keyName,
+          plaintext,
+        }: {
+          keyName: string;
+          plaintext: Uint8Array;
+        }) => ({
+          ciphertext: Buffer.from(plaintext).toString("base64"),
+          keyName,
+        }),
+      },
+      webWrapKmsKeyName:
+        "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
+    }),
+  };
+});
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =

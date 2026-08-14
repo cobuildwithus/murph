@@ -597,6 +597,7 @@ const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
   "aask_done_",
+  "aask_private_",
 ] as const;
 
 function isHostedPreCheckpointExternalCompletionDedupeKey(

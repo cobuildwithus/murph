@@ -14800,7 +14800,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     },
     {
       dedupeKey: "aask_done_private_completion",
-      label: "private Assistant Ask completion",
+      label: "legacy private Assistant Ask completion",
+    },
+    {
+      dedupeKey: "aask_private_completion",
+      label: "current private Assistant Ask completion",
     },
   ])("drains an exact $label through the causal-only fixed-route outbox once", async ({
     dedupeKey,
@@ -14897,6 +14901,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             "assistant.notification.requested:phone-call-result:",
             "assistant.notification.requested:usage-referral-reward:",
             "aask_done_",
+            "aask_private_",
           ],
           allowedRouteActions: ["dispatch-assistant-notification"],
           allowedWakeKinds: ["assistant.notification.requested"],

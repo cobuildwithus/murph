@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedRuntimeGroupToolRequest,
-  HostedRuntimeGroupToolResponse,
+import {
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -27,6 +29,8 @@ const replaySafeRequests = [
       action: "ask",
       result: { status: "accepted", targetLabel: "100 Club" },
     },
+    wireRequest: undefined,
+    wireResponse: undefined,
   },
   {
     action: "ask_member",
@@ -44,11 +48,15 @@ const replaySafeRequests = [
       action: "ask_member",
       result: { status: "accepted" },
     },
+    wireRequest: undefined,
+    wireResponse: undefined,
   },
   {
     action: "ask_current_sender",
     request: {
       action: "ask_current_sender",
+      audience: "group",
+      mode: "new",
       origin: {
         assistantInputId: `ain_${"c".repeat(32)}`,
         kind: "accepted_input",
@@ -59,11 +67,25 @@ const replaySafeRequests = [
       action: "ask_current_sender",
       result: { status: "accepted" },
     },
+    wireRequest: {
+      action: "ask_current_sender",
+      audience: "group",
+      [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+      mode: "new",
+      origin: {
+        assistantInputId: `ain_${"c".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    wireResponse: undefined,
   },
   {
-    action: "message_current_sender",
+    action: "ask_current_sender clarification",
     request: {
-      action: "message_current_sender",
+      action: "ask_current_sender",
+      mode: "clarification",
       origin: {
         assistantInputId: `ain_${"d".repeat(32)}`,
         kind: "accepted_input",
@@ -71,9 +93,21 @@ const replaySafeRequests = [
       },
     },
     response: {
-      action: "message_current_sender",
-      result: { status: "accepted" },
+      action: "ask_current_sender",
+      result: { status: "clarification_required" },
     },
+    wireRequest: {
+      action: "ask_current_sender",
+      [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+      mode: "clarification",
+      origin: {
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    wireResponse: undefined,
   },
   {
     action: "record_current_sender_daily_metric",
@@ -95,11 +129,15 @@ const replaySafeRequests = [
       action: "record_current_sender_daily_metric",
       result: { status: "accepted" },
     },
+    wireRequest: undefined,
+    wireResponse: undefined,
   },
 ] as const satisfies readonly {
   action: string;
   request: HostedRuntimeGroupToolRequest;
   response: HostedRuntimeGroupToolResponse;
+  wireRequest?: unknown;
+  wireResponse?: unknown;
 }[];
 
 const hostedGroupToolTransports = [
@@ -132,15 +170,22 @@ const dailyMetricReplay = replaySafeRequests.at(-1)!;
 describe("hosted group tool exact replay", () => {
   it.each(replaySafeRequests)(
     "exact-replays the same $action request when a successful response body is lost",
-    async ({ request, response }) => {
+    async ({
+      request,
+      response,
+      wireRequest,
+      wireResponse,
+    }: (typeof replaySafeRequests)[number]) => {
       const requestBodies: BodyInit[] = [];
-      const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+      const requestUrls: string[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (fetchRequest, init) => {
+        requestUrls.push(readFetchRequestUrl(fetchRequest));
         if (init?.body) {
           requestBodies.push(init.body);
         }
         return requestBodies.length === 1
           ? createLostBodyResponse(200)
-          : createJsonResponse(response);
+          : createJsonResponse(wireResponse ?? response);
       });
       const port = createHostedRuntimeGroupToolPort({
         boundUserId: "member-bound",
@@ -151,10 +196,15 @@ describe("hosted group tool exact replay", () => {
 
       await expect(port.request(request)).resolves.toEqual(response);
       expect(fetchImpl).toHaveBeenCalledTimes(2);
-      expect(requestBodies).toEqual([
-        JSON.stringify(request),
-        JSON.stringify(request),
+      expect(requestBodies.map((body) => JSON.parse(String(body)))).toEqual([
+        wireRequest ?? request,
+        wireRequest ?? request,
       ]);
+      for (const requestUrl of requestUrls) {
+        expect(new URL(requestUrl).searchParams.has(
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+        )).toBe(false);
+      }
     },
   );
 
@@ -211,6 +261,33 @@ describe("hosted group tool exact replay", () => {
     expect(requestBodies).toEqual([
       JSON.stringify(request),
       JSON.stringify(request),
+    ]);
+  });
+
+  it("exact-replays the same Ask after consuming a complete 5xx response", async () => {
+    const { request, response, wireRequest, wireResponse } = replaySafeRequests[0];
+    const responses = [
+      createJsonResponse({ error: "temporarily unavailable" }, 503),
+      createJsonResponse(wireResponse ?? response),
+    ];
+    const requestBodies: BodyInit[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+      if (init?.body) {
+        requestBodies.push(init.body);
+      }
+      return responses.shift()!;
+    });
+    const port = createHostedRuntimeGroupToolPort({
+      boundUserId: "member-bound",
+      fetchImpl,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.request(request)).resolves.toEqual(response);
+    expect(requestBodies).toEqual([
+      JSON.stringify(wireRequest ?? request),
+      JSON.stringify(wireRequest ?? request),
     ]);
   });
 
@@ -320,6 +397,13 @@ function createJsonResponse(payload: unknown, status = 200): Response {
     headers: { "content-type": "application/json" },
     status,
   });
+}
+
+function readFetchRequestUrl(request: RequestInfo | URL): string {
+  if (typeof request === "string") {
+    return request;
+  }
+  return request instanceof URL ? request.href : request.url;
 }
 
 function createLostBodyResponse(
