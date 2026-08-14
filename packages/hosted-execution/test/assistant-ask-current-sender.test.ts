@@ -33,24 +33,28 @@ const CURRENT_SENDER_ASK = {
     sessionId: "session_group",
   },
   question: "Murph, ask my Murph how my synthetic activity changed?",
+  resultDestination: { kind: "origin_context" as const },
   target: {
     groupRuntimeMemberId: "member_group_runtime",
-    kind: "group_sender" as const,
+    kind: "current_sender_personal" as const,
     permissionDigest: "d".repeat(64),
   },
 };
 
 describe("hosted current-sender Assistant Ask contracts", () => {
-  it("round-trips the fixed group and private target kinds", () => {
-    for (const kind of ["group_sender", "group_sender_private"] as const) {
+  it("round-trips one personal target with a separately pinned result destination", () => {
+    for (const [index, resultDestination] of [
+      { kind: "origin_context" as const },
+      { channel: "telegram" as const, kind: "requester_direct" as const },
+    ].entries()) {
       const ask = {
         ...CURRENT_SENDER_ASK,
-        target: { ...CURRENT_SENDER_ASK.target, kind },
+        resultDestination,
       };
       expect(parseHostedExecutionAssistantAskRequestedPayload(ask)).toEqual(ask);
       const wake = buildHostedExecutionAssistantAskRequestedWake({
         ask,
-        eventId: `aask_req_${(kind === "group_sender" ? "b" : "c").repeat(64)}`,
+        eventId: `aask_req_${(index === 0 ? "b" : "c").repeat(64)}`,
         memberId: "member_personal_runtime",
         occurredAt: REQUESTED_AT,
       });
@@ -63,6 +67,24 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     expect(HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT).toMatch(
       /one direct private message/u,
     );
+  });
+
+  it("parses former audience-coupled target shapes only without a destination field", () => {
+    for (const kind of ["group_sender", "group_sender_private"] as const) {
+      const legacy = {
+        expiresAt: CURRENT_SENDER_ASK.expiresAt,
+        origin: CURRENT_SENDER_ASK.origin,
+        question: CURRENT_SENDER_ASK.question,
+        target: { ...CURRENT_SENDER_ASK.target, kind },
+      };
+      expect(parseHostedExecutionAssistantAskRequestedPayload(legacy)).toEqual(
+        legacy,
+      );
+      expect(() => parseHostedExecutionAssistantAskRequestedPayload({
+        ...legacy,
+        resultDestination: CURRENT_SENDER_ASK.resultDestination,
+      })).toThrow(/unsupported field/u);
+    }
   });
 
   it("rejects scheduled or model-selected target authority", () => {
@@ -82,6 +104,11 @@ describe("hosted current-sender Assistant Ask contracts", () => {
         targetMemberId: "model_selected_member",
       },
     })).toThrow(/unsupported field/u);
+
+    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
+      ...CURRENT_SENDER_ASK,
+      resultDestination: undefined,
+    })).toThrow();
   });
 
   it("parses trusted audience decisions and canonicalizes the legacy private action", () => {

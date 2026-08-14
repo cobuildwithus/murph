@@ -316,8 +316,18 @@ export const HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT =
 export const HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT =
   "The owner of this personal Murph authored the exact incoming group request and explicitly asked Murph to answer them privately. Answer as one direct private message to the owner. You may use only the owner's personal Murph context needed for this request. Do not disclose anyone else's private information, do not post anything back to the group, and do not perform actions. This authorization applies once to this request and grants no future, scheduled, or broader access.";
 
-/** One persisted audience: group or same-channel direct to the source sender. */
-export type HostedExecutionAssistantAskGroupSenderTarget = {
+/** The one personal context resolved from the exact current group sender. */
+export interface HostedExecutionAssistantAskCurrentSenderPersonalTarget {
+  groupRuntimeMemberId: string;
+  kind: "current_sender_personal";
+  permissionDigest: string;
+}
+
+/**
+ * Drain-only target shapes written by the former audience-coupled protocol.
+ * New requests must use current_sender_personal plus resultDestination.
+ */
+export type HostedExecutionAssistantAskLegacyGroupSenderTarget = {
   groupRuntimeMemberId: string;
   permissionDigest: string;
 } & (
@@ -325,11 +335,29 @@ export type HostedExecutionAssistantAskGroupSenderTarget = {
   | { kind: "group_sender_private" }
 );
 
+export type HostedExecutionAssistantAskCurrentSenderTarget =
+  | HostedExecutionAssistantAskCurrentSenderPersonalTarget
+  | HostedExecutionAssistantAskLegacyGroupSenderTarget;
+
+export type HostedExecutionAssistantAskResultDestination =
+  | { kind: "origin_context" }
+  | {
+      channel: "linq" | "telegram";
+      kind: "requester_direct";
+    };
 
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget;
+  | HostedExecutionAssistantAskCurrentSenderTarget;
+
+export function isHostedExecutionAssistantAskCurrentSenderTarget(
+  target: HostedExecutionAssistantAskTarget,
+): target is HostedExecutionAssistantAskCurrentSenderTarget {
+  return target.kind === "current_sender_personal"
+    || target.kind === "group_sender"
+    || target.kind === "group_sender_private";
+}
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -372,17 +400,26 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
-export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
+export interface HostedExecutionAssistantAskCurrentSenderRequestedPayload {
   expiresAt: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   question: string;
-  target: HostedExecutionAssistantAskGroupSenderTarget;
+  resultDestination: HostedExecutionAssistantAskResultDestination;
+  target: HostedExecutionAssistantAskCurrentSenderPersonalTarget;
+}
+
+export interface HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  question: string;
+  target: HostedExecutionAssistantAskLegacyGroupSenderTarget;
 }
 
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
-  | HostedExecutionAssistantAskGroupSenderRequestedPayload;
+  | HostedExecutionAssistantAskCurrentSenderRequestedPayload
+  | HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;

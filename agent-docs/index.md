@@ -61,9 +61,12 @@ Murph infers a fixed audience from ordinary language, asks a natural
 clarification when needed, and sends advance notice before a group-bound
 personal read; Web keeps exact-source identity, route, replay, and same-sender
 continuation authority, including causally monotonic clarification replacement
-and resolved-pointer replay closure. Private delivery has a distinct identity from the
-canonical group completion/fallback, so expiry or a lost private route produces
-only a fresh non-disclosing group `cannot_answer` completion. Its exact
+and resolved-pointer replay closure. One `current_sender_personal` target owns
+the read while a separate result destination owns group or same-channel direct
+delivery; replay cannot switch that destination. Private delivery has a distinct
+identity from the canonical group completion/fallback, so expiry or a lost
+private route produces only a fresh non-disclosing group `cannot_answer`
+completion. Its exact
 reviewed-text binding, personal direct-route revalidation at every provider
 attempt, and terminal no-fallback failure, plus exact legacy `aask_done_*` and
 current `aask_private_*` pre-checkpoint staging without generic-notification
@@ -320,8 +323,8 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Marks completed plans as immutable, non-operative historical snapshots and routes current implementation, deployment, rollback, and incident guidance to live owner docs. | Completed-plan archive interpretation | Medium | 2026-07-22 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
-| `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans, including the current PR #1705 current-sender replacement rollout. | Active plan lifecycle | Medium | 2026-08-12 |
-| `agent-docs/exec-plans/active/pr-1705-current-sender-replacement.md` | Exact-message, fixed-audience current-sender Assistant Ask replacement, bounded compatibility drain, rollout, removal condition, and focused validation. | PR #1705 replacement plan | High | 2026-08-12 |
+| `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans, including the current PR #1705 final review and target/destination refactor. | Active plan lifecycle | Medium | 2026-08-13 |
+| `agent-docs/exec-plans/active/2026-08-13-pr-1705-final-review.md` | PR #1705 unified current-sender target refactor, bounded compatibility drain, final review, exact-head CI, and merge-boundary proof. | PR #1705 completion plan | High | 2026-08-13 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Reusable completion-review lenses and local audit prompts, including the preliminary ReviewGPT product-experience/prompt/frontend/coverage references, the frontend simplicity and Steve Jobs taste bar, and the fallback local deep-review prompt. | Workflow prompt library | Low | 2026-07-30 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |

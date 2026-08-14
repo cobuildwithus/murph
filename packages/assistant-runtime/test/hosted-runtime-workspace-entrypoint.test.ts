@@ -35356,9 +35356,13 @@ function createPrivateCurrentSenderAssistantAskRequestedWake(input: {
         sessionId: "session_group_private_completion",
       },
       question: "What is my shoulder-safe workout?",
+      resultDestination: {
+        channel: "linq",
+        kind: "requester_direct",
+      },
       target: {
         groupRuntimeMemberId: "member_group_runtime",
-        kind: "group_sender_private",
+        kind: "current_sender_personal",
         permissionDigest: "f".repeat(64),
       },
     },

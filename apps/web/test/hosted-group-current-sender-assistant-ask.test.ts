@@ -269,15 +269,21 @@ function requireCompletedWake(completionId: string) {
 
 function storeLegacyRequest(input: {
   assistantInputId: string;
+  canonicalRequestId?: boolean;
   legacyAudience: "group" | "current_sender";
   text: string;
 }) {
   sourceWakes.set(input.assistantInputId, createSourceWake({ text: input.text }));
-  const requestId = createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
-    audience: input.legacyAudience,
-    groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-    originAssistantInputId: input.assistantInputId,
-  });
+  const requestId = input.canonicalRequestId
+    ? createHostedGroupCurrentSenderAssistantAskRequestId({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        originAssistantInputId: input.assistantInputId,
+      })
+    : createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        audience: input.legacyAudience,
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        originAssistantInputId: input.assistantInputId,
+      });
   const permissionText = input.legacyAudience === "current_sender"
     ? HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT
     : HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT;
@@ -389,7 +395,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
         const key = `${data.groupRuntimeMemberId}:${data.targetMemberId}`;
         const next = {
           ...data,
-          resolvedAudience: null,
+          resolvedResultDestination: null,
           resolvedByAssistantInputId: null,
         };
         pendingClarifications.set(key, next);
@@ -468,15 +474,21 @@ describe("hosted current-sender Assistant Ask authority", () => {
     const text = "Could you check this for me? I'm not sure where the answer belongs.";
     const group = await admit({ text });
     expect(requireRequestedWake(group.requestId).ask.target.kind).toBe(
-      "group_sender",
+      "current_sender_personal",
     );
+    expect(requireRequestedWake(group.requestId).ask).toMatchObject({
+      resultDestination: { kind: "origin_context" },
+    });
 
     storedItems.clear();
     storedWakes.clear();
     const privateResult = await admit({ audience: "current_sender", text });
     expect(requireRequestedWake(privateResult.requestId).ask.target.kind).toBe(
-      "group_sender_private",
+      "current_sender_personal",
     );
+    expect(requireRequestedWake(privateResult.requestId).ask).toMatchObject({
+      resultDestination: { channel: "linq", kind: "requester_direct" },
+    });
   });
 
   it("holds an ambiguous request and resumes it from the same sender's natural answer", async () => {
@@ -571,7 +583,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
         `${GROUP_RUNTIME_MEMBER_ID}:${CURRENT_SENDER_MEMBER_ID}`,
       ),
     ).toMatchObject({
-      resolvedAudience: null,
+      resolvedResultDestination: null,
       resolvedByAssistantInputId: null,
     });
     expect(storedItems.size).toBe(0);
@@ -601,14 +613,17 @@ describe("hosted current-sender Assistant Ask authority", () => {
       result: { status: "accepted" },
     });
     expect(requireRequestedWake(requestId).ask.target.kind).toBe(
-      "group_sender_private",
+      "current_sender_personal",
     );
+    expect(requireRequestedWake(requestId).ask).toMatchObject({
+      resultDestination: { channel: "linq", kind: "requester_direct" },
+    });
     expect(
       pendingClarifications.get(
         `${GROUP_RUNTIME_MEMBER_ID}:${CURRENT_SENDER_MEMBER_ID}`,
       ),
     ).toMatchObject({
-      resolvedAudience: "current_sender",
+      resolvedResultDestination: "current_sender",
       resolvedByAssistantInputId: retryResponseInputId,
     });
   });
@@ -683,7 +698,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
         `${GROUP_RUNTIME_MEMBER_ID}:${CURRENT_SENDER_MEMBER_ID}`,
       ),
     ).toMatchObject({
-      resolvedAudience: "group",
+      resolvedResultDestination: "group",
       resolvedByAssistantInputId: responseInputId,
     });
   });
@@ -760,9 +775,10 @@ describe("hosted current-sender Assistant Ask authority", () => {
     expect(wake.ask).toMatchObject({
       origin: origin(),
       question: "Can you ask my Murph how my synthetic activity has changed?",
+      resultDestination: { kind: "origin_context" },
       target: {
         groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-        kind: "group_sender",
+        kind: "current_sender_personal",
         permissionDigest: createHash("sha256")
           .update(HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT)
           .digest("hex"),
@@ -776,6 +792,28 @@ describe("hosted current-sender Assistant Ask authority", () => {
       now: NOW,
       origin: origin(),
     })).resolves.toEqual(admission);
+    expect(storedItems.size).toBe(1);
+  });
+
+  it("rejects replay that tries to switch the pinned result destination", async () => {
+    const { requestId } = await admit({
+      text: "Can you ask my Murph how my synthetic activity has changed?",
+    });
+
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "current_sender",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "new",
+      now: NOW,
+      origin: origin(),
+    })).resolves.toMatchObject({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "request_conflict" },
+    });
+    expect(requireRequestedWake(requestId).ask).toMatchObject({
+      resultDestination: { kind: "origin_context" },
+      target: { kind: "current_sender_personal" },
+    });
     expect(storedItems.size).toBe(1);
   });
 
@@ -822,6 +860,28 @@ describe("hosted current-sender Assistant Ask authority", () => {
         status: "ready",
       },
     });
+
+    storedItems.clear();
+    storedWakes.clear();
+    sourceWakes.clear();
+    const formerCanonicalId = storeLegacyRequest({
+      assistantInputId: CURRENT_INPUT_ID,
+      canonicalRequestId: true,
+      legacyAudience: "group",
+      text: "Murph, ask my Murph about my synthetic activity.",
+    });
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: NOW,
+      request: { action: "prepare", requestId: formerCanonicalId },
+    })).resolves.toMatchObject({
+      response: {
+        disclosure: {
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+        },
+        status: "ready",
+      },
+    });
   });
 
   it("fixes private audience only after resolving a same-channel direct route", async () => {
@@ -832,10 +892,13 @@ describe("hosted current-sender Assistant Ask authority", () => {
     expect(admission.result).toEqual({ status: "accepted" });
     expect(requireRequestedWake(requestId).ask.target).toEqual({
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      kind: "group_sender_private",
+      kind: "current_sender_personal",
       permissionDigest: createHash("sha256")
         .update(HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT)
         .digest("hex"),
+    });
+    expect(requireRequestedWake(requestId).ask).toMatchObject({
+      resultDestination: { channel: "linq", kind: "requester_direct" },
     });
 
     storedItems.clear();

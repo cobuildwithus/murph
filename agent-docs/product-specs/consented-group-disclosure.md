@@ -50,11 +50,14 @@ speaker's later accepted input may resolve it, and a failed admission leaves the
 pointer claimable. No exact response format is required from the person.
 
 Web derives the member, route, question, and replay identity from the exact
-stored source; the model never supplies those values. The existing
-requested-wake target kind and permission digest persist the inferred audience
-as fixed authority. The private candidate and fresh outgoing reviewer may only
-allow or deny the answer under the fixed permission. Group answers use the
-existing group completion. Private
+stored source; the model never supplies those values. The requested wake
+persists one `current_sender_personal` read target and a separate fixed result
+destination: `origin_context` or same-channel `requester_direct`. Its permission
+digest remains the disclosure policy for that destination. Request identity
+uses the exact source rather than the destination, so replay cannot switch the
+stored choice or cause another personal read. The private candidate and fresh
+outgoing reviewer may only allow or deny the answer under the fixed permission.
+Group answers use the existing group completion. Private
 answers use the existing exact-text notification on the admitted channel. If a
 private route disappears after admission or at provider entry, or if the
 request expires before prepare, the private answer is discarded and the
@@ -141,12 +144,15 @@ group.
   manual, direct, unknown-audience, or local cron runs must not receive it.
 - For the one-time current-sender path, the model supplies only one opaque
   `message_ref`. Runtime code requires that ref in the current accepted group
-  turn, and Web owns exact-source admission, sender derivation, fixed audience,
-  fixed permission, private-route admission, replay identity, and completion
-  route. Multiple valid refs in one turn remain independent.
+  turn, and Web owns exact-source admission, sender derivation, fixed result
+  destination, fixed permission, private-route admission, replay identity, and
+  completion route. Multiple valid refs in one turn remain independent.
   An accepted origin can produce at most one request and one authorized terminal
   experience. Legacy action names, origins, and destination fields are drain
-  inputs only and never audience authority.
+  inputs only and never result-destination authority. Already-admitted
+  `group_sender` and `group_sender_private` targets retain their stored meaning
+  during the bounded drain; new requests write only the unified personal target
+  and separate destination.
 - The model never supplies invocation, delivery mode, member, membership,
   runtime, mailbox, session, callback, or return-route identity. It may use only
   a current server-issued `grantId` from the live group read.

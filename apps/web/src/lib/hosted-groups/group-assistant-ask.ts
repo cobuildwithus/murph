@@ -18,6 +18,7 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   isHostedExecutionAssistantAskCompletedWake,
+  isHostedExecutionAssistantAskCurrentSenderTarget,
   isHostedExecutionAssistantAskRequestedWake,
   type HostedExecutionAssistantAskCompletedPayload,
   type HostedExecutionAssistantAskCompletedWake,
@@ -507,7 +508,7 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       input.request.requestId,
     );
     const canonicalPrivateDeliveryId = currentSenderAuthority?.currentSender
-        .audience === "current_sender"
+        .resultDestination.kind === "requester_direct"
       ? createHostedGroupCurrentSenderPrivateDeliveryId(
           input.request.requestId,
         )
@@ -523,15 +524,16 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       prisma: tx,
     });
     const legacyPrivateDelivery =
-      currentSenderAuthority?.currentSender.audience === "current_sender"
+      currentSenderAuthority?.currentSender.resultDestination.kind
+        === "requester_direct"
       && canonicalCompletionSlot?.kind === "assistant.notification.requested"
         ? canonicalCompletionSlot
         : null;
     const privateDelivery = canonicalPrivateDelivery ?? legacyPrivateDelivery;
     const privateDeliveryId = privateDelivery?.id
       ?? canonicalPrivateDeliveryId;
-    const groupCompletionId = currentSenderAuthority?.currentSender.audience
-        === "current_sender"
+    const groupCompletionId = currentSenderAuthority?.currentSender
+        .resultDestination.kind === "requester_direct"
       ? createHostedGroupCurrentSenderFallbackCompletionId({
           privateDeliveryId,
           requestId: input.request.requestId,
@@ -723,7 +725,8 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
     }
     if (
       currentSenderAuthority
-      && currentSenderAuthority.currentSender.audience === "current_sender"
+      && currentSenderAuthority.currentSender.resultDestination.kind
+        === "requester_direct"
     ) {
       const privateMailboxWake =
         await appendHostedGroupCurrentSenderPrivateCompletionTx({
@@ -805,10 +808,7 @@ async function appendExpiredHostedCurrentSenderFallbackTx(input: {
     || wake.ask.expiresAt !== readHostedAssistantAskItemExpiresAt(item.expiresAt)
     || !("origin" in wake.ask)
     || wake.ask.origin.kind !== "accepted_input"
-    || (
-      wake.ask.target.kind !== "group_sender"
-      && wake.ask.target.kind !== "group_sender_private"
-    )
+    || !isHostedExecutionAssistantAskCurrentSenderTarget(wake.ask.target)
   ) {
     return null;
   }
@@ -822,6 +822,9 @@ async function appendExpiredHostedCurrentSenderFallbackTx(input: {
       persistedOccurredAt: wake.occurredAt,
       persistedQuestion: wake.ask.question,
       requestId: input.requestId,
+      ...("resultDestination" in wake.ask
+        ? { resultDestination: wake.ask.resultDestination }
+        : {}),
       targetKind: wake.ask.target.kind,
       tx: input.tx,
     });
@@ -849,7 +852,8 @@ async function appendExpiredHostedCurrentSenderFallbackTx(input: {
     await readExpiredHostedCurrentSenderExistingGroupCompletionMailboxWakeTx({
       authority: completionAuthority,
       completionId: canonicalCompletionId,
-      requireFallbackResult: wake.ask.target.kind === "group_sender_private",
+      requireFallbackResult:
+        authority.resultDestination.kind === "requester_direct",
       tx: input.tx,
     });
   if (existingCompletion) {
@@ -1063,7 +1067,8 @@ async function readHostedCurrentSenderExistingCompletionMailboxWakeTx(input: {
     !completion
     || (
       (
-        input.authority.currentSender.audience === "current_sender"
+        input.authority.currentSender.resultDestination.kind
+          === "requester_direct"
         || !input.authority.currentSender.personalReadAllowed
       )
       && !isHostedCurrentSenderGroupFallbackResult(completion.ask.result)
@@ -1304,7 +1309,8 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     if (
       (
         (
-          currentSenderAuthority.currentSender.audience === "current_sender"
+          currentSenderAuthority.currentSender.resultDestination.kind
+            === "requester_direct"
           || !currentSenderAuthority.currentSender.personalReadAllowed
         )
         && !isHostedCurrentSenderGroupFallbackResult(
@@ -1634,10 +1640,7 @@ async function readHostedAssistantAskAuthorityTx(input: {
     };
   }
 
-  if (
-    wake.ask.target.kind === "group_sender"
-    || wake.ask.target.kind === "group_sender_private"
-  ) {
+  if (isHostedExecutionAssistantAskCurrentSenderTarget(wake.ask.target)) {
     if (wake.ask.origin.kind !== "accepted_input") {
       return { authority: null, terminalReason: "unavailable" };
     }
@@ -1660,6 +1663,9 @@ async function readHostedAssistantAskAuthorityTx(input: {
         persistedOccurredAt: wake.occurredAt,
         persistedQuestion: wake.ask.question,
         requestId: input.requestId,
+        ...("resultDestination" in wake.ask
+          ? { resultDestination: wake.ask.resultDestination }
+          : {}),
         targetKind: wake.ask.target.kind,
         tx: input.tx,
       });

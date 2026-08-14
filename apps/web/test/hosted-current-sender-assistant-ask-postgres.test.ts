@@ -125,9 +125,10 @@ describe.skipIf(!runPostgresProof)(
           ask: {
             origin: fixture.origin,
             question: fixture.question,
+            resultDestination: { kind: "origin_context" },
             target: {
               groupRuntimeMemberId: fixture.groupRuntimeMemberId,
-              kind: "group_sender",
+              kind: "current_sender_personal",
             },
           },
           eventId: requestId,
@@ -320,7 +321,7 @@ describe.skipIf(!runPostgresProof)(
             },
           },
         })).resolves.toMatchObject({
-          resolvedAudience: null,
+          resolvedResultDestination: null,
           resolvedByAssistantInputId: null,
         });
 
@@ -414,7 +415,7 @@ describe.skipIf(!runPostgresProof)(
 
         await prisma.hostedGroupCurrentSenderClarification.update({
           data: {
-            resolvedAudience: "group",
+            resolvedResultDestination: "group",
             resolvedByAssistantInputId: fixture.priorAssistantInputId,
           },
           where: {
@@ -519,7 +520,7 @@ describe.skipIf(!runPostgresProof)(
           },
         })).resolves.toMatchObject({
           originAssistantInputId: fixture.priorAssistantInputId,
-          resolvedAudience: "group",
+          resolvedResultDestination: "group",
           resolvedByAssistantInputId: fixture.assistantInputId,
         });
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
@@ -572,6 +573,20 @@ describe.skipIf(!runPostgresProof)(
             mailboxItemId: requestId,
           },
           result: { status: "accepted" },
+        });
+        const privateRequestWake = await readHostedMailboxWakeByItemId({
+          availableAt: now,
+          mailboxItemId: requestId,
+          prisma,
+        });
+        expect(privateRequestWake).toMatchObject({
+          ask: {
+            resultDestination: {
+              channel: "telegram",
+              kind: "requester_direct",
+            },
+            target: { kind: "current_sender_personal" },
+          },
         });
         await expect(handleHostedRuntimeAssistantAskControl({
           boundRuntimeMemberId: fixture.senderMemberId,

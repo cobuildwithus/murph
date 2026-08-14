@@ -754,7 +754,7 @@ expiry cleanup or account deletion. A group-bound request sends a deterministic
 advance notice before Web admits any personal read; notice failure blocks the
 request. A private request sends no group notice. Web remains the identity and
 route authority, reloads the exact source, and prevents a replay from changing
-the already-fixed audience.
+the already-fixed result destination.
 
 `murph.group(action="ask")` is admitted only from a fresh authenticated private
 input. The runtime calls `assistantAskPort.request`; the signed
@@ -954,18 +954,21 @@ never need a command or exact reply form.
 
 Web reloads each exact source and is the sole identity, route, and admission
 owner. It derives the sender, locks every canonical and bounded legacy request
-alias, prevents replay from changing the already-fixed audience, and appends at
+alias, prevents replay from changing the already-fixed result destination, and appends at
 most one request. A private request must already have a current same-channel
 direct route. A group-bound request must first deliver the deterministic room
 notice; notice failure prevents the Web call. Missing private routing returns
 immediate concise recovery guidance without enqueuing personal work. The
-mailbox item persists the fixed target kind and self-only permission text before
-the personal runtime starts. The clarification pointer copies no question text,
-expires after ten minutes through the bounded hourly retention owner, and is
-also removed by account deletion.
+mailbox item persists one `current_sender_personal` read target, a separate
+`origin_context` or same-channel `requester_direct` result destination, and the
+self-only permission text before the personal runtime starts. The request id is
+derived from the exact source, not the destination, so replay cannot change the
+stored choice. The clarification pointer copies no question text, expires after
+ten minutes through the bounded hourly retention owner, and is also removed by
+account deletion.
 
 Prepare reloads the same source and revalidates membership, group routing,
-permission, fixed audience, and any required private route immediately before
+permission, fixed result destination, and any required private route immediately before
 private context is read. The personal read-only child proposes one candidate
 under that immutable permission. There is no incoming model reviewer. One fresh
 one-shot outgoing reviewer has no personal workspace, history, application
@@ -975,12 +978,12 @@ cannot rewrite or redact. Invalid output, refusal, timeout, provider failure, or
 ambiguity fails closed, and denied candidate bytes do not enter a Murph mailbox,
 vault, assistant state, operational log, or error.
 
-Completion cannot change audience. `group_sender` uses the existing authorized
-group completion. `group_sender_private` uses the existing same-channel private
-notification with exact reviewed text and a separate deterministic delivery
-identity. It cannot occupy the canonical group completion/fallback identity. If
-that direct route disappears after admission or at provider entry, or if the
-request expires before prepare, Web persists a fresh non-disclosing
+Completion cannot change result destination. `origin_context` uses the existing
+authorized group completion. `requester_direct` uses the existing same-channel
+private notification with exact reviewed text and a separate deterministic
+delivery identity. It cannot occupy the canonical group completion/fallback
+identity. If that direct route disappears after admission or at provider entry,
+or if the request expires before prepare, Web persists a fresh non-disclosing
 `cannot_answer` completion to the already-authorized originating group; the
 private answer never falls back. Replay, restart, and concurrent prepare or
 completion observe the persisted terminal result. A detached runner must
@@ -992,7 +995,8 @@ New callers identify the strict protocol with the single
 accepts deployed unmarked old `ask_current_sender` or
 `message_current_sender` bodies and drains already-accepted `group_sender` or
 `group_sender_private` mailbox work. It reloads the exact source and preserves
-the old call's already-defined group/private meaning. The
+the old call's already-defined group/private meaning. New work writes only the
+unified current-sender target and separate result destination. The
 undeployed dual URL marker, model-authored destination dialect, and intermediate
 request-id alias are rejected rather than preserved. Remove the old action
 parsing and legacy request-id lookup eleven minutes after all old runners are

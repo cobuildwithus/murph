@@ -1818,7 +1818,7 @@ model HostedGroupCurrentSenderClarification {
   originSessionId            String       @map("origin_session_id")
   sourceCausalSeq            BigInt       @map("source_causal_seq")
   resolvedByAssistantInputId String?      @map("resolved_by_assistant_input_id")
-  resolvedAudience           String?      @map("resolved_audience")
+  resolvedResultDestination  String?      @map("resolved_audience")
   expiresAt                  DateTime     @map("expires_at")
   createdAt                  DateTime     @default(now()) @map("created_at")
   updatedAt                  DateTime     @updatedAt @map("updated_at")

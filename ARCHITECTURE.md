@@ -352,6 +352,13 @@ Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.
 
+Assistant Ask and Assistant Notification are complementary cross-context
+boundaries. An Ask runs a read-only pass inside the selected target context and
+returns one bounded answer without writing there. A Notification delivers one
+route-bound payload without opening the destination context. Trusted adapters
+may select an existing membership or exact current-sender relationship, but
+they do not copy, mount, or merge conversation state between contexts.
+
 The current-sender Assistant Ask adapter is a single first-party, one-time
 personal-runtime request path, not a grant shortcut. The group model exposes
 `ask_current_sender` with one opaque `message_ref`, allowing each independent
@@ -364,7 +371,8 @@ destination address, or route.
 Web is the sole admission owner. In one transaction it reopens the exact
 encrypted source wake, preserves native reply evidence, revalidates the live
 group route, resolves the source author through the canonical channel identity
-index, and binds the inferred audience to that source. A group read first
+index, and translates the inferred audience into a result destination bound to
+that source. A group read first
 requires a trusted notice delivered against the same exact accepted message.
 A private request must resolve a current same-channel direct-member route before
 enqueue or it returns immediate recovery guidance. Genuine audience ambiguity
@@ -375,13 +383,16 @@ sender may resume the original request. Failed admission rolls the provisional
 claim back.
 
 The canonical deterministic request id binds the group runtime and exact
-accepted input, while the existing target kind and permission digest persist
-the fixed audience: `group_sender` plus the fixed group permission, or
-`group_sender_private` plus the fixed private permission. Admission locks the
+accepted input. The mailbox request persists one `current_sender_personal`
+read target and a separate fixed result destination: `origin_context` or a
+same-channel `requester_direct` route. The permission digest remains the
+destination-specific disclosure policy. The result destination is not part of
+request identity, so replay may reuse the exact choice but a replay that tries
+to switch it conflicts against the stored request. Admission locks the
 canonical id with the bounded former request ids and admits or replays at most
 one representation. The personal candidate pass and outgoing reviewer receive
 the already-fixed permission; the reviewer returns only `allow` or `deny` and
-cannot choose a member, route, or audience.
+cannot choose a member, route, or result destination.
 
 Group completion and non-disclosing fallback use the shared canonical
 `assistant.ask.completed` identity for the originating group. Private
@@ -389,7 +400,7 @@ completion uses a separate deterministic queue-only
 `assistant.notification.requested` containing the exact reviewed text for the
 same sender's current same-channel direct route, with no external group-route
 authority. Completion revalidates the persisted request, exact source, fixed
-audience, expiry, runtime fences, and route. If a private route is lost after
+result destination, expiry, runtime fences, and route. If a private route is lost after
 admission or at provider entry, or if the request expires before prepare, Web
 discards the private answer and persists a fresh fixed `cannot_answer`
 completion to the already-authorized originating group. The private delivery
@@ -404,7 +415,8 @@ accepts the deployed unmarked `ask_current_sender` and
 deterministic rules. The undeployed dual URL marker, model-authored destination
 dialect, and intermediate request-id alias are absent. Already-accepted former
 `group_sender` / `group_sender_private` mailbox work drains under its stored
-request id, target kind, and permission digest. After all old runners are
+request id, target kind, and permission digest, while new work writes only the
+unified target and separate destination. After all old runners are
 recycled, wait the ten-minute request TTL plus the one-minute detached-queue
 retry margin (eleven minutes total), then remove the old action parser, former
 request-id readers, and neutral-permission drain branch together. This path adds

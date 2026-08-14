@@ -4,10 +4,11 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   type HostedExecutionAssistantAskCompletedPayload,
   type HostedExecutionAssistantAskConsentedMemberTarget,
-  type HostedExecutionAssistantAskGroupSenderTarget,
+  type HostedExecutionAssistantAskCurrentSenderTarget,
   type HostedExecutionAssistantAskJoinedGroupTarget,
   type HostedExecutionAssistantAskOrigin,
   type HostedExecutionAssistantAskRequestedPayload,
+  type HostedExecutionAssistantAskResultDestination,
   type HostedExecutionAssistantAskResult,
 } from "./contracts.ts";
 import {
@@ -59,16 +60,40 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
     };
   }
 
+  const origin = parseHostedExecutionAssistantAskOrigin(
+    record.origin,
+    `${label}.origin`,
+  );
+  if (target.kind === "current_sender_personal") {
+    assertExactHostedExecutionAssistantAskKeys(record, [
+      "expiresAt",
+      "origin",
+      "question",
+      "resultDestination",
+      "target",
+    ], label);
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(
+        `${label}.origin must be an accepted input for the group sender.`,
+      );
+    }
+    return {
+      expiresAt,
+      origin,
+      question,
+      resultDestination: parseHostedExecutionAssistantAskResultDestination(
+        record.resultDestination,
+        `${label}.resultDestination`,
+      ),
+      target,
+    };
+  }
   assertExactHostedExecutionAssistantAskKeys(record, [
     "expiresAt",
     "origin",
     "question",
     "target",
   ], label);
-  const origin = parseHostedExecutionAssistantAskOrigin(
-    record.origin,
-    `${label}.origin`,
-  );
   if (
     target.kind === "group_sender"
     || target.kind === "group_sender_private"
@@ -281,7 +306,7 @@ function parseHostedExecutionAssistantAskTarget(
   label: string,
 ): HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget {
+  | HostedExecutionAssistantAskCurrentSenderTarget {
   const target = requireObject(value, label);
   const kind = requireString(target.kind, `${label}.kind`);
   if (kind === "joined_group") {
@@ -327,7 +352,11 @@ function parseHostedExecutionAssistantAskTarget(
       ),
     };
   }
-  if (kind === "group_sender" || kind === "group_sender_private") {
+  if (
+    kind === "current_sender_personal"
+    || kind === "group_sender"
+    || kind === "group_sender_private"
+  ) {
     assertExactHostedExecutionAssistantAskKeys(
       target,
       ["groupRuntimeMemberId", "kind", "permissionDigest"],
@@ -344,6 +373,31 @@ function parseHostedExecutionAssistantAskTarget(
         `${label}.permissionDigest`,
       ),
     };
+  }
+  throw new TypeError(`${label}.kind is invalid.`);
+}
+
+function parseHostedExecutionAssistantAskResultDestination(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantAskResultDestination {
+  const destination = requireObject(value, label);
+  const kind = requireString(destination.kind, `${label}.kind`);
+  if (kind === "origin_context") {
+    assertExactHostedExecutionAssistantAskKeys(destination, ["kind"], label);
+    return { kind };
+  }
+  if (kind === "requester_direct") {
+    assertExactHostedExecutionAssistantAskKeys(
+      destination,
+      ["channel", "kind"],
+      label,
+    );
+    const channel = requireString(destination.channel, `${label}.channel`);
+    if (channel !== "linq" && channel !== "telegram") {
+      throw new TypeError(`${label}.channel is invalid.`);
+    }
+    return { channel, kind };
   }
   throw new TypeError(`${label}.kind is invalid.`);
 }

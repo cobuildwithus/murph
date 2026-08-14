@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Non-Negotiable Rules
 
@@ -764,7 +764,7 @@ Last verified: 2026-08-12
 - Hosted Linq first-contact admission is a web-owned OpenAI egress path for unknown first-contact candidates. Keep `HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY` or the fallback `OPENAI_API_KEY` in web environment configuration only. The approved classifier input is bounded first-contact text plus sparse contact-kind/part-type metadata and a fixed `imessage`/`sms`/`rcs`/`unknown` service enum; do not add member ids, raw provider payloads, routing secrets, invite codes, mailbox bodies, transcripts, contact lookup keys, attachments, or prior conversation context. Do not persist classifier prompts, raw responses, model rationales, provider response bodies, or raw first-contact message text. The legacy nullable rejected-message-text column is retained only as an ignored deploy-skew compatibility column during the expand/contract rollout, and the migration scrubs existing values rather than dropping the column under old app code. Persist only the event-id keyed terminal allow/block decision with confidence/source so replay and concurrency observe the same admission result, and keep that decision write duplicate-safe by event id without relying on caught unique-constraint errors inside open transactions. An instant-start invite may retain that event id as single-owner provenance for the exact original inbound. Only the transaction whose unique phone-identity insert creates a genuinely new member may mint that authority; a loser retries before invite or accounting work, and an existing member without the exact token remains on the signup path. Activation requires the referenced decision to remain a model-source allow and revalidates the exact invite and event under the member and usage-credit beneficiary lock before appending the semantic-keyed starter grant. A different inbound cannot reuse that authority. Logs may include only sanitized confidence/source/failure metadata, safe bounded provider error code/type/message/request-id-presence, and event id suffixes. When admission enforcement is enabled, textless deterministic blocks, explicit classifier blocks, OpenAI refusal, content-filter outcomes, and first-contact budget exhaustion must be acknowledged as blocked without member creation, invite creation, reply send, read receipt, wake, or mailbox side effects. When enforcement is off, a genuinely unknown member on a provider-authenticated direct iMessage from a configured E.164 phone prefix may use the classifier solely to qualify for instant start: only a persisted `allow` with `source=model` and exact same-line routing may enter the starter-usage path. That path creates no Stripe Customer or Subscription and cannot charge a saved payment method. Model blocks, deterministic fail-open decisions, classifier unavailability, budget exhaustion, SMS/RCS, groups, email handles, unsupported prefixes, unrelated existing members, conflicting billing history, and cross-line routing must retain the existing signup-link or ignored behavior and must never mint instant-start entitlement. Calling-code or phone-prefix filtering is abuse friction, not nationality, residence, carrier, or fraud attestation. The default is an explicitly reviewed launch-market list, and operators may replace it through `HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES`; `+1` still includes the full NANP.
 - Inbound message content written by the retention-capable owners has one receipt-anchored 14-day maximum across hosted mailbox ciphertext, vault capture text/raw fields, out-of-line text, parser bundles, SQLite/FTS projections, assistant input events, and user transcript entries. The deadline is inclusive and active or retryable work cannot extend it. Every new user transcript entry carries `contentReceivedAt`; retention must never infer a missing legacy receipt from transcript `createdAt`, an accepted-turn journal, or an input event because normal settled-snapshot cleanup may already have discarded that join. The phase-one rollout therefore preserves unstamped legacy transcript entries while re-arming existing snapshots once to queue cleanup of every carrier with trustworthy receipt evidence; the rollout remains incomplete until that queue drains. Only after both 14 complete days from verified stamping-capable runner convergence and phase-one drain completion may a separate phase-two migration re-arm those snapshots again and retire every remaining unstamped user entry. Postgres cleanup deletes sidecar payload ciphertext, clears inline payload fields, and retains only structural mailbox metadata. If a conversation message reaches the deadline without terminal handling, the existing mailbox row becomes a durable `policy_non_reply.content_expired` tombstone and the runtime records its existing suppression evidence before local content retirement; neither owner may silently delete accepted work or later resurrect it as replyable. Promoted canonical health facts, explicit user saves/pins, Murph replies, delivery evidence, and content-free structural/audit metadata are outside this inbound-message-content policy and retain their owning lifecycle.
 - The Cloudflare `runtime/ensure-processing` route accepts exactly two credentials: the Temporal orchestrator's web-callback signature and web's Vercel OIDC identity (the same identity already used by the browser-vault/status/deletion control routes). Authorization dispatches on the credential the caller presented and never falls through a failed signature to OIDC or vice versa. The web direct wake is a post-Temporal latency hint for eligible Linq and Assistant Ask request/completion mailbox appends, carries no message payload, mints diagnostics-only `web-ingress-` attempt ids, and grants web no authority it did not already exercise through the accepted Temporal signal; the `triggeredByWebDirect` diagnostic is derived from the authorizing credential, never from caller-supplied fields. Hosted R2 reads, writes, restores, presigns, and account deletion use one environment-selected ENAM bucket; authenticated callers cannot select a bucket, region, or presign target. The Assistant Ask child receives only the server-bound requester membership `participantId` as immutable identity context: first-person references require an exact `read_shared` participant match, while display names, handles, member order, and the opaque id itself are forbidden output authority.
-- Web is the sole target and audience authority for one-time current-sender
+- Web is the sole relationship and result-destination authority for one-time current-sender
   Assistant Ask. The `ask_current_sender` action accepts only an opaque
   `message_ref` from the current accepted group turn, so each independent
   requester can be submitted without granting target authority. Web reopens
@@ -774,16 +774,20 @@ Last verified: 2026-08-12
   same exact-source check; no model output may select a sender, member,
   question, destination address, or route.
 - The conversational model infers group, private, or genuine audience
-  ambiguity for one exact accepted ref. Admission fixes that audience before
+  ambiguity for one exact accepted ref. Admission fixes the corresponding
+  result destination before
   personal-model work. Group admission first requires a trusted notice bound to
   the same source ref. Private admission requires a current same-channel
-  `direct-member` route. The existing requested-wake target kind and permission
-  digest persist the audience, and the personal candidate plus fresh outgoing
+  `direct-member` route. The requested wake persists one
+  `current_sender_personal` read target, a separate `origin_context` or
+  same-channel `requester_direct` result destination, and its matching
+  permission digest. The request identity remains the exact source, so replay
+  cannot change the destination. The personal candidate plus fresh outgoing
   reviewer may only allow or deny disclosure under that fixed permission. An
   ambiguity stores only a short-lived group/sender pointer to the original
   input/session and causal sequence; replacement is causally monotonic, another
   sender cannot claim it, and failed admission rolls back its claim.
-- A successful current-sender completion cannot change audience.
+- A successful current-sender completion cannot change result destination.
   `assistant.ask.completed` is the group path and remains bound to the exact
   origin request and synthetic group runtime. Linq and Telegram carry its exact
   completion proof into the existing Web-owned provider-entry authority
@@ -808,7 +812,8 @@ Last verified: 2026-08-12
   compatibility surfaces.
   Already-accepted former request ids and `group_sender` /
   `group_sender_private` targets drain only under their stored target kind and
-  permission digest. After all old runners are recycled, retain this seam for
+  permission digest; new requests write only `current_sender_personal` plus the
+  separate destination. After all old runners are recycled, retain this seam for
   the ten-minute request TTL plus the one-minute detached-queue retry margin,
   then remove the old action parser, former request-id readers, and
   neutral-permission drain branch together.

@@ -11,6 +11,7 @@ import { initializeVault } from "@murphai/core";
 import {
   HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
   HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  type HostedExecutionAssistantAskRequestedPayload,
 } from "@murphai/hosted-execution/contracts";
 import { describe, test, vi } from "vitest";
 
@@ -36,8 +37,42 @@ const TEST_USER_ID = "member_personal_runtime";
 const GROUP_INPUT_ID = `ain_${"a".repeat(32)}`;
 
 function createPendingCurrentSenderAsk(
-  targetKind: "group_sender" | "group_sender_private" = "group_sender",
+  targetKind:
+    | "current_sender_personal"
+    | "group_sender"
+    | "group_sender_private" = "current_sender_personal",
+  resultDestination: "origin_context" | "requester_direct" = "origin_context",
 ): HostedSystemMailboxPendingItem {
+  const commonAsk = {
+    expiresAt: "2026-07-27T20:10:00.000Z",
+    origin: {
+      assistantInputId: GROUP_INPUT_ID,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    },
+    question: "Murph, ask my Murph about my synthetic activity.",
+  };
+  const ask: HostedExecutionAssistantAskRequestedPayload =
+    targetKind === "current_sender_personal"
+      ? {
+          ...commonAsk,
+          resultDestination: resultDestination === "requester_direct"
+            ? { channel: "linq", kind: "requester_direct" }
+            : { kind: "origin_context" },
+          target: {
+            groupRuntimeMemberId: "member_group_runtime",
+            kind: "current_sender_personal",
+            permissionDigest: "d".repeat(64),
+          },
+        }
+      : {
+          ...commonAsk,
+          target: {
+            groupRuntimeMemberId: "member_group_runtime",
+            kind: targetKind,
+            permissionDigest: "d".repeat(64),
+          },
+        };
   return {
     attemptCount: 0,
     itemId: "item_current_sender",
@@ -53,20 +88,7 @@ function createPendingCurrentSenderAsk(
     routeAction: "run-assistant-ask",
     status: "pending",
     wake: {
-      ask: {
-        expiresAt: "2026-07-27T20:10:00.000Z",
-        origin: {
-          assistantInputId: GROUP_INPUT_ID,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-        question: "Murph, ask my Murph about my synthetic activity.",
-        target: {
-          groupRuntimeMemberId: "member_group_runtime",
-          kind: targetKind,
-          permissionDigest: "d".repeat(64),
-        },
-      },
+      ask,
       eventId: "ask_current_sender_request",
       kind: "assistant.ask.requested",
       occurredAt: TEST_NOW,
@@ -77,7 +99,11 @@ function createPendingCurrentSenderAsk(
 
 async function runFixedAudienceAsk(input: {
   permissionText: string;
-  targetKind: "group_sender" | "group_sender_private";
+  resultDestination?: "origin_context" | "requester_direct";
+  targetKind:
+    | "current_sender_personal"
+    | "group_sender"
+    | "group_sender_private";
 }) {
   const vaultRoot = await mkdtemp(
     path.join(tmpdir(), "murph-fixed-current-sender-assistant-ask-"),
@@ -92,7 +118,10 @@ async function runFixedAudienceAsk(input: {
 
   await initializeVault({ createdAt: TEST_NOW, vaultRoot });
   await updateHostedSystemMailboxState(vaultRoot, () => ({
-    pending: [createPendingCurrentSenderAsk(input.targetKind)],
+    pending: [createPendingCurrentSenderAsk(
+      input.targetKind,
+      input.resultDestination,
+    )],
   }));
   const controller = createHostedDetachedAssistantAskController({
     assistantAskPort: {
@@ -128,6 +157,36 @@ async function runFixedAudienceAsk(input: {
 }
 
 describe("hosted current-sender Assistant Ask execution", () => {
+  test("uses the canonical result destination independently of target identity", async () => {
+    const group = await runFixedAudienceAsk({
+      permissionText: HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+      resultDestination: "origin_context",
+      targetKind: "current_sender_personal",
+    });
+    try {
+      assert.equal(
+        group.executeConsentedAsk.mock.calls[0]?.[0].answerMode,
+        "caller_handoff",
+      );
+    } finally {
+      await rm(group.vaultRoot, { force: true, recursive: true });
+    }
+
+    const direct = await runFixedAudienceAsk({
+      permissionText: HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+      resultDestination: "requester_direct",
+      targetKind: "current_sender_personal",
+    });
+    try {
+      assert.equal(
+        direct.executeConsentedAsk.mock.calls[0]?.[0].answerMode,
+        "direct_recipient",
+      );
+    } finally {
+      await rm(direct.vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("uses caller handoff for a Web-fixed group audience despite a legacy private target", async () => {
     const run = await runFixedAudienceAsk({
       permissionText: HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,

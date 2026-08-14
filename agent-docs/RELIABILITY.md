@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Current Guardrails
 
@@ -1187,21 +1187,24 @@ Last verified: 2026-08-12
   while granting no sender or route authority. The conversational model infers
   group, private, or genuine audience ambiguity for that exact ref. Web reloads
   the exact wake, preserves native-reply evidence, resolves its author, binds
-  the inferred audience, and requires the same source's trusted group notice or
-  current same-channel private route before admission.
+  the corresponding result destination, and requires the same source's trusted
+  group notice or current same-channel private route before admission.
 - Ambiguity persists one ten-minute group/sender pointer to the original exact
   input/session and causal sequence, without copied question text. Creation is
   serialized and causally monotonic: older work cannot replace newer work, and
   exact replay cannot reopen a resolved pointer. Continuation accepts only a
   later exact input from the same sender. Claim and ordinary admission share one
   database-only transaction, so unavailable admission rolls the claim back.
-- Admission persists the fixed audience through `group_sender` or
-  `group_sender_private` plus the matching fixed permission digest. Private
-  admission first resolves a current same-channel direct route. Prepare and
-  completion re-read the source and stored target under the existing request
-  locks. The personal runtime and reviewer cannot change the audience; the
+- Admission persists one `current_sender_personal` read target and a separate
+  result destination. `origin_context` selects the existing group completion;
+  `requester_direct` also pins the admitted Linq or Telegram channel. The
+  matching permission digest remains fixed disclosure policy. Private admission
+  first resolves a current same-channel direct route. Prepare and completion
+  re-read the source, target, and result destination under the existing request
+  locks. The personal runtime and reviewer cannot change the destination; the
   reviewer returns only allow or deny. Exact request replay returns the same
-  target mailbox item, and exactly one alias may exist for an origin.
+  mailbox item, a replay that switches destination conflicts, and exactly one
+  alias may exist for an origin.
 - Group completion persists as `assistant.ask.completed` for the originating
   group. Private completion persists as one deterministic queue-only
   `assistant.notification.requested` for the source sender: exact text,
@@ -1220,7 +1223,8 @@ Last verified: 2026-08-12
   admission. The undeployed dual URL marker, destination dialect, and
   intermediate request-id alias are rejected. Existing former request ids and `group_sender` /
   `group_sender_private` targets drain only when their stored shape is valid and
-  the reloaded source independently agrees on sender and audience. Completion
+  the reloaded source independently agrees on sender and legacy destination.
+  Completion
   locks every alias and accepts at most one completion alias. After
   all old runners are recycled, wait the ten-minute request TTL plus the
   one-minute detached-queue retry margin (eleven minutes total), then remove the

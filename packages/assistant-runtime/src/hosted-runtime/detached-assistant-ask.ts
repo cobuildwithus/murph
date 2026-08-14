@@ -21,6 +21,7 @@ import type {
 } from "@murphai/assistant-engine";
 import {
   HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  isHostedExecutionAssistantAskCurrentSenderTarget,
   type HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
@@ -279,10 +280,9 @@ async function runOneHostedDetachedAssistantAsk(input: {
       return "settled";
     }
     if (prepared.status === "terminal") {
-      if (
-        claimed.wake.ask.target.kind === "group_sender"
-        || claimed.wake.ask.target.kind === "group_sender_private"
-      ) {
+      if (isHostedExecutionAssistantAskCurrentSenderTarget(
+        claimed.wake.ask.target,
+      )) {
         throw new TypeError(
           "Current-sender assistant ask has no persisted terminal completion.",
         );
@@ -340,16 +340,19 @@ async function runOneHostedDetachedAssistantAsk(input: {
       }
       answer = await input.executeConsentedAsk({
         ...executionInput,
-        // Web has already fixed and persisted the audience. Legacy mailbox
-        // target kinds are only drain-compatible storage shapes and cannot
-        // override that authority.
+        // Web has already fixed and persisted the result destination. Former
+        // target kinds are drain-only; their Web-returned disclosure remains
+        // the compatibility authority for imported work.
         answerMode:
-          (
-            claimed.wake.ask.target.kind === "group_sender"
-            || claimed.wake.ask.target.kind === "group_sender_private"
+          isHostedExecutionAssistantAskCurrentSenderTarget(
+            claimed.wake.ask.target,
           )
-          && prepared.disclosure.permissionText
-            === HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT
+          && (
+            "resultDestination" in claimed.wake.ask
+              ? claimed.wake.ask.resultDestination.kind === "requester_direct"
+              : prepared.disclosure.permissionText
+                === HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT
+          )
             ? "direct_recipient"
             : "caller_handoff",
         permissionText: prepared.disclosure.permissionText,
@@ -384,9 +387,8 @@ async function runOneHostedDetachedAssistantAsk(input: {
     }
     if (
       completed.status === "terminal"
-      && (
-        claimed.wake.ask.target.kind === "group_sender"
-        || claimed.wake.ask.target.kind === "group_sender_private"
+      && isHostedExecutionAssistantAskCurrentSenderTarget(
+        claimed.wake.ask.target,
       )
     ) {
       throw new TypeError(

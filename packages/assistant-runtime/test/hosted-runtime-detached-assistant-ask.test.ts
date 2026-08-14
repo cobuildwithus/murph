@@ -1092,9 +1092,10 @@ function createPendingAsk(input: {
               sessionId: "session_current_sender",
             },
             question: "current sender question",
+            resultDestination: { kind: "origin_context" as const },
             target: {
               groupRuntimeMemberId: "member_synthetic_group_runtime",
-              kind: "group_sender" as const,
+              kind: "current_sender_personal" as const,
               permissionDigest: "e".repeat(64),
             },
           }
