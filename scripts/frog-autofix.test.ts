@@ -2075,7 +2075,14 @@ describe("Frog autofix guards", () => {
       writeFileSync(path.join(root, skillPath), skillContent);
       writeFileSync(
         path.join(root, "package.json"),
-        `${JSON.stringify({ private: true, scripts: { "no-js": "true" } }, null, 2)}\n`,
+        `${JSON.stringify({
+          private: true,
+          packageManager: JSON.parse(readFileSync(
+            path.join(repositoryRoot, "package.json"),
+            "utf8",
+          )).packageManager,
+          scripts: { "no-js": "true" },
+        }, null, 2)}\n`,
       );
       git("init", "--quiet");
       git("config", "user.name", "Automation");
