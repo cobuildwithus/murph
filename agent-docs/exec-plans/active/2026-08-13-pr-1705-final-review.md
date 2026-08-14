@@ -151,8 +151,15 @@ Local replacement-candidate evidence on 2026-08-13:
   their fail-closed behavior. The current-sender Engine filter passes 15 tests,
   the Web authority file passes 25 tests, and the fully migrated PostgreSQL
   lifecycle suite passes 9 tests.
-- A fresh sensitive full-snapshot ReviewGPT round 18 and required GitHub checks
-  remain pending on the remediated exact head.
+- ReviewGPT round 18 ran as a fresh sensitive full snapshot against the
+  remediated exact head and returned `Findings: None`, `ROUND_OUTCOME: PASS`,
+  and `REVIEW_COMPLETE`. Nothing was accepted or rejected, and no remediation
+  or complexity was added. Independent capture metadata verified the requested
+  `gpt-5.6-sol` run returned the `gpt-5-6-pro` response model.
+- Required GitHub Actions remain pending because the current base conflict
+  prevents GitHub from creating the pull-request merge ref that triggers those
+  workflows. The permitted base-update budget remains consumed, so resolving
+  that conflict requires explicit new user authorization.
 
 ## Round-17 requirement retrospective
 
