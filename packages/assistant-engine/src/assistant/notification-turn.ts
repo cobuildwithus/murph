@@ -29,6 +29,7 @@ import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantSessionTarget } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import { resolveAssistantConversationScope } from './conversation-policy.js'
+import { prepareAssistantCronNotificationInput } from './cron/output-history.js'
 import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
@@ -299,7 +300,7 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
-      const messageInput = buildAssistantNotificationMessageInput(
+      const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
         maintenanceEvidence,
       )
@@ -312,13 +313,22 @@ export async function sendAssistantNotificationLocal(
           ? createAssistantMaintenanceNotificationResolvedSession({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
           : await resolveAssistantSessionForMessage({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
+      const preparedInput = await prepareAssistantCronNotificationInput(input, {
+        sessionId: resolved.session.sessionId,
+      })
+      const messageInput = preparedInput === input
+        ? resolutionMessageInput
+        : buildAssistantNotificationMessageInput(
+            preparedInput,
+            maintenanceEvidence,
+          )
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
         resolved,

@@ -70,6 +70,7 @@ const FINNISH_DRY_SAUNA_KEY =
 const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
 const DEVICE_SYNC_CONFIG_RUNTIME_MODULE: string = "@murphai/device-syncd/config";
 const JUNCTION_SDK_RUNTIME_PATH = "/app/node_modules/@junction-api/sdk";
+const JUNCTION_SDK_VITALS_RUNTIME_MODULE: string = "@junction-api/sdk/vitals";
 const CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS = 45_000;
 const CODEX_SHELL_ENV_PROBE_TIMEOUT_MS = 90_000;
 const PDF_SMOKE_EXPECTED_TEXT = "Murph hosted PDF smoke fixture";
@@ -563,18 +564,15 @@ async function runDeviceSyncRuntimeSmoke(): Promise<void> {
     );
   }
 
-  try {
-    await access(JUNCTION_SDK_RUNTIME_PATH);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw error;
+  await access(JUNCTION_SDK_RUNTIME_PATH);
+  const junctionVitals = await import(JUNCTION_SDK_VITALS_RUNTIME_MODULE) as {
+    VitalsClient?: unknown;
+  };
+  if (typeof junctionVitals.VitalsClient !== "function") {
+    throw new Error(
+      "Hosted runner smoke could not load the external Junction SDK vitals runtime.",
+    );
   }
-
-  throw new Error(
-    "Hosted runner smoke found the Junction SDK runtime after production pruning.",
-  );
 }
 
 async function runCodexPreflight(): Promise<{
@@ -1302,7 +1300,7 @@ function buildMemberWorkspaceAutomationSaveArgs(input: {
     "--channel",
     "telegram",
     "--delivery-target",
-    "agentmail:hosted-member-workspace-smoke",
+    "telegram:hosted-member-workspace-smoke",
     "--identity-id",
     "identity_hosted_member_workspace_smoke",
     "--participant-id",
@@ -1326,7 +1324,7 @@ function createMemberWorkspaceAutomationImportPayload(input: {
     instructions: "Run the hosted member-workspace import permission proof.",
     route: {
       channel: "telegram",
-      deliveryTarget: "agentmail:hosted-member-workspace-import-smoke",
+      deliveryTarget: "telegram:hosted-member-workspace-import-smoke",
       identityId: "identity_hosted_member_workspace_import_smoke",
       participantId: "participant_hosted_member_workspace_import_smoke",
       threadId: "thread_hosted_member_workspace_import_smoke",

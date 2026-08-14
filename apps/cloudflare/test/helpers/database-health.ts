@@ -2,6 +2,7 @@ export function buildMetricsBody(input: {
   branchId: string;
   clientWaitSeconds?: number;
   directErrors?: number;
+  pooledErrors?: number;
   postgresStates?: Readonly<Record<string, number>>;
   serverConnections?: number;
 }): string {
@@ -37,6 +38,10 @@ export function buildMetricsBody(input: {
       + `planetscale_database_branch_id="${input.branchId}",`
       + 'planetscale_port="5432",planetscale_region="us-east"} '
       + `${input.directErrors ?? 0}`,
+    "planetscale_edge_postgres_connection_errors_total{"
+      + `planetscale_database_branch_id="${input.branchId}",`
+      + 'planetscale_port="6432",planetscale_region="us-east"} '
+      + `${input.pooledErrors ?? 0}`,
     "",
   ].join("\n");
 }

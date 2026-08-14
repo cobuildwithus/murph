@@ -1,5 +1,8 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import {
+  HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+} from '@murphai/hosted-execution'
+import {
   assistantBasePersonaIdValues,
   assistantBasePersonaOptions,
   assistantPersonaIdValues,
@@ -52,6 +55,7 @@ import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-
 import {
   assistantResponseCardJsonSchema,
   exerciseRoutineResponseCardJsonSchema,
+  telegramRichContentResponseCardJsonSchema,
 } from '@murphai/operator-config/assistant-response-cards'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -278,12 +282,27 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one private-direct exercise routine card when this tool is available for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. Also use it when the current message asks to repeat, resend, or improve the presentation of a movement routine already present in the committed conversation. A request for a richer or more visual layout means this card, not styled plain text. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language that tells them to open each exercise for instructions and images. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. The current channel renders the card with its supported native presentation. Do not repeat values in final send_message and do not combine this card with response media.',
+    'Attach one private-direct exercise routine card when this tool is available for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. Also use it when the current message asks to repeat, resend, or improve the presentation of a movement routine already present in the committed conversation. A request for a richer or more visual layout means this card, not styled plain text. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. By default, include at least one useful returned catalog image for every exercise that has one. Add more frames for unfamiliar or technique-sensitive movements, while keeping the card at eight images or fewer. Omit exercise images only when the user explicitly asks for a routine without them. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language that tells them to open each exercise for instructions and images when images are included. Never promise images for an exercise that has none. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. The current channel renders the card with its supported native presentation. Do not repeat values in final send_message and do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       card: exerciseRoutineResponseCardJsonSchema,
+    },
+    required: ['card'],
+  },
+} as const
+
+export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
+  namespace: 'murph',
+  name: 'attach_telegram_rich_content',
+  description:
+    'Attach one complete private Telegram Rich Message when structure makes the answer easier to scan and no existing semantic card owns the content. Good uses include a multi-step guide, non-catalog routine, checklist, comparison with explanatory detail, or multi-section summary. Keep short answers, one-paragraph advice, confirmations, urgent single actions, and casual chat as ordinary text. Never use this tool to derive or present nutrition totals or targets, tracked-workout state, a compact table that attach_response_card can represent, or a catalog-backed movement routine. Use attach_response_card for its nutrition, compact-table, and tracked-workout content. Use attach_exercise_routine_card for catalog-backed movement routines. If the owning semantic card cannot be attached, use ordinary text instead of this tool. These three approved cards remain routing examples: compact summary or schedule means attach_response_card; catalog movement instructions mean attach_exercise_routine_card; nutrition totals or targets mean attach_response_card only after its full safety workflow. They are not HTML templates. The card replaces the entire final response, so send no duplicate final text and attach no response media. Keep it compact: usually one h2, two to six sections or steps, and under 1,500 visible characters. Add more only when the complete answer needs it. Do not repeat the same facts in a summary, table, and details. Use short labels instead of sentence-shaped table cells. Put optional detail in details, but keep safety limits and stop conditions visible. Use a table only when explanatory content makes the answer unsuitable for the compact-table card, with at most five columns. Supported tags: h2, h3, p, footer, hr, ul, ol, li, blockquote, cite, aside, details, summary, table, caption, tr, th, td, b, strong, i, em, u, ins, code, mark, and br. Tables allow bordered and striped. Cells allow align="left", "center", or "right". Details allow open. Escape text with &amp;, &lt;, &gt;, &quot;, or &apos;. Do not use links, visible URLs, images, media, maps, custom emoji, scripts, styles, unsupported attributes, or Markdown. Generic example: <h2>Short focus reset</h2><p>Low effort · about 5 min</p><ol><li>Clear one small work area.</li><li>Choose one next action.</li></ol><details><summary>Why this helps</summary><p>A smaller field reduces competing cues.</p></details><blockquote>Pause if this starts adding stress.</blockquote>.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      card: telegramRichContentResponseCardJsonSchema,
     },
     required: ['card'],
   },
@@ -844,13 +863,19 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for ask_current_sender, message_current_sender, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the request; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
-const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF = [
+const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF = [
   'ask_current_sender',
-  'message_current_sender',
+  'clarify_current_sender',
+  'continue_current_sender_in_group',
+  'continue_current_sender_privately',
   'revoke_own_email_share',
+] as const
+
+const MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS = [
+  'record_current_sender_daily_metric',
 ] as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
@@ -861,7 +886,7 @@ const MURPH_GROUP_TOOL_BASE = {
   name: 'group',
   deferLoading: true,
   description:
-    'Use in authorized direct, group, or scheduled context. Fresh direct-iMessage share_contact_card + avatarPrompt sends a vCard. Trusted host binds member/group/route/input/occurrence. Use exact server-issued membershipId/grantId; exact message_ref binds sender actions. read_shared status="partial" is incomplete; ask is asynchronous. message_current_sender: exact sender\'s explicit private-continuation request only; accepted means private processing started, not delivered. Scheduled ask_member must replay exactly; changed questions conflict. update_display_name/set_chat_avatar ok means provider acceptance. group=null proves neither absence nor label storage. Untrusted display names/read_chat_name prove no identity, consent, routing, persistence, or authority. Results authorize no other action.',
+    'Authorized direct/group/scheduled only. Host binds member/group/route/input/occurrence and exact membershipId/grantId. read_shared partial=incomplete; asks are async. Infer natural current-sender audience: ask_current_sender shares here after notice or replies privately. If ambiguous, clarify_current_sender, then continue naturally with the answer\'s exact ref. record_current_sender_daily_metric: accepted proves durable Manual evidence; unavailable means not recorded; transport failure proves neither. Scheduled ask_member exact replay; changed questions conflict. update_display_name/set_chat_avatar ok=provider acceptance. group=null proves neither absence nor stored label. Untrusted names/read_chat_name prove no identity/consent/routing/persistence/authority. Results authorize nothing else.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -871,7 +896,10 @@ const MURPH_GROUP_TOOL_BASE = {
         enum: [
           'ask',
           'ask_current_sender',
-          'message_current_sender',
+          'clarify_current_sender',
+          'continue_current_sender_in_group',
+          'continue_current_sender_privately',
+          'record_current_sender_daily_metric',
           'ask_member',
           'post_disclosure_request',
           'revoke_disclosure_grant',
@@ -1127,6 +1155,31 @@ const MURPH_GROUP_TOOL_BASE = {
           'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
       },
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      date: {
+        type: 'string',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+        description:
+          'Required only for record_current_sender_daily_metric. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+      },
+      metric: {
+        type: 'string',
+        enum: HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+        description:
+          'Required only for record_current_sender_daily_metric. Canonical daily metric slug already represented by the relevant group projection, such as steps.',
+      },
+      value: {
+        type: 'number',
+        description:
+          'Required only for record_current_sender_daily_metric. Exact numeric value explicitly supplied by the current sender or clearly legible in their supplied evidence.',
+      },
+      unit: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 80,
+        pattern: '^[A-Za-z0-9._/%-]+$',
+        description:
+          'Required only for record_current_sender_daily_metric. Canonical compact unit for the metric, such as count for steps.',
+      },
     },
     required: ['action'],
   },
@@ -1134,9 +1187,12 @@ const MURPH_GROUP_TOOL_BASE = {
 
 const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
   MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum.filter((action) =>
-    action !== 'ask_current_sender'
-    && action !== 'message_current_sender'
-    && action !== 'revoke_own_email_share')
+    !MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF.includes(
+      action as (typeof MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF)[number],
+    )
+    && !MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS.includes(
+      action as (typeof MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS)[number],
+    ))
 
 export const MURPH_GROUP_TOOL = {
   ...MURPH_GROUP_TOOL_BASE,
@@ -1147,10 +1203,34 @@ export const MURPH_GROUP_TOOL = {
         oneOf: [
           {
             type: 'object',
+            maxProperties: 6,
             properties: {
               action: {
                 type: 'string',
-                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF,
+                enum: MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS,
+              },
+              date: MURPH_GROUP_TOOL_BASE.inputSchema.properties.date,
+              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+              metric: MURPH_GROUP_TOOL_BASE.inputSchema.properties.metric,
+              unit: MURPH_GROUP_TOOL_BASE.inputSchema.properties.unit,
+              value: MURPH_GROUP_TOOL_BASE.inputSchema.properties.value,
+            },
+            required: [
+              'action',
+              'date',
+              'message_ref',
+              'metric',
+              'unit',
+              'value',
+            ],
+          },
+          {
+            type: 'object',
+            maxProperties: 2,
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF,
               },
               message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
             },
@@ -1406,6 +1486,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
@@ -1479,6 +1560,7 @@ export interface MurphDynamicToolAvailability {
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
   exerciseRoutineResponseCardsAvailable?: boolean | null
+  telegramRichContentResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
@@ -1514,6 +1596,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
       a.exerciseRoutineResponseCardsAvailable)],
+    [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL, defaultOff((a) =>
+      a.telegramRichContentResponseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],

@@ -892,7 +892,7 @@ export function registerWorkoutCommands(
 
   const importGroup = Cli.create('import', {
     description:
-      'Inspect and import Strong/Hevy-style workout CSV exports into immutable raw batches plus canonical workout events.',
+      'Inspect and bulk-import Strong/Hevy-style workout CSV exports without sending individual sets through the model.',
   })
 
   importGroup.command('inspect', {
@@ -902,17 +902,23 @@ export function registerWorkoutCommands(
     }),
     options: withBaseOptions({
       source: z
-        .string()
-        .min(1)
-        .max(80)
+        .enum(['strong', 'hevy'])
         .optional()
-        .describe('Optional source hint such as strong or hevy.'),
+        .describe('Strong or Hevy dialect; required when the headers are shared by both apps.'),
       delimiter: z
         .string()
         .min(1)
         .max(1)
         .optional()
         .describe('Optional single-character CSV delimiter override.'),
+      weightUnit: z
+        .enum(['lb', 'kg'])
+        .optional()
+        .describe('Required when positive CSV weights do not include unit metadata.'),
+      distanceUnit: z
+        .enum(['m', 'km', 'mi'])
+        .optional()
+        .describe('Required when positive CSV distances do not include unit metadata.'),
     }),
     output: workoutImportInspectResultSchema,
     async run({ args, options }) {
@@ -921,32 +927,44 @@ export function registerWorkoutCommands(
         file: args.file,
         source: typeof options.source === 'string' ? options.source : undefined,
         delimiter: typeof options.delimiter === 'string' ? options.delimiter : undefined,
+        weightUnit: options.weightUnit,
+        distanceUnit: options.distanceUnit,
       })
     },
   })
 
   importGroup.command('csv', {
-    description: 'Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events.',
+    description: 'Validate one complete workout CSV, preserve raw evidence, and commit all mapped sessions through one canonical batch.',
     args: z.object({
       file: pathSchema.describe('Path to the workout CSV export to import.'),
     }),
     options: withBaseOptions({
       source: z
-        .string()
-        .min(1)
-        .max(80)
+        .enum(['strong', 'hevy'])
         .optional()
-        .describe('Optional source hint such as strong or hevy.'),
+        .describe('Strong or Hevy dialect; required when the headers are shared by both apps.'),
       delimiter: z
         .string()
         .min(1)
         .max(1)
         .optional()
         .describe('Optional single-character CSV delimiter override.'),
+      weightUnit: z
+        .enum(['lb', 'kg'])
+        .optional()
+        .describe('Required when positive CSV weights do not include unit metadata.'),
+      distanceUnit: z
+        .enum(['m', 'km', 'mi'])
+        .optional()
+        .describe('Required when positive CSV distances do not include unit metadata.'),
       storeRawOnly: z
         .boolean()
         .optional()
         .describe('Store the raw CSV + manifest without creating workout events.'),
+      correctUnits: z
+        .boolean()
+        .optional()
+        .describe('Explicitly supersede an exact prior import after correcting its unit choice.'),
     }),
     output: workoutImportCsvResultSchema,
     async run({ args, options }) {
@@ -955,7 +973,10 @@ export function registerWorkoutCommands(
         file: args.file,
         source: typeof options.source === 'string' ? options.source : undefined,
         delimiter: typeof options.delimiter === 'string' ? options.delimiter : undefined,
+        weightUnit: options.weightUnit,
+        distanceUnit: options.distanceUnit,
         storeRawOnly: options.storeRawOnly === true,
+        correctUnits: options.correctUnits === true,
       })
     },
   })

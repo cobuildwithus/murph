@@ -1,6 +1,7 @@
 ---
 title: 'Waited ReviewGPT can stay alive after writing a completed response'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1749'
 ---
 
 ## Expected Behavior

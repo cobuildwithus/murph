@@ -1,6 +1,7 @@
 ---
 title: 'Committer usage disagrees with repository examples'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1753'
 ---
 
 ## Expected Behavior

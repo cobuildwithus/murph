@@ -1,6 +1,7 @@
 ---
 title: 'Sanctioned worktree briefly reports every tracked file deleted'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1660'
 ---
 
 ## Expected Behavior

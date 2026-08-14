@@ -1,6 +1,7 @@
 ---
 title: 'Isolated design catalog still polls the control database'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1713'
 ---
 
 ## Expected Behavior

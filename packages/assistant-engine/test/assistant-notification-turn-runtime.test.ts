@@ -26,6 +26,7 @@ import {
 } from '@murphai/core'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
+import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import type {
   AssistantCodexTurnRecoveryOutcome,
   executeCodexTurnWithRecovery,
@@ -171,6 +172,42 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/turn-lock.js')
   vi.doUnmock('../src/assistant/response-media.js')
   vi.doUnmock('../src/assistant/first-contact.js')
+  vi.doUnmock('../src/assistant/cron/output-history.js')
+})
+
+test('sendAssistantNotificationLocal scopes cron output history to the resolved conversation session', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-current-cron-history',
+  })
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'Send the recurring reminder.',
+    }),
+    session,
+  })
+  const prepareAssistantCronNotificationInput = vi.fn(
+    async (notificationInput: AssistantNotificationInput) => notificationInput,
+  )
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    prepareAssistantCronNotificationInput,
+    providerResult,
+    turnId: 'turn-current-cron-history',
+  })
+  const input = {
+    executionContext: { hosted: null },
+    instructions: 'Send one recurring reminder.',
+    scheduledAutomationScheduleKind: 'dailyLocal' as const,
+    turnTrigger: 'automation-cron' as const,
+    vault: '/vaults/current-cron-history',
+  }
+
+  await sendAssistantNotificationLocal(input)
+
+  expect(prepareAssistantCronNotificationInput).toHaveBeenCalledWith(input, {
+    sessionId: session.sessionId,
+  })
 })
 
 test('sendAssistantNotificationLocal deterministically skips only an authorized busy occurrence before provider delivery', async () => {
@@ -5381,6 +5418,10 @@ async function loadNotificationTurnHarness(input: {
   onExecuteCodexTurnWithRecovery?: (
     providerInput: NotificationTurnProviderInput,
   ) => Promise<AssistantCodexTurnRecoveryOutcome>
+  prepareAssistantCronNotificationInput?: (
+    notificationInput: AssistantNotificationInput,
+    selection: { sessionId?: string | null },
+  ) => Promise<AssistantNotificationInput>
   providerOutcome?: AssistantCodexTurnRecoveryOutcome
   providerResult: ExecutedAssistantProviderTurnResult
   sessionCreated?: boolean
@@ -5552,6 +5593,12 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
+  if (input.prepareAssistantCronNotificationInput) {
+    vi.doMock('../src/assistant/cron/output-history.js', () => ({
+      prepareAssistantCronNotificationInput:
+        input.prepareAssistantCronNotificationInput,
+    }))
+  }
 
   const { sendAssistantNotificationLocal } = await import(
     '../src/assistant/notification-turn.ts'

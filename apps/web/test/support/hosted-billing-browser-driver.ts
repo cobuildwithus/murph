@@ -123,6 +123,16 @@ export class HostedBillingBrowserDriver {
         (url) => url.origin === new URL(this.webBaseUrl).origin
           && url.pathname === "/home",
       );
+      // router.replace() changes the URL before the new React Server Component
+      // tree is necessarily committed. Waiting on DOMContentLoaded here only
+      // observes the invite document's already-fired lifecycle event, so a
+      // following document navigation can race the still-pending Home commit.
+      const homeEyebrow = actor.page.getByText("Live Well", { exact: true });
+      await homeEyebrow.waitFor();
+      await homeEyebrow.locator("xpath=parent::div").getByRole("heading", {
+        exact: true,
+        name: "Welcome to Murph",
+      }).waitFor();
     });
   }
 
@@ -361,14 +371,18 @@ export class HostedBillingBrowserDriver {
   async openSettings(actor: HostedBillingBrowserActor): Promise<void> {
     const target = new URL(this.murphUrl("/settings#subscription"));
     const current = new URL(actor.page.url());
+    let navigation: Response | null;
     if (current.origin === target.origin && current.pathname === target.pathname) {
       // A navigation that differs only by the subscription hash is a
       // same-document navigation and preserves a stale server projection.
       // Force a request when a workflow has mutated billing in another page.
-      await actor.page.reload({ waitUntil: "commit" });
+      navigation = await actor.page.reload({ waitUntil: "domcontentloaded" });
     } else {
-      await actor.page.goto(target.toString(), { waitUntil: "commit" });
+      navigation = await actor.page.goto(target.toString(), {
+        waitUntil: "domcontentloaded",
+      });
     }
+    assertSuccessfulNavigation(navigation, "Murph settings");
     await actor.page.getByText("Subscription", { exact: true }).first().waitFor();
   }
 

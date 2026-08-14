@@ -32,6 +32,20 @@ export function HomepageAuthWarmRuntimeStudy() {
           finishing.
         </p>
       </div>
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Authenticated preparation
+        </p>
+        <h3 className="mt-3 font-serif text-2xl font-semibold tracking-tight text-foreground">
+          Prepare data, not a download
+        </h3>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          After the homepage responds, the server may request a low-priority
+          dashboard data refresh using current access and consent. The replica
+          stays out of the homepage and browser until the member opens the
+          dashboard, and preparation failure never blocks the page.
+        </p>
+      </div>
       <div className="rounded-2xl border border-border bg-card p-6" inert>
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Provider still initializing

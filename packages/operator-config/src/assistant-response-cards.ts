@@ -18,6 +18,9 @@ import {
   dailyNutritionResponseCardV2Schema,
   exerciseRoutineResponseCardV1Schema,
   renderExerciseRoutineResponseCardTextV1,
+  renderTelegramRichContentResponseCardTextV1,
+  telegramRichContentCardV1Bounds,
+  telegramRichContentResponseCardV1Schema,
   nutritionCardGoalStatusLabels,
   nutritionCardGoalStatusValues,
   workoutSessionCardStateValues,
@@ -35,6 +38,7 @@ import {
   type ExerciseRoutineCardExerciseV1,
   type ExerciseRoutineCardImageV1,
   type ExerciseRoutineResponseCardV1,
+  type TelegramRichContentResponseCardV1,
   type NutritionCardGoalSnapshot,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
@@ -116,6 +120,8 @@ export {
   dailyNutritionResponseCardSchema,
   exerciseRoutineCardV1Bounds,
   exerciseRoutineResponseCardV1Schema,
+  telegramRichContentCardV1Bounds,
+  telegramRichContentResponseCardV1Schema,
   nutritionCardGoalStatusValues,
   rankedChallengeStandingsResponseCardV1Schema,
   type ChallengeStandingsCoverage,
@@ -142,6 +148,7 @@ export {
   type ExerciseRoutineCardExerciseV1,
   type ExerciseRoutineCardImageV1,
   type ExerciseRoutineResponseCardV1,
+  type TelegramRichContentResponseCardV1,
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
@@ -168,6 +175,20 @@ export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
 export const exerciseRoutineResponseCardJsonSchema =
   createExerciseRoutineResponseCardJsonSchema()
+export const telegramRichContentResponseCardJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    kind: { const: 'telegram_rich_content' },
+    version: { const: 1 },
+    html: {
+      type: 'string',
+      minLength: 1,
+      maxLength: telegramRichContentCardV1Bounds.htmlLength,
+    },
+  },
+  required: ['kind', 'version', 'html'],
+} as const
 export const challengeStandingsResponseCardJsonSchema =
   createChallengeStandingsResponseCardJsonSchema()
 
@@ -186,6 +207,8 @@ export function renderAssistantResponseCardText(
       return renderCompactTableResponseCardText(parsed, false)
     case 'exercise_routine':
       return renderExerciseRoutineResponseCardTextV1(parsed)
+    case 'telegram_rich_content':
+      return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -225,6 +248,8 @@ export function renderAssistantResponseCardTranscriptText(
       return renderCompactTableResponseCardText(parsed, true)
     case 'exercise_routine':
       return renderExerciseRoutineResponseCardTextV1(parsed)
+    case 'telegram_rich_content':
+      return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -232,6 +257,7 @@ export function renderAssistantResponseCardTranscriptText(
 
 export type TelegramRichMessage = {
   html: string
+  skip_entity_detection?: true
 }
 
 /** Build one Telegram-native rich message from a frozen response card. */
@@ -246,6 +272,8 @@ export function buildTelegramRichMessage(
       return { html: renderTelegramCompactTableCardHtml(parsed) }
     case 'exercise_routine':
       return { html: renderTelegramExerciseRoutineCardHtml(parsed) }
+    case 'telegram_rich_content':
+      return { html: parsed.html, skip_entity_detection: true }
     case 'challenge_standings':
       return { html: renderTelegramChallengeStandingsCardHtml(parsed) }
   }
@@ -256,6 +284,7 @@ export function buildLinqIMessageAppFallbackText(
 ):
   | 'Challenge standings. Ask Murph for this card in text'
   | 'Exercise routine. Ask Murph for this card in text'
+  | 'Your Murph guide. Ask Murph for this card in text'
   | 'Your daily nutrition. Ask Murph for this card in text'
   | 'Your Murph summary. Ask Murph for this card in text'
   | 'Your workout. Ask Murph for this card in text' {
@@ -276,6 +305,8 @@ export function buildLinqIMessageAppFallbackText(
       return 'Challenge standings. Ask Murph for this card in text'
     case 'exercise_routine':
       return 'Exercise routine. Ask Murph for this card in text'
+    case 'telegram_rich_content':
+      return 'Your Murph guide. Ask Murph for this card in text'
   }
 }
 
@@ -286,6 +317,11 @@ export function buildLinqIMessageAppLayout(
   if (parsed.kind === 'exercise_routine') {
     throw new TypeError(
       'Exercise routine response cards do not have a native iMessage layout.',
+    )
+  }
+  if (parsed.kind === 'telegram_rich_content') {
+    throw new TypeError(
+      'Telegram rich content cards do not have a native iMessage layout.',
     )
   }
   if (parsed.kind === 'compact_table') {
@@ -335,6 +371,11 @@ export function buildLinqIMessageAppCardImageUrl(
       'Exercise routine response cards do not have a native iMessage image URL.',
     )
   }
+  if (parsed.kind === 'telegram_rich_content') {
+    throw new TypeError(
+      'Telegram rich content cards do not have a native iMessage image URL.',
+    )
+  }
   const encoded = parsed.kind === 'daily_nutrition'
     ? encodeDailyNutritionAppCardPayload(parsed)
     : parsed.kind === 'compact_table'
@@ -368,6 +409,10 @@ export function buildLinqIMessageAppCardUrl(
     case 'exercise_routine':
       throw new TypeError(
         'Exercise routine response cards do not have a native iMessage app URL.',
+      )
+    case 'telegram_rich_content':
+      throw new TypeError(
+        'Telegram rich content cards do not have a native iMessage app URL.',
       )
   }
 }

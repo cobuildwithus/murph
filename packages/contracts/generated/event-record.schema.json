@@ -4328,6 +4328,32 @@
             "default"
           ]
         },
+        "qualifiers": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          }
+        },
         "value": {
           "type": "number"
         },
@@ -10220,7 +10246,6 @@
         "title",
         "kind",
         "activityType",
-        "durationMinutes",
         "workout"
       ],
       "additionalProperties": false

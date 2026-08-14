@@ -13,6 +13,8 @@ import {
 
 const HOSTED_ASSISTANT_IDENTIFIER_BLIND_NAMESPACE =
   "murph.hosted-assistant-input.identifier-blind.v1";
+const HOSTED_ASSISTANT_ASK_COMPLETION_ID_NAMESPACE =
+  "murph.hosted-assistant-ask.completion.v1";
 export const HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
   "reviewed-assistant-ask-completion:";
 export const HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
@@ -24,6 +26,16 @@ export type HostedMailboxAssistantInputLane = "conversation" | "system";
 
 export interface HostedAssistantConversationIdentifierBlind {
   key: string;
+}
+
+export function createHostedExecutionAssistantAskCompletionId(
+  requestId: string,
+): string {
+  return `aask_done_${createHash("sha256")
+    .update(HOSTED_ASSISTANT_ASK_COMPLETION_ID_NAMESPACE)
+    .update("\0")
+    .update(requestId)
+    .digest("hex")}`;
 }
 
 export function createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(

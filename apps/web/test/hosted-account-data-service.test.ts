@@ -213,6 +213,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_group_member",
   "prisma.hosted_group_disclosure_permission",
   "prisma.hosted_group_disclosure_grant",
+  "prisma.hosted_group_current_sender_clarification",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
@@ -1556,7 +1557,7 @@ describe("deleteHostedAccountData", () => {
       ]));
   });
 
-  it("deletes disclosure grants and owned policies before their membership and group owners", async () => {
+  it("deletes group grants, clarifications, and policies before their owners", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
@@ -1585,6 +1586,13 @@ describe("deleteHostedAccountData", () => {
           { runtimeMemberId: "member_123" },
         ] } },
       },
+      {
+        model: "hostedGroupCurrentSenderClarification",
+        where: { OR: [
+          { groupRuntimeMemberId: "member_123" },
+          { targetMemberId: "member_123" },
+        ] },
+      },
     ]));
     const deletedModels = deleteCalls.map((call) => call.model);
     expect(deletedModels.indexOf("hostedGroupDisclosureGrant")).toBeLessThan(
@@ -1596,6 +1604,7 @@ describe("deleteHostedAccountData", () => {
     }
     expect(result.deletedCounts).toMatchObject({
       "prisma.hosted_group_disclosure_grant": 1,
+      "prisma.hosted_group_current_sender_clarification": 1,
       "prisma.hosted_group_disclosure_permission": 1,
     });
   });

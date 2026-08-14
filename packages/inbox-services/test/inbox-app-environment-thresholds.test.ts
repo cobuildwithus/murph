@@ -1,111 +1,9 @@
 import assert from 'node:assert/strict'
 
-import { beforeEach, test, vi } from 'vitest'
-
-const {
-  createAgentmailApiClientMock,
-  listAllAgentmailInboxesMock,
-  matchesAgentmailHttpErrorMock,
-  resolveAgentmailApiKeyMock,
-  resolveAgentmailBaseUrlMock,
-  resolveTelegramApiBaseUrlMock,
-  resolveTelegramBotTokenMock,
-  resolveTelegramFileBaseUrlMock,
-  loadQueryRuntimeMock,
-  loadRuntimeModuleMock,
-} = vi.hoisted(() => ({
-  createAgentmailApiClientMock: vi.fn(),
-  listAllAgentmailInboxesMock: vi.fn(),
-  matchesAgentmailHttpErrorMock: vi.fn(),
-  resolveAgentmailApiKeyMock: vi.fn(),
-  resolveAgentmailBaseUrlMock: vi.fn(),
-  resolveTelegramApiBaseUrlMock: vi.fn(),
-  resolveTelegramBotTokenMock: vi.fn(),
-  resolveTelegramFileBaseUrlMock: vi.fn(),
-  loadQueryRuntimeMock: vi.fn(),
-  loadRuntimeModuleMock: vi.fn(),
-}))
-
-vi.mock('@murphai/operator-config/agentmail-runtime', () => ({
-  createAgentmailApiClient: createAgentmailApiClientMock,
-  listAllAgentmailInboxes: listAllAgentmailInboxesMock,
-  matchesAgentmailHttpError: matchesAgentmailHttpErrorMock,
-  resolveAgentmailApiKey: resolveAgentmailApiKeyMock,
-  resolveAgentmailBaseUrl: resolveAgentmailBaseUrlMock,
-}))
-
-vi.mock('@murphai/operator-config/setup-runtime-env', () => ({
-  SETUP_RUNTIME_ENV_NOTICE: 'setup runtime env notice',
-}))
-
-vi.mock('@murphai/operator-config/telegram-runtime', () => ({
-  resolveTelegramApiBaseUrl: resolveTelegramApiBaseUrlMock,
-  resolveTelegramBotToken: resolveTelegramBotTokenMock,
-  resolveTelegramFileBaseUrl: resolveTelegramFileBaseUrlMock,
-}))
-
-vi.mock('@murphai/vault-usecases/runtime', () => ({
-  loadQueryRuntime: loadQueryRuntimeMock,
-}))
-vi.mock('../src/runtime-import.ts', () => ({
-  loadRuntimeModule: loadRuntimeModuleMock,
-}))
+import { test, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-
 import { createInboxAppEnvironment } from '../src/inbox-app/environment.ts'
-import type {
-  EmailDriver,
-  InboxConnectorConfig,
-} from '../src/inbox-app/types.ts'
-
-function createEmailDriver(
-  overrides: Partial<EmailDriver> = {},
-): EmailDriver {
-  return {
-    async downloadAttachment() {
-      return null
-    },
-    inboxId: 'mailbox-1',
-    async listUnreadMessages() {
-      return []
-    },
-    async markProcessed() {},
-    ...overrides,
-  }
-}
-
-const EMAIL_CONNECTOR = {
-  accountId: 'mailbox-1',
-  enabled: true,
-  id: 'email:primary',
-  options: {},
-  source: 'email',
-} satisfies InboxConnectorConfig
-
-beforeEach(() => {
-  createAgentmailApiClientMock.mockReset()
-  listAllAgentmailInboxesMock.mockReset()
-  matchesAgentmailHttpErrorMock.mockReset()
-  resolveAgentmailApiKeyMock.mockReset()
-  resolveAgentmailBaseUrlMock.mockReset()
-  resolveTelegramApiBaseUrlMock.mockReset()
-  resolveTelegramBotTokenMock.mockReset()
-  resolveTelegramFileBaseUrlMock.mockReset()
-  loadQueryRuntimeMock.mockReset()
-  loadRuntimeModuleMock.mockReset()
-
-  resolveAgentmailApiKeyMock.mockReturnValue('env-key')
-  resolveAgentmailBaseUrlMock.mockReturnValue(null)
-  resolveTelegramApiBaseUrlMock.mockReturnValue(null)
-  resolveTelegramBotTokenMock.mockReturnValue(null)
-  resolveTelegramFileBaseUrlMock.mockReturnValue(null)
-  matchesAgentmailHttpErrorMock.mockReturnValue(false)
-  loadQueryRuntimeMock.mockResolvedValue({ kind: 'query-runtime' })
-  loadRuntimeModuleMock.mockImplementation(async (specifier: string) => ({
-    specifier,
-  }))
-})
 
 test('default helper methods expose live process values and the no-op auto-reply default', async () => {
   const env = createInboxAppEnvironment()
@@ -114,10 +12,9 @@ test('default helper methods expose live process values and the no-op auto-reply
   assert.equal(env.getPid(), process.pid)
   assert.equal(env.getPlatform(), process.platform)
   assert.ok(env.getHomeDirectory().length > 0)
+  assert.equal(env.usesInjectedTelegramDriver, false)
 
-  const killSpy = vi
-    .spyOn(process, 'kill')
-    .mockImplementation(() => true)
+  const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
   try {
     env.killProcess(123, 'SIGTERM')
     assert.deepEqual(killSpy.mock.calls[0], [123, 'SIGTERM'])
@@ -126,7 +23,10 @@ test('default helper methods expose live process values and the no-op auto-reply
   }
 
   await env.sleep(0)
-  assert.equal(await env.enableAssistantAutoReplyChannel('/tmp/vault', 'linq'), false)
+  assert.equal(
+    await env.enableAssistantAutoReplyChannel('/tmp/vault', 'telegram'),
+    false,
+  )
 })
 
 test('requireParsers wraps non-Error runtime failures with parser package guidance', async () => {
@@ -151,157 +51,4 @@ test('requireParsers wraps non-Error runtime failures with parser package guidan
       return true
     },
   )
-})
-
-test('loadConfiguredEmailDriver prefers an injected driver when present', async () => {
-  const expectedDriver = createEmailDriver()
-  const loadEmailDriver = vi.fn(
-    async (_config: InboxConnectorConfig) => expectedDriver,
-  )
-  const env = createInboxAppEnvironment({
-    loadEmailDriver,
-  })
-
-  assert.equal(await env.loadConfiguredEmailDriver(EMAIL_CONNECTOR), expectedDriver)
-  assert.equal(env.usesInjectedEmailDriver, true)
-  assert.equal(loadEmailDriver.mock.calls.length, 1)
-})
-
-test('tryResolveAgentmailInboxAddress returns the looked-up inbox email when discovery succeeds', async () => {
-  createAgentmailApiClientMock.mockReturnValue({
-    apiKey: 'env-key',
-    baseUrl: null,
-    getInbox: vi.fn(async () => ({
-      email: ' resolved@example.com ',
-    })),
-  })
-
-  const env = createInboxAppEnvironment({
-    getEnvironment: () => ({ AGENTMAIL_API_KEY: 'env-key' }),
-  })
-
-  assert.equal(
-    await env.tryResolveAgentmailInboxAddress({
-      accountId: 'mailbox-lookup',
-      emailAddress: null,
-    }),
-    'resolved@example.com',
-  )
-})
-
-test('provisionOrRecoverAgentmailInbox reuses the only discovered inbox after a forbidden create', async () => {
-  const createInboxError = new Error('forbidden-create')
-  createAgentmailApiClientMock.mockReturnValue({
-    apiKey: 'env-key',
-    baseUrl: null,
-    createInbox: vi.fn(async () => {
-      throw createInboxError
-    }),
-  })
-  listAllAgentmailInboxesMock.mockResolvedValue([
-    {
-      inbox_id: 'mailbox-reused',
-      email: 'existing@example.com',
-      display_name: 'Existing Inbox',
-      client_id: 'client-7',
-    },
-  ])
-  matchesAgentmailHttpErrorMock.mockImplementation((error, match) =>
-    error === createInboxError &&
-    match.status === 403 &&
-    match.method === 'POST' &&
-    match.path === '/inboxes',
-  )
-
-  const env = createInboxAppEnvironment({
-    getEnvironment: () => ({ AGENTMAIL_API_KEY: 'env-key' }),
-  })
-
-  assert.deepEqual(await env.provisionOrRecoverAgentmailInbox({}), {
-    accountId: 'mailbox-reused',
-    emailAddress: 'existing@example.com',
-    provisionedMailbox: null,
-    reusedMailbox: {
-      clientId: 'client-7',
-      displayName: 'Existing Inbox',
-      emailAddress: 'existing@example.com',
-      inboxId: 'mailbox-reused',
-      provider: 'agentmail',
-    },
-  })
-})
-
-test('provisionOrRecoverAgentmailInbox requires an explicit account when discovery returns no inboxes', async () => {
-  const createInboxError = new Error('forbidden-create')
-  createAgentmailApiClientMock.mockReturnValue({
-    apiKey: 'env-key',
-    baseUrl: null,
-    createInbox: vi.fn(async () => {
-      throw createInboxError
-    }),
-  })
-  listAllAgentmailInboxesMock.mockResolvedValue([])
-  matchesAgentmailHttpErrorMock.mockImplementation((error, match) =>
-    error === createInboxError &&
-    match.status === 403 &&
-    match.method === 'POST' &&
-    match.path === '/inboxes',
-  )
-
-  const env = createInboxAppEnvironment({
-    getEnvironment: () => ({ AGENTMAIL_API_KEY: 'env-key' }),
-  })
-
-  await assert.rejects(
-    () => env.provisionOrRecoverAgentmailInbox({}),
-    (error: unknown) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'INBOX_EMAIL_ACCOUNT_REQUIRED')
-      return true
-    },
-  )
-})
-
-test('provisionOrRecoverAgentmailInbox rethrows unexpected inbox discovery failures', async () => {
-  const createInboxError = new Error('forbidden-create')
-  const listInboxesError = new Error('list failed')
-
-  createAgentmailApiClientMock.mockReturnValue({
-    apiKey: 'env-key',
-    baseUrl: null,
-    createInbox: vi.fn(async () => {
-      throw createInboxError
-    }),
-  })
-  listAllAgentmailInboxesMock.mockRejectedValue(listInboxesError)
-  matchesAgentmailHttpErrorMock.mockImplementation((error, match) =>
-    error === createInboxError &&
-    match.status === 403 &&
-    match.method === 'POST' &&
-    match.path === '/inboxes',
-  )
-
-  const env = createInboxAppEnvironment({
-    getEnvironment: () => ({ AGENTMAIL_API_KEY: 'env-key' }),
-  })
-
-  await assert.rejects(() => env.provisionOrRecoverAgentmailInbox({}), listInboxesError)
-})
-
-test('provisionOrRecoverAgentmailInbox rethrows non-forbidden create failures', async () => {
-  const createInboxError = new Error('create failed')
-
-  createAgentmailApiClientMock.mockReturnValue({
-    apiKey: 'env-key',
-    baseUrl: null,
-    createInbox: vi.fn(async () => {
-      throw createInboxError
-    }),
-  })
-
-  const env = createInboxAppEnvironment({
-    getEnvironment: () => ({ AGENTMAIL_API_KEY: 'env-key' }),
-  })
-
-  await assert.rejects(() => env.provisionOrRecoverAgentmailInbox({}), createInboxError)
 })

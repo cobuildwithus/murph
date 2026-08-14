@@ -98,6 +98,14 @@ export const POST = withJsonError(async (request: Request) => {
       untracedCount,
     });
   }
+  if (result.truncated === true) {
+    console.warn("Hosted runtime latency collection milestone reached its write bound.", {
+      eventType: traceRequest.event.type,
+      matchedCount: result.matchedCount,
+      runtimeAttemptId,
+      source: traceRequest.event.source,
+    });
+  }
 
   return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
 });

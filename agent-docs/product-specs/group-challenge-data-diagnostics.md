@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-08-11
+Last verified: 2026-08-13
 
 Status: Implemented
 
@@ -133,64 +133,80 @@ Revoke and regrant clear the ciphertext in the same authority transaction, and
 regrant rotates the share id, so a stale producer cannot write into a later
 grant generation.
 
-Deep sleep and REM sleep are each one user-facing permission. New access offers
-always use the source-aware `deep-sleep-sources-days.v1` and
-`rem-sleep-sources-days.v1` scopes, which disclose the canonical value plus one
-bounded entry for every public sleep source that has that metric on the date,
-up to four wearable sources plus the optional reserved `Manual` correction
-source. Each entry carries the canonical public source key and label, its value
-and unit, its nullable canonical source-record time, and whether it supplied the
-canonical selected value. The record also carries `projectedAt` and a literal
-`sourcesDisagree` flag. Source-aware records fail closed instead of truncating
-when either source bound is exceeded or the selected source cannot be proved. A
-canonical manually entered sleep-stage event is projected onto its
-member-local day and disclosed as the explicit `manual` / `Manual` source; it is
-never attributed to a connected wearable or aggregator, and it is authoritative
-for that day while wearable values remain visible as disagreeing sources. When
-multiple live manual facts target the same stage and member-local day, canonical
-recording order decides the correction before value or unit normalization: the
-newest recorded raw fact wins after the shared metric date, source, and
-observation-time rules. An invalid newest fact omits only its affected day
-instead of silently reviving an older value or erasing other valid shared days.
-A canonically deleted fact no longer
-participates, so the next newest live manual fact wins; wearable selection
-resumes only when no live manual fact remains. The legacy
-provider-neutral `deep-sleep-days.v0` and
-`rem-sleep-days.v0` scopes remain read-only compatibility contracts for
-existing policies and grants, disclosing one canonical daily value only. A new
-join view or access offer derives the matching legacy policy request as v1, so
-existing groups expose the same single complete permission without an owner
-reconfiguration step. The durable v0 policy entry remains exact. When Web
-acceptance explicitly approves v1, that scope is added alongside v0 in the same
-locked transaction as the grant change, so the previous Web can still show and
-revoke every active authority after rollback. This never upgrades or broadens
-an existing grant in place; each member's v1 grant still requires its own
-server-owned access approval.
+Deep sleep and REM sleep remain one user-facing permission each. New access
+offers continue to use `deep-sleep-sources-days.v1` and
+`rem-sleep-sources-days.v1`; legacy v0 grants and every existing permission,
+grant, revoke, and settings control remain valid. Every health scope now
+authorizes its public source identity together with the value, including
+existing active grants, and each permission description discloses that rule in
+one short sentence. The projection shape is uniform: each date can carry one
+complete record per available public source, and each record carries a
+canonical `{ source, label }` tag plus a `date.source` record key. A canonical
+manually entered observation is the explicit `manual` / `Manual` source and is
+never attributed to a wearable or aggregator. Murph-derived meal totals use
+`murph` / `Murph`. The producer admits at most eight public sources and seven
+member-local civil dates, fails closed above the complete 56-record bound, and
+never truncates or chooses one source to represent another.
+Source-tagged Deep and REM records also carry that provider's bounded
+`recordedAt` timestamp, or `null` when unavailable; their `occurredAt` remains
+the synthetic UTC midnight used only for civil-date identity.
 
-The authenticated sharing controls keep a legacy-active sleep grant visible
-under that same single Deep sleep or REM sleep row. Saving without changing it
-preserves the narrower v0 grant. The member can explicitly include source
-details, which grants v1 and revokes the matching v0 row in the same
-transaction, or turn the row off, which revokes both versions. A native reaction
-to a new v1 offer uses the same replacement semantics. No legacy grant is hidden
-or broadened by policy normalization.
+The same source-preserving rule applies across steps, sleep duration and times,
+sleep stages, activity metrics and selectors, workout-day summaries, heart-rate
+zones, workouts, and nutrition totals. `workouts.v0` tags each workout item
+inside its existing day record and admits up to thirteen workouts independently
+for each of eight public sources on a day. Legacy unsourced workout days retain
+their original thirteen-item limit, and any source-specific or combined-source
+overflow fails the complete projection closed rather than dropping a workout.
+The maximum legal 104-item day stays inside the shared 320 KiB delivery and
+encrypted-snapshot bound. The other dated health scopes tag the record.
+Duplicate normalization may resolve multiple facts within one public source,
+but it never compares sources to pick a group-share winner. Single-owner
+profile, timezone, and group-email authority records stay unsourced, and
+`device-sync-status.v0` retains its existing per-source item list.
 
-A persisted reader that still requests a legacy v0 sleep scope may use the
-canonical top-level value from the matching v1 grant when no exact v0 grant is
-active. That compatibility projection keeps the requested v0 scope identity and
-removes every source name, source value, recorded time, projection time, and
-disagreement field. When both grants exist, the exact v0 grant wins. This lets a
-frozen workflow converge after an explicit v1 approval without silently giving
-that workflow the broader source-aware contract.
+When the exact current sender contradicts a visible snapshot, Murph treats that
+snapshot as contradicted and unverified rather than repeating it as a current
+device value. If the sender supplies an exact metric, value, unit, and civil
+date, `record_current_sender_daily_metric` reuses the accepted-message ref to
+resolve that participant server-side and durably admits a report to the
+participant's personal runtime. The canonical write is a separate `manual`
+daily observation; it never edits or deletes a wearable observation. Accepted
+means the personal mailbox owns the report. The existing post-checkpoint share
+projection then refreshes already-granted scopes, so a later `read_shared` can
+return the manual record beside any device record. Missing values or dates are
+never inferred, and the action creates no group-owned health-value store. The
+Cloudflare port exact-replays this action once when a successful response body
+or retryable post-request response is lost. Its deterministic mailbox item
+identity resolves an already committed exact request before mutable sender or
+consent state can misreport it; a new report still requires current authority
+and non-revoked consent, and a changed value remains a generic mailbox conflict.
 
-`projectedAt` is snapshot generation time, not proof of a provider fetch or a
-fresh sync. A source entry's `recordedAt` is canonical source-record evidence,
-not proof of a live fetch. A group response may describe the stored source
-values and their timestamps, but it must never call a `read_shared` result a
-live provider check or imply that a new provider read occurred. When
-`sourcesDisagree` is true, Murph reports the source values separately; the
-top-level canonical value remains the scoring selection and is not presented
-as every provider's answer.
+Persisted unsourced records and the earlier nested source-aware sleep snapshots
+remain parseable during convergence. A new join view or access offer still
+derives the matching legacy sleep policy request as v1, so existing groups keep
+one complete permission without owner reconfiguration. The durable v0 policy
+entry remains exact, and saving an existing v0 grant preserves that scope key.
+The authenticated sharing controls show v0 and v1 under the same row; turning
+that permission off revokes both versions through the existing flow. There is
+no separate source-details grant or upgrade control because source identity is
+part of every health scope's contract.
+
+A persisted reader that still requests a legacy v0 sleep scope may use records
+from the matching v1 grant when no exact v0 grant is active. New source-tagged
+records retain every source under the requested v0 scope identity. An earlier
+nested v1 snapshot still projects only its historical top-level scalar because
+that snapshot did not contain independent record envelopes. When both grants
+exist, the exact v0 grant wins, preserving stable authority lookup while both
+scope versions share the same source-aware meaning.
+
+Snapshot generation and record times are not proof of a live provider fetch. A
+group response may describe the stored source-tagged values and their
+timestamps, but it must never call a `read_shared` result a live provider check
+or imply that a new provider read occurred. When sources disagree, Murph reports
+the values separately. Any later challenge-specific collapsing or scoring rule
+must be explicit and downstream; the share contract does not choose a canonical
+cross-source value.
 
 The retired `vault-share.delivery` and `vault-share.revoke` mailbox rows are
 terminally skipped from their plaintext metadata before payload fetch or
@@ -238,7 +254,7 @@ evidence.
 
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
-| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. Reported Deep/REM sleep is scoreable immediately; the member-local future-date guard still excludes future rows, but the current local date alone does not make a reported stage value provisional. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data eligible under the scope's producer-owned completion marker | Treat every source-tagged value as settled evidence. Reported Deep/REM sleep is available immediately; the member-local future-date guard still excludes future rows, but the current local date alone does not make a reported stage value provisional. If multiple sources exist, name them separately instead of presenting one as the member-wide value. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence or select between sources. |
 | Current challenge-metric data exists but is not yet eligible under that completion marker | Keep the participant pending and unranked. This is not missing data or a zero. | Do not diagnose, offer permission, or advance completion from the reader's clock. |
 | Exact scope granted with a `pending` first projection snapshot | Say the permission is active and the recent shared data is still preparing. Keep the participant pending and unranked. | Invite a retry shortly. Do not diagnose a source, offer permission again, or infer private sync state. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
@@ -372,6 +388,11 @@ durable route does not preserve a Linq iMessage-versus-SMS subtype.
 Web remains the durable authority for the canonical consent sentence, frozen
 scope disclosure, recipient-safe delivery, active-offer/all-granted dedupe, and
 first-party customize page. Native consent grants only the disclosed snapshot.
+A reaction-bound offer that carries health values always says those values
+include source names; a sleep-stage offer also names each source's recorded
+time. This is the same broadened health-scope meaning used by Web joins and
+already-active grants, without a second source-details permission or consent
+owner.
 A returned link grants nothing until the member accepts the first-party page.
 The standings message itself never grants permission.
 
@@ -483,6 +504,26 @@ Browser replicas rebuild on their normal access/refresh path. Query SQLite,
 browser replicas, and group snapshots are derived and rebuildable, so this
 correction has no canonical or PostgreSQL migration. Do not add read-triggered
 cross-member fanout, polling, a scheduler, or persisted rollout state.
+
+Member-reported daily metrics use a narrower consumer-first cut because Web's
+new `health.daily-metric.reported` mailbox kind is ordered in the personal
+runtime system lane. Deploy the importing runner with immediate container
+rollout and prove its exact bundle fingerprint across eligible targets before
+deploying the Web producer. After Web deploys, a synthetic granted steps report
+must be accepted once, advance the personal system-lane checkpoint, and appear
+beside—not instead of—the device record as `Manual` on a later `read_shared`.
+Absence of `unsupported_kind` evidence and of an unconsumed report behind the
+system-lane counter is convergence smoke only; it never changes rollback
+eligibility. `apps/cloudflare/DEPLOY.md` is the authoritative rollout and
+rollback contract. Web producer enablement or the first imported report creates
+a permanent contracts/query/runner rollback floor because the strict
+observation qualifier and causal ordering outlive transient mailbox work. Web
+may roll back first to stop production, but the runner must remain at that floor
+or newer and be forward-fixed, independent of retained, pending, unconsumed, or
+drained mailbox work. Signal-loss recovery stays with the existing bounded
+mailbox handoff sweep. Repair means keep the compatible runner, invoke that
+sweep, and verify counter progress—never mutate mailbox rows, create an
+unrelated message, or add a second queue.
 
 ## Acceptance cases
 
