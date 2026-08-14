@@ -17,9 +17,12 @@ import {
   type AssistantAcceptedTurnInputJournal,
 } from './active-turn-input-journal.js'
 import {
-  AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
   readAssistantAutoReplyReceiptMetadata,
 } from './automation/auto-reply-retry.js'
+import {
+  maintainAssistantAutoReplyRouteStateAtPaths,
+  type AssistantAutoReplyRouteMaintenanceResult,
+} from './automation/cross-session-route-state.js'
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
@@ -174,7 +177,16 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     vault: input.vault,
   })
   input.signal?.throwIfAborted()
+  const autoReplyRouteState = await maintainAssistantAutoReplyRouteStateAtPaths({
+    outboxIntents: inventory.outbox.records.map(({ record }) => record),
+    outboxTrusted: inventory.outbox.trusted,
+    paths: input.paths,
+    receipts: inventory.receipts.records.map(({ record }) => record),
+    receiptsTrusted: inventory.receipts.trusted,
+  })
+  input.signal?.throwIfAborted()
   const plan = planAssistantRuntimeResiduePrune({
+    autoReplyRouteState,
     inventory,
     now: input.now,
     pendingInputIds: input.pendingInputIds,
@@ -594,6 +606,7 @@ function assistantFileStatsMatch(left: Stats, right: Stats): boolean {
 }
 
 function planAssistantRuntimeResiduePrune(input: {
+  autoReplyRouteState: AssistantAutoReplyRouteMaintenanceResult
   inventory: AssistantRuntimeResidueInventory
   now: Date
   pendingInputIds: readonly string[]
@@ -751,17 +764,18 @@ function planAssistantRuntimeResiduePrune(input: {
       : []
 
   const receiptPaths: string[] = []
-  if (input.inventory.outbox.trusted && input.inventory.receipts.trusted) {
+  if (
+    input.autoReplyRouteState.trusted &&
+    input.inventory.outbox.trusted &&
+    input.inventory.receipts.trusted
+  ) {
     const unprotectedReceipts = input.inventory.receipts.records
       .filter(({ record }) =>
         !activeTurnIds.has(record.turnId) &&
         !retainedJournalTurnIds.has(record.turnId) &&
+        !input.autoReplyRouteState.protectedReceiptTurnIds.has(record.turnId) &&
         receiptHasNoPendingAutoReplyInputs({
           pendingInputIds,
-          receipt: record,
-        }) &&
-        !receiptReferencesLiveCrossSessionContextIntent({
-          liveOutboxIntentIds: allOutboxIntentIds,
           receipt: record,
         }) &&
         Number.isFinite(resolveReceiptTimestampMs(record)),
@@ -819,30 +833,6 @@ function receiptHasNoPendingAutoReplyInputs(input: {
     return true
   }
   return metadata.inputIds.every((inputId) => !input.pendingInputIds.has(inputId))
-}
-
-// Cross-session context consumption is tracked by recording the source outbox
-// intent's id in this receipt's timeline metadata. The selector treats the
-// receipt as the sole source of truth, so we must keep the receipt at least as
-// long as the referenced outbox intent itself — otherwise pruning could delete
-// the consumption record while the source intent is still selectable, and the
-// same prior message would resurface as turn context.
-function receiptReferencesLiveCrossSessionContextIntent(input: {
-  liveOutboxIntentIds: ReadonlySet<string>
-  receipt: AssistantTurnReceipt
-}): boolean {
-  for (const event of input.receipt.timeline) {
-    const intentId =
-      event.metadata[AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]
-    if (
-      typeof intentId === 'string' &&
-      intentId.length > 0 &&
-      input.liveOutboxIntentIds.has(intentId)
-    ) {
-      return true
-    }
-  }
-  return false
 }
 
 function isPrunableTerminalAssistantTurnReceipt(

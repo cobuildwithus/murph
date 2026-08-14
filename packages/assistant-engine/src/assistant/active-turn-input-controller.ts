@@ -1,6 +1,9 @@
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import type { AssistantMessageInput } from './service-contracts.js'
+import type {
+  AssistantMessageInput,
+  AssistantProviderAcceptedInputsRelease,
+} from './service-contracts.js'
 import {
   resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputItemInput,
@@ -101,7 +104,7 @@ class AssistantActiveTurnInputController {
       }) => Promise<void>
       beforeProviderSteer?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
-      }) => Promise<void>
+      }) => Promise<AssistantProviderAcceptedInputsRelease | void>
       eventAdmissionEnabled?: boolean
       sessionId: string
       turnId: string
@@ -542,14 +545,19 @@ class AssistantActiveTurnInputController {
       item.providerInputAckTurnKey = liveProviderTurnKey
       item.providerInputAck = Promise.resolve()
         .then(async () => {
-          await this.input.beforeProviderSteer?.({
-            acceptedInputs: item.admission.acceptedInputs,
-          })
-          await liveProviderTurn.steer({
-            prompt: normalizeNullableString(item.admission.prompt) ?? '',
-            relativeDateReferenceWindow: item.relativeDateReferenceWindow,
-            userMessageContent: item.admission.userMessageContent ?? null,
-          })
+          const releaseProviderAcceptedInputs =
+            await this.input.beforeProviderSteer?.({
+              acceptedInputs: item.admission.acceptedInputs,
+            })
+          try {
+            await liveProviderTurn.steer({
+              prompt: normalizeNullableString(item.admission.prompt) ?? '',
+              relativeDateReferenceWindow: item.relativeDateReferenceWindow,
+              userMessageContent: item.admission.userMessageContent ?? null,
+            })
+          } finally {
+            await releaseProviderAcceptedInputs?.()
+          }
         })
         .then(() => {
           if (
@@ -642,7 +650,7 @@ export function createAssistantActiveTurnInputController(input: {
   }) => Promise<void>
   beforeProviderSteer?: (steerInput: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
-  }) => Promise<void>
+  }) => Promise<AssistantProviderAcceptedInputsRelease | void>
   admissionHook?: AssistantActiveTurnInputAdmissionHook | null
   conversationKeys?: readonly string[] | null
   eventAdmissionEnabled?: boolean

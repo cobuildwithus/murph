@@ -485,6 +485,7 @@ export async function sendAssistantNotificationLocal(
           onProviderRequestPlanned: messageInput.beforeProviderAcceptedInputs
             ? async () => await messageInput.beforeProviderAcceptedInputs?.({
                 acceptedInputs: [],
+                turnId,
               })
             : undefined,
           plan: sharedPlan,

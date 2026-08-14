@@ -31,6 +31,10 @@ import {
   AUTO_REPLY_RECEIPT_INPUT_IDS_KEY,
 } from '../src/assistant/automation/auto-reply-retry.ts'
 import {
+  readAssistantAutoReplyRouteState,
+  resolveAssistantAutoReplyOutboxExactRoute,
+} from '../src/assistant/automation/cross-session-route-state.ts'
+import {
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.ts'
 import {
@@ -1096,7 +1100,7 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(resolveAssistantTurnReceiptPath(paths, recentTurnId))
   })
 
-  it('retains terminal receipts whose cross-session context intent is still in the outbox', async () => {
+  it('migrates terminal cross-session consumption before pruning its receipt', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-cross-session-context-',
     )
@@ -1104,6 +1108,7 @@ describe('assistant runtime residue pruning', () => {
     const consumingTurnId = createTurnId('8')
 
     const sourceIntent = await createAssistantOutboxIntent({
+      actorId: 'actor-cross-session',
       channel: 'email',
       createdAt: OLD_RECORD_AT,
       identityId: 'identity-cross-session',
@@ -1116,11 +1121,27 @@ describe('assistant runtime residue pruning', () => {
       turnTrigger: 'automation-auto-reply',
       vault: vaultRoot,
     })
+    const deliveredSourceIntent = await saveAssistantOutboxIntent(vaultRoot, {
+      ...sourceIntent,
+      delivery: {
+        channel: 'email',
+        idempotencyKey: null,
+        messageLength: sourceIntent.message.length,
+        providerMessageId: 'provider-cross-session',
+        providerThreadId: null,
+        sentAt: OLD_RECORD_AT,
+        target: 'serialized-email-target',
+        targetKind: 'thread',
+      },
+      sentAt: OLD_RECORD_AT,
+      status: 'sent',
+      updatedAt: OLD_RECORD_AT,
+    })
     await createAssistantTurnReceipt({
       deliveryRequested: false,
       metadata: {
         [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
-          sourceIntent.intentId,
+          deliveredSourceIntent.intentId,
       },
       prompt: 'consumes cross-session context',
       provider: 'codex-cli',
@@ -1144,8 +1165,22 @@ describe('assistant runtime residue pruning', () => {
       vault: vaultRoot,
     })
 
-    expect(result.receiptsPruned).toBe(0)
-    await expectPathExists(resolveAssistantTurnReceiptPath(paths, consumingTurnId))
+    expect(result.receiptsPruned).toBe(1)
+    await expectPathMissing(resolveAssistantTurnReceiptPath(paths, consumingTurnId))
+    const route = resolveAssistantAutoReplyOutboxExactRoute(deliveredSourceIntent)
+    if (!route) {
+      throw new Error('expected exact cross-session route')
+    }
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: {
+        intentId: deliveredSourceIntent.intentId,
+        sentAt: OLD_RECORD_AT,
+      },
+    })
   })
 
   it('prunes intent provenance only after the outbox intent is gone', async () => {

@@ -2842,6 +2842,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
   const providerProgressDelivered = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const providerBoundInputIds: string[][] = []
+  const releaseProviderAcceptedInputs = vi.fn(async () => undefined)
   const liveSteeredPrompts: string[] = []
   mocks.deliverAssistantProgressUpdate.mockImplementationOnce(
     async (progressInput) => {
@@ -2899,8 +2900,14 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
 
   const initialResultPromise = sendAssistantMessageLocal({
     activeTurnCheckpoint,
-    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+    beforeProviderAcceptedInputs: async ({ acceptedInputs, turnId }) => {
+      expect(turnId).toBe('turn-1')
+      expect(
+        mocks.runtimeState.turns.acceptedInputs.append.mock.calls.at(-1)?.[0]
+          ?.inputs,
+      ).toEqual(acceptedInputs)
       providerBoundInputIds.push(acceptedInputs.map((item) => item.id))
+      return releaseProviderAcceptedInputs
     },
     channel: 'telegram',
     deliverResponse: true,
@@ -2934,6 +2941,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
   expect(providerBoundInputIds).toEqual([['manual-1']])
+  expect(releaseProviderAcceptedInputs).toHaveBeenCalledOnce()
   providerProgressRequested.resolve()
   await providerProgressDelivered.promise
   expect(activeTurnCheckpoint).toHaveBeenCalledTimes(0)
@@ -3451,8 +3459,10 @@ test('sendAssistantMessageLocal binds accepted inputs before provider execution'
     },
     beforeProviderAcceptedInputs: async ({
       acceptedInputs,
+      turnId,
     }) => {
       assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
+      assert.equal(turnId, 'turn-1')
       callOrder.push('accepted-inputs')
     },
     prompt: 'Initial prompt',
