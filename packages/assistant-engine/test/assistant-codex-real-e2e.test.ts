@@ -547,7 +547,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'reuses one exact active-workout prescription for later terse set completions',
+    'reuses exact repetitions without carrying forward a planned load',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -583,7 +583,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
               'vault-cli workout exercise add <name> --order <n>',
-              'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>]',
+              'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
             assistantHostedDeviceConnectAvailable: false,
@@ -620,7 +620,8 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ...commonInput,
           prompt: [
             'Start a live workout for seated cable curl with four sets.',
-            'Every set is exactly 9 reps; use that fixed value throughout this active workout.',
+            'Use 30 lb as the planned load for every set.',
+            'Every set is exactly 9 reps; use that fixed repetition count throughout this active workout.',
           ].join(' '),
         })
         const firstCompletion = await executeRealCodexAppServerTurn({
@@ -644,9 +645,17 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(secondCompletion.finalMessage).toMatch(/actual 9 reps/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
+        expect(firstCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
+        expect(secondCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
         expect(
           workout?.exercises[0]?.sets.map((set) => set.reps ?? null),
         ).toEqual([9, 9, null, null])
+        expect(
+          workout?.exercises[0]?.sets.map((set) => set.weight ?? null),
+        ).toEqual([null, null, null, null])
+        expect(
+          workout?.exercises[0]?.sets.map((set) => set.weightUnit ?? null),
+        ).toEqual([null, null, null, null])
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
