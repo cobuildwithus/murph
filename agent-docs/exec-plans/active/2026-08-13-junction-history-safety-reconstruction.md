@@ -171,3 +171,9 @@ Updated: 2026-08-13
     10,219,811/10,251,013 total bytes, with no budget ratchet.
   - Final diff check plus privacy, secret, local-path, and stale-symbol scans
     passed immediately before the scoped candidate checkpoint.
+  - PR #1800's first clean release-app lane exposed one missing explicit Web
+    source alias for the new public device-sync subpath. The package export was
+    correct, but a prebuilt local `dist` had allowed focused Web typecheck to
+    resolve it without the Web-owned alias. Adding the exact source mapping
+    makes clean and prebuilt resolution agree; Web `typecheck:prepared` and the
+    repo workspace-source-resolution suite (7 tests) pass after remediation.
