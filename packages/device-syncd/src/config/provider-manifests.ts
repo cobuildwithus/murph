@@ -180,7 +180,6 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
-      timeseriesPhase: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
@@ -192,7 +191,6 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
-      timeseriesPhase: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
