@@ -3,7 +3,10 @@
  */
 import { Prisma } from "@prisma/client";
 
-import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
+import {
+  buildHostedMemberRoutingPrivateColumns,
+  readHostedMemberRoutingHomeLinqRecipientPhones,
+} from "./member-private-codecs";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
@@ -568,6 +571,72 @@ async function resolveUniqueHostedMemberRoutingLookup(input: {
     input.prisma,
   );
 }
+
+export interface HostedMemberRoutingHomeLinqRecipientPhoneRecord {
+  linqRecipientPhoneEncrypted: string | null;
+  linqRecipientPhoneLookupKey: string | null;
+  memberId: string;
+}
+
+export interface HostedMemberRoutingHomeLinqRecipientPhoneSnapshot
+  extends HostedMemberRoutingHomeLinqRecipientPhoneRecord {
+  linqRecipientPhone: string | null;
+}
+
+export async function readHostedMemberRoutingHomeLinqRecipientPhoneRecords(
+  input: {
+    memberIds: readonly string[];
+    prisma: HostedOnboardingReadClient;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneRecord[]> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return [];
+  }
+  return input.prisma.hostedMemberRouting.findMany({
+    orderBy: { memberId: "asc" },
+    select: {
+      linqRecipientPhoneEncrypted: true,
+      linqRecipientPhoneLookupKey: true,
+      memberId: true,
+    },
+    where: { memberId: { in: memberIds } },
+  });
+}
+
+export async function readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots(
+  input: {
+    memberIds: readonly string[];
+    prisma: HostedOnboardingReadClient;
+    retainFailureInScopedCache?: boolean;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
+  const records = await readHostedMemberRoutingHomeLinqRecipientPhoneRecords(input);
+  return openHostedMemberRoutingHomeLinqRecipientPhoneRecords({
+    prisma: input.prisma,
+    records,
+    retainFailureInScopedCache: input.retainFailureInScopedCache,
+  });
+}
+
+export async function openHostedMemberRoutingHomeLinqRecipientPhoneRecords(
+  input: {
+    prisma: HostedOnboardingReadClient;
+    records: readonly HostedMemberRoutingHomeLinqRecipientPhoneRecord[];
+    retainFailureInScopedCache?: boolean;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
+  const phones = await readHostedMemberRoutingHomeLinqRecipientPhones(
+    input.records,
+    input.prisma,
+    input.retainFailureInScopedCache,
+  );
+  return input.records.map((record, index) => ({
+    ...record,
+    linqRecipientPhone: phones[index] ?? null,
+  }));
+}
+
 export async function readHostedMemberRoutingState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;

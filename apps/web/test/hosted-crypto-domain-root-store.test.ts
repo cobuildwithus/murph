@@ -1117,9 +1117,9 @@ test("runtime device-secret pages batch 32 distinct roots with bounded KMS unwra
   expect(decryptMetrics.calls).toHaveLength(0);
 });
 
-test("member email batches use one envelope query with bounded KMS unwraps", async () => {
+test("K=32 private-field batches use one envelope query with at most four concurrent KMS unwraps", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
-  const memberIds = Array.from({ length: 6 }, (_, index) => `member-batch-${index + 1}`);
+  const memberIds = Array.from({ length: 32 }, (_, index) => `member-batch-${index + 1}`);
   const records = await createBatchPrivateFieldRecords({ memberIds, tx });
   const envelopeFindMany = createBatchEnvelopeFindMany(tx);
   const emailFindMany = vi.fn().mockResolvedValue(records.emailRecords);
@@ -1449,14 +1449,17 @@ test("batch private-field decrypt deduplicates roots and fails closed on missing
     buildBatchEnvelopeRows(tx).filter((row) => row.userId !== second.memberId)
   );
   resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
-  await expect(decryptHostedWebNullableStrings({
+  const missingEnvelopeError = await decryptHostedWebNullableStrings({
     field: "hosted-member-identity.phone-number",
     prisma,
     values: records.identityRecords.map((record) => ({
       memberId: record.memberId,
       value: record.phoneNumberEncrypted,
     })),
-  })).rejects.toThrow(/domain root envelope is not available/u);
+  }).then(() => null, (error: unknown) => error);
+  expect(missingEnvelopeError).toBeInstanceOf(Error);
+  expect((missingEnvelopeError as Error).message)
+    .toMatch(/domain root envelope is not available/u);
   expect(decryptMetrics.calls).toHaveLength(0);
 
   const [firstEnvelope, secondEnvelope] = tx.persistedEnvelopes;
@@ -1728,6 +1731,98 @@ test("batch metadata query failures are retryable in the same cache scope withou
   expect(decryptMetrics.calls).toHaveLength(1);
 });
 
+test("historical authority verify-key omissions stay retryable across request scopes", async () => {
+  setHostedSecureBoxStringTestCodecForTests(null);
+  const historicalAuthorityKeyVersion = `${AUTHORITY_KEY_VERSION}/historical`;
+  const historicalSigner = await generateP256SigningKeyPair();
+  const currentSigner = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const decryptMetrics = createLocalKmsDecryptMetrics();
+  gcpKmsMock.client = createLocalKmsClient({
+    decryptMetrics,
+    encryptCalls: [],
+    signCalls: [],
+    signer: historicalSigner.privateKey,
+  });
+  stubHostedCryptoEnv({
+    authorityKeyVersionName: historicalAuthorityKeyVersion,
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: historicalSigner.publicKeyPem,
+  });
+  const tx = createCapturingTransaction();
+  const memberId = "member-historical-authority-root";
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootsForWebByRootKeyIds,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.historical-authority",
+    userId: memberId,
+  });
+  const envelope = tx.persistedEnvelopes[0];
+  assert.ok(envelope);
+  expect(envelope.authoritySignature.keyVersionName)
+    .toBe(historicalAuthorityKeyVersion);
+  const references = [{
+    domain: "control" as const,
+    rootKeyId: envelope.rootKeyId,
+    userId: memberId,
+  }];
+
+  gcpKmsMock.client = createLocalKmsClient({
+    decryptMetrics,
+    encryptCalls: [],
+    signCalls: [],
+    signer: currentSigner.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: currentSigner.publicKeyPem,
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  let missingKeyError: unknown = null;
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    missingKeyError = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: tx.prisma,
+      references,
+      retainFailureInScopedCache: true,
+    }).then(() => null, (error: unknown) => error);
+  });
+  expect(missingKeyError).toBeInstanceOf(Error);
+  expect((missingKeyError as Error).message)
+    .toMatch(/not trusted for verification/u);
+  expect(decryptMetrics.calls).toHaveLength(0);
+
+  stubHostedCryptoEnv({
+    authorityVerifyKeyringJson: JSON.stringify({
+      [historicalAuthorityKeyVersion]: {
+        publicKeyPem: historicalSigner.publicKeyPem,
+        status: "verify_only",
+      },
+    }),
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: currentSigner.publicKeyPem,
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const [root] = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: tx.prisma,
+      references,
+      retainFailureInScopedCache: true,
+    });
+    assert.ok(root);
+    expect(root.rootKey.some((byte) => byte !== 0)).toBe(true);
+    root.rootKey.fill(0);
+  });
+  expect(decryptMetrics.calls).toHaveLength(1);
+});
+
 test("Linq authority batch retains metadata validation failures only for the current request", async () => {
   type MetadataTestRow = Omit<
     ReturnType<typeof buildBatchEnvelopeRows>[number],
@@ -1870,7 +1965,7 @@ test("a retained root failure stops a mixed batch before new metadata or KMS wor
 
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
   await runWithHostedDomainRootUnwrapCache(async () => {
-    await expect(decryptHostedWebNullableFields({
+    const transientError = await decryptHostedWebNullableFields({
       entries: [{
         field: "hosted-member-identity.phone-number",
         memberId: first.memberId,
@@ -1878,7 +1973,12 @@ test("a retained root failure stops a mixed batch before new metadata or KMS wor
       }],
       prisma,
       retainFailureInScopedCache: true,
-    })).rejects.toThrow("Test KMS decrypt failure.");
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(transientError).toBeInstanceOf(Error);
+    expect((transientError as Error).message).toBe("Test KMS decrypt failure.");
     const envelopeCallsBeforeMixedBatch = envelopeFindMany.mock.calls.length;
     const kmsCallsBeforeMixedBatch = decryptMetrics.calls.length;
     decryptMetrics.failAtCall = null;
@@ -1919,14 +2019,17 @@ test("batch private-field decrypt zeroizes invalid KMS plaintext and stops befor
     invalidPlaintextAtCall: 2,
     yieldBeforeReturn: true,
   });
-  await expect(decryptHostedWebNullableStrings({
+  const invalidRootError = await decryptHostedWebNullableStrings({
     field: "hosted-member-identity.phone-number",
     prisma,
     values: records.identityRecords.map((record) => ({
       memberId: record.memberId,
       value: record.phoneNumberEncrypted,
     })),
-  })).rejects.toThrow(/decrypt returned invalid root length/u);
+  }).then(() => null, (error: unknown) => error);
+  expect(invalidRootError).toBeInstanceOf(Error);
+  expect((invalidRootError as Error).message)
+    .toMatch(/decrypt returned invalid root length/u);
   expect(envelopeFindMany).toHaveBeenCalledTimes(1);
   expect(decryptMetrics.calls).toHaveLength(4);
   expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
@@ -3697,6 +3800,7 @@ function restoreHostedSecureBoxTestCodec(): void {
 }
 
 function stubHostedCryptoEnv(input: {
+  authorityKeyVersionName?: string;
   authorityVerifyKeyringJson?: string;
   cloudflarePublicKeyringJson?: string;
   cloudflarePublicJwk: JsonWebKey;
@@ -3708,7 +3812,10 @@ function stubHostedCryptoEnv(input: {
     JSON.stringify(input.cloudflarePublicJwk),
   );
   vi.stubEnv("HOSTED_CRYPTO_ENV", "test");
-  vi.stubEnv("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION", AUTHORITY_KEY_VERSION);
+  vi.stubEnv(
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+    input.authorityKeyVersionName ?? AUTHORITY_KEY_VERSION,
+  );
   vi.stubEnv(
     "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
     input.signerPublicKeyPem.replace(/\n/gu, "\\n"),

@@ -1,6 +1,5 @@
 // Local-only assistant orchestration surface for headless consumers.
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
-import { prepareAssistantCronNotificationInput } from './cron/output-history.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
@@ -79,9 +78,7 @@ export async function sendAssistantMessage(
 export async function sendAssistantNotificationLocal(
   input: AssistantNotificationInput,
 ): Promise<AssistantNotificationResult> {
-  return sendAssistantNotificationTurnLocal(
-    await prepareAssistantCronNotificationInput(input),
-  )
+  return sendAssistantNotificationTurnLocal(input)
 }
 
 export async function sendAssistantNotification(

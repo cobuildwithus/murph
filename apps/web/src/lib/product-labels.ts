@@ -21,6 +21,8 @@ const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
 const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
+const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 5_000;
+const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
   number
@@ -2037,6 +2039,304 @@ async function searchGenericProductLabels(
   tableSql: ProductLabelsTableSql,
   input: GenericProductLabelSearchInput,
 ): Promise<ProductLabelSearchRow[] | PublicProductLabelSearchRow[]> {
+  // The production timeout is specific to private food-name search. Keep the
+  // established supplement and public candidate contracts on their original
+  // path instead of changing every caller through this shared helper.
+  if (tableSql !== "foods" || input.projection === "public") {
+    return await searchOriginalGenericProductLabels(client, tableSql, input);
+  }
+
+  // Food-name results are ranked deterministically within an index-admitted
+  // nearest-name plus canonical-diversity set. This bounded retrieval contract
+  // trades exhaustive whole-catalog ranking for completion inside the labels
+  // database statement timeout; exact IDs and UPCs use separate direct paths.
+  const stemmed = input.stemmedSearch;
+  const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
+    "data_origin",
+    input.excludedDataOrigins,
+  );
+  const queryText = `
+        WITH query AS (
+          SELECT
+            $1::text AS raw_q,
+            websearch_to_tsquery('simple', $1) AS tsq${stemmed ? `,
+            websearch_to_tsquery('english', $1) AS stemmed_tsq` : ""}
+        ),
+        fts_exact_name_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            lower(name) = lower($1::text)
+            AND ${stemmed ? `(
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          ORDER BY
+            lower(name) ASC,
+            data_origin_priority ASC,
+            id ASC
+          LIMIT ${PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT}
+        ),
+        fts_nearest_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            -- With stemming on, match both dictionaries: 'simple' keeps
+            -- exact tokens that 'english' would drop or mangle
+            -- (stopword-shaped brands like "NOW"), while 'english' stems so
+            -- singular/plural queries reach rows indexed under the other
+            -- form. Both arms are GIN-indexed.
+            ${stemmed ? `(
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          -- The GiST trigram index admits the closest names without scoring
+          -- and sorting the entire FTS match set.
+          ORDER BY name <->>> $1::text
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        fts_canonical_matches AS MATERIALIZED (
+          SELECT DISTINCT ON (canonical_key)
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            ${stemmed ? `(
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          -- The canonical-rank btree keeps this diversity lane deterministic
+          -- and selects the highest-priority representative for each key.
+          ORDER BY
+            canonical_key ASC,
+            data_origin_priority ASC,
+            id ASC
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        fts_matches AS MATERIALIZED (
+          SELECT * FROM fts_exact_name_matches
+          UNION
+          SELECT * FROM fts_nearest_matches
+          UNION
+          SELECT * FROM fts_canonical_matches
+        ),
+        fts_candidates AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin AS "dataOrigin",
+            data_origin_id AS "dataOriginId",
+            name,
+            brand,
+            upc,
+            off_market AS "offMarket",
+            ${stemmed ? `greatest(
+              ts_rank_cd(to_tsvector('simple', search_text), query.tsq),
+              ts_rank_cd(to_tsvector('english', search_text), query.stemmed_tsq)
+            )` : `ts_rank_cd(to_tsvector('simple', search_text), query.tsq)`} AS search_rank,
+            strict_word_similarity(query.raw_q, name) AS name_similarity,
+            CASE
+              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
+              ELSE 0
+            END AS name_phrase_match,
+            CASE
+              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN char_length(name)
+              ELSE 0
+            END AS name_phrase_length,
+            ${stemmed ? `CASE
+              WHEN to_tsvector('english', name) = to_tsvector('english', query.raw_q) THEN 1
+              ELSE 0
+            END` : "0"} AS stemmed_name_match,
+            data_origin_priority
+          FROM fts_matches, query
+        ),
+        trigram_nearest_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            NOT EXISTS (SELECT 1 FROM fts_matches)
+            AND name % $1::text
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          ORDER BY name <->>> $1::text
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        trigram_canonical_matches AS MATERIALIZED (
+          SELECT DISTINCT ON (canonical_key)
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            NOT EXISTS (SELECT 1 FROM fts_matches)
+            AND name % $1::text
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          ORDER BY
+            canonical_key ASC,
+            data_origin_priority ASC,
+            id ASC
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
+        trigram_matches AS MATERIALIZED (
+          SELECT * FROM trigram_nearest_matches
+          UNION
+          SELECT * FROM trigram_canonical_matches
+        ),
+        trigram_candidates AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin AS "dataOrigin",
+            data_origin_id AS "dataOriginId",
+            name,
+            brand,
+            upc,
+            off_market AS "offMarket",
+            0::real AS search_rank,
+            strict_word_similarity(query.raw_q, name) AS name_similarity,
+            CASE
+              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
+              ELSE 0
+            END AS name_phrase_match,
+            CASE
+              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN char_length(name)
+              ELSE 0
+            END AS name_phrase_length,
+            ${stemmed ? `CASE
+              WHEN to_tsvector('english', name) = to_tsvector('english', query.raw_q) THEN 1
+              ELSE 0
+            END` : "0"} AS stemmed_name_match,
+            data_origin_priority
+          FROM trigram_matches, query
+        ),
+        candidates AS (
+          SELECT * FROM fts_candidates
+          UNION ALL
+          SELECT * FROM trigram_candidates
+        ),
+        ranked AS (
+          SELECT
+            *,
+            row_number() OVER (
+              PARTITION BY canonical_key
+              ORDER BY
+                name_phrase_match DESC,
+                name_phrase_length DESC,
+                stemmed_name_match DESC,
+                name_similarity DESC,
+                search_rank DESC,
+                "offMarket" ASC,
+                data_origin_priority ASC,
+                name ASC,
+                id ASC
+            ) AS dedupe_rank
+          FROM candidates
+        ),
+        selected AS (
+          SELECT
+            *,
+            row_number() OVER (
+              ORDER BY
+                name_phrase_match DESC,
+                name_phrase_length DESC,
+                stemmed_name_match DESC,
+                name_similarity DESC,
+                search_rank DESC,
+                data_origin_priority ASC,
+                name ASC,
+                id ASC
+            ) AS result_rank
+          FROM ranked
+          WHERE dedupe_rank = 1
+          ORDER BY
+            name_phrase_match DESC,
+            name_phrase_length DESC,
+            stemmed_name_match DESC,
+            name_similarity DESC,
+            search_rank DESC,
+            data_origin_priority ASC,
+            name ASC,
+            id ASC
+          LIMIT $3
+        )
+        ${productLabelSearchFinalProjectionSql(tableSql, input.projection)}
+        `;
+  const values = [
+    input.q,
+    input.includeOffMarket,
+    input.limit,
+    input.genericSearchDataOrigins,
+  ];
+
+  const { rows } = await client.query<ProductLabelSearchRow>(queryText, values);
+  return rows;
+}
+
+async function searchOriginalGenericProductLabels(
+  client: ProductLabelsQueryClient,
+  tableSql: ProductLabelsTableSql,
+  input: GenericProductLabelSearchInput,
+): Promise<ProductLabelSearchRow[] | PublicProductLabelSearchRow[]> {
   const stemmed = input.stemmedSearch;
   const candidateBoundSql = input.projection === "public"
     ? `
@@ -2091,11 +2391,6 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM ${tableSql}, query
           WHERE
-            -- With stemming on, match both dictionaries: 'simple' keeps
-            -- exact tokens that 'english' would drop or mangle
-            -- (stopword-shaped brands like "NOW"), while 'english' stems so
-            -- singular/plural queries reach rows indexed under the other
-            -- form. Both arms are GIN-indexed.
             ${stemmed ? `(
               to_tsvector('simple', search_text) @@ query.tsq
               OR to_tsvector('english', search_text) @@ query.stemmed_tsq

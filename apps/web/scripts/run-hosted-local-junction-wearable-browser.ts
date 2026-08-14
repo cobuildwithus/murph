@@ -1,7 +1,10 @@
+import { pathToFileURL } from "node:url";
+
 import {
   chromium,
   type Locator,
   type Page,
+  type Response,
 } from "@playwright/test";
 
 import {
@@ -11,6 +14,7 @@ import {
   readHostedLocalBrowserEnvironmentValue,
   readHostedLocalBrowserTimeout,
 } from "./hosted-local-browser-process.ts";
+import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-challenge.ts";
 
 interface BrowserConfig {
   disclosureSourceName: "Oura" | "Whoop";
@@ -18,6 +22,7 @@ interface BrowserConfig {
   headless: boolean;
   hostedSessionCookie: string;
   label: "Oura" | "WHOOP";
+  manualAuthorizationAllowed: boolean;
   otp: string | null;
   password: string | null;
   source: "oura" | "whoop";
@@ -56,6 +61,7 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
+const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -128,17 +134,7 @@ async function main(): Promise<void> {
     });
 
     stage = `junction_${config.source}_authorization`;
-    const [callbackResponse] = await Promise.all([
-      page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return url.origin === config.webOrigin
-          && url.pathname === "/api/device-sync/connect/junction/callback";
-      }, { timeout: config.timeoutMs }),
-      completeExternalAuthorization(page, config),
-    ]);
-    if (callbackResponse.status() !== 302) {
-      throw new Error("Murph did not complete the Junction callback redirect.");
-    }
+    await completeAuthorizationAndRequireCallback(page, config);
 
     stage = "murph_connected_completion";
     await page.waitForURL(
@@ -176,62 +172,123 @@ async function main(): Promise<void> {
 async function completeExternalAuthorization(
   page: Page,
   config: BrowserConfig,
+  now: () => number = Date.now,
 ): Promise<void> {
-  const deadline = Date.now() + config.timeoutMs;
+  const deadline = now() + config.timeoutMs;
+  let automationBlockedObservedAt: number | null = null;
+  let blockedWindowObservedChallenge = false;
 
-  while (Date.now() < deadline) {
+  while (now() < deadline) {
     if (readOrigin(page.url()) === config.webOrigin) {
       return;
     }
 
     assertTrustedAuthorizationUrl(page.url(), config);
-    await fillVisible(page, [
-      'input[type="email"]',
-      'input[autocomplete="email"]',
-      'input[autocomplete="username"]',
-      'input[name*="email" i]',
-      'input[name="username"]',
-    ], config.email);
-    if (config.password) {
+    const providerChallenge = isHostedLocalProviderChallengeSurface({
+      frameUrls: page.frames().map((frame) => frame.url()),
+      title: await page.title().catch(() => ""),
+    });
+    if (providerChallenge) {
+      if (config.manualAuthorizationAllowed) {
+        await page.waitForTimeout(1_000);
+        continue;
+      }
+    } else {
       await fillVisible(page, [
-        'input[type="password"]',
-        'input[autocomplete="current-password"]',
-      ], config.password);
-    }
+        'input[type="email"]',
+        'input[autocomplete="email"]',
+        'input[autocomplete="username"]',
+        'input[name*="email" i]',
+        'input[name="username"]',
+      ], config.email);
+      if (config.password) {
+        await fillVisible(page, [
+          'input[type="password"]',
+          'input[autocomplete="current-password"]',
+        ], config.password);
+      }
 
-    const otpInput = await findVisibleEditable(page, [
-      'input[autocomplete="one-time-code"]',
-      'input[name*="otp" i]',
-      'input[name*="verification" i]',
-    ]);
-    if (otpInput) {
-      const currentOtp = await otpInput.inputValue().catch(() => "");
-      if (config.otp) {
-        if (currentOtp !== config.otp) {
-          await otpInput.fill(config.otp);
+      const otpInput = await findVisibleEditable(page, [
+        'input[autocomplete="one-time-code"]',
+        'input[name*="otp" i]',
+        'input[name*="verification" i]',
+      ]);
+      if (otpInput) {
+        const currentOtp = await otpInput.inputValue().catch(() => "");
+        if (config.otp) {
+          if (currentOtp !== config.otp) {
+            await otpInput.fill(config.otp);
+          }
+        } else if (!config.manualAuthorizationAllowed) {
+          throw new Error(
+            `${config.label} requested a one-time code. Set MURPH_E2E_PROVIDER_OTP; manual entry is available only in a headed non-CI run.`,
+          );
+        } else if (!currentOtp.trim()) {
+          await page.waitForTimeout(1_000);
+          continue;
         }
-      } else if (config.headless) {
-        throw new Error(
-          `${config.label} requested a one-time code. Set MURPH_E2E_PROVIDER_OTP or run headfully for manual entry.`,
-        );
-      } else if (!currentOtp.trim()) {
+      }
+
+      await checkRequiredConsentCheckboxes(page);
+      const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
+      if (clicked) {
+        automationBlockedObservedAt = null;
+        blockedWindowObservedChallenge = false;
+        await page.waitForTimeout(750);
+        continue;
+      }
+      if (config.manualAuthorizationAllowed) {
+        // Headful runs permit manual CAPTCHA or one-time-code completion while
+        // the test continues watching for the proof-bound Murph callback.
         await page.waitForTimeout(1_000);
         continue;
       }
     }
 
-    await checkRequiredConsentCheckboxes(page);
-    const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
-    if (!clicked && !config.headless) {
-      // Headful runs permit manual CAPTCHA or one-time-code completion while
-      // the test continues watching for the proof-bound Murph callback.
-      await page.waitForTimeout(1_000);
-      continue;
+    automationBlockedObservedAt ??= now();
+    blockedWindowObservedChallenge ||= providerChallenge;
+    if (
+      now() - automationBlockedObservedAt
+        >= PROVIDER_AUTOMATION_BLOCKED_GRACE_MS
+    ) {
+      if (blockedWindowObservedChallenge) {
+        throw new Error(
+          `${config.label} authorization was blocked by an external provider challenge.`,
+        );
+      }
+      throw new Error(
+        `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
+      );
     }
-    await page.waitForTimeout(clicked ? 750 : 1_000);
+    await page.waitForTimeout(1_000);
   }
 
   throw new Error("Timed out before Junction returned the browser to Murph.");
+}
+
+async function completeAuthorizationAndRequireCallback(
+  page: Page,
+  config: BrowserConfig,
+): Promise<void> {
+  const [callbackResponse] = await Promise.all([
+    page.waitForResponse(
+      (response) => isExpectedJunctionCallbackResponse(response, config.webOrigin),
+      { timeout: config.timeoutMs },
+    ),
+    completeExternalAuthorization(page, config),
+  ]);
+  if (callbackResponse.status() !== 302) {
+    throw new Error("Murph did not complete the Junction callback redirect.");
+  }
+}
+
+function isExpectedJunctionCallbackResponse(
+  response: Pick<Response, "url">,
+  webOrigin: string,
+): boolean {
+  const url = new URL(response.url());
+  return url.origin === webOrigin
+    && url.pathname === "/api/device-sync/connect/junction/callback";
 }
 
 async function fillVisible(
@@ -354,6 +411,8 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
   const label = source === "oura" ? "Oura" : "WHOOP";
   const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
+  const ci = environment.CI?.trim().toLowerCase();
+  const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";
   const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
   const password = environment.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
   if (source === "whoop" && !password) {
@@ -361,9 +420,9 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction WHOOP browser runner requires MURPH_E2E_PROVIDER_PASSWORD.",
     );
   }
-  if (source === "oura" && headless && !otp) {
+  if (source === "oura" && !manualAuthorizationAllowed && !otp) {
     throw new Error(
-      "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP or MURPH_E2E_PROVIDER_HEADLESS=0 for manual code entry.",
+      "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP unless it is a headed non-CI run with manual code entry.",
     );
   }
   const webBaseUrl = readHostedLocalBrowserEnvironmentValue(
@@ -403,6 +462,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       RUNNER_NAME,
     ),
     label,
+    manualAuthorizationAllowed,
     otp,
     password,
     source,
@@ -419,6 +479,12 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
     webOrigin: parsedWebBaseUrl.origin,
   };
 }
+
+export {
+  completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
+  completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+};
 
 function assertTrustedAuthorizationUrl(
   value: string,
@@ -495,11 +561,13 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
   return message.slice(0, 600);
 }
 
-void main().catch((error: unknown) => {
-  process.stderr.write(
-    `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
-      sanitizeFailure(error, activeConfig)
-    }\n`,
-  );
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main().catch((error: unknown) => {
+    process.stderr.write(
+      `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
+        sanitizeFailure(error, activeConfig)
+      }\n`,
+    );
+    process.exitCode = 1;
+  });
+}

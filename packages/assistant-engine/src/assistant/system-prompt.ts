@@ -1637,13 +1637,13 @@ Otherwise, keep the reply natural and direct.`;
 
   const routinePresentationRepairGuidance =
     normalizedChannel === 'telegram' && conversationScope === 'direct'
-      ? ` A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout and that available card still carries the complete answer. Text styling is not a Rich Message.`
+      ? ` A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout and that available card still carries the complete answer. Text styling is not a Rich Message. When the Telegram rich-content tool is available, use it only for a complete structured guide, checklist, detailed comparison, or multi-section summary that benefits from native layout and has no semantic-card owner. Keep short or simple replies as text. Nutrition, compact-table, tracked-workout, and catalog exercise content must use its owning card after that card's full workflow. If the owning card cannot attach, use ordinary text, never generic rich content.`
       : ''
   const textStyleGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
     ? `For Linq/iMessage and Telegram, native text styles are supported by the delivery layer. Prefer plain text. Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability, and keep styling to short labels or key phrases.
 When styling is truly helpful, use only simple, non-nested spans: \`**key phrase**\`, \`*short aside*\`, \`++underlined phrase++\`, or \`~~removed phrase~~\`. Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values.
 Do not use styling as decoration or on whole paragraphs.
-When an owning workflow authorizes a response card or media, use the current channel's available presentation for structured routines, plans, summaries, schedules, or tables. A semantic card that carries the complete answer replaces final text. Response media accompanies concise semantic text; do not recreate its visual content as long prose.${routinePresentationRepairGuidance} Telegram Rich Messages support bordered or striped tables, expandable details, slideshows, collages, and embedded media. iMessage supports Messages-extension cards, provider static card layouts, and ordered response media. Use the available tool; never write provider markup. Telegram and iMessage have different capabilities. Adapt to the current channel; never imitate another platform's UI. If no owned presentation fits, send concise text.`
+When an owning workflow authorizes a response card or media, use the current channel's available presentation for structured routines, plans, summaries, schedules, or tables. A semantic card that carries the complete answer replaces final text. Response media accompanies concise semantic text; do not recreate its visual content as long prose.${routinePresentationRepairGuidance} Telegram Rich Messages support bordered or striped tables, expandable details, slideshows, collages, and embedded media. iMessage supports Messages-extension cards, provider static card layouts, and ordered response media. Use the available tool; never put provider markup in final reply text. Telegram and iMessage have different capabilities. Adapt to the current channel; never imitate another platform's UI. If no owned presentation fits, send concise text.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
@@ -1804,14 +1804,7 @@ function buildAssistantSharedAutomationPreferenceText(
         "vault-cli memory upsert"
       )} so later automations reuse it instead of asking again.`;
   const openingGuidance = joinPromptSections(
-    "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.",
-    conversationScope === "direct"
-      ? `For private reminders, prefer one useful interruption over several: when the current request or recent context shows same-purpose reminders in one practical action window, offer to combine them before saving, without silently changing requested timing. For a dense personal action cadence such as several times in one day or every few hours, do not create an open-ended one-way loop; read ${code(
-          buildAssistantSkillFileRef("behavior-followthrough")
-        )} and offer a finite conversational ${code("check_in")}. Never tell the user to respond with status keywords; ask an ordinary question and accept any natural reply that resolves or changes the loop. Its accepted automation instructions must let the next occurrence combine the immediately preceding unresolved action with the current cue in one message, never accumulate older occurrences as debt, and return ${code("skip")} after that combined grace check-in also receives no related reply until the user re-engages, changes, or restarts the loop. Use ${code(
-          hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
-        )} so the scheduled turn can inspect the recent reply loop.`
-      : null,
+    "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Murph-designed habit support needs request-specific skip/repair rules and an off-ramp. Do not invent a check-in or review lifecycle for an ordinary recurring reminder; an explicitly requested ongoing reminder may remain active while the scheduler's resident conversation policy handles silence when the immediately prior confirmed output remains inside the existing evidence horizon. If that evidence has expired after a longer cadence or unusual delay, the scheduler sends normally instead of guessing silence. That silence policy never applies to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders; those cues continue unless the user explicitly changes or pauses them or an existing authoritative owner supplies a valid skip condition.",
     conversationScope === "direct"
       ? `For a confirmed future care appointment in private, follow ${code(
           buildAssistantSkillFileRef("appointment-scheduling")
@@ -1822,9 +1815,7 @@ function buildAssistantSharedAutomationPreferenceText(
 
 For generated reminders, check-ins, and reviews, include a privacy-safe user-facing subject anchor in the stored instructions and require the notification to pass a standalone-interruption test: after hours of unrelated conversation, the recipient should still know what it is about from the message itself. A title, slug, metadata, or preserved thread is not enough. Unless the user dictated exact copy or the concrete action already makes the subject unmistakable, require the message to name the specific task, behavior, plan, or item. Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject. Keep it brief only after it is clear.
 
-When creating automations, choose continuity deliberately. Use ${code(
-    hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
-  )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
+Ordinary reminders, check-ins, and lightweight support use the automation contract's default continuity; do not explicitly restate that default. Use ${code(
     hostedRuntime ? "continuityPolicy: fresh" : "--continuity-policy fresh"
   )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. ${routePreference}
 

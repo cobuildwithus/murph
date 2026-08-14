@@ -1,4 +1,5 @@
 import {
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
@@ -46,6 +47,27 @@ import { safeCleanupErrorCode } from "./diagnostics.js";
 import { deleteR2ObjectIfSupported } from "./r2-delete.js";
 
 export const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
+const WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_MAX_DURATION_MS = 60_000;
+const WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_SLOW_MS = 1_000;
+
+type HostedWorkspaceSnapshotSessionStartSubstage =
+  | "alarm_candidate_work"
+  | "completed"
+  | "session_create_storage"
+  | "write_fence_owner_validation";
+
+type HostedWorkspaceSnapshotSessionStartOutcome =
+  | "created"
+  | "failed"
+  | "stale_owner";
+
+interface HostedWorkspaceSnapshotSessionStartDiagnostics {
+  alarmCandidateWorkDurationMs: number;
+  currentSubstage: HostedWorkspaceSnapshotSessionStartSubstage;
+  durationsCapped: boolean;
+  ownerValidationDurationMs: number;
+  sessionCreateStorageDurationMs: number;
+}
 const WORKSPACE_SNAPSHOT_R2_PUT_DRAIN_STATE_SCHEMA =
   "murph.hosted-workspace-snapshot-r2-put-drain.v1";
 const BROWSER_VAULT_REPLICA_ACTIVE_PUT_STATE_SCHEMA =
@@ -278,7 +300,10 @@ export function createWorkspaceSnapshotSessionService(input: {
         workspaceSnapshotUploadSessionCurrentStorageKey(),
         updatedSession,
       );
-      await service.syncOrphanCandidateAlarm(updatedSession.userId);
+      await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+        candidates: buildWorkspaceSnapshotOrphanCandidatesFromUploadSession(updatedSession),
+        state: input.state,
+      });
       input.state.waitUntil(
         service.cleanupOrphanCandidatesBestEffort(updatedSession.userId),
       );
@@ -286,54 +311,155 @@ export function createWorkspaceSnapshotSessionService(input: {
     },
 
     async create(sessionInput) {
-      await input.stateStore.bindUser(sessionInput.userId);
-      const session = parseHostedWorkspaceSnapshotUploadSession({
-        ...sessionInput,
-        checkpointHandoffCompletedAt: undefined,
-        checkpointHandoffHeartbeatAt: new Date().toISOString(),
-      });
-      if (session.userId !== sessionInput.userId) {
-        throw new Error("Hosted workspace snapshot upload session user mismatch.");
-      }
-      const previousCurrent = await input.state.storage.get<unknown>(
-        workspaceSnapshotUploadSessionCurrentStorageKey(),
-      );
-      if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)) {
-        return null;
-      }
-      if (previousCurrent !== undefined) {
-        const previousSession = parseHostedWorkspaceSnapshotUploadSession(previousCurrent);
-        if (
-          previousSession.userId === sessionInput.userId
-          && previousSession.snapshotId !== session.snapshotId
-        ) {
-          const previousReplacedCandidate =
-            buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(previousSession);
-          if (previousReplacedCandidate) {
-            await service.recordOrphanCandidate(previousReplacedCandidate);
-          }
-          const orphanCandidate: HostedWorkspaceSnapshotOrphanCandidate = {
-            createdAt: new Date().toISOString(),
-            objectKey: previousSession.objectKey,
-            schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-            snapshotId: previousSession.snapshotId,
-            userId: previousSession.userId,
-          };
-          await service.recordOrphanCandidate(orphanCandidate);
+      const diagnostics = createHostedWorkspaceSnapshotSessionStartDiagnostics();
+      let currentSessionCandidateCount = 0;
+      let newWorkspaceCandidateCount = 0;
+      let recordedCandidateCount = 0;
+      const finish = (
+        session: HostedWorkspaceSnapshotUploadSession | null,
+        outcome: Exclude<HostedWorkspaceSnapshotSessionStartOutcome, "failed">,
+      ) => {
+        emitHostedWorkspaceSnapshotSessionStartDiagnostics({
+          currentSessionCandidateCount,
+          diagnostics,
+          newWorkspaceCandidateCount,
+          outcome,
+          recordedCandidateCount,
+        });
+        return session;
+      };
+
+      try {
+        await measureHostedWorkspaceSnapshotSessionStartSubstage(
+          diagnostics,
+          "write_fence_owner_validation",
+          async () => await input.stateStore.bindUser(sessionInput.userId),
+        );
+        const session = await measureHostedWorkspaceSnapshotSessionStartSubstage(
+          diagnostics,
+          "session_create_storage",
+          async () => parseHostedWorkspaceSnapshotUploadSession({
+            ...sessionInput,
+            checkpointHandoffCompletedAt: undefined,
+            checkpointHandoffHeartbeatAt: new Date().toISOString(),
+          }),
+        );
+        if (session.userId !== sessionInput.userId) {
+          throw new Error("Hosted workspace snapshot upload session user mismatch.");
         }
+        const previousCurrent = await measureHostedWorkspaceSnapshotSessionStartSubstage(
+          diagnostics,
+          "session_create_storage",
+          async () => await input.state.storage.get<unknown>(
+            workspaceSnapshotUploadSessionCurrentStorageKey(),
+          ),
+        );
+        const ownsSession = await measureHostedWorkspaceSnapshotSessionStartSubstage(
+          diagnostics,
+          "write_fence_owner_validation",
+          async () => await ownsWorkspaceSnapshotSessionOwner(
+            input.stateStore,
+            session,
+          ),
+        );
+        if (!ownsSession) {
+          return finish(null, "stale_owner");
+        }
+
+        const newOrphanCandidates: HostedWorkspaceSnapshotOrphanCandidate[] = [];
+        if (previousCurrent !== undefined) {
+          const previousSession = parseHostedWorkspaceSnapshotUploadSession(previousCurrent);
+          if (
+            previousSession.userId === sessionInput.userId
+            && previousSession.snapshotId !== session.snapshotId
+          ) {
+            const previousReplacedCandidate =
+              buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(previousSession);
+            if (previousReplacedCandidate) {
+              newOrphanCandidates.push(previousReplacedCandidate);
+            }
+            newOrphanCandidates.push({
+              createdAt: new Date().toISOString(),
+              objectKey: previousSession.objectKey,
+              schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+              snapshotId: previousSession.snapshotId,
+              userId: previousSession.userId,
+            });
+          }
+        }
+        newWorkspaceCandidateCount = newOrphanCandidates.length;
+        await measureHostedWorkspaceSnapshotSessionStartSubstage(
+          diagnostics,
+          "alarm_candidate_work",
+          async () => {
+            for (const candidate of newOrphanCandidates) {
+              await input.state.storage.put(
+                workspaceSnapshotOrphanCandidateStorageKey(candidate.snapshotId),
+                candidate,
+              );
+              recordedCandidateCount += 1;
+            }
+          },
+        );
+        if (previousCurrent !== undefined) {
+          const stillOwnsSession = await measureHostedWorkspaceSnapshotSessionStartSubstage(
+            diagnostics,
+            "write_fence_owner_validation",
+            async () => await ownsWorkspaceSnapshotSessionOwner(
+              input.stateStore,
+              session,
+            ),
+          );
+          if (!stillOwnsSession) {
+            await measureHostedWorkspaceSnapshotSessionStartSubstage(
+              diagnostics,
+              "alarm_candidate_work",
+              async () => await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+                candidates: newOrphanCandidates,
+                state: input.state,
+              }),
+            );
+            return finish(null, "stale_owner");
+          }
+        }
+
+        await measureHostedWorkspaceSnapshotSessionStartSubstage(
+          diagnostics,
+          "session_create_storage",
+          async () => await input.state.storage.put(
+            workspaceSnapshotUploadSessionCurrentStorageKey(),
+            session,
+          ),
+        );
+        const currentSessionCandidates =
+          buildWorkspaceSnapshotOrphanCandidatesFromUploadSession(session);
+        currentSessionCandidateCount = currentSessionCandidates.length;
+        await measureHostedWorkspaceSnapshotSessionStartSubstage(
+          diagnostics,
+          "alarm_candidate_work",
+          async () => await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+            candidates: [
+              ...newOrphanCandidates,
+              ...currentSessionCandidates,
+            ],
+            state: input.state,
+          }),
+        );
+        input.state.waitUntil(
+          service.cleanupOrphanCandidatesBestEffort(sessionInput.userId),
+        );
+        return finish(session, "created");
+      } catch (error) {
+        emitHostedWorkspaceSnapshotSessionStartDiagnostics({
+          currentSessionCandidateCount,
+          diagnostics,
+          errorCode: deriveHostedExecutionErrorCode(error),
+          newWorkspaceCandidateCount,
+          outcome: "failed",
+          recordedCandidateCount,
+        });
+        throw error;
       }
-      if (
-        previousCurrent !== undefined
-        && !await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)
-      ) {
-        return null;
-      }
-      await input.state.storage.put(workspaceSnapshotUploadSessionCurrentStorageKey(), session);
-      await service.syncOrphanCandidateAlarm(session.userId);
-      input.state.waitUntil(
-        service.cleanupOrphanCandidatesBestEffort(sessionInput.userId),
-      );
-      return session;
     },
 
     async heartbeatCurrentOwner(heartbeatInput) {
@@ -401,7 +527,10 @@ export function createWorkspaceSnapshotSessionService(input: {
         workspaceSnapshotOrphanCandidateStorageKey(candidate.snapshotId),
         candidate,
       );
-      await service.syncOrphanCandidateAlarm(candidate.userId);
+      await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+        candidates: [candidate],
+        state: input.state,
+      });
       return candidate;
     },
 
@@ -423,7 +552,10 @@ export function createWorkspaceSnapshotSessionService(input: {
         browserVaultReplicaOrphanCandidateStorageKey(candidate.objectKey),
         candidate,
       );
-      await service.syncOrphanCandidateAlarm(candidate.userId);
+      await scheduleHostedR2OrphanCandidateAlarmForNewCandidates({
+        candidates: [candidate],
+        state: input.state,
+      });
       return candidate;
     },
 
@@ -664,6 +796,115 @@ export function createWorkspaceSnapshotSessionService(input: {
   };
 
   return service;
+}
+
+function createHostedWorkspaceSnapshotSessionStartDiagnostics(): HostedWorkspaceSnapshotSessionStartDiagnostics {
+  return {
+    alarmCandidateWorkDurationMs: 0,
+    currentSubstage: "write_fence_owner_validation",
+    durationsCapped: false,
+    ownerValidationDurationMs: 0,
+    sessionCreateStorageDurationMs: 0,
+  };
+}
+
+async function measureHostedWorkspaceSnapshotSessionStartSubstage<T>(
+  diagnostics: HostedWorkspaceSnapshotSessionStartDiagnostics,
+  substage: Exclude<HostedWorkspaceSnapshotSessionStartSubstage, "completed">,
+  operation: () => Promise<T>,
+): Promise<T> {
+  diagnostics.currentSubstage = substage;
+  const startedAt = Date.now();
+  try {
+    return await operation();
+  } finally {
+    const duration = readBoundedHostedWorkspaceSnapshotSessionStartNumber(
+      Date.now() - startedAt,
+      WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_MAX_DURATION_MS,
+    );
+    diagnostics.durationsCapped ||= duration.capped;
+    const key = substage === "write_fence_owner_validation"
+      ? "ownerValidationDurationMs"
+      : substage === "session_create_storage"
+        ? "sessionCreateStorageDurationMs"
+        : "alarmCandidateWorkDurationMs";
+    const remaining = Math.max(
+      0,
+      WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_MAX_DURATION_MS - diagnostics[key],
+    );
+    if (duration.value > remaining) {
+      diagnostics.durationsCapped = true;
+    }
+    diagnostics[key] += Math.min(duration.value, remaining);
+  }
+}
+
+function emitHostedWorkspaceSnapshotSessionStartDiagnostics(input: {
+  currentSessionCandidateCount: number;
+  diagnostics: HostedWorkspaceSnapshotSessionStartDiagnostics;
+  errorCode?: string;
+  newWorkspaceCandidateCount: number;
+  outcome: HostedWorkspaceSnapshotSessionStartOutcome;
+  recordedCandidateCount: number;
+}): void {
+  const totalDurationMs = input.diagnostics.alarmCandidateWorkDurationMs
+    + input.diagnostics.ownerValidationDurationMs
+    + input.diagnostics.sessionCreateStorageDurationMs;
+  if (
+    input.outcome === "created"
+    && totalDurationMs < WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_SLOW_MS
+  ) {
+    return;
+  }
+  emitHostedExecutionStructuredLog({
+    component: "hosted.runner",
+    details: {
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      operation: "workspace_snapshot_start",
+      snapshotStartAlarmCandidateCount:
+        input.currentSessionCandidateCount + input.newWorkspaceCandidateCount,
+      snapshotStartAlarmCandidateWorkDurationMs:
+        input.diagnostics.alarmCandidateWorkDurationMs,
+      snapshotStartCandidateCountsCapped: false,
+      snapshotStartCandidateCountsObserved: true,
+      snapshotStartCryptoDataKeyDurationMs: 0,
+      snapshotStartCurrentSessionCandidateCount:
+        input.currentSessionCandidateCount,
+      snapshotStartDiagnosticScopeKind: "session_owner",
+      snapshotStartDurationsCapped: input.diagnostics.durationsCapped,
+      snapshotStartNewWorkspaceCandidateCount:
+        input.newWorkspaceCandidateCount,
+      snapshotStartOutcomeKind: input.outcome,
+      snapshotStartRecordedCandidateCount: input.recordedCandidateCount,
+      snapshotStartSessionCreateStorageDurationMs:
+        input.diagnostics.sessionCreateStorageDurationMs,
+      snapshotStartSubstageKind: input.outcome === "created"
+        ? "completed"
+        : input.diagnostics.currentSubstage,
+      snapshotStartWriteFenceOwnerValidationDurationMs:
+        input.diagnostics.ownerValidationDurationMs,
+    },
+    level: input.outcome === "failed" ? "warn" : "info",
+    message: "Hosted runner workspace snapshot session start diagnostic.",
+    phase: "wake.running",
+    userId: null,
+  });
+}
+
+function readBoundedHostedWorkspaceSnapshotSessionStartNumber(
+  value: number,
+  maximum: number,
+): { capped: boolean; value: number } {
+  if (value === Number.POSITIVE_INFINITY) {
+    return { capped: true, value: maximum };
+  }
+  const normalized = Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : 0;
+  return {
+    capped: normalized !== value || normalized > maximum,
+    value: Math.min(normalized, maximum),
+  };
 }
 
 async function ownsWorkspaceSnapshotSessionOwner(
@@ -995,6 +1236,20 @@ function buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(
   };
 }
 
+function buildWorkspaceSnapshotOrphanCandidatesFromUploadSession(
+  session: HostedWorkspaceSnapshotUploadSession,
+): HostedWorkspaceSnapshotOrphanCandidate[] {
+  const candidates: HostedWorkspaceSnapshotOrphanCandidate[] = [
+    buildWorkspaceSnapshotOrphanCandidateFromUploadSessionObject(session),
+  ];
+  const replacedCandidate =
+    buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(session);
+  if (replacedCandidate) {
+    candidates.push(replacedCandidate);
+  }
+  return candidates;
+}
+
 function selectEarliestHostedR2OrphanCleanupAlarm(
   previous: number | null,
   createdAt: string,
@@ -1011,6 +1266,30 @@ function isHostedR2OrphanCleanupCreatedAtEligible(createdAt: string, nowMs: numb
   const createdAtMs = Date.parse(createdAt);
   return Number.isFinite(createdAtMs)
     && nowMs - createdAtMs >= WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS;
+}
+
+async function scheduleHostedR2OrphanCandidateAlarmForNewCandidates(input: {
+  candidates: ReadonlyArray<{ createdAt: string }>;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  let nextAtMs: number | null = null;
+  for (const candidate of input.candidates) {
+    nextAtMs = selectEarliestHostedR2OrphanCleanupAlarm(
+      nextAtMs,
+      candidate.createdAt,
+    );
+  }
+  if (nextAtMs === null) {
+    return;
+  }
+
+  // Insertions can only move the earliest eligibility earlier. Cleanup owns
+  // full recomputation because deletion can move the alarm later or clear it.
+  const currentAlarm = await input.state.storage.getAlarm();
+  if (currentAlarm !== null && currentAlarm <= nextAtMs) {
+    return;
+  }
+  await input.state.storage.setAlarm(nextAtMs);
 }
 
 async function syncHostedR2OrphanCandidateAlarm(input: {

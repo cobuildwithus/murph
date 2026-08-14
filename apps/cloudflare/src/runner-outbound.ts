@@ -530,6 +530,32 @@ async function handleRunnerArtifactRequest(input: {
   }
 }
 
+const WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_MAX_DURATION_MS = 60_000;
+const WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_SLOW_MS = 1_000;
+
+type HostedWorkspaceSnapshotStartSubstage =
+  | "completed"
+  | "crypto_data_key"
+  | "session_create_storage"
+  | "write_fence_owner_validation";
+
+type HostedWorkspaceSnapshotStartOutcome =
+  | "created"
+  | "failed"
+  | "invalid_reason"
+  | "stale_owner"
+  | "stale_workspace_version"
+  | "unauthorized";
+
+interface HostedWorkspaceSnapshotStartRouteDiagnostics {
+  cryptoDataKeyDurationMs: number;
+  currentSubstage: HostedWorkspaceSnapshotStartSubstage;
+  durationsCapped: boolean;
+  sessionCreateStorageDurationMs: number;
+  startedAt: number;
+  writeFenceOwnerValidationDurationMs: number;
+}
+
 async function handleRunnerWorkspaceSnapshotStartRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -537,107 +563,290 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  const writeFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!writeFence) {
-    return unauthorized();
-  }
-
-  const body = await readJsonObject(input.request, {
-    limitBytes: 16 * 1024,
-  });
-  const reason = requireSnapshotDataKeyString(body.reason, "reason");
-  if (reason !== "idle_shutdown") {
-    return jsonError("Hosted workspace snapshot start reason must be idle_shutdown.", 400);
-  }
-  const expectedWorkspaceVersion = requireSnapshotDataKeyString(
-    body.expectedWorkspaceVersion,
-    "expectedWorkspaceVersion",
-  );
-  if (expectedWorkspaceVersion !== writeFence.workspaceVersion) {
-    return jsonError("Hosted workspace snapshot start workspace version is stale.", 409);
-  }
-
-  const snapshotId = createHostedWorkspaceSnapshotId();
-  const objectKey = await hostedWorkspaceSnapshotObjectKey({
-    snapshotId,
-    userId: input.userId,
-  });
-  const aad = buildHostedWorkspaceSnapshotV2Aad({
-    objectKey,
-    snapshotId,
-    userId: input.userId,
-  });
-
-  const cryptoContext = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.bucket,
-    domain: "runtime",
-    env: input.env,
-    environment: input.environment,
-    userId: input.userId,
-  });
-  const dataKey = createHostedWorkspaceSnapshotV2DataKey();
-  const wrappedDataKey = await wrapHostedWorkspaceSnapshotV2DataKey({
-    aad,
-    dataKey,
-    rootKey: cryptoContext.rootKey,
-    rootKeyId: cryptoContext.rootKeyId,
-  });
-  const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
-  dataKey.fill(0);
-  const ivBase64 = createHostedWorkspaceSnapshotIvBase64();
-  const expiresAt = new Date(
-    Date.now() + HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS,
-  ).toISOString();
-
-  const session: HostedWorkspaceSnapshotUploadSession = {
-    attemptId: writeFence.attemptId,
-    createdAt: new Date().toISOString(),
-    encryption: {
-      aad,
-      ivBase64,
-      rootKeyId: cryptoContext.rootKeyId,
-      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
-      wrappedDataKey,
-    },
-    expectedWorkspaceVersion,
-    expiresAt,
-    leaseGeneration: writeFence.generation,
-    objectKey,
-    schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
-    snapshotId,
-    userId: input.userId,
-    workspaceVersion: writeFence.workspaceVersion,
+  const diagnostics = createHostedWorkspaceSnapshotStartRouteDiagnostics();
+  const complete = (
+    response: Response,
+    outcome: Exclude<HostedWorkspaceSnapshotStartOutcome, "failed">,
+  ): Response => {
+    emitHostedWorkspaceSnapshotStartRouteDiagnostics({
+      diagnostics,
+      outcome,
+      responseStatus: response.status,
+      userIdPresent: input.userId.length > 0,
+    });
+    return response;
   };
-  const createdSession = await createWorkspaceSnapshotUploadSession({
-    env: input.env,
-    session,
-    userId: input.userId,
-  });
-  if (!createdSession) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
 
-  return json({
-    encryption: {
-      aad,
-      dataKeyBase64,
-      ivBase64,
-      rootKeyId: cryptoContext.rootKeyId,
-      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
-      wrappedDataKey,
+  try {
+    const validation = await measureHostedWorkspaceSnapshotStartRouteSubstage(
+      diagnostics,
+      "write_fence_owner_validation",
+      async () => {
+        const writeFence = await requireWorkspaceSnapshotWriteFence({
+          env: input.env,
+          request: input.request,
+          userId: input.userId,
+        });
+        if (!writeFence) {
+          return {
+            kind: "rejected" as const,
+            outcome: "unauthorized" as const,
+            response: unauthorized(),
+          };
+        }
+
+        const body = await readJsonObject(input.request, {
+          limitBytes: 16 * 1024,
+        });
+        const reason = requireSnapshotDataKeyString(body.reason, "reason");
+        if (reason !== "idle_shutdown") {
+          return {
+            kind: "rejected" as const,
+            outcome: "invalid_reason" as const,
+            response: jsonError(
+              "Hosted workspace snapshot start reason must be idle_shutdown.",
+              400,
+            ),
+          };
+        }
+        const expectedWorkspaceVersion = requireSnapshotDataKeyString(
+          body.expectedWorkspaceVersion,
+          "expectedWorkspaceVersion",
+        );
+        if (expectedWorkspaceVersion !== writeFence.workspaceVersion) {
+          return {
+            kind: "rejected" as const,
+            outcome: "stale_workspace_version" as const,
+            response: jsonError(
+              "Hosted workspace snapshot start workspace version is stale.",
+              409,
+            ),
+          };
+        }
+        return {
+          expectedWorkspaceVersion,
+          kind: "valid" as const,
+          writeFence,
+        };
+      },
+    );
+    if (validation.kind === "rejected") {
+      return complete(validation.response, validation.outcome);
+    }
+
+    const crypto = await measureHostedWorkspaceSnapshotStartRouteSubstage(
+      diagnostics,
+      "crypto_data_key",
+      async () => {
+        const snapshotId = createHostedWorkspaceSnapshotId();
+        const objectKey = await hostedWorkspaceSnapshotObjectKey({
+          snapshotId,
+          userId: input.userId,
+        });
+        const aad = buildHostedWorkspaceSnapshotV2Aad({
+          objectKey,
+          snapshotId,
+          userId: input.userId,
+        });
+        const cryptoContext = await resolveRunnerOutboundUserCryptoContext({
+          bucket: input.bucket,
+          domain: "runtime",
+          env: input.env,
+          environment: input.environment,
+          userId: input.userId,
+        });
+        const dataKey = createHostedWorkspaceSnapshotV2DataKey();
+        const wrappedDataKey = await wrapHostedWorkspaceSnapshotV2DataKey({
+          aad,
+          dataKey,
+          rootKey: cryptoContext.rootKey,
+          rootKeyId: cryptoContext.rootKeyId,
+        });
+        const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+        dataKey.fill(0);
+        return {
+          aad,
+          dataKeyBase64,
+          ivBase64: createHostedWorkspaceSnapshotIvBase64(),
+          objectKey,
+          rootKeyId: cryptoContext.rootKeyId,
+          snapshotId,
+          wrappedDataKey,
+        };
+      },
+    );
+    const expiresAt = new Date(
+      Date.now() + HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS,
+    ).toISOString();
+
+    const createdSession = await measureHostedWorkspaceSnapshotStartRouteSubstage(
+      diagnostics,
+      "session_create_storage",
+      async () => {
+        const session: HostedWorkspaceSnapshotUploadSession = {
+          attemptId: validation.writeFence.attemptId,
+          createdAt: new Date().toISOString(),
+          encryption: {
+            aad: crypto.aad,
+            ivBase64: crypto.ivBase64,
+            rootKeyId: crypto.rootKeyId,
+            scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+            wrappedDataKey: crypto.wrappedDataKey,
+          },
+          expectedWorkspaceVersion: validation.expectedWorkspaceVersion,
+          expiresAt,
+          leaseGeneration: validation.writeFence.generation,
+          objectKey: crypto.objectKey,
+          schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+          snapshotId: crypto.snapshotId,
+          userId: input.userId,
+          workspaceVersion: validation.writeFence.workspaceVersion,
+        };
+        return await createWorkspaceSnapshotUploadSession({
+          env: input.env,
+          session,
+          userId: input.userId,
+        });
+      },
+    );
+    if (!createdSession) {
+      return complete(
+        jsonError("Hosted workspace snapshot upload session is stale.", 409),
+        "stale_owner",
+      );
+    }
+
+    return complete(json({
+      encryption: {
+        aad: crypto.aad,
+        dataKeyBase64: crypto.dataKeyBase64,
+        ivBase64: crypto.ivBase64,
+        rootKeyId: crypto.rootKeyId,
+        scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+        wrappedDataKey: crypto.wrappedDataKey,
+      },
+      expiresAt,
+      limits: {
+        maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+        warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+      },
+      objectKey: crypto.objectKey,
+      snapshotId: crypto.snapshotId,
+    }), "created");
+  } catch (error) {
+    emitHostedWorkspaceSnapshotStartRouteDiagnostics({
+      diagnostics,
+      errorCode: deriveHostedExecutionErrorCode(error),
+      outcome: "failed",
+      responseStatus: 500,
+      userIdPresent: input.userId.length > 0,
+    });
+    throw error;
+  }
+}
+
+function createHostedWorkspaceSnapshotStartRouteDiagnostics(): HostedWorkspaceSnapshotStartRouteDiagnostics {
+  return {
+    cryptoDataKeyDurationMs: 0,
+    currentSubstage: "write_fence_owner_validation",
+    durationsCapped: false,
+    sessionCreateStorageDurationMs: 0,
+    startedAt: Date.now(),
+    writeFenceOwnerValidationDurationMs: 0,
+  };
+}
+
+async function measureHostedWorkspaceSnapshotStartRouteSubstage<T>(
+  diagnostics: HostedWorkspaceSnapshotStartRouteDiagnostics,
+  substage: Exclude<HostedWorkspaceSnapshotStartSubstage, "completed">,
+  operation: () => Promise<T>,
+): Promise<T> {
+  diagnostics.currentSubstage = substage;
+  const startedAt = Date.now();
+  try {
+    return await operation();
+  } finally {
+    const duration = readBoundedHostedWorkspaceSnapshotStartDiagnosticNumber(
+      Date.now() - startedAt,
+      WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_MAX_DURATION_MS,
+    );
+    diagnostics.durationsCapped ||= duration.capped;
+    const key = substage === "write_fence_owner_validation"
+      ? "writeFenceOwnerValidationDurationMs"
+      : substage === "crypto_data_key"
+        ? "cryptoDataKeyDurationMs"
+        : "sessionCreateStorageDurationMs";
+    diagnostics[key] = duration.value;
+  }
+}
+
+function emitHostedWorkspaceSnapshotStartRouteDiagnostics(input: {
+  diagnostics: HostedWorkspaceSnapshotStartRouteDiagnostics;
+  errorCode?: string;
+  outcome: HostedWorkspaceSnapshotStartOutcome;
+  responseStatus: number;
+  userIdPresent: boolean;
+}): void {
+  const totalDuration = readBoundedHostedWorkspaceSnapshotStartDiagnosticNumber(
+    Date.now() - input.diagnostics.startedAt,
+    WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_MAX_DURATION_MS,
+  );
+  if (
+    input.outcome === "created"
+    && totalDuration.value < WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_SLOW_MS
+  ) {
+    return;
+  }
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      operation: "workspace_snapshot_start",
+      responseStatus: input.responseStatus,
+      snapshotStartAlarmCandidateCount: 0,
+      snapshotStartAlarmCandidateWorkDurationMs: 0,
+      snapshotStartCandidateCountsCapped: false,
+      snapshotStartCandidateCountsObserved: false,
+      snapshotStartCryptoDataKeyDurationMs:
+        input.diagnostics.cryptoDataKeyDurationMs,
+      snapshotStartCurrentSessionCandidateCount: 0,
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartDurationsCapped: input.diagnostics.durationsCapped
+        || totalDuration.capped,
+      snapshotStartNewWorkspaceCandidateCount: 0,
+      snapshotStartOutcomeKind: input.outcome,
+      snapshotStartRecordedCandidateCount: 0,
+      snapshotStartSessionCreateStorageDurationMs:
+        input.diagnostics.sessionCreateStorageDurationMs,
+      snapshotStartSubstageKind: input.outcome === "created"
+        ? "completed"
+        : input.diagnostics.currentSubstage,
+      snapshotStartTotalDurationMs: totalDuration.value,
+      snapshotStartWriteFenceOwnerValidationDurationMs:
+        input.diagnostics.writeFenceOwnerValidationDurationMs,
+      userIdPresent: input.userIdPresent,
     },
-    expiresAt,
-    limits: {
-      maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-      warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
-    },
-    objectKey,
-    snapshotId,
+    level: input.outcome === "failed" ? "warn" : "info",
+    message: "Hosted runner workspace snapshot start diagnostic.",
+    phase: "wake.running",
+    userId: null,
   });
+}
+
+function readBoundedHostedWorkspaceSnapshotStartDiagnosticNumber(
+  value: number,
+  maximum: number,
+): { capped: boolean; value: number } {
+  if (value === Number.POSITIVE_INFINITY) {
+    return { capped: true, value: maximum };
+  }
+  const normalized = Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : 0;
+  return {
+    capped: normalized !== value || normalized > maximum,
+    value: Math.min(normalized, maximum),
+  };
 }
 
 async function handleRunnerWorkspaceSnapshotHeartbeatRequest(input: {
@@ -1436,7 +1645,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   const snapshotRef = parseHostedWorkspaceSnapshotV2Ref(
     buildHostedWorkspaceSnapshotRefFromUploadSession({
       archive: body.archive,
-      createdAt: new Date().toISOString(),
+      createdAt: session.createdAt,
       session,
     }),
     "Hosted workspace snapshot complete snapshotRef",

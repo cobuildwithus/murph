@@ -93,29 +93,34 @@ export type HostedGroupCurrentSenderSourceChannel = "linq" | "telegram";
 
 export interface HostedGroupCurrentSenderAuthority {
   groupRuntimeMemberId: string;
+  messageText: string | null;
   occurredAt: string;
-  question: string;
   sourceChannel: HostedGroupCurrentSenderSourceChannel;
   targetMemberId: string;
 }
 
-export interface HostedGroupCurrentSenderAssistantAskAuthority
-  extends HostedGroupCurrentSenderAuthority {
-  permissionDigest: string;
-  permissionText: string;
-}
+type HostedGroupCurrentSenderQuestionAuthority =
+  Omit<HostedGroupCurrentSenderAuthority, "messageText"> & {
+    question: string;
+  };
 
-export interface HostedGroupCurrentSenderPrivateAssistantAskAuthority
-  extends HostedGroupCurrentSenderAuthority {
-  permissionDigest: string;
-  permissionText: string;
-}
+export type HostedGroupCurrentSenderAssistantAskAuthority =
+  HostedGroupCurrentSenderQuestionAuthority & {
+    permissionDigest: string;
+    permissionText: string;
+  };
 
-export interface HostedGroupCurrentSenderPrivateCompletionAuthority
-  extends HostedGroupCurrentSenderPrivateAssistantAskAuthority {
-  expiresAt: string;
-  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
-}
+export type HostedGroupCurrentSenderPrivateAssistantAskAuthority =
+  HostedGroupCurrentSenderQuestionAuthority & {
+    permissionDigest: string;
+    permissionText: string;
+  };
+
+export type HostedGroupCurrentSenderPrivateCompletionAuthority =
+  HostedGroupCurrentSenderPrivateAssistantAskAuthority & {
+    expiresAt: string;
+    origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  };
 
 export interface HostedGroupCurrentSenderAssistantAskAdmission {
   mailboxWake: {
@@ -455,8 +460,8 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
 
   return {
     groupRuntimeMemberId,
+    messageText: source.messageText,
     occurredAt: sourceWake.occurredAt,
-    question: source.question,
     sourceChannel: source.sourceChannel,
     targetMemberId: senderMemberId,
   };
@@ -466,9 +471,12 @@ export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
   input: HostedGroupCurrentSenderAuthorityReadInput,
 ): Promise<HostedGroupCurrentSenderAssistantAskAuthority | null> {
   const authority = await readHostedGroupCurrentSenderAuthorityTx(input);
-  return authority
+  const question = authority
+    ? readHostedCurrentSenderQuestion(authority.messageText)
+    : null;
+  return authority && question
     ? {
-        ...authority,
+        ...hostedCurrentSenderQuestionAuthority(authority, question),
         permissionDigest: createHostedGroupCurrentSenderPermissionDigest(),
         permissionText: HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
       }
@@ -479,9 +487,12 @@ export async function readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx
   input: HostedGroupCurrentSenderAuthorityReadInput,
 ): Promise<HostedGroupCurrentSenderPrivateAssistantAskAuthority | null> {
   const authority = await readHostedGroupCurrentSenderAuthorityTx(input);
-  return authority
+  const question = authority
+    ? readHostedCurrentSenderQuestion(authority.messageText)
+    : null;
+  return authority && question
     ? {
-        ...authority,
+        ...hostedCurrentSenderQuestionAuthority(authority, question),
         permissionDigest:
           createHostedGroupCurrentSenderPrivatePermissionDigest(),
         permissionText: HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
@@ -1035,7 +1046,7 @@ function readHostedCurrentSenderSource(
   wake: HostedExecutionConversationMessageWake,
   groupRuntimeMemberId: string,
 ): {
-  question: string;
+  messageText: string | null;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   sourceChannel: HostedGroupCurrentSenderSourceChannel;
 } | null {
@@ -1075,14 +1086,34 @@ function readHostedCurrentSenderSource(
   } else {
     return null;
   }
-  const question = readHostedExecutionConversationMessageText(message);
+  return {
+    messageText: readHostedExecutionConversationMessageText(message),
+    routeAuthority,
+    sourceChannel,
+  };
+}
+
+function readHostedCurrentSenderQuestion(messageText: string | null): string | null {
   if (
-    !question
-    || [...question].length > HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS
+    !messageText
+    || [...messageText].length > HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS
   ) {
     return null;
   }
-  return { question, routeAuthority, sourceChannel };
+  return messageText;
+}
+
+function hostedCurrentSenderQuestionAuthority(
+  authority: HostedGroupCurrentSenderAuthority,
+  question: string,
+): HostedGroupCurrentSenderQuestionAuthority {
+  return {
+    groupRuntimeMemberId: authority.groupRuntimeMemberId,
+    occurredAt: authority.occurredAt,
+    question,
+    sourceChannel: authority.sourceChannel,
+    targetMemberId: authority.targetMemberId,
+  };
 }
 
 async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {

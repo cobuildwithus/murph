@@ -22,6 +22,7 @@ export * from "./activity-kind.ts";
 export * from "./challenge-standings-card.ts";
 export * from "./compact-table-card.ts";
 export * from "./exercise-routine-card.ts";
+export * from "./telegram-rich-content-card.ts";
 export * from "./workout-session-card.ts";
 export * from "./memory.ts";
 export * from "./message-links.ts";
