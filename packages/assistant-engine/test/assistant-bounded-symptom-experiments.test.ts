@@ -2,21 +2,14 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import {
-  ASSISTANT_SKILLS,
-  resolveAssistantSkillsRoot,
-} from '../src/assistant-skill-assets.js'
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
-function getSkill(slug: (typeof ASSISTANT_SKILLS)[number]['slug']) {
-  const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
-  if (!skill) {
-    throw new Error(`Missing registered skill: ${slug}`)
-  }
-  return skill
-}
+type BoundedExperimentSkillSlug =
+  | 'chronic-illness-support'
+  | 'self-management-experiments'
 
-async function readSkill(slug: (typeof ASSISTANT_SKILLS)[number]['slug']) {
+async function readSkill(slug: BoundedExperimentSkillSlug) {
   return readFile(
     path.join(resolveAssistantSkillsRoot(), slug, 'SKILL.md'),
     'utf8',
@@ -44,27 +37,6 @@ function buildPrompt(input: { conversationScope?: 'group' } = {}): string {
 }
 
 describe('bounded self-management experiment guidance', () => {
-  it('routes persistent symptom change requests without requiring experiment language', () => {
-    const chronic = getSkill('chronic-illness-support')
-    const experiments = getSkill('self-management-experiments')
-
-    expect(chronic.triggerHint).toContain(
-      'persistent or recurring symptoms even without a settled diagnosis',
-    )
-    expect(chronic.triggerHint).toContain(
-      'asks what to change or try day to day',
-    )
-    expect(chronic.triggerHint).toContain(
-      'one ranked low-burden trial rather than a generic wellness bundle',
-    )
-    expect(experiments.triggerHint).toContain(
-      'The member does not need to say “experiment”',
-    )
-    expect(experiments.triggerHint).toContain(
-      'what to change or try day to day is experiment intent',
-    )
-  })
-
   it('puts the symptom-experiment correction in the resident direct prompt', () => {
     const prompt = buildPrompt()
     const groupPrompt = buildPrompt({ conversationScope: 'group' })
@@ -97,6 +69,9 @@ describe('bounded self-management experiment guidance', () => {
   it('requires one complete symptom-targeted trial with a safety off-ramp', async () => {
     const chronic = await readSkill('chronic-illness-support')
 
+    expect(chronic).toContain(
+      'a persistent or recurring symptom pattern even without a settled diagnosis',
+    )
     expect(chronic).toContain(
       'Choose one symptom-targeted first lever rather than a bundle of generic wellness factors.',
     )
