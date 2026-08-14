@@ -1,6 +1,6 @@
 import { parseAutomationSupportSeriesTag } from '@murphai/contracts'
 import type { InboxServices } from '@murphai/inbox-services'
-import { readAutomation } from '@murphai/query'
+import { readAutomationByRelativePath } from '@murphai/query'
 import {
   readAssistantDeliveryFailureClass,
 } from '@murphai/operator-config/assistant/delivery-failure'
@@ -4873,6 +4873,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
   automationId: string | null
+  automationRelativePath: string | null
   automationExpectedUpdatedAt: string | null
   scheduledOccurrenceAt: string | null
   intentId: string
@@ -4955,6 +4956,10 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     return [{
       automationId:
         normalizeNullableString(intent.automationAuthority?.automationId) ?? null,
+      automationRelativePath:
+        normalizeNullableString(
+          intent.automationAuthority?.automationRelativePath,
+        ) ?? null,
       automationExpectedUpdatedAt:
         normalizeNullableString(
           intent.automationAuthority?.expectedUpdatedAt,
@@ -5152,16 +5157,28 @@ async function buildAssistantAutoReplyExperimentSupportContext(input: {
   vault: string
 }): Promise<string | null> {
   const automationId = normalizeNullableString(input.delivery?.automationId)
-  if (!automationId) {
+  const automationRelativePath = normalizeNullableString(
+    input.delivery?.automationRelativePath,
+  )
+  if (!automationId || !automationRelativePath) {
     return null
   }
 
-  const automation = await readAutomation(input.vault, automationId)
+  let automation
+  try {
+    automation = await readAutomationByRelativePath(
+      input.vault,
+      automationRelativePath,
+    )
+  } catch {
+    return null
+  }
   const expectedUpdatedAt = normalizeNullableString(
     input.delivery?.automationExpectedUpdatedAt,
   )
   if (
     !automation ||
+    automation.automationId !== automationId ||
     expectedUpdatedAt === null ||
     automation.updatedAt !== expectedUpdatedAt ||
     automation.supportKind === null

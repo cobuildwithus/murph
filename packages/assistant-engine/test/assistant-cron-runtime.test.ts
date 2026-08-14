@@ -11291,6 +11291,7 @@ describe('assistant cron runtime orchestration', () => {
     )
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-pinned-mixed-route',
+      relativePath: 'bank/automations/stand-up-reminder.md',
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
       instructions: 'Remind me to stand up.',
@@ -11367,6 +11368,7 @@ describe('assistant cron runtime orchestration', () => {
         },
         outboxAutomationAuthority: {
           automationId: 'automation-linq-pinned-mixed-route',
+          automationRelativePath: 'bank/automations/stand-up-reminder.md',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
         },
         participantId: 'participant-1',
@@ -11434,6 +11436,7 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-kl-pending-sent-')
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-kl-pending-sent',
+      relativePath: 'bank/automations/midnight-sleep-reminder.md',
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
       instructions: 'Remind me to sleep.',
@@ -11472,6 +11475,7 @@ describe('assistant cron runtime orchestration', () => {
       expect.objectContaining({
         outboxAutomationAuthority: {
           automationId: 'automation-kl-pending-sent',
+          automationRelativePath: 'bank/automations/midnight-sleep-reminder.md',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
         },
       }),

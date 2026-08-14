@@ -349,6 +349,7 @@ export const assistantExternalThreadRouteAuthoritySchema = z
 export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
+    automationRelativePath: z.string().trim().min(1).optional(),
     expectedUpdatedAt: isoTimestampSchema,
   })
   .strict()

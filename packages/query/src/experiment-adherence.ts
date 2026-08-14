@@ -777,7 +777,6 @@ export function countCalendarAdherenceSessions(input: {
   return counts;
 }
 
-
 function resolveEffectiveLinkedEventMissingPolicy(input: {
   evidence: Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
   expectedCount: number;

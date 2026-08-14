@@ -3085,6 +3085,7 @@ describe('assistant auto-reply event-first path', () => {
       createOutboxMessage({
         automationAuthority: {
           automationId,
+          automationRelativePath: automation.record.relativePath,
           expectedUpdatedAt: automation.record.updatedAt,
         },
         intentId: 'intent-experiment-reminder',
@@ -3132,6 +3133,7 @@ describe('assistant auto-reply event-first path', () => {
       createOutboxMessage({
         automationAuthority: {
           automationId,
+          automationRelativePath: automation.record.relativePath,
           expectedUpdatedAt: '2026-04-08T00:03:59.000Z',
         },
         intentId: 'intent-stale-experiment-reminder',
@@ -4056,6 +4058,7 @@ describe('assistant auto-reply event-first path', () => {
       createOutboxMessage({
         automationAuthority: {
           automationId,
+          automationRelativePath: automation.record.relativePath,
           expectedUpdatedAt: automation.record.updatedAt,
         },
         channel: 'linq',
@@ -4958,6 +4961,7 @@ function createOutboxMessage(input: {
   actorId?: string | null
   automationAuthority?: {
     automationId: string
+    automationRelativePath?: string
     expectedUpdatedAt: string
   } | null
   channel?: string

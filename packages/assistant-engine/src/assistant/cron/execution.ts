@@ -1720,6 +1720,7 @@ function resolveAssistantCronOutboxAutomationAuthority(
 
   return {
     automationId: job.source.automationId,
+    automationRelativePath: job.source.relativePath,
     expectedUpdatedAt: job.source.updatedAt,
   }
 }

@@ -945,6 +945,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<{
+  assistantCronDueNow: boolean;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
 }> {
@@ -972,33 +973,42 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
 
-  return selectEarliestHostedRuntimeWake([
-    ...(input.extraCandidates ?? []),
-    {
-      at: systemMailboxWake.at,
-      reason: systemMailboxWake.reason,
-    },
-    {
-      at: input.mailboxImportRetryAt ?? null,
-      reason: input.mailboxImportRetryAt ? "mailbox" : null,
-    },
-    {
-      at: outboxWakeAt,
-      reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-    },
-    {
-      at: pendingAssistantInputWakeAt,
-      reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-    },
-    {
-      at: providerCleanupWakeAt,
-      reason: providerCleanupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-    },
-    {
-      at: assistantCronWake.at,
-      reason: assistantCronWake.reason,
-    },
-  ]);
+  const selectedWake = assistantCronWake.dueNow
+    ? {
+        nextWakeAt: assistantCronWake.at,
+        nextWakeReason: assistantCronWake.reason,
+      }
+    : selectEarliestHostedRuntimeWake([
+        ...(input.extraCandidates ?? []),
+        {
+          at: systemMailboxWake.at,
+          reason: systemMailboxWake.reason,
+        },
+        {
+          at: input.mailboxImportRetryAt ?? null,
+          reason: input.mailboxImportRetryAt ? "mailbox" : null,
+        },
+        {
+          at: outboxWakeAt,
+          reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+        },
+        {
+          at: pendingAssistantInputWakeAt,
+          reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+        },
+        {
+          at: providerCleanupWakeAt,
+          reason: providerCleanupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+        },
+        {
+          at: assistantCronWake.at,
+          reason: assistantCronWake.reason,
+        },
+      ]);
+  return {
+    assistantCronDueNow: assistantCronWake.dueNow,
+    ...selectedWake,
+  };
 }
 
 function hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(
@@ -2606,7 +2616,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
         ]);
         const invocationResult = {
-          ...(foregroundWakeObserved ? { immediateRecheckRequested: true as const } : {}),
+          ...(foregroundWakeObserved || projectedWake.assistantCronDueNow
+            ? { immediateRecheckRequested: true as const }
+            : {}),
           nextWakeAt: returnedWake.nextWakeAt,
           ...(returnedWake.nextWakeReason
             ? { nextWakeReason: returnedWake.nextWakeReason }
@@ -2677,6 +2689,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               `${inputItem.stagePrefix}.checkpoint.prepare`,
               preparationWake ? [preparationWake] : [],
             );
+          }
+          if (projectedWake.assistantCronDueNow) {
+            return { preempted: true, prepared: preparation !== null };
           }
           if (hostAbortObserved || consumeForegroundWake()) {
             return { preempted: true, prepared: preparation !== null };
@@ -2812,6 +2827,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
 
       if (consumeForegroundWake()) {
+        return await returnSystemMailboxModeResult();
+      }
+
+      const initialProjectedWake = await resolveCurrentSystemMailboxModeWake();
+      if (initialProjectedWake.assistantCronDueNow) {
+        if (
+          importOrStartupCheckpointPending
+          || hostedSystemMailboxWakeChangedFromWorkspace({
+            nextWakeAt: initialProjectedWake.nextWakeAt,
+            nextWakeReason: initialProjectedWake.nextWakeReason,
+            workspace: activeWorkspace,
+          })
+        ) {
+          await checkpointSystemMailboxMode(
+            "system_mailbox.checkpoint.due_assistant_handoff",
+          );
+        }
         return await returnSystemMailboxModeResult();
       }
 

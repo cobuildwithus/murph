@@ -13456,14 +13456,10 @@ describe("hosted workspace runtime entrypoint", () => {
         title: "Synthetic due reminder",
         vaultRoot,
       });
-      mocks.getAssistantCronStatus.mockResolvedValueOnce({
-        dueJobs: 1,
-        enabledJobs: 1,
-        nextRunAt: "2026-04-27T13:59:30.000Z",
-        runningJobs: 0,
-        totalJobs: 1,
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/due-assistant-system-handoff-before.bundle.json",
+        vaultRoot,
       });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -13487,6 +13483,7 @@ describe("hosted workspace runtime entrypoint", () => {
             throw new Error("No mailbox items should be imported for this handoff.");
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
             workspacePort: createWorkspacePort({
@@ -13495,6 +13492,7 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState({
                 nextWakeAt: staleDeviceSyncWakeAt,
                 nextWakeReason: "device-sync.reconcile",
+                snapshotRef: restoredWorkspace.snapshotRef,
                 version: "0",
               }),
             }),
