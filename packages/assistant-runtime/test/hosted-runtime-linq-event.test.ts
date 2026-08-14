@@ -461,7 +461,8 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       directLocatorAllowed: false,
       directLocatorPresent: true,
       failureCode: "metadata_fetch_failed",
-      errorCause: "fetch failed",
+      errorCause:
+        "Linq request GET /attachments/[attachment] failed before a response was returned.",
       errorDetailPresent: true,
       errorRetryable: true,
       metadataLocatorAllowed: false,
@@ -896,8 +897,13 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
     process.env.LINQ_API_TOKEN = "linq-token";
 
+    let markFetchStarted: (() => void) | null = null;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
     const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
+        markFetchStarted?.();
         init?.signal?.addEventListener(
           "abort",
           () => reject(new Error(String(init.signal?.reason ?? "aborted"))),
@@ -916,6 +922,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       type: "voice_memo",
     }, controller.signal);
 
+    await fetchStarted;
     controller.abort("caller aborted");
 
     await expect(downloadPromise).resolves.toBeNull();

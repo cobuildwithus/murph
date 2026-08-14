@@ -2264,16 +2264,16 @@ function matchesRegisteredProviderHttpException(
 
 const officialSdkFetchHookApprovals = Object.freeze([
   {
-    functionName: "createDatabaseHealthLinqFetch",
+    functionName: "createOperatorLinqFetch",
     implementationSha256:
-      "d18dae9e8a7ba1e0df91be68a27f7de6b7b68c2de51542c016915e4541381c4d",
+      "db8252a4862fc54c7992ef719a4dedddcfc250e34a8ad6a9b77e1081cab8ce18",
     moduleName: "@linqapp/sdk",
     providerId: "linq",
-    relativePath: "apps/cloudflare/src/database-health/monitor.ts",
+    relativePath: "apps/cloudflare/src/operator-alert/linq.ts",
     transportPath: "fetchImplementation",
-    wiringFunctionName: "createDatabaseHealthLinqClient",
+    wiringFunctionName: "createOperatorLinqClient",
     wiringImplementationSha256:
-      "78030dc6cae7e6ddba681fd53586224db8c66bbaa94eff2270c8635c673923d7",
+      "48f6cde07d60d37abe5a9c18f34d9f91bc39e028688c33b535181bc63fd8a48f",
   },
   {
     functionName: "createBoundedComposioFetch",

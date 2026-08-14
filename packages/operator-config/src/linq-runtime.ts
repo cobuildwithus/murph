@@ -2762,6 +2762,7 @@ async function waitForLinqRetryDelay(
 
 function sanitizeLinqPathForDiagnostics(path: string): string {
   return normalizeRequiredString(path, 'path')
+    .replace(/\/attachments\/[^/]+/gu, '/attachments/[attachment]')
     .replace(/\/chats\/[^/]+/gu, '/chats/[chat]')
     .replace(/\/messages\/[^/]+/gu, '/messages/[message]')
 }

@@ -48,7 +48,10 @@ const createLinqWebhookSubscription = vi.fn<
   updatedAt: "2026-05-02T00:00:00.000Z",
 }));
 
-vi.mock("@murphai/operator-config/linq-runtime", () => ({
+vi.mock("@murphai/operator-config/linq-runtime", async (importOriginal) => ({
+  ...await importOriginal<
+    typeof import("@murphai/operator-config/linq-runtime")
+  >(),
   createLinqWebhookSubscription,
 }));
 
@@ -560,7 +563,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
 
       expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
       expect(fetchImplementation).toHaveBeenCalledWith(
-        new URL("webhook-subscriptions", "https://linq.example.test/api/partner/v3/"),
+        "https://linq.example.test/api/partner/v3/webhook-subscriptions",
         expect.objectContaining({
           headers: {
             authorization: "Bearer linq-token",

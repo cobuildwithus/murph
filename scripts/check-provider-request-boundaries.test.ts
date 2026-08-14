@@ -235,7 +235,7 @@ describe("check-provider-request-boundaries", () => {
         "const client = new LinqAPIV3({ apiKey: 'test' });",
         "void client;",
       ].join("\n"),
-      "apps/cloudflare/src/database-health/monitor.ts",
+      "apps/cloudflare/src/operator-alert/neutral.ts",
     );
 
     expect(matches).toEqual([]);
@@ -250,7 +250,7 @@ describe("check-provider-request-boundaries", () => {
         "}",
         "void LinqAPIV3;",
       ].join("\n"),
-      "apps/cloudflare/src/database-health/monitor.ts",
+      "apps/cloudflare/src/operator-alert/linq.ts",
     );
 
     expect(matches.map((match) => match.line)).toEqual([3]);
@@ -1270,7 +1270,7 @@ describe("check-provider-request-boundaries", () => {
       {
         after: "redirect: \"follow\",",
         before: "redirect: \"manual\",",
-        path: "apps/cloudflare/src/database-health/monitor.ts",
+        path: "apps/cloudflare/src/operator-alert/linq.ts",
       },
       {
         after: "request,",
@@ -1327,10 +1327,9 @@ describe("check-provider-request-boundaries", () => {
         path: "packages/operator-config/src/linq-runtime.ts",
       },
       {
-        after:
-          "fetch: input.fetchImplementation && createDatabaseHealthLinqFetch(",
-        before: "fetch: createDatabaseHealthLinqFetch(",
-        path: "apps/cloudflare/src/database-health/monitor.ts",
+        after: "fetch: input.fetchImplementation && createOperatorLinqFetch(",
+        before: "fetch: createOperatorLinqFetch(",
+        path: "apps/cloudflare/src/operator-alert/linq.ts",
       },
       {
         after: "baseOptions.adapter = input.fetchImpl as LobAxiosAdapter;",
