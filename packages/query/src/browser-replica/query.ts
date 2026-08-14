@@ -72,6 +72,7 @@ export function createBrowserVaultProjectionQueryClient(
 function normalizeBrowserVaultReplica(replica: BrowserVaultReplica): BrowserVaultQueryClient["replica"] {
   return {
     ...replica,
+    experimentOutcomes: replica.experimentOutcomes ?? [],
     experimentRunCards: replica.experimentRunCards ?? [],
     hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
   };

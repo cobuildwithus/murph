@@ -37,7 +37,6 @@ export interface BrowserVaultCoreShard extends Pick<
   BrowserVaultReplica,
   | "assistantSummary"
   | "entities"
-  | "experimentOutcomes"
   | "personalPatterns"
   | "policy"
   | "timelineRows"
@@ -80,6 +79,7 @@ export interface BrowserVaultMetricsShard extends Pick<
   | "metricSelectionRows"
   | "sourceHealthRows"
 > {
+  experimentOutcomes: NonNullable<BrowserVaultReplica["experimentOutcomes"]>;
   identity: BrowserVaultReplicaShardIdentity;
   metricDirectory: BrowserVaultMetricDirectoryEntry[];
   metricRowCount: number;
@@ -159,7 +159,6 @@ export async function splitBrowserVaultReplica(
     core: {
       assistantSummary: replica.assistantSummary,
       entities: replica.entities,
-      ...(replica.experimentOutcomes === undefined ? {} : { experimentOutcomes: replica.experimentOutcomes }),
       experimentRunCards: replica.experimentRunCards ?? [],
       hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
       identity,
@@ -172,6 +171,7 @@ export async function splitBrowserVaultReplica(
     labs: { identity, labResultRows: replica.labResultRows, schema: BROWSER_VAULT_LABS_SHARD_SCHEMA },
     metricBuckets: emptyBuckets,
     metrics: {
+      experimentOutcomes: replica.experimentOutcomes ?? [],
       identity,
       metricDirectory,
       metricGoalProgressRows: replica.metricGoalProgressRows,
@@ -199,7 +199,6 @@ export function assembleBrowserVaultCoreReplica(core: BrowserVaultCoreShard): Br
   return {
     assistantSummary: core.assistantSummary,
     entities: core.entities,
-    ...(core.experimentOutcomes === undefined ? {} : { experimentOutcomes: core.experimentOutcomes }),
     experimentRunCards: core.experimentRunCards,
     generatedAt: identity.generatedAt,
     ...(identity.generation === undefined ? {} : { generation: identity.generation }),
@@ -222,6 +221,7 @@ export function assembleBrowserVaultMetricsIndexReplica(
   requireMatchingIdentity(core.identity, metrics.identity, "metrics index");
   return {
     ...assembleBrowserVaultCoreReplica(core),
+    experimentOutcomes: metrics.experimentOutcomes,
     metricGoalProgressRows: metrics.metricGoalProgressRows,
     metricSelectionRows: metrics.metricSelectionRows,
     sourceHealthRows: metrics.sourceHealthRows,

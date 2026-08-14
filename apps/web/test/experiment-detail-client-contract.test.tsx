@@ -391,7 +391,6 @@ function createExperimentRunCardClient(status: BrowserVaultExperimentRunCardStat
   const core: BrowserVaultCoreShard = {
     assistantSummary: { highlights: [], latestDate: null },
     entities: [],
-    experimentOutcomes: [],
     experimentRunCards: [{
       id: "run_status",
       lookupKeys: {

@@ -343,7 +343,6 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   BrowserVaultReplica,
   | "assistantSummary"
   | "entities"
-  | "experimentOutcomes"
   | "experimentRunCards"
   | "generatedAt"
   | "generation"
@@ -367,18 +366,24 @@ export type BrowserVaultCoreReplica = Omit<
 
 export type BrowserVaultMetricsReplica = BrowserVaultCoreReplica & Pick<
   BrowserVaultReplica,
+  | "experimentOutcomes"
   | "metricGoalProgressRows"
   | "metricRows"
   | "metricSelectionRows"
   | "sourceHealthRows"
->;
+> & {
+  experimentOutcomes: ExperimentOutcome[];
+};
 
 export type BrowserVaultMetricsIndexReplica = BrowserVaultCoreReplica & Pick<
   BrowserVaultReplica,
+  | "experimentOutcomes"
   | "metricGoalProgressRows"
   | "metricSelectionRows"
   | "sourceHealthRows"
->;
+> & {
+  experimentOutcomes: ExperimentOutcome[];
+};
 
 export type BrowserVaultLabsReplica = BrowserVaultCoreReplica & Pick<
   BrowserVaultReplica,
@@ -512,6 +517,7 @@ export interface BrowserVaultLabsQueryClient extends BrowserVaultCoreQueryAccess
 export interface BrowserVaultQueryClient extends BrowserVaultCoreQueryAccess, BrowserVaultMetricsQueryAccess, BrowserVaultLabsQueryAccess {
   capability: "core+metrics+labs";
   replica: BrowserVaultReplica & {
+    experimentOutcomes: ExperimentOutcome[];
     experimentRunCards: BrowserVaultExperimentRunCard[];
     hasLabBiomarkers: boolean;
   };

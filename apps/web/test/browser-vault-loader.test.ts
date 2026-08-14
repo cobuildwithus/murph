@@ -850,6 +850,7 @@ function createShardedReadyFixture(
       schema: "murph.browser-vault-replica.labs.v1",
     },
     metricsIndex: {
+      experimentOutcomes: [],
       identity,
       metricGoalProgressRows: [],
       metricDirectory: [],

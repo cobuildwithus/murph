@@ -131,11 +131,6 @@ export function parseBrowserVaultCoreShard(
     entities: requireArray(record.entities, `${label}.entities`).map((entry, index) =>
       parseEntity(entry, `${label}.entities[${index}]`)
     ),
-    experimentOutcomes: record.experimentOutcomes === undefined
-      ? []
-      : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
-          experimentOutcomeSchema.parse(entry)
-        ),
     experimentRunCards: requireArray(
       record.experimentRunCards,
       `${label}.experimentRunCards`,
@@ -318,6 +313,10 @@ export function parseBrowserVaultMetricsShard(
   requireExpectedSchema(record.schema, BROWSER_VAULT_METRICS_SHARD_SCHEMA, `${label}.schema`);
 
   return {
+    experimentOutcomes: requireArray(
+      record.experimentOutcomes,
+      `${label}.experimentOutcomes`,
+    ).map((entry) => experimentOutcomeSchema.parse(entry)),
     identity: parseShardIdentity(record.identity, `${label}.identity`),
     metricGoalProgressRows: requireArray(
       record.metricGoalProgressRows,

@@ -180,6 +180,127 @@ test("exact experiment metric demand is not bounded by the 24-card display proje
   ), true);
 });
 
+test("experiment metric demand follows the saved outcome used by results and run cards", async () => {
+  const legacyId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FA1";
+  const currentId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FA2";
+  const activeId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FA3";
+  const legacyOutcome = createMetricOutcome({
+    biomarkerKey: "biomarker:deep-sleep-minutes",
+    experimentId: legacyId,
+    outcomeId: "outcome-legacy-demand",
+    schemaVersion: "murph.experiment-outcome.v1",
+    slug: "legacy-demand",
+  });
+  const currentOutcome = createMetricOutcome({
+    biomarkerKey: "biomarker:deep-sleep-minutes",
+    experimentId: currentId,
+    outcomeId: "outcome-current-demand",
+    schemaVersion: "murph.experiment-outcome.v2",
+    slug: "current-demand",
+  });
+  const createRun = (input: {
+    id: string;
+    outcome?: ExperimentOutcome;
+    slug: string;
+    status: "active" | "completed";
+  }) => {
+    const frontmatter = {
+      analysisPlan: {
+        desiredDirection: "decrease" as const,
+        primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      },
+      experimentId: input.id,
+      ...(input.outcome
+        ? {
+            outcomeRef: {
+              generatedAt: input.outcome.generatedAt,
+              outcomeId: input.outcome.outcomeId!,
+            },
+          }
+        : {}),
+      runPlan: {
+        baselineEnd: "2026-04-01",
+        baselineStart: "2026-04-01",
+        interventionEnd: "2026-04-02",
+        interventionStart: "2026-04-02",
+      },
+      slug: input.slug,
+      startedOn: "2026-04-01",
+      status: input.status,
+    };
+    return createEntity("experiment", input.id, {
+      date: "2026-04-02",
+      experimentSlug: input.slug,
+      frontmatter,
+      kind: "experiment",
+      occurredAt: "2026-04-02T12:00:00.000Z",
+      status: input.status,
+      title: input.slug,
+    });
+  };
+  const replica = await createBrowserVaultReplica({
+    experimentOutcomes: [legacyOutcome, currentOutcome],
+    generatedAt: "2026-04-03T12:00:00.000Z",
+    metricPoints: [
+      createMetricPoint({
+        biomarkerKey: "biomarker:deep-sleep-minutes",
+        effectiveDate: "2026-04-02",
+        metricKey: "deep-sleep-minutes",
+        recordId: "saved-deep-sleep",
+        unit: "min",
+        value: 58,
+      }),
+      createMetricPoint({
+        biomarkerKey: "biomarker:resting-heart-rate",
+        effectiveDate: "2026-04-02",
+        metricKey: "resting-heart-rate",
+        recordId: "active-resting-heart-rate",
+        unit: "bpm",
+        value: 58,
+      }),
+    ],
+    sourceBundleHash: "e".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createRun({ id: legacyId, outcome: legacyOutcome, slug: "legacy-demand", status: "completed" }),
+        createRun({ id: currentId, outcome: currentOutcome, slug: "current-demand", status: "completed" }),
+        createRun({ id: activeId, slug: "active-demand", status: "active" }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://saved-outcome-demand",
+    }),
+  });
+  const client = createBrowserVaultQueryClient(replica);
+  const deepSleepBucket = await getBrowserVaultMetricBucketId("deep-sleep-minutes");
+  const restingHeartRateBucket = await getBrowserVaultMetricBucketId("resting-heart-rate");
+  assert.notEqual(deepSleepBucket, restingHeartRateBucket);
+
+  assert.deepEqual(
+    selectBrowserVaultExperimentMetricKeys(client, { experimentId: legacyId }),
+    ["deep-sleep-minutes"],
+  );
+  assert.deepEqual(
+    selectBrowserVaultExperimentMetricKeys(client, { experimentId: currentId }),
+    [],
+  );
+  assert.deepEqual(
+    selectBrowserVaultExperimentMetricKeys(client, { experimentId: activeId }),
+    ["resting-heart-rate"],
+  );
+  assert.deepEqual(
+    replica.experimentRunCards?.find((card) => card.id === legacyId)?.requiredMetricBuckets,
+    [deepSleepBucket],
+  );
+  assert.deepEqual(
+    replica.experimentRunCards?.find((card) => card.id === currentId)?.requiredMetricBuckets,
+    [],
+  );
+  assert.deepEqual(
+    replica.experimentRunCards?.find((card) => card.id === activeId)?.requiredMetricBuckets,
+    [restingHeartRateBucket],
+  );
+});
+
 test("browser vault replicas preserve habitat facts for coverage derivation", async () => {
   const indicators = {
     darkness: "blackout",
@@ -1103,6 +1224,72 @@ function createExperimentOutcome(): ExperimentOutcome {
       baselineStart: "2026-04-01",
       interventionEnd: "2026-04-20",
       interventionStart: "2026-04-08",
+    },
+  };
+}
+
+function createMetricOutcome(input: {
+  biomarkerKey: "biomarker:deep-sleep-minutes";
+  experimentId: string;
+  outcomeId: string;
+  schemaVersion: ExperimentOutcome["schemaVersion"];
+  slug: string;
+}): ExperimentOutcome {
+  const points = input.schemaVersion === "murph.experiment-outcome.v2"
+    ? [
+        { date: "2026-04-01", phase: "baseline" as const, unit: "min", value: 62 },
+        { date: "2026-04-02", phase: "intervention" as const, unit: "min", value: 58 },
+      ]
+    : undefined;
+  return {
+    adherenceSummary: {
+      completedSessions: 1,
+      minimumUsefulSessions: 1,
+      status: "met_target",
+      targetSessions: 1,
+    },
+    asOf: "2026-04-02",
+    commonsProtocolRef: null,
+    conclusion: {
+      caveats: [],
+      headline: "Saved deep-sleep result",
+      plainLanguage: "The immutable result owns this metric selection.",
+    },
+    confidence: { level: "medium", reasons: ["Two daily measurements."] },
+    confounders: [],
+    effectiveProtocolSnapshot: null,
+    experiment: {
+      id: input.experimentId,
+      slug: input.slug,
+      status: "completed",
+      title: input.slug,
+    },
+    generatedAt: "2026-04-03T12:00:00.000Z",
+    metricResults: [{
+      baseline: { daysWithData: 1, mean: 62, totalDays: 1, unit: "min" },
+      baselineDayCount: 1,
+      baselineMean: 62,
+      biomarkerKey: input.biomarkerKey,
+      completeness: "good",
+      deltaAbs: -4,
+      deltaPct: -6.45,
+      expectedDirection: "decrease",
+      intervention: { daysWithData: 1, mean: 58, totalDays: 1, unit: "min" },
+      interventionDayCount: 1,
+      interventionMean: 58,
+      label: "Deep Sleep Minutes",
+      movedAsExpected: true,
+      ...(points ? { points } : {}),
+      unit: "min",
+    }],
+    outcomeId: input.outcomeId,
+    protocolRef: null,
+    schemaVersion: input.schemaVersion,
+    windows: {
+      baselineEnd: "2026-04-01",
+      baselineStart: "2026-04-01",
+      interventionEnd: "2026-04-02",
+      interventionStart: "2026-04-02",
     },
   };
 }

@@ -526,7 +526,7 @@ function createReplica(): BrowserVaultReplica {
       latestDate: "2026-08-12",
     },
     entities: [],
-    experimentOutcomes: [],
+    experimentOutcomes: [createExportOutcome()],
     experimentRunCards: [],
     generatedAt: "2026-08-13T12:00:00.000Z",
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
@@ -583,5 +583,42 @@ function createMetricRow(
     unit: "count",
     value: sequence,
     valueLabel: null,
+  };
+}
+
+function createExportOutcome(): NonNullable<BrowserVaultReplica["experimentOutcomes"]>[number] {
+  return {
+    adherenceSummary: {
+      completedSessions: 1,
+      minimumUsefulSessions: 1,
+      status: "met_target",
+      targetSessions: 1,
+    },
+    asOf: "2026-08-12",
+    commonsProtocolRef: null,
+    conclusion: {
+      caveats: [],
+      headline: "Saved export result",
+      plainLanguage: "The complete export preserves the saved result.",
+    },
+    confidence: { level: "medium", reasons: ["Saved evidence."] },
+    confounders: [],
+    experiment: {
+      id: "exp_01ARZ3NDEKTSV4RRFFQ69G5FA6",
+      slug: "saved-export-result",
+      status: "completed",
+      title: "Saved export result",
+    },
+    generatedAt: "2026-08-13T12:00:00.000Z",
+    metricResults: [],
+    outcomeId: "outcome-export-result",
+    protocolRef: null,
+    schemaVersion: "murph.experiment-outcome.v1",
+    windows: {
+      baselineEnd: "2026-08-11",
+      baselineStart: "2026-08-11",
+      interventionEnd: "2026-08-12",
+      interventionStart: "2026-08-12",
+    },
   };
 }

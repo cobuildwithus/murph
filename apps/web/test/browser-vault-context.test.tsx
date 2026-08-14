@@ -937,9 +937,111 @@ test("experiment deep links load core and metrics index before exact run-card bu
   await rendered.cleanup();
 });
 
-test("experiment routes derive one exact bucket from an overflow core entity without a run card", async () => {
+test("current saved outcomes render from the metrics index without a bucket follow-up", async () => {
+  mocks.usePathname.mockReturnValue("/experiments/runs/run_current");
+  const savedExperimentId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FA5";
+  const outcome = createExperimentDemandOutcome({
+    experimentId: savedExperimentId,
+    outcomeId: "outcome-current-demand",
+    schemaVersion: "murph.experiment-outcome.v2",
+    slug: "current-demand",
+  });
+  const replica = createReplica({
+    entities: [{
+      attributes: {
+        analysisPlan: {
+          desiredDirection: "decrease",
+          primaryBiomarkerKey: "biomarker:resting-heart-rate",
+        },
+        experimentId: savedExperimentId,
+        outcomeRef: {
+          generatedAt: outcome.generatedAt,
+          outcomeId: outcome.outcomeId!,
+        },
+        runPlan: {
+          baselineEnd: "2026-03-07",
+          baselineStart: "2026-03-01",
+          interventionEnd: "2026-03-14",
+          interventionStart: "2026-03-08",
+        },
+        slug: "current-demand",
+        startedOn: "2026-03-01",
+        status: "completed",
+      },
+      bodyPreview: null,
+      date: "2026-03-14",
+      experimentSlug: "current-demand",
+      family: "experiment",
+      id: "run_current",
+      kind: "experiment",
+      links: [],
+      lookupIds: ["run_current", "current-demand"],
+      occurredAt: "2026-03-14T12:00:00.000Z",
+      recordClass: "bank",
+      status: "completed",
+      stream: null,
+      tags: [],
+      title: "Current saved outcome",
+    }],
+    experimentOutcomes: [outcome],
+    experimentRunCards: [],
+  });
+  const ref = await createShardedReplicaRef(replica);
+  const shardSet = await splitBrowserVaultReplica(replica);
+  const encoded = {
+    core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
+    metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
+  };
+  const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: ref,
+    shards: {
+      core: createEncryptedShardResponse(ref, "core"),
+      metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
+    },
+    state: "ready",
+  }));
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockImplementation(({ aad }: {
+    aad: { shard?: string };
+  }) => {
+    if (aad.shard === "core") return Promise.resolve(encoded.core);
+    if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
+    throw new Error("Unexpected encrypted browser-vault current-outcome child.");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultExperimentResultDemandProbe, {
+        experimentId: "run_current",
+        label: "current",
+      }),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, `current:ready:loaded:${savedExperimentId}`);
+  assert.equal(fetchMock.mock.calls.length, 1);
+  const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+  assert.deepEqual(request.requestedShards, ["core", "metricsIndex"]);
+  assert.equal(request.requestedMetricBuckets, undefined);
+
+  await rendered.cleanup();
+});
+
+test("overflow experiment routes derive demand from the immutable legacy outcome", async () => {
   mocks.usePathname.mockReturnValue("/experiments/runs/run_overflow");
-  const targetBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
+  const targetBucketId = await getBrowserVaultMetricBucketId("deep-sleep-minutes");
+  const mutableEntityBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
+  assert.notEqual(targetBucketId, mutableEntityBucketId);
+  const savedExperimentId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FA4";
+  const legacyOutcome = createExperimentDemandOutcome({
+    experimentId: savedExperimentId,
+    outcomeId: "outcome-overflow-legacy",
+    schemaVersion: "murph.experiment-outcome.v1",
+    slug: "overflow-protocol-slug",
+  });
   const entities = Array.from({ length: 25 }, (_, index) => {
     const id = index === 24 ? "run_overflow" : `run_${index}`;
     const slug = index === 24 ? "overflow-protocol-slug" : `protocol-${index}`;
@@ -952,6 +1054,15 @@ test("experiment routes derive one exact bucket from an overflow core entity wit
         commonsProtocolRef: {
           key: index === 24 ? "overflow-public-protocol" : `public-${index}`,
         },
+        ...(index === 24
+          ? {
+              experimentId: savedExperimentId,
+              outcomeRef: {
+                generatedAt: legacyOutcome.generatedAt,
+                outcomeId: legacyOutcome.outcomeId!,
+              },
+            }
+          : {}),
         runPlan: {
           baselineEnd: "2026-03-07",
           baselineStart: "2026-03-01",
@@ -959,7 +1070,7 @@ test("experiment routes derive one exact bucket from an overflow core entity wit
           interventionStart: "2026-03-08",
         },
         startedOn: "2026-03-01",
-        status: "active",
+        status: index === 24 ? "completed" : "active",
       },
       bodyPreview: null,
       date: `2026-04-${String(25 - index).padStart(2, "0")}`,
@@ -971,7 +1082,7 @@ test("experiment routes derive one exact bucket from an overflow core entity wit
       lookupIds: [id, slug],
       occurredAt: `2026-04-${String(25 - index).padStart(2, "0")}T12:00:00.000Z`,
       recordClass: "bank" as const,
-      status: "active",
+      status: index === 24 ? "completed" : "active",
       stream: null,
       tags: [],
       title: `Experiment ${index}`,
@@ -998,25 +1109,26 @@ test("experiment routes derive one exact bucket from an overflow core entity wit
   }));
   const replica = createReplica({
     entities,
+    experimentOutcomes: [legacyOutcome],
     experimentRunCards,
     metricRows: [{
-      biomarkerKey: "biomarker:resting-heart-rate",
+      biomarkerKey: "biomarker:deep-sleep-minutes",
       comparator: null,
       confidence: "high",
       context: {},
       date: "2026-03-10",
       grain: "day",
-      id: "metric-row:overflow-rhr",
-      metricKey: "resting-heart-rate",
+      id: "metric-row:overflow-deep-sleep",
+      metricKey: "deep-sleep-minutes",
       observedAt: "2026-03-10T12:00:00.000Z",
-      pointIds: ["point-overflow-rhr"],
-      recordIds: ["record-overflow-rhr"],
+      pointIds: ["point-overflow-deep-sleep"],
+      recordIds: ["record-overflow-deep-sleep"],
       rowSchema: "murph.browser-vault.metric-row.v1",
       sourceFamily: "sample",
       sourceKind: "wearable-summary",
       sourceLabel: "Device",
       statistic: "value",
-      unit: "bpm",
+      unit: "min",
       value: 60,
       valueLabel: null,
     }],
@@ -1087,9 +1199,9 @@ test("experiment routes derive one exact bucket from an overflow core entity wit
     { requireButton: false },
   );
 
-  await waitForText(rendered.container, "exact:ready:loaded:run_overflow");
-  await waitForText(rendered.container, "slug:ready:loaded:run_overflow");
-  await waitForText(rendered.container, "protocol:ready:loaded:run_overflow");
+  await waitForText(rendered.container, `exact:ready:loaded:${savedExperimentId}`);
+  await waitForText(rendered.container, `slug:ready:loaded:${savedExperimentId}`);
+  await waitForText(rendered.container, `protocol:ready:loaded:${savedExperimentId}`);
   await waitForText(rendered.container, "absent:ready:loaded:not-found");
   assert.equal(fetchMock.mock.calls.length, 2);
   const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
@@ -4467,5 +4579,71 @@ function createReplica(overrides: Partial<BrowserVaultReplica> = {}): BrowserVau
     weeklySampleSummaries: [],
     ...overrides,
     labResultRows: overrides.labResultRows ?? [],
+  };
+}
+
+function createExperimentDemandOutcome(input: {
+  experimentId: string;
+  outcomeId: string;
+  schemaVersion: "murph.experiment-outcome.v1" | "murph.experiment-outcome.v2";
+  slug: string;
+}): NonNullable<BrowserVaultReplica["experimentOutcomes"]>[number] {
+  return {
+    adherenceSummary: {
+      completedSessions: 1,
+      minimumUsefulSessions: 1,
+      status: "met_target",
+      targetSessions: 1,
+    },
+    asOf: "2026-03-14",
+    commonsProtocolRef: null,
+    conclusion: {
+      caveats: [],
+      headline: "Saved deep-sleep result",
+      plainLanguage: "The saved outcome keeps its original biomarker identity.",
+    },
+    confidence: { level: "medium", reasons: ["Two measured windows."] },
+    confounders: [],
+    effectiveProtocolSnapshot: null,
+    experiment: {
+      id: input.experimentId,
+      slug: input.slug,
+      status: "completed",
+      title: "Saved experiment",
+    },
+    generatedAt: "2026-03-15T12:00:00.000Z",
+    metricResults: [{
+      baseline: { daysWithData: 1, mean: 62, totalDays: 7, unit: "min" },
+      baselineDayCount: 1,
+      baselineMean: 62,
+      biomarkerKey: "biomarker:deep-sleep-minutes",
+      completeness: "partial",
+      deltaAbs: -2,
+      deltaPct: -3.23,
+      expectedDirection: "decrease",
+      intervention: { daysWithData: 1, mean: 60, totalDays: 7, unit: "min" },
+      interventionDayCount: 1,
+      interventionMean: 60,
+      label: "Deep Sleep Minutes",
+      movedAsExpected: true,
+      ...(input.schemaVersion === "murph.experiment-outcome.v2"
+        ? {
+            points: [
+              { date: "2026-03-01", phase: "baseline" as const, unit: "min", value: 62 },
+              { date: "2026-03-08", phase: "intervention" as const, unit: "min", value: 60 },
+            ],
+          }
+        : {}),
+      unit: "min",
+    }],
+    outcomeId: input.outcomeId,
+    protocolRef: null,
+    schemaVersion: input.schemaVersion,
+    windows: {
+      baselineEnd: "2026-03-07",
+      baselineStart: "2026-03-01",
+      interventionEnd: "2026-03-14",
+      interventionStart: "2026-03-08",
+    },
   };
 }

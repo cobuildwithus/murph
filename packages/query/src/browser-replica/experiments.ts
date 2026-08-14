@@ -422,15 +422,34 @@ export function selectBrowserVaultExperimentResults(
 }
 
 /**
- * Resolve the metric series needed by one exact encrypted-core experiment
- * entity. This intentionally does not depend on the bounded run-card list.
+ * Resolve the metric series needed by one exact experiment result. Undefined
+ * means the encrypted metrics index that owns saved outcomes is not loaded yet;
+ * null means no matching experiment exists.
  */
 export function selectBrowserVaultExperimentMetricKeys(
   client: BrowserVaultCoreCapableQueryClient,
   lookup: BrowserVaultExperimentResultsLookup,
-): string[] | null {
+): string[] | null | undefined {
   const entity = findBrowserVaultExperimentRun(client, lookup);
-  return entity ? resolveBrowserVaultExperimentEntityMetricKeys(entity) : null;
+  if (!entity) return null;
+  if (!hasBrowserVaultExperimentOutcomes(client)) return undefined;
+
+  const referencedOutcome = findReferencedExperimentOutcome(client, entity);
+  const persistedOutcome = shouldUseReferencedExperimentOutcome(
+    entity,
+    referencedOutcome,
+  )
+    ? referencedOutcome
+    : null;
+  return persistedOutcome
+    ? resolveBrowserVaultPersistedOutcomeMetricKeys(persistedOutcome)
+    : resolveBrowserVaultExperimentEntityMetricKeys(entity);
+}
+
+function hasBrowserVaultExperimentOutcomes(
+  client: BrowserVaultCoreCapableQueryClient,
+): client is BrowserVaultMetricsCapableQueryClient {
+  return "experimentOutcomes" in client.replica;
 }
 
 export function resolveBrowserVaultExperimentEntityMetricKeys(
@@ -517,9 +536,14 @@ function buildRunContext(
   const sourceStatus = readString(attributes.status) ?? entity.status;
   const liveWindows = readRunWindows(attributes);
   const endedOn = readIsoDate(attributes.endedOn);
+  const persistedOutcome = shouldUseReferencedExperimentOutcome(
+    entity,
+    referencedOutcome,
+  )
+    ? referencedOutcome
+    : null;
   const plannedEnd = (referencedOutcome?.windows ?? liveWindows).interventionEnd;
   const endedEarly = endedOn !== null && plannedEnd !== null && endedOn < plannedEnd;
-  const persistedOutcome = endedEarly ? null : referencedOutcome;
   const windows = endedEarly
     ? clampRunWindowsToTerminalDate(liveWindows, endedOn)
     : persistedOutcome?.windows ?? liveWindows;
@@ -702,6 +726,26 @@ function findReferencedExperimentOutcome(
     outcome.experiment.id === experimentId &&
     outcome.experiment.slug === experimentSlug
   ) ?? null;
+}
+
+function shouldUseReferencedExperimentOutcome(
+  entity: BrowserVaultEntity,
+  outcome: ExperimentOutcome | null,
+): outcome is ExperimentOutcome {
+  if (!outcome) return false;
+  const endedOn = readIsoDate(entity.attributes.endedOn);
+  const plannedEnd = outcome.windows.interventionEnd;
+  return endedOn === null || plannedEnd === null || endedOn >= plannedEnd;
+}
+
+function resolveBrowserVaultPersistedOutcomeMetricKeys(
+  outcome: ExperimentOutcome,
+): string[] {
+  return uniqueStrings(outcome.metricResults.flatMap((metric) => {
+    if (metric.points !== undefined) return [];
+    const sourceMetric = resolveBiomarkerMetricSource(metric.biomarkerKey);
+    return sourceMetric ? [sourceMetric.metricKey] : [];
+  })).sort();
 }
 
 function resolveSavedOutcomeStatus(

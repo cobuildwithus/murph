@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import type { ExperimentOutcome } from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
@@ -28,6 +29,8 @@ import {
 
 test("browser vault replicas split into independently parseable core, metrics index, buckets, and labs shards", async () => {
   const replica = createReplica();
+  const outcome = createCurrentOutcome(0);
+  replica.experimentOutcomes = [outcome];
   replica.entities.push({
     attributes: {},
     bodyPreview: "A private note preview.",
@@ -90,8 +93,10 @@ test("browser vault replicas split into independently parseable core, metrics in
   assert.equal("metricRows" in shards.core, false);
   assert.equal("labResultRows" in shards.core, false);
   assert.equal("searchRows" in shards.core, false);
+  assert.equal("experimentOutcomes" in shards.core, false);
   assert.equal("entities" in shards.metrics, false);
   assert.equal("metricRows" in shards.metrics, false);
+  assert.deepEqual(shards.metrics.experimentOutcomes, [outcome]);
   assert.equal(shards.metrics.metricRowCount, 1);
   assert.deepEqual(shards.metrics.metricDirectory, [{
     bucketId: await getBrowserVaultMetricBucketId("steps"),
@@ -103,6 +108,18 @@ test("browser vault replicas split into independently parseable core, metrics in
   assert.equal("rowSchema" in physicalRow, false);
   assert.equal("metricKey" in physicalRow, false);
   assert.equal(shards.metricBuckets[stepsBucketId].schema, BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA);
+
+  const outcomeHeavyShards = await splitBrowserVaultReplica({
+    ...replica,
+    experimentOutcomes: Array.from({ length: 10 }, (_, index) =>
+      createCurrentOutcome(index)
+    ),
+  });
+  assert.equal(JSON.stringify(outcomeHeavyShards.core), JSON.stringify(shards.core));
+  assert.ok(
+    JSON.stringify(outcomeHeavyShards.metrics).length
+      > JSON.stringify(shards.metrics).length,
+  );
 
   const serialized = JSON.parse(JSON.stringify(shards)) as unknown;
   const parsedShards = await parseBrowserVaultReplicaShards(serialized);
@@ -314,5 +331,63 @@ function createReplica(): BrowserVaultReplica {
     sourceHealthRows: [],
     timelineRows: [],
     weeklySampleSummaries: [],
+  };
+}
+
+function createCurrentOutcome(sequence: number): ExperimentOutcome {
+  const suffix = String(sequence);
+  return {
+    adherenceSummary: {
+      completedSessions: 1,
+      minimumUsefulSessions: 1,
+      status: "met_target",
+      targetSessions: 1,
+    },
+    asOf: "2026-08-12",
+    commonsProtocolRef: null,
+    conclusion: {
+      caveats: [],
+      headline: "Saved result",
+      plainLanguage: "The saved analysis retained its daily points.",
+    },
+    confidence: { level: "medium", reasons: ["Two days of evidence."] },
+    confounders: [],
+    effectiveProtocolSnapshot: null,
+    experiment: {
+      id: `exp_01ARZ3NDEKTSV4RRFFQ69G5FA${suffix}`,
+      slug: `saved-outcome-${suffix}`,
+      status: "completed",
+      title: `Saved outcome ${suffix}`,
+    },
+    generatedAt: "2026-08-13T12:00:00.000Z",
+    metricResults: [{
+      baseline: { daysWithData: 1, mean: 62, totalDays: 1, unit: "bpm" },
+      baselineDayCount: 1,
+      baselineMean: 62,
+      biomarkerKey: "biomarker:resting-heart-rate",
+      completeness: "good",
+      deltaAbs: -4,
+      deltaPct: -6.45,
+      expectedDirection: "decrease",
+      intervention: { daysWithData: 1, mean: 58, totalDays: 1, unit: "bpm" },
+      interventionDayCount: 1,
+      interventionMean: 58,
+      label: "Resting heart rate",
+      movedAsExpected: true,
+      points: [
+        { date: "2026-08-11", phase: "baseline", unit: "bpm", value: 62 },
+        { date: "2026-08-12", phase: "intervention", unit: "bpm", value: 58 },
+      ],
+      unit: "bpm",
+    }],
+    outcomeId: `outcome-${suffix}`,
+    protocolRef: null,
+    schemaVersion: "murph.experiment-outcome.v2",
+    windows: {
+      baselineEnd: "2026-08-11",
+      baselineStart: "2026-08-11",
+      interventionEnd: "2026-08-12",
+      interventionStart: "2026-08-12",
+    },
   };
 }

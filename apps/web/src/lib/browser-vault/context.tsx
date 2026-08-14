@@ -1025,6 +1025,9 @@ export function useBrowserVaultExperimentMetricBucketDemand(input: {
   );
   const entityMetricKeysLoaded = useBrowserVaultMetricKeyDemand(entityMetricKeys ?? []);
   return client !== null && (
-    card ? cardBucketsLoaded : entityMetricKeys === null || entityMetricKeysLoaded
+    card
+      ? cardBucketsLoaded
+      : entityMetricKeys === null
+        || (entityMetricKeys !== undefined && entityMetricKeysLoaded)
   );
 }

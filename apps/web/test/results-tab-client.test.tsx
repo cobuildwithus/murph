@@ -233,7 +233,6 @@ function createTestCoreClient() {
   const core: BrowserVaultCoreShard = {
     assistantSummary: { highlights: [], latestDate: null },
     entities: [],
-    experimentOutcomes: [],
     experimentRunCards: [],
     hasLabBiomarkers: false,
     identity: {

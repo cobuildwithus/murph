@@ -114,12 +114,13 @@ Updated: 2026-08-13
   encryption. During the mixed-version window, the ref also names the existing
   identity monolith; request-serving code selects ciphertext and never decrypts
   health data.
-- `core` owns metadata, entities, experiment outcomes, bounded experiment run
-  cards, personal patterns, derived search, timeline, and weekly summaries.
-  `metrics-index` owns metric selections, goal progress, source health, and the
-  exact metric-key-to-bucket directory. `labs` owns lab-result rows. Metric
-  history exists only in the 32 bucket children; there is no all-row metrics
-  child.
+- `core` owns metadata, entities, bounded experiment run cards, personal
+  patterns, derived search, timeline, and weekly summaries. `metrics-index`
+  owns saved experiment outcomes, metric selections, goal progress, source
+  health, and the exact metric-key-to-bucket directory. `labs` owns lab-result
+  rows. Metric history exists only in the 32 bucket children; there is no
+  all-row metrics child. Saved outcome history therefore never enters a
+  core-only route.
 - `/home` and the exact `/experiments` list now use bounded producer-owned run
   card summaries in `core`, preserving current status, cadence, results, and
   public-protocol decoration without raw metric history. `/training`,
@@ -170,3 +171,10 @@ Updated: 2026-08-13
   Interactive decrypt/decompress work is capped at four concurrent children.
   The all-bucket export response is about 871 KB and retains at most one parsed
   metric bucket at a time.
+- ReviewGPT round 4 identified two accepted demand-boundary defects. The
+  remediation moves saved outcomes from universal core into the existing
+  metrics index, and derives both card and cardless experiment metric demand
+  from the exact saved outcome when one is renderable. Current outcomes carry
+  their own daily points and request no live bucket; legacy outcomes request
+  buckets from their saved biomarker identities; outcome-less runs retain the
+  entity-plan fallback.
