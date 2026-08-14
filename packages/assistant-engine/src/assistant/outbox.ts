@@ -717,6 +717,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
+    if (resolvePersistedAssistantOutboxDelivery(intent)) {
+      return {
+        action: 'reconcile' as const,
+        intent,
+        intentPath,
+      }
+    }
+
     if (
       (
         intent.status === 'retryable' ||
@@ -823,6 +831,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: recoveredDelivery,
+          intent: prepared.intent,
+        }),
         delivery: recoveredDelivery,
         intent: prepared.intent,
         intentPath: prepared.intentPath,
@@ -884,6 +896,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: recoveredDelivery,
+          intent: prepared.intent,
+        }),
         delivery: recoveredDelivery,
         intent: prepared.intent,
         intentPath: prepared.intentPath,
@@ -934,6 +950,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(dispatchIntent)
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: reconciledDelivery,
+          intent: dispatchIntent,
+        }),
         delivery: reconciledDelivery,
         intent: dispatchIntent,
         intentPath: dispatchIntentPath,
@@ -2269,6 +2289,15 @@ function resolvePersistedAssistantOutboxDelivery(
   }
 
   return intent.delivery
+}
+
+function resolveRecoveredAssistantOutboxDeliveryCompletedAt(input: {
+  delivery: AssistantChannelDelivery
+  intent: AssistantOutboxIntent
+}): string {
+  return resolvePersistedAssistantOutboxDelivery(input.intent)
+    ? input.intent.updatedAt
+    : input.delivery.sentAt
 }
 
 function shouldFailClosedAssistantOutboxStaleSendingIntent(

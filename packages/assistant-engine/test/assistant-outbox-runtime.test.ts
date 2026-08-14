@@ -2980,6 +2980,237 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('uses the persisted completion checkpoint when crash recovery finalizes delivery', async () => {
+    vi.useFakeTimers()
+    const occurrenceAt = '2026-04-08T01:00:00.000Z'
+    const acceptedMediaAt = '2026-04-08T01:01:00.000Z'
+    const completedAt = '2026-04-08T01:03:00.000Z'
+    const recoveredAt = '2026-04-08T01:13:00.000Z'
+    vi.setSystemTime(new Date(recoveredAt))
+    const { paths, vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-completion-checkpoint-crash-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      instructions: 'Send the hourly checkpoint reminder.',
+      now: new Date(occurrenceAt),
+      route: {
+        ...scaffold.route,
+        channel: 'linq',
+        threadId: 'linq-thread-completion-checkpoint-crash',
+      },
+      schedule: { everyMs: 60 * 60 * 1_000, kind: 'every' },
+      slug: 'completion-checkpoint-crash',
+      title: 'Completion checkpoint crash',
+      vaultRoot,
+    })
+    const seeded = await createIntent(vaultRoot, {
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'linq',
+      createdAt: occurrenceAt,
+      explicitTarget: 'linq-thread-completion-checkpoint-crash',
+      identityId: 'phone_lookup_completion_checkpoint_crash',
+      message: 'Checkpoint recovery reminder',
+      sessionId: 'session-completion-checkpoint-crash',
+      threadId: 'linq-thread-completion-checkpoint-crash',
+      turnId: 'turn-completion-checkpoint-crash',
+    })
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'Send the checkpoint recovery reminder.',
+      provider: 'codex-cli',
+      providerModel: 'gpt-test',
+      sessionId: seeded.sessionId,
+      startedAt: occurrenceAt,
+      turnId: seeded.turnId,
+      vault: vaultRoot,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 1,
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: 'completion-checkpoint-crash',
+        providerMessageId: 'provider-completion-checkpoint-crash',
+        providerThreadId: 'linq-thread-completion-checkpoint-crash',
+        sentAt: acceptedMediaAt,
+        target: 'linq-thread-completion-checkpoint-crash',
+        targetKind: 'thread',
+      }),
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey: 'completion-checkpoint-crash',
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: completedAt,
+      lastError: createConfirmationPendingError(),
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: completedAt,
+    })
+    const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: automation.record.automationId,
+      now: automation.record.updatedAt,
+    })
+    runtimeRecord.updatedAt = occurrenceAt
+    runtimeRecord.state.lastRunAt = occurrenceAt
+    runtimeRecord.state.pendingDeliveryIntentId = seeded.intentId
+    runtimeRecord.state.pendingOccurrenceAt = occurrenceAt
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeRecord],
+      version: 1,
+    })
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date(recoveredAt),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    expect(recovered.intent).toMatchObject({
+      sentAt: completedAt,
+      status: 'sent',
+      updatedAt: completedAt,
+    })
+    expect(recovered.intent.delivery?.sentAt).toBe(acceptedMediaAt)
+    const receipt = await readAssistantTurnReceipt(vaultRoot, seeded.turnId)
+    expect(receipt?.timeline.filter(
+      (event) => event.kind === 'delivery.sent',
+    )).toEqual([
+      expect.objectContaining({ at: completedAt }),
+    ])
+    const diagnosticEvents = (await readFile(paths.diagnosticEventsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { at: string; kind: string })
+    expect(diagnosticEvents).toContainEqual(expect.objectContaining({
+      at: completedAt,
+      kind: 'delivery.sent',
+    }))
+    expect(await readAssistantDiagnosticsSnapshot(vaultRoot)).toMatchObject({
+      lastEventAt: completedAt,
+      updatedAt: completedAt,
+    })
+    const cronRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(cronRuntime.jobs[0]?.state).toMatchObject({
+      lastSucceededAt: completedAt,
+      pendingOccurrenceAt: null,
+    })
+    expect(cronRuntime.jobs[0]?.state.pendingDeliveryIntentId).toBeUndefined()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
+      expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          lastSucceededAt: completedAt,
+          nextRunAt: '2026-04-08T02:03:00.000Z',
+        }),
+      }),
+    )
+  })
+
+  it('retains the completion checkpoint when the post-persistence hook throws', async () => {
+    vi.useFakeTimers()
+    const acceptedMediaAt = '2026-04-08T02:01:00.000Z'
+    const completedAt = '2026-04-08T02:03:00.000Z'
+    const hookFailedAt = '2026-04-08T02:04:00.000Z'
+    vi.setSystemTime(new Date(completedAt))
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-completion-checkpoint-hook-',
+    )
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-08T02:00:00.000Z',
+      explicitTarget: 'linq-thread-completion-checkpoint-hook',
+      identityId: 'phone_lookup_completion_checkpoint_hook',
+      media: [createVoiceMemoMedia()],
+      message: 'Checkpoint hook recovery reminder',
+      sessionId: 'session-completion-checkpoint-hook',
+      threadId: 'linq-thread-completion-checkpoint-hook',
+      turnId: 'turn-completion-checkpoint-hook',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 1,
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageId: 'provider-completion-checkpoint-media',
+        providerMessageIds: ['provider-completion-checkpoint-media'],
+        providerThreadId: 'linq-thread-completion-checkpoint-hook',
+        sentAt: acceptedMediaAt,
+        target: 'linq-thread-completion-checkpoint-hook',
+        targetKind: 'thread',
+      }),
+      deliveryConfirmationPending: false,
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: acceptedMediaAt,
+      lastError: {
+        code: 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
+        message: 'The accepted media awaits its rich-link sibling.',
+      },
+      nextAttemptAt: completedAt,
+      status: 'retryable',
+      updatedAt: acceptedMediaAt,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageId: 'provider-completion-checkpoint-media',
+        providerMessageIds: [
+          'provider-completion-checkpoint-media',
+          'provider-completion-checkpoint-rich-link',
+        ],
+        providerThreadId: 'linq-thread-completion-checkpoint-hook',
+        sentAt: completedAt,
+        target: 'linq-thread-completion-checkpoint-hook',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const postPersistenceError = new Error('post-persistence hook failed')
+
+    const interrupted = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        persistDeliveredIntent: async () => {
+          vi.setSystemTime(new Date(hookFailedAt))
+          throw postPersistenceError
+        },
+      },
+      intentId: seeded.intentId,
+      now: new Date(completedAt),
+      vault: vaultRoot,
+    })
+
+    expect(interrupted.intent).toMatchObject({
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+      updatedAt: completedAt,
+    })
+    expect(interrupted.intent.delivery?.sentAt).toBe(acceptedMediaAt)
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date(hookFailedAt),
+      vault: vaultRoot,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(recovered.intent).toMatchObject({
+      sentAt: completedAt,
+      status: 'sent',
+      updatedAt: completedAt,
+    })
+    expect(recovered.intent.delivery?.sentAt).toBe(acceptedMediaAt)
+  })
+
   it('delivers immediately, reuses sent dedupe hits, and supports queue-only mode', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-deliver-')
     const prepareDispatchIntent = vi.fn(async () => {})

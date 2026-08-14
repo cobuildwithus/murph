@@ -1575,10 +1575,37 @@ describe('assistant auto-reply event-first path', () => {
 
       const successfulDeliveryAt = repeatedNextAttemptAt
       vi.setSystemTime(successfulDeliveryAt)
+      const processTerminated = new Error(
+        'simulated process termination after durable delivery persistence',
+      )
+      await expect(dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq },
+        dispatchHooks: {
+          persistDeliveredIntent: async () => {
+            throw processTerminated
+          },
+          shouldRethrowDispatchError: ({ error }) => error === processTerminated,
+        },
+        intentId: intent.intentId,
+        now: new Date(repeatedNextAttemptAt),
+        vault,
+      })).rejects.toBe(processTerminated)
+      const interrupted = await readAssistantOutboxIntent(vault, intent.intentId)
+      expect(interrupted).toMatchObject({
+        deliveryConfirmationPending: true,
+        status: 'sending',
+        updatedAt: successfulDeliveryAt,
+      })
+      expect(interrupted?.delivery?.sentAt).toBe(firstAcceptedAt)
+
+      const staleRecoveryAt = new Date(
+        Date.parse(successfulDeliveryAt) + 10 * 60 * 1_000,
+      ).toISOString()
+      vi.setSystemTime(staleRecoveryAt)
       const recovered = await dispatchAssistantOutboxIntent({
         dependencies: { sendLinq },
         intentId: intent.intentId,
-        now: new Date(repeatedNextAttemptAt),
+        now: new Date(staleRecoveryAt),
         vault,
       })
       expect(recovered.intent.status).toBe('sent')

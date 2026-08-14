@@ -423,6 +423,9 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       carriesNonConfirmableLinqRichLinkCheckpoint(baseIntent)
     const retainLinqReactionConfirmation =
       hasConcreteLinqMessageReactionReceipt(baseIntent)
+    const preserveDeliveryCompletionCheckpoint =
+      input.deliveryMayHaveSucceeded &&
+      carriesPersistedDeliveryCompletionCheckpoint(baseIntent)
     const attemptCount = baseIntent.attemptCount
     const failedAt = input.failedAt.toISOString()
     const retryExhausted = retryRequested &&
@@ -460,7 +463,9 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
             ? input.deliveryTransportIdempotent
             : (current?.deliveryTransportIdempotent ??
                 input.sending.deliveryTransportIdempotent),
-        updatedAt: failedAt,
+        updatedAt: preserveDeliveryCompletionCheckpoint
+          ? baseIntent.updatedAt
+          : failedAt,
         nextAttemptAt,
         status: abandonedDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
         lastError: deliveryError,
@@ -547,6 +552,17 @@ function carriesNonConfirmableLinqRichLinkCheckpoint(
     delivery?.channel === 'linq' &&
     intent.deliveryConfirmationPending === false &&
     delivery.providerMessageIds?.length === 1
+}
+
+function carriesPersistedDeliveryCompletionCheckpoint(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return intent.status === 'sending' &&
+    intent.delivery !== null &&
+    (
+      intent.deliveryConfirmationPending ||
+      !intent.deliveryTransportIdempotent
+    )
 }
 
 function isAmbiguousDeliveryWithoutProviderIds(input: {

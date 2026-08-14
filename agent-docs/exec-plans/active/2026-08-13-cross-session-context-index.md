@@ -169,6 +169,14 @@ Updated: 2026-08-14
   timestamp only inside the nested delivery while the intent's top-level
   `sentAt` and `updatedAt` record actual completion; no new state, selector
   exception, or migration version is introduced.
+- Final ReviewGPT round 7 found that crash recovery could discard that distinct
+  top-level completion checkpoint, rewrite the intent as a new attempt, and
+  terminalize receipts, diagnostics, and cron state at the earlier nested media
+  acceptance time. The correction recognizes a concrete persisted delivery
+  before mutating dispatch state, passes its existing top-level checkpoint to
+  every recovery terminalization, and retains that checkpoint if the optional
+  post-persistence hook fails. No provider replay or new persisted field is
+  introduced.
 
 ## Verification
 
@@ -207,3 +215,11 @@ Updated: 2026-08-14
   policy, and the full workspace typecheck pass. The repo-tools suite passed
   536 of 541 tests while competing with that workspace typecheck; the five
   process-readiness timeouts then passed in an isolated 48-test rerun.
+- ReviewGPT round 7 remediation: the real Linq generated-image path now stops
+  after durable pending-confirmation persistence and resumes after the stale
+  grace window without another provider call. Focused outbox coverage also
+  proves the same checkpoint survives an ordinary post-persistence hook error,
+  with the original nested media time retained while terminal intent, receipt,
+  diagnostic, cron success, and next-run state derive from actual completion.
+  The three affected Vitest files, assistant-engine typecheck, build, and diff
+  validation pass under Node 24.14.1.
