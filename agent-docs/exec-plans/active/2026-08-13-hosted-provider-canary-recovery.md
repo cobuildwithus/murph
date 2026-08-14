@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -23,8 +23,9 @@ Updated: 2026-08-13
 
 ## Scope
 
-- In scope: the two hosted browser drivers, focused behavioral tests, and their
-  live-canary workflow contract.
+- In scope: the two hosted browser drivers, focused behavioral tests, their
+  live-canary workflow contract, and the public Web Viewport Overflow workflow
+  as the secret-free Ubuntu/Xvfb proof for the protected headed-browser shape.
 - Out of scope: provider business logic, credentials, production auth flows,
   challenge bypasses, and weakening protected-main requirements.
 
@@ -41,8 +42,14 @@ Updated: 2026-08-13
    Mitigation: challenge detection only shortens and classifies failure; success
    still requires the exact Murph callback and persisted connected state.
 2. Risk: a broader Home wait could make Starter proof depend on incidental UI.
-   Mitigation: use the stable PageHeader title owned by the Home route and prove
-   the ordering with a behavioral page double.
+   Mitigation: require the Home-only `Live Well` eyebrow and its sibling
+   `Welcome to Murph` heading, then prove the ordering with a behavioral page
+   double.
+3. Risk: the public Xvfb proof adds a headed-browser failure owner to every pull
+   request and main push.
+   Mitigation: keep the proof secret-free and focused on a real
+   `headless: false` Chromium launch plus page/title round trip, then run the
+   pre-existing marketing overflow gate unchanged afterward.
 
 ## Tasks
 
@@ -62,6 +69,10 @@ Updated: 2026-08-13
 - Do not land a Stripe-only timing workaround based solely on one failed run;
   preserve the real race fix because the current wait observes the old document
   lifecycle rather than the client-router Home commit.
+- Reuse Web Viewport Overflow's existing Ubuntu Chromium installation for the
+  public pre-merge Xvfb proof instead of adding another browser workflow. This
+  intentionally makes the public workflow an owner of the protected canary's
+  virtual-display boundary without exposing provider credentials.
 
 ## Verification
 
@@ -70,3 +81,7 @@ Updated: 2026-08-13
   fresh protected-main live workflows.
 - Expected outcomes: deterministic local proof and actionable, fail-closed live
   provider results without seven-minute opaque waits.
+- Observed before closure: focused runner and workflow tests, affected
+  typechecks, the real Ubuntu headed-Chromium/Xvfb job, exact-head CI, and the
+  preliminary specialist ReviewGPT pass are green. Final ReviewGPT and fresh
+  protected-main live workflows remain required before this plan is complete.
