@@ -151,6 +151,32 @@ describe("hosted-local Junction wearable browser authorization", () => {
     )).resolves.toBeUndefined();
   });
 
+  it("permits a headed non-CI operator to complete a classified challenge", async () => {
+    let atMurph = false;
+    let waits = 0;
+    const config = createConfig({ CI: undefined });
+    const page = {
+      frames: () => [{ url: () => "https://challenges.cloudflare.com/frame" }],
+      title: vi.fn(async () => "Just a moment..."),
+      url: () => atMurph
+        ? "https://app.example.test/home"
+        : "https://id.whoop.com/sign-in",
+      waitForTimeout: vi.fn(async () => {
+        waits += 1;
+        if (waits === 20) {
+          atMurph = true;
+        }
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      config,
+      () => waits * 1_000,
+    )).resolves.toBeUndefined();
+    expect(waits).toBe(20);
+  });
+
   it("requires an OTP up front for headed Oura CI", () => {
     expect(() => createConfig({
       MURPH_E2E_CONNECT_URL:

@@ -191,6 +191,11 @@ async function completeExternalAuthorization(
     });
     if (providerChallenge) {
       noActionObservedAt = null;
+      if (config.manualAuthorizationAllowed) {
+        providerChallengeObservedAt = null;
+        await page.waitForTimeout(1_000);
+        continue;
+      }
       providerChallengeObservedAt ??= now();
       if (now() - providerChallengeObservedAt >= PROVIDER_CHALLENGE_GRACE_MS) {
         throw new Error(
