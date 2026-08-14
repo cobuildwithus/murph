@@ -196,7 +196,10 @@ export async function sendTelegramRichMessage(
   providerMessageIds?: string[]
   target: string
 }> {
-  assertSingleTelegramRichFallbackMessage(input.fallbackMessage)
+  assertSingleTelegramRichFallbackMessage(
+    input.fallbackMessage,
+    input.richMessage.skip_entity_detection === true,
+  )
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -1441,7 +1444,9 @@ async function sendTelegramMessageDetailed(
   const providerMessageIds: string[] = []
   let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
 
-  const renderedMessage = renderMarkdownMessageText(input.message)
+  const renderedMessage = input.protectAutomaticEntities
+    ? { decorations: [], text: input.message }
+    : renderMarkdownMessageText(input.message)
   const chunks = splitDecoratedMessageText(renderedMessage, TELEGRAM_MAX_TEXT_LENGTH)
   const maxDeliveryAttempts = requireTelegramMaxDeliveryAttempts(
     dependencies.maxDeliveryAttempts,
@@ -2311,8 +2316,13 @@ function markTelegramDeliveryAmbiguous(
   })
 }
 
-function assertSingleTelegramRichFallbackMessage(message: string): void {
-  const renderedMessage = renderMarkdownMessageText(message)
+function assertSingleTelegramRichFallbackMessage(
+  message: string,
+  protectAutomaticEntities: boolean,
+): void {
+  const renderedMessage = protectAutomaticEntities
+    ? { decorations: [], text: message }
+    : renderMarkdownMessageText(message)
   const chunks = splitDecoratedMessageText(
     renderedMessage,
     TELEGRAM_MAX_TEXT_LENGTH,

@@ -1095,6 +1095,7 @@ describe('assistant channels runtime seam', () => {
       'https://example.test example.test help@example.test',
       '@helper #topic /start +48 123 456 789',
       '[support](https://support.example.test)',
+      'call(**kwargs, **options)',
     ].join('\n')
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1146,7 +1147,7 @@ describe('assistant channels runtime seam', () => {
       }],
       message_thread_id: 9,
       reply_to_message_id: 42,
-      text: expect.stringContaining('https://example.test'),
+      text: fallbackMessage,
     })
   })
 
