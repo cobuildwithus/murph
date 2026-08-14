@@ -18,6 +18,7 @@ import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboard
 
 import {
   getBrowserVaultMetricBucketId,
+  selectBrowserVaultExperimentMetricKeys,
   type BrowserVaultExperimentRunCardLookup,
   type BrowserVaultLabsCapableQueryClient,
   type BrowserVaultMetricBucketId,
@@ -127,6 +128,18 @@ const DISABLED_BROWSER_VAULT_CONTEXT: BrowserVaultContextValue = {
   status: "empty",
   workspaceVersion: null,
 };
+
+function browserVaultSnapshotCoversDemand(
+  snapshot: BrowserVaultReadySnapshot | null,
+  requestedShards: readonly ("core" | "labs" | "metricsIndex")[],
+  requestedMetricBuckets: readonly BrowserVaultMetricBucketId[],
+): boolean {
+  return snapshot !== null
+    && requestedShards.every((shard) => snapshot.loadedShards.includes(shard))
+    && requestedMetricBuckets.every((bucketId) =>
+      snapshot.loadedMetricBuckets.includes(bucketId)
+    );
+}
 
 export function BrowserVaultProvider({
   children,
@@ -376,8 +389,9 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     (outcome: BrowserVaultWarmLoadOutcome, options: {
       authorityPathname?: string;
       background: boolean;
+      requiredDemand: boolean;
     }) => {
-      const { authorityPathname, background } = options;
+      const { authorityPathname, background, requiredDemand } = options;
       if (outcome.status === "superseded") {
         return;
       }
@@ -420,10 +434,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         }
         return;
       }
-      // A failed background revalidation keeps the ready stale data visible
-      // instead of replacing it with an error-only screen. Foreground loads and
-      // cold mounts with no client still surface the error.
-      if (background && clientRef.current) {
+      // A failed optional revalidation keeps ready stale data visible. A load
+      // that owns currently-required route demand must surface its recoverable
+      // error, while preserving the already-admitted partial client.
+      if (background && clientRef.current && !requiredDemand) {
         return;
       }
       setStatus("error");
@@ -534,6 +548,25 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         return null;
       }
 
+      const currentRouteShards = planBrowserVaultRouteShards(pathname);
+      const currentMetricBuckets = activeMetricBucketDemandRef.current;
+      const currentRequestedShards = currentMetricBuckets.length > 0
+        && !currentRouteShards.includes("metricsIndex")
+        ? [...currentRouteShards, "metricsIndex" as const]
+        : currentRouteShards;
+      const currentSnapshot = getBrowserVaultReadySnapshot();
+      const requiredDemand = background
+        && targetPathname === pathname
+        && currentRequestedShards.every((shard) => requestedShards.includes(shard))
+        && currentMetricBuckets.every((bucketId) =>
+          requestedMetricBuckets.includes(bucketId)
+        )
+        && !browserVaultSnapshotCoversDemand(
+          currentSnapshot,
+          currentRequestedShards,
+          currentMetricBuckets,
+        );
+
       if (requirePostRequestReplica) {
         // The runtime schedules its Browser Vault rebuild after responding to
         // the forced request. Its response is therefore the causal baseline,
@@ -565,7 +598,11 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         pausePostRequestPolling();
       }
 
-      applyOutcome(outcome, { authorityPathname, background });
+      applyOutcome(outcome, {
+        authorityPathname,
+        background,
+        requiredDemand,
+      });
       return outcome;
     },
     [
@@ -712,13 +749,13 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       && !routeShards.includes("metricsIndex")
       ? [...routeShards, "metricsIndex" as const]
       : routeShards;
-    const demandAlreadyLoaded =
-      snapshot.loadedShards.length === requestedShards.length
-      && requestedShards.every((shard) => snapshot.loadedShards.includes(shard))
-      && snapshot.loadedMetricBuckets.length === activeMetricBucketDemand.length
-      && activeMetricBucketDemand.every((bucketId) =>
-        snapshot.loadedMetricBuckets.includes(bucketId)
-      );
+    const demandAlreadyLoaded = browserVaultSnapshotCoversDemand(
+      snapshot,
+      requestedShards,
+      activeMetricBucketDemand,
+    )
+      && snapshot.loadedShards.length === requestedShards.length
+      && snapshot.loadedMetricBuckets.length === activeMetricBucketDemand.length;
     if (demandAlreadyLoaded) {
       return;
     }
@@ -952,8 +989,25 @@ export function useBrowserVaultExperimentMetricBucketDemand(input: {
     return stableLookups.map((lookup) => client.experimentRunCards.find(lookup))
       .find((candidate) => candidate !== null) ?? null;
   }, [client, input.experimentId, stableLookups]);
-  const bucketsLoaded = useBrowserVaultMetricBucketDemand(
+  const entityMetricKeys = useMemo(() => {
+    if (!client || card) return null;
+    if (input.experimentId) {
+      const exact = selectBrowserVaultExperimentMetricKeys(client, {
+        experimentId: input.experimentId,
+      });
+      if (exact !== null) return exact;
+    }
+    for (const lookup of stableLookups) {
+      const match = selectBrowserVaultExperimentMetricKeys(client, lookup);
+      if (match !== null) return match;
+    }
+    return null;
+  }, [card, client, input.experimentId, stableLookups]);
+  const cardBucketsLoaded = useBrowserVaultMetricBucketDemand(
     card?.requiredMetricBuckets ?? [],
   );
-  return client !== null && (card === null || bucketsLoaded);
+  const entityMetricKeysLoaded = useBrowserVaultMetricKeyDemand(entityMetricKeys ?? []);
+  return client !== null && (
+    card ? cardBucketsLoaded : entityMetricKeys === null || entityMetricKeysLoaded
+  );
 }

@@ -142,7 +142,20 @@ export function BiomarkersPageClient({
     || (status === "error" && isAuthRequiredBrowserVaultError(error));
   const preparing = authenticated && refreshPending;
   const totalCount = biomarkers.length + deviceMetrics.length;
-  const canShowResolvedEmptyState = status === "empty" || status === "ready";
+  const deviceMetricDemandSettled = demandedMetricKeys.length === 0
+    || deviceMetricBucketsLoaded;
+  const canShowResolvedEmptyState = status === "empty"
+    || (status === "ready" && deviceMetricDemandSettled);
+  const showListSkeleton = authenticated
+    && !authRequired
+    && (
+      status === "loading"
+      || (
+        status === "ready"
+        && !deviceMetricDemandSettled
+        && biomarkers.length === 0
+      )
+    );
   const showUnclassifiedLabNotice = authenticated
     && !authRequired
     && canShowResolvedEmptyState
@@ -154,15 +167,19 @@ export function BiomarkersPageClient({
     <div className="flex flex-col gap-8">
       <PageHeader title="Biomarkers" />
 
-      {authenticated && status === "loading" ? <BiomarkerListSkeleton /> : null}
+      {showListSkeleton ? <BiomarkerListSkeleton /> : null}
 
       {authenticated && status === "error" && !authRequired ? (
         <Alert variant="destructive">
           <AlertTitle>Could not load your biomarkers</AlertTitle>
           <AlertDescription>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>Your saved lab results are not available right now.</span>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
+              <span>Some private biomarker data is not available right now.</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void refresh({ background: true })}
+              >
                 Retry
               </Button>
             </div>

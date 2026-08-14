@@ -194,7 +194,11 @@ export type {
   BrowserVaultExperimentScheduleCellKind,
   BrowserVaultExperimentScheduleResult,
 } from "./browser-replica/experiments.ts";
-export { selectBrowserVaultExperimentResults } from "./browser-replica/experiments.ts";
+export {
+  resolveBrowserVaultExperimentEntityMetricKeys,
+  selectBrowserVaultExperimentMetricKeys,
+  selectBrowserVaultExperimentResults,
+} from "./browser-replica/experiments.ts";
 export {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
   isCompletedOverviewExperimentStatus,

@@ -64,6 +64,8 @@ export {
   toBrowserVaultLabResultRows,
   toBrowserVaultMetricRows,
   selectBrowserVaultExperimentResults,
+  resolveBrowserVaultExperimentEntityMetricKeys,
+  selectBrowserVaultExperimentMetricKeys,
   selectBrowserVaultHistory,
   selectBrowserVaultOverview,
   selectBrowserVaultExperimentSummary,

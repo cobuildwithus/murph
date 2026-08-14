@@ -19,6 +19,7 @@ import {
   hashBrowserVaultReplicaData,
   parseBrowserVaultReplica,
   selectBrowserVaultExperimentResults,
+  selectBrowserVaultExperimentMetricKeys,
   selectBrowserVaultHistory,
   selectBrowserVaultOverview,
   selectBrowserVaultTrackedExperiments,
@@ -99,6 +100,84 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   assert.ok(history.timeline.some((entry) => entry.title === "Travel recovery note"));
   assert.equal(client.entities.get("exp_1")?.title, "Morning walk");
   assert.ok(client.search("steadier").some((row) => row.entityId === "journal_1"));
+});
+
+test("exact experiment metric demand is not bounded by the 24-card display projection", async () => {
+  const overflowIndex = 24;
+  const experiments = Array.from({ length: 25 }, (_, index) => {
+    const day = String(25 - index).padStart(2, "0");
+    const id = index === overflowIndex ? "run_overflow" : `run_${index}`;
+    const slug = index === overflowIndex ? "overflow-protocol-slug" : `protocol-${index}`;
+    const commonsKey = index === overflowIndex ? "overflow-public-protocol" : `public-${index}`;
+    const frontmatter = {
+      analysisPlan: {
+        desiredDirection: "decrease",
+        primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      },
+      commonsProtocolRef: { key: commonsKey },
+      runPlan: {
+        baselineEnd: "2026-03-07",
+        baselineStart: "2026-03-01",
+        interventionEnd: "2026-03-14",
+        interventionStart: "2026-03-08",
+      },
+      startedOn: "2026-03-01",
+      status: "active",
+    };
+    return createEntity("experiment", id, {
+      date: `2026-04-${day}`,
+      experimentSlug: slug,
+      frontmatter,
+      kind: "experiment",
+      occurredAt: `2026-04-${day}T12:00:00.000Z`,
+      status: "active",
+      title: `Experiment ${index}`,
+    });
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    metricPoints: [createMetricPoint({
+      biomarkerKey: "biomarker:resting-heart-rate",
+      effectiveDate: "2026-03-10",
+      metricKey: "resting-heart-rate",
+      recordId: "overflow-rhr",
+      unit: "bpm",
+      value: 60,
+    })],
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: experiments,
+      metadata: null,
+      vaultRoot: "browser://experiment-overflow",
+    }),
+  });
+  const client = createBrowserVaultQueryClient(replica);
+  const expectedBucket = await getBrowserVaultMetricBucketId("resting-heart-rate");
+
+  assert.equal(replica.experimentRunCards?.length, 24);
+  assert.equal(replica.experimentRunCards?.some((card) => card.id === "run_overflow"), false);
+  assert.deepEqual(
+    selectBrowserVaultExperimentMetricKeys(client, { experimentId: "run_overflow" }),
+    ["resting-heart-rate"],
+  );
+  assert.deepEqual(
+    selectBrowserVaultExperimentMetricKeys(client, { slug: "overflow-protocol-slug" }),
+    ["resting-heart-rate"],
+  );
+  assert.deepEqual(
+    selectBrowserVaultExperimentMetricKeys(client, {
+      protocolKeys: ["overflow-public-protocol"],
+    }),
+    ["resting-heart-rate"],
+  );
+  assert.equal(
+    selectBrowserVaultExperimentMetricKeys(client, { experimentId: "absent-run" }),
+    null,
+  );
+  assert.equal(replica.experimentRunCards?.every((card) =>
+    card.requiredMetricBuckets.length === 1
+    && card.requiredMetricBuckets[0] === expectedBucket
+  ), true);
 });
 
 test("browser vault replicas preserve habitat facts for coverage derivation", async () => {

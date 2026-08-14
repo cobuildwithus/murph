@@ -39,6 +39,7 @@ import {
   type MetricWindowSummary,
 } from "../metrics/index.ts";
 import type {
+  BrowserVaultCoreCapableQueryClient,
   BrowserVaultEntity,
   BrowserVaultMetricRow,
   BrowserVaultMetricSeriesCapableQueryClient as BrowserVaultMetricsCapableQueryClient,
@@ -420,8 +421,30 @@ export function selectBrowserVaultExperimentResults(
   };
 }
 
+/**
+ * Resolve the metric series needed by one exact encrypted-core experiment
+ * entity. This intentionally does not depend on the bounded run-card list.
+ */
+export function selectBrowserVaultExperimentMetricKeys(
+  client: BrowserVaultCoreCapableQueryClient,
+  lookup: BrowserVaultExperimentResultsLookup,
+): string[] | null {
+  const entity = findBrowserVaultExperimentRun(client, lookup);
+  return entity ? resolveBrowserVaultExperimentEntityMetricKeys(entity) : null;
+}
+
+export function resolveBrowserVaultExperimentEntityMetricKeys(
+  entity: BrowserVaultEntity,
+): string[] {
+  return uniqueStrings(collectBiomarkerKeys(entity.attributes).flatMap((biomarkerKey) => {
+    const outcome = resolveBrowserMetricOutcome(entity.attributes, biomarkerKey);
+    const sourceMetric = resolveBiomarkerMetricSource(biomarkerKey, outcome.metricKey);
+    return sourceMetric ? [sourceMetric.metricKey] : [];
+  })).sort();
+}
+
 function findBrowserVaultExperimentRun(
-  client: BrowserVaultMetricsCapableQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
   lookup: BrowserVaultExperimentResultsLookup,
 ): BrowserVaultEntity | null {
   const candidates = client.replica.entities.filter((entity) => entity.family === "experiment");

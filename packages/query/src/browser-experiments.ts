@@ -7,7 +7,11 @@ export type {
   BiomarkerChangeSentiment,
 } from "./biomarker-change-sentiment.ts";
 export { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
-export { selectBrowserVaultExperimentResults } from "./browser-replica/experiments.ts";
+export {
+  resolveBrowserVaultExperimentEntityMetricKeys,
+  selectBrowserVaultExperimentMetricKeys,
+  selectBrowserVaultExperimentResults,
+} from "./browser-replica/experiments.ts";
 export { isActiveOverviewExperimentStatus } from "./overview-status.ts";
 export type {
   BrowserVaultMetricsCapableQueryClient,

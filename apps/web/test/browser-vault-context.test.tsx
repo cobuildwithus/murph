@@ -6,7 +6,11 @@ import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
+  getBrowserVaultMetricBucketId,
+  selectBrowserVaultExperimentResults,
   splitBrowserVaultReplica,
+  type BrowserVaultExperimentRunCardLookup,
+  type BrowserVaultMetricBucketId,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
@@ -95,8 +99,10 @@ vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
 
 import {
   BrowserVaultProvider,
+  isBrowserVaultMetricsCapable,
   useBrowserVault,
   useBrowserVaultExperimentMetricBucketDemand,
+  useBrowserVaultMetricKeyDemand,
   useBrowserVaultSelector,
 } from "@/src/lib/browser-vault/context";
 import {
@@ -485,6 +491,191 @@ test("browser-vault warm store reuses same-ref bucket intersections and retains 
   assert.equal(getBrowserVaultReadySnapshot(), null);
 });
 
+test("required bucket transport failure preserves partial data and Retry requests only missing demand once", async () => {
+  mocks.usePathname.mockReturnValue("/biomarkers");
+  const metricBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
+  const replica = createReplica();
+  const ref = await createShardedReplicaRef(replica);
+  const shardSet = await splitBrowserVaultReplica(replica);
+  const encoded = {
+    core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
+    labs: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.labs))),
+    metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
+    metricBucket: gzipSync(
+      new TextEncoder().encode(JSON.stringify(shardSet.metricBuckets[metricBucketId])),
+    ),
+  };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      shards: {
+        core: createEncryptedShardResponse(ref, "core"),
+        labs: createEncryptedShardResponse(ref, "labs"),
+        metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
+      },
+      state: "ready",
+    }))
+    .mockResolvedValueOnce({
+      json: async () => ({ error: "Temporary failure" }),
+      ok: false,
+      status: 500,
+    } as Response)
+    .mockResolvedValueOnce(jsonResponse({
+      metricBuckets: {
+        [metricBucketId]: createEncryptedMetricBucketResponse(ref, metricBucketId),
+      },
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }));
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockImplementation(({ aad }: {
+    aad: { metricBucketId?: string; shard?: string };
+  }) => {
+    if (aad.shard === "core") return Promise.resolve(encoded.core);
+    if (aad.shard === "labs") return Promise.resolve(encoded.labs);
+    if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
+    if (aad.metricBucketId === metricBucketId) {
+      return Promise.resolve(encoded.metricBucket);
+    }
+    throw new Error("Unexpected encrypted browser-vault required-demand child.");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRequiredMetricDemandProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    "error:pending:core+metrics-partial+labs",
+  );
+  assert.deepEqual(getBrowserVaultReadySnapshot()?.loadedMetricBuckets, []);
+  assert.equal(
+    getBrowserVaultReadySnapshot()?.client.capability,
+    "core+metrics-partial+labs",
+  );
+  assert.equal(fetchMock.mock.calls.length, 2);
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    rendered.button?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await waitForText(
+    rendered.container,
+    "ready:loaded:core+metrics-partial+labs",
+  );
+
+  const failedDemandBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  const retryBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+  assert.deepEqual(failedDemandBody.requestedMetricBuckets, [metricBucketId]);
+  assert.deepEqual(retryBody.requestedMetricBuckets, [metricBucketId]);
+  assert.deepEqual(retryBody.knownMetricBuckets, []);
+  assert.deepEqual(retryBody.knownShards, ["core", "labs", "metricsIndex"]);
+  assert.equal(fetchMock.mock.calls.length, 3);
+
+  await rendered.cleanup();
+});
+
+test("required bucket integrity failure surfaces through the provider without dropping partial data", async () => {
+  mocks.usePathname.mockReturnValue("/biomarkers");
+  const metricBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
+  const mismatchedBucketId: BrowserVaultMetricBucketId = metricBucketId === "00"
+    ? "01"
+    : "00";
+  const replica = createReplica();
+  const shardSet = await splitBrowserVaultReplica(replica);
+  const invalidBucket = {
+    ...shardSet.metricBuckets[metricBucketId],
+    bucketId: mismatchedBucketId,
+  };
+  const invalidBucketBytes = new TextEncoder().encode(JSON.stringify(invalidBucket));
+  const encodedInvalidBucket = gzipSync(invalidBucketBytes);
+  const baseRef = await createShardedReplicaRef(replica);
+  assert.ok(baseRef.metricBuckets);
+  const ref: HostedBrowserVaultReplicaRef = {
+    ...baseRef,
+    metricBuckets: {
+      ...baseRef.metricBuckets,
+      buckets: {
+        ...baseRef.metricBuckets.buckets,
+        [metricBucketId]: {
+          ...baseRef.metricBuckets.buckets[metricBucketId],
+          byteLength: invalidBucketBytes.byteLength,
+          encodedByteLength: encodedInvalidBucket.byteLength,
+        },
+      },
+    },
+  };
+  const encoded = {
+    core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
+    labs: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.labs))),
+    metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
+  };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      shards: {
+        core: createEncryptedShardResponse(ref, "core"),
+        labs: createEncryptedShardResponse(ref, "labs"),
+        metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
+      },
+      state: "ready",
+    }))
+    .mockResolvedValueOnce(jsonResponse({
+      metricBuckets: {
+        [metricBucketId]: createEncryptedMetricBucketResponse(ref, metricBucketId),
+      },
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }));
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockImplementation(({ aad }: {
+    aad: { metricBucketId?: string; shard?: string };
+  }) => {
+    if (aad.shard === "core") return Promise.resolve(encoded.core);
+    if (aad.shard === "labs") return Promise.resolve(encoded.labs);
+    if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
+    if (aad.metricBucketId === metricBucketId) {
+      return Promise.resolve(encodedInvalidBucket);
+    }
+    throw new Error("Unexpected encrypted browser-vault integrity child.");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRequiredMetricDemandProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    "error:pending:core+metrics-partial+labs",
+  );
+  assert.equal(fetchMock.mock.calls.length, 2);
+  assert.deepEqual(getBrowserVaultReadySnapshot()?.loadedMetricBuckets, []);
+  assert.equal(
+    getBrowserVaultReadySnapshot()?.client.capability,
+    "core+metrics-partial+labs",
+  );
+  assert.equal(
+    mocks.decryptHostedStoragePayload.mock.calls.some(([input]) =>
+      input.aad.metricBucketId === metricBucketId
+    ),
+    true,
+  );
+
+  await rendered.cleanup();
+});
+
 test("experiment deep links load core and metrics index before exact run-card bucket follow-up", async () => {
   mocks.usePathname.mockReturnValue("/experiments/custom-protocol");
   const replica = createReplica({
@@ -572,6 +763,171 @@ test("experiment deep links load core and metrics index before exact run-card bu
     "ready:loaded:core+metrics-partial",
   );
   assert.equal(fetchMock.mock.calls.length, 2);
+
+  await rendered.cleanup();
+});
+
+test("experiment routes derive one exact bucket from an overflow core entity without a run card", async () => {
+  mocks.usePathname.mockReturnValue("/experiments/runs/run_overflow");
+  const targetBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
+  const entities = Array.from({ length: 25 }, (_, index) => {
+    const id = index === 24 ? "run_overflow" : `run_${index}`;
+    const slug = index === 24 ? "overflow-protocol-slug" : `protocol-${index}`;
+    return {
+      attributes: {
+        analysisPlan: {
+          desiredDirection: "decrease",
+          primaryBiomarkerKey: "biomarker:resting-heart-rate",
+        },
+        commonsProtocolRef: {
+          key: index === 24 ? "overflow-public-protocol" : `public-${index}`,
+        },
+        runPlan: {
+          baselineEnd: "2026-03-07",
+          baselineStart: "2026-03-01",
+          interventionEnd: "2026-03-14",
+          interventionStart: "2026-03-08",
+        },
+        startedOn: "2026-03-01",
+        status: "active",
+      },
+      bodyPreview: null,
+      date: `2026-04-${String(25 - index).padStart(2, "0")}`,
+      experimentSlug: slug,
+      family: "experiment",
+      id,
+      kind: "experiment",
+      links: [],
+      lookupIds: [id, slug],
+      occurredAt: `2026-04-${String(25 - index).padStart(2, "0")}T12:00:00.000Z`,
+      recordClass: "bank" as const,
+      status: "active",
+      stream: null,
+      tags: [],
+      title: `Experiment ${index}`,
+    };
+  });
+  const experimentRunCards = entities.slice(0, 24).map((entity) => ({
+    id: entity.id,
+    lookupKeys: {
+      experimentIds: [entity.id],
+      protocolKeys: [],
+      slugs: entity.experimentSlug ? [entity.experimentSlug] : [],
+    },
+    requiredMetricBuckets: [targetBucketId],
+    runSummary: { metrics: [] },
+    schema: "murph.browser-vault.experiment-run-card.v1" as const,
+    slug: entity.experimentSlug,
+    startedOn: "2026-03-01",
+    status: "active" as const,
+    statusLabel: "Active",
+    summary: null,
+    summaryDetail: null,
+    tags: [],
+    title: entity.title,
+  }));
+  const replica = createReplica({
+    entities,
+    experimentRunCards,
+    metricRows: [{
+      biomarkerKey: "biomarker:resting-heart-rate",
+      comparator: null,
+      confidence: "high",
+      context: {},
+      date: "2026-03-10",
+      grain: "day",
+      id: "metric-row:overflow-rhr",
+      metricKey: "resting-heart-rate",
+      observedAt: "2026-03-10T12:00:00.000Z",
+      pointIds: ["point-overflow-rhr"],
+      recordIds: ["record-overflow-rhr"],
+      rowSchema: "murph.browser-vault.metric-row.v1",
+      sourceFamily: "sample",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Device",
+      statistic: "value",
+      unit: "bpm",
+      value: 60,
+      valueLabel: null,
+    }],
+  });
+  assert.equal(replica.entities.length, 25);
+  assert.equal(replica.experimentRunCards?.length, 24);
+  assert.equal(replica.experimentRunCards?.some((card) => card.id === "run_overflow"), false);
+
+  const ref = await createShardedReplicaRef(replica);
+  const shardSet = await splitBrowserVaultReplica(replica);
+  const encoded = {
+    core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
+    metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
+    targetBucket: gzipSync(
+      new TextEncoder().encode(JSON.stringify(shardSet.metricBuckets[targetBucketId])),
+    ),
+  };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      shards: {
+        core: createEncryptedShardResponse(ref, "core"),
+        metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
+      },
+      state: "ready",
+    }))
+    .mockResolvedValueOnce(jsonResponse({
+      metricBuckets: {
+        [targetBucketId]: createEncryptedMetricBucketResponse(ref, targetBucketId),
+      },
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }));
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockImplementation(({ aad }: {
+    aad: { metricBucketId?: string; shard?: string };
+  }) => {
+    if (aad.shard === "core") return Promise.resolve(encoded.core);
+    if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
+    if (aad.metricBucketId === targetBucketId) return Promise.resolve(encoded.targetBucket);
+    throw new Error("Unexpected encrypted browser-vault experiment overflow child.");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement("div", null,
+        createElement(BrowserVaultExperimentResultDemandProbe, {
+          experimentId: "run_overflow",
+          label: "exact",
+        }),
+        createElement(BrowserVaultExperimentResultDemandProbe, {
+          label: "slug",
+          lookups: [{ slug: "overflow-protocol-slug" }],
+        }),
+        createElement(BrowserVaultExperimentResultDemandProbe, {
+          label: "protocol",
+          lookups: [{ protocolKeys: ["overflow-public-protocol"] }],
+        }),
+        createElement(BrowserVaultExperimentResultDemandProbe, {
+          experimentId: "absent-run",
+          label: "absent",
+        }),
+      ),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "exact:ready:loaded:run_overflow");
+  await waitForText(rendered.container, "slug:ready:loaded:run_overflow");
+  await waitForText(rendered.container, "protocol:ready:loaded:run_overflow");
+  await waitForText(rendered.container, "absent:ready:loaded:not-found");
+  assert.equal(fetchMock.mock.calls.length, 2);
+  const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+  assert.deepEqual(firstBody.requestedShards, ["core", "metricsIndex"]);
+  assert.equal(firstBody.requestedMetricBuckets, undefined);
+  const followUpBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.deepEqual(followUpBody.requestedMetricBuckets, [targetBucketId]);
+  assert.equal(followUpBody.requestedMetricBuckets.length, 1);
 
   await rendered.cleanup();
 });
@@ -3530,6 +3886,32 @@ function BrowserVaultExperimentDemandProbe() {
   );
 }
 
+function BrowserVaultExperimentResultDemandProbe({
+  experimentId,
+  label,
+  lookups = [],
+}: {
+  experimentId?: string;
+  label: string;
+  lookups?: readonly BrowserVaultExperimentRunCardLookup[];
+}) {
+  const vault = useBrowserVault();
+  const loaded = useBrowserVaultExperimentMetricBucketDemand({ experimentId, lookups });
+  const metricsClient = loaded && isBrowserVaultMetricsCapable(vault.client)
+    ? vault.client
+    : null;
+  const lookup = experimentId ? { experimentId } : lookups[0];
+  const result = metricsClient && lookup
+    ? selectBrowserVaultExperimentResults(metricsClient, lookup)
+    : null;
+
+  return createElement(
+    "div",
+    null,
+    `${label}:${vault.status}:${loaded ? "loaded" : "pending"}:${result?.experiment.id ?? "not-found"}`,
+  );
+}
+
 function BrowserVaultBackgroundRefreshProbe() {
   const vault = useBrowserVault();
 
@@ -3537,6 +3919,17 @@ function BrowserVaultBackgroundRefreshProbe() {
     "button",
     { onClick: () => void vault.refresh({ background: true }) },
     `${vault.status}:${vault.dataVersion ?? "none"}`,
+  );
+}
+
+function BrowserVaultRequiredMetricDemandProbe() {
+  const vault = useBrowserVault();
+  const loaded = useBrowserVaultMetricKeyDemand(["resting-heart-rate"]);
+
+  return createElement(
+    "button",
+    { onClick: () => void vault.refresh({ background: true }) },
+    `${vault.status}:${loaded ? "loaded" : "pending"}:${vault.client?.capability ?? "none"}:${vault.error ?? "none"}`,
   );
 }
 
@@ -3767,7 +4160,7 @@ function createEncryptedShardResponse(
 
 function createEncryptedMetricBucketResponse(
   ref: HostedBrowserVaultReplicaRef,
-  metricBucketId: "00" | "01",
+  metricBucketId: BrowserVaultMetricBucketId,
 ) {
   const metricBucketRef = ref.metricBuckets?.buckets[metricBucketId];
   if (!metricBucketRef || !ref.metricBuckets) {

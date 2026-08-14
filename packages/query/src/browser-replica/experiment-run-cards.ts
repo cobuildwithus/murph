@@ -1,6 +1,7 @@
 import { resolveExperimentAdherenceRollupTarget } from "../experiment-adherence.ts";
 import { selectBrowserVaultTrackedExperiments } from "./tracked-experiments.ts";
 import {
+  resolveBrowserVaultExperimentEntityMetricKeys,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentAdherenceTarget,
   type BrowserVaultExperimentBiomarkerResult,
@@ -70,7 +71,7 @@ export async function buildBrowserVaultExperimentRunCards(
     cards.push(projectExperimentRunCard(
       results,
       entity,
-      await requiredMetricBuckets(results),
+      await requiredMetricBuckets(entity),
     ));
     seen.add(results.experiment.id);
   }
@@ -151,11 +152,9 @@ function projectExperimentRunCard(
 }
 
 async function requiredMetricBuckets(
-  results: BrowserVaultExperimentResultsView,
+  entity: BrowserVaultEntity,
 ): Promise<BrowserVaultMetricBucketId[]> {
-  const metricKeys = [...new Set(results.biomarkers.flatMap((biomarker) =>
-    biomarker.sourceMetric?.metricKey ? [biomarker.sourceMetric.metricKey] : []
-  ))];
+  const metricKeys = resolveBrowserVaultExperimentEntityMetricKeys(entity);
   return [...new Set(await Promise.all(metricKeys.map(getBrowserVaultMetricBucketId)))].sort();
 }
 
