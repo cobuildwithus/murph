@@ -6850,18 +6850,20 @@ function filterJunctionTimeseriesRecordsToWindow(
     if (
       dateQueryFormat === "date"
       && policy?.normalizationMode === "daily_aggregate"
-      && (
-        isJunctionFloatingCalendarTimestamp(rawTimestamp)
-        || JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)
+    ) {
+      if (
+        JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)
         || resolveJunctionExtendedTimeseriesBackfillPolicy(resource)?.completion
           === "daily_aggregate"
-      )
-    ) {
-      // Junction's date-mode response owns the provider calendar day. Keep
-      // every interval for extended daily aggregates together even when an
-      // explicit offset crosses UTC midnight. Bounded activity totals retain
-      // their established instant ownership for offset-bearing intervals.
-      return rawTimestamp.slice(0, 10) === windowStart.slice(0, 10);
+      ) {
+        // Junction's date-mode response owns the provider calendar day. Keep
+        // every interval together even when an explicit offset crosses UTC
+        // midnight; the importer owns provider-local day resolution.
+        return true;
+      }
+      if (isJunctionFloatingCalendarTimestamp(rawTimestamp)) {
+        return rawTimestamp.slice(0, 10) === windowStart.slice(0, 10);
+      }
     }
 
     const timestamp = toIsoTimestampIfValid(rawTimestamp) ?? rawTimestamp;

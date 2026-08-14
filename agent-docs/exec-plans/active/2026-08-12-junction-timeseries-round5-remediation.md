@@ -81,9 +81,11 @@ Updated: 2026-08-14
 26. [x] Resolve round twenty-three's yielded sparse-history repair loss and
     unclosed broad-continuation publication findings without adding another
     queue, frontier, or state owner.
-27. [ ] Resolve round twenty-four's post-import sparse-day ownership recurrence
+27. [x] Resolve round twenty-four's post-import sparse-day ownership recurrence
     through one shared finalization boundary, prove the accepted day and
-    malformed-row retry leave the executor together, then obtain ReviewGPT PASS.
+    malformed-row retry leave the executor together.
+28. [ ] Resolve round twenty-five's date-mode UTC-prefix data-loss finding,
+    then obtain exact-head green CI and ReviewGPT PASS.
 
 ## Decisions
 
@@ -282,6 +284,15 @@ Updated: 2026-08-14
   path does not occur. The regression therefore stays at the actual boundary
   and proves the accepted calendar day and malformed-row retry are returned
   together, without adding a contrived lifecycle test.
+- Round twenty-five's review-induced finding is accepted. Junction's one-date
+  endpoint can represent a row with a UTC timestamp plus separate provider
+  offset, so comparing the raw UTC prefix with the requested provider date can
+  silently remove part of an otherwise complete calendar response before the
+  importer sees it. The existing calendar-owned and extended-daily date branch
+  now retains the endpoint's complete response and leaves provider-local day
+  resolution with the importer. Floating activity aggregates keep their prior
+  trim, so the fix does not broaden non-calendar ownership. This changes no
+  state, queue, cursor, service, parser, or retry mechanism.
 
 ## Verification
 
@@ -516,3 +527,12 @@ Updated: 2026-08-14
   asserted which random job ID claimed first. The intended first row now has
   explicit priority. The focused regression and all 50 store tests pass; no
   production behavior changed.
+- Round twenty-five reproduced the UTC-prefix loss before remediation: a
+  provider-date response totaling 120 retained only 80 when one negative-offset
+  row crossed into the next UTC date. The sparse production-path regression now
+  passes for both offset directions across extended history, retained calendar
+  repair, and reconcile. The dense regression passes scheduled-resource and
+  reconcile execution in both orders and proves each daily mean and compact
+  feature envelope retains both crossing samples. Both full affected provider
+  files pass 355/355, the device-sync typecheck passes, and `git diff --check`
+  passes.

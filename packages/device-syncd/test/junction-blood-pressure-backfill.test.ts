@@ -79,9 +79,16 @@ function isMockRecordInRequestWindow(
   timestamp: string,
   windowStart: string | null,
   windowEnd: string | null,
+  timeZoneOffsetSeconds?: unknown,
 ): boolean {
   if (windowStart?.length === 10 && windowEnd?.length === 10) {
-    const providerDate = timestamp.slice(0, 10);
+    const timestampMs = Date.parse(timestamp);
+    const providerDate =
+      typeof timeZoneOffsetSeconds === "number"
+      && Number.isFinite(timeZoneOffsetSeconds)
+      && Number.isFinite(timestampMs)
+        ? new Date(timestampMs + timeZoneOffsetSeconds * 1_000).toISOString().slice(0, 10)
+        : timestamp.slice(0, 10);
     return providerDate >= windowStart && providerDate <= windowEnd;
   }
   return (windowStart === null || timestamp >= windowStart)
@@ -501,7 +508,12 @@ function createProvider(input: {
               ? record.timestamp
               : null;
           return timestamp !== null
-            && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
+            && isMockRecordInRequestWindow(
+              timestamp,
+              noteWindowStart,
+              noteWindowEnd,
+              record.timezone_offset,
+            );
         });
         const resourceGroups = resource === "note"
           ? { oura: noteRecords }
@@ -1558,15 +1570,15 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
     [
       "negative offset",
       [
-        { end: "2026-06-09T10:05:00-07:00", start: "2026-06-09T10:00:00-07:00", unit: "g", value: 0.08 },
-        { end: "2026-06-09T20:05:00-07:00", start: "2026-06-09T20:00:00-07:00", unit: "g", value: 0.04 },
+        { end: "2026-06-09T17:05:00.000Z", start: "2026-06-09T17:00:00.000Z", timezone_offset: -25_200, unit: "g", value: 0.08 },
+        { end: "2026-06-10T03:05:00.000Z", start: "2026-06-10T03:00:00.000Z", timezone_offset: -25_200, unit: "g", value: 0.04 },
       ],
     ],
     [
       "positive offset",
       [
-        { end: "2026-06-09T00:35:00+07:00", start: "2026-06-09T00:30:00+07:00", unit: "g", value: 0.08 },
-        { end: "2026-06-09T20:05:00+07:00", start: "2026-06-09T20:00:00+07:00", unit: "g", value: 0.04 },
+        { end: "2026-06-08T17:35:00.000Z", start: "2026-06-08T17:30:00.000Z", timezone_offset: 25_200, unit: "g", value: 0.08 },
+        { end: "2026-06-09T13:05:00.000Z", start: "2026-06-09T13:00:00.000Z", timezone_offset: 25_200, unit: "g", value: 0.04 },
       ],
     ],
   ] as const;

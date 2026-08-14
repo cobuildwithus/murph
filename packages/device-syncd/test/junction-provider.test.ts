@@ -9293,15 +9293,17 @@ test("Junction dense jobs retain complete offset days in either transport order"
           const requestedDate = url.searchParams.get("start_date");
           const revision = versioned ? { updatedAt: "2026-04-03T10:00:00.000Z" } : {};
           const records = [
-            { id: "day-1-early", timestamp: "2026-04-01T00:30:00-04:00", value: 5, ...revision },
-            { id: "day-1-late", timestamp: "2026-04-01T23:30:00-04:00", value: 6, ...revision },
-            { id: "day-2-early", timestamp: "2026-04-02T00:30:00-04:00", value: 7, ...revision },
-            { id: "day-2-late", timestamp: "2026-04-02T23:30:00-04:00", value: 8, ...revision },
+            { providerDay: "2026-04-01", record: { id: "day-1-early", timestamp: "2026-04-01T04:30:00.000Z", timezone_offset: -14_400, unit: "mmol/L", value: 5, ...revision } },
+            { providerDay: "2026-04-01", record: { id: "day-1-late", timestamp: "2026-04-02T03:30:00.000Z", timezone_offset: -14_400, unit: "mmol/L", value: 6, ...revision } },
+            { providerDay: "2026-04-02", record: { id: "day-2-early", timestamp: "2026-04-02T04:30:00.000Z", timezone_offset: -14_400, unit: "mmol/L", value: 7, ...revision } },
+            { providerDay: "2026-04-02", record: { id: "day-2-late", timestamp: "2026-04-03T03:30:00.000Z", timezone_offset: -14_400, unit: "mmol/L", value: 8, ...revision } },
           ];
           return createJsonResponse({
             groups: {
               dexcom: [{
-                data: records.filter((record) => record.timestamp.startsWith(requestedDate ?? "")),
+                data: records
+                  .filter((record) => record.providerDay === requestedDate)
+                  .map((record) => record.record),
                 source: { provider: "dexcom", type: "cgm" },
               }],
             },
@@ -9351,10 +9353,11 @@ test("Junction dense jobs retain complete offset days in either transport order"
         const records = entry.timeseries?.glucose;
         return records
           ? [{
-              records,
-              timeseriesWindowKind: entry.timeseriesWindowKind,
-              windowEnd: entry.windowEnd,
-              windowStart: entry.windowStart,
+            records,
+            snapshot,
+            timeseriesWindowKind: entry.timeseriesWindowKind,
+            windowEnd: entry.windowEnd,
+            windowStart: entry.windowStart,
             }]
           : [];
       });
@@ -9367,29 +9370,49 @@ test("Junction dense jobs retain complete offset days in either transport order"
         })),
         [
           {
-            dates: ["2026-04-01", "2026-04-01"],
+            dates: ["2026-04-01", "2026-04-02"],
             timeseriesWindowKind: "calendar_day",
             windowEnd: "2026-04-02T00:00:00.000Z",
             windowStart: "2026-04-01T00:00:00.000Z",
           },
           {
-            dates: ["2026-04-02", "2026-04-02"],
+            dates: ["2026-04-02", "2026-04-03"],
             timeseriesWindowKind: "calendar_day",
             windowEnd: "2026-04-03T00:00:00.000Z",
             windowStart: "2026-04-02T00:00:00.000Z",
           },
           {
-            dates: ["2026-04-01", "2026-04-01"],
+            dates: ["2026-04-01", "2026-04-02"],
             timeseriesWindowKind: "calendar_day",
             windowEnd: "2026-04-02T00:00:00.000Z",
             windowStart: "2026-04-01T00:00:00.000Z",
           },
           {
-            dates: ["2026-04-02", "2026-04-02"],
+            dates: ["2026-04-02", "2026-04-03"],
             timeseriesWindowKind: "calendar_day",
             windowEnd: "2026-04-03T00:00:00.000Z",
             windowStart: "2026-04-02T00:00:00.000Z",
           },
+        ],
+      );
+      assert.deepEqual(
+        glucoseSnapshots.map(({ snapshot }) => {
+          const normalized = normalizeJunctionSnapshot(snapshot as JunctionSnapshotInput);
+          const daily = normalized.events?.find((event) => event.fields?.metric === "glucose");
+          const feature = normalized.evidenceParts?.find((part) =>
+            part.role.startsWith("junction-timeseries-features-glucose:")
+          )?.content as { sampleCount?: number } | undefined;
+          return {
+            dayKey: daily?.dayKey,
+            sampleCount: feature?.sampleCount,
+            value: daily?.fields?.value,
+          };
+        }),
+        [
+          { dayKey: "2026-04-01", sampleCount: 2, value: 99.1001 },
+          { dayKey: "2026-04-02", sampleCount: 2, value: 135.1365 },
+          { dayKey: "2026-04-01", sampleCount: 2, value: 99.1001 },
+          { dayKey: "2026-04-02", sampleCount: 2, value: 135.1365 },
         ],
       );
       assert.equal(
@@ -9400,7 +9423,7 @@ test("Junction dense jobs retain complete offset days in either transport order"
       );
     }
   }
-  assert.equal(Date.parse("2026-04-01T23:30:00-04:00") >= Date.parse("2026-04-02T00:00:00Z"), true);
+  assert.equal(Date.parse("2026-04-02T03:30:00Z") >= Date.parse("2026-04-02T00:00:00Z"), true);
 });
 
 test("Junction dense jobs wait for global provider-day closure in either transport order", async () => {
