@@ -876,7 +876,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         expect(unavailable).toMatchObject({
           connection: {
-            lastErrorCode: "PROVIDER_REVOKE_NOT_CONFIGURED",
+            lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
             status: "reauthorization_required",
           },
           warning: { code: "PROVIDER_REVOKE_NOT_CONFIGURED" },
@@ -920,7 +920,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         expect(failed).toMatchObject({
           connection: {
-            lastErrorCode: "PROVIDER_REVOKE_FAILED",
+            lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
             status: "reauthorization_required",
           },
           warning: { code: "PROVIDER_REVOKE_FAILED" },
@@ -1088,7 +1088,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         expect(failed).toMatchObject({
           connection: {
-            lastErrorCode: "PROVIDER_REVOKE_FAILED",
+            lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
             status: "reauthorization_required",
           },
           warning: { code: "PROVIDER_REVOKE_FAILED" },

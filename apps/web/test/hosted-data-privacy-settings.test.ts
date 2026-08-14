@@ -526,6 +526,67 @@ describe("HostedDataPrivacySettings", () => {
     expect(payload).not.toHaveProperty("exitNote");
   });
 
+  test("requires provider-access confirmation after an ambiguous OAuth callback", async () => {
+    mockHostedDataPrivacyDeleteFlowState({
+      dialogError: "Remove Murph access in the Oura provider account, then confirm below.",
+      providerAccessRemovalRequired: true,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    expect(container.textContent).toContain(
+      "I removed Murph access in each provider account named above.",
+    );
+    assert.equal(findButton(container, "Delete account").disabled, true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
+  test("submits explicit provider-access confirmation on the recovery retry", async () => {
+    mockHostedDataPrivacyDeleteFlowState({
+      providerAccessRemovalConfirmed: true,
+      providerAccessRemovalRequired: true,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload)
+      .toMatchObject({ providerAccessRemovalConfirmed: true });
+  });
+
   test("allows account deletion to succeed after the vault receiver lease window", async () => {
     vi.useFakeTimers();
     mockHostedDataPrivacyDeleteFlowState();
@@ -886,7 +947,8 @@ describe("HostedDataPrivacySettings", () => {
 // Values follow the component's useState declaration order:
 // exportPending, exportDialogOpen, acknowledgedSensitiveDownload, exportDialogError,
 // exportSuccess, deletePending, dialogOpen, dialogStep, exitReason, exitNote,
-// confirmationPhrase, dialogError, deleted, cleanupPending, privyLogoutDone.
+// confirmationPhrase, dialogError, providerAccessRemovalRequired,
+// providerAccessRemovalConfirmed, deleted, cleanupPending, privyLogoutDone.
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
 } = {}) {
@@ -906,6 +968,8 @@ function mockHostedVaultExportFlowState(input: {
     false,
     false,
     false,
+    false,
+    false,
   ];
 }
 
@@ -914,6 +978,8 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
   dialogError?: string | null;
   exitNote?: string;
   exitReason?: string | null;
+  providerAccessRemovalConfirmed?: boolean;
+  providerAccessRemovalRequired?: boolean;
 } = {}) {
   mocks.useStateValues = [
     false,
@@ -930,6 +996,8 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     input.exitNote ?? "",
     input.confirmationPhrase ?? "DELETE MY ACCOUNT",
     input.dialogError ?? null,
+    input.providerAccessRemovalRequired ?? false,
+    input.providerAccessRemovalConfirmed ?? false,
     false,
     false,
     false,
@@ -952,6 +1020,8 @@ function mockHostedDataPrivacyDeletedState(input: {
     "",
     "",
     null,
+    false,
+    false,
     true,
     input.cleanupPending ?? false,
     false,

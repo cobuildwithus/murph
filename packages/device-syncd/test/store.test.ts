@@ -3658,8 +3658,8 @@ test("device sync store filters listed accounts by provider and returns unexpire
       store.deleteExpiredOAuthStates("2026-04-07T00:10:00.000Z"),
       0,
     );
-    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:10:00.000Z"), {
-      status: "replayed",
+    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:20:00.000Z"), {
+      status: "recovery_required",
       consumedAt: "2026-04-07T00:05:00.000Z",
       record: {
         state: "active-state",

@@ -613,6 +613,7 @@ describe("parseHostedAccountDeletionRequest", () => {
     })).toEqual({
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
       exitFeedback: null,
+      providerAccessRemovalConfirmed: false,
     });
   });
 
@@ -627,6 +628,7 @@ describe("parseHostedAccountDeletionRequest", () => {
         note: "Too many texts on weekends.",
         reason: "too_many_texts",
       },
+      providerAccessRemovalConfirmed: false,
     });
   });
 
@@ -666,6 +668,7 @@ describe("parseHostedAccountDeletionRequest", () => {
     })).toEqual({
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
       exitFeedback: null,
+      providerAccessRemovalConfirmed: false,
     });
   });
 
@@ -788,6 +791,123 @@ function makeExactPhoneTransferStripeSubscription(
 
 
 describe("deleteHostedAccountData", () => {
+  it("starts all four ordinary target reads before waiting and holds the terminal transaction", async () => {
+    const onTransaction = vi.fn();
+    const gate = createHostedAccountDeletionConcurrentReadGate(4);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction,
+    });
+    const root = prisma as unknown as HostedAccountDeletionRootReadFake;
+    root.hostedMemberBillingRef.findUnique = gate.wrap(
+      root.hostedMemberBillingRef.findUnique,
+    );
+    root.hostedMemberSubscriptionCheckout.findMany = gate.wrap(
+      root.hostedMemberSubscriptionCheckout.findMany,
+    );
+    root.hostedAccountGroupBillingRef.findMany = gate.wrap(
+      root.hostedAccountGroupBillingRef.findMany,
+    );
+    root.hostedMemberIdentity.findUnique = gate.wrap(
+      root.hostedMemberIdentity.findUnique,
+    );
+
+    const deletion = deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    await gate.allStarted;
+    try {
+      expect(gate.peak).toBe(4);
+      expect(gate.started).toBe(4);
+      expect(onTransaction).toHaveBeenCalledTimes(1);
+      expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
+    } finally {
+      gate.release();
+    }
+
+    await expect(deletion).resolves.toMatchObject({ memberId: "member_123" });
+    expect(onTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts all six phone-transfer fingerprint reads before waiting and holds the terminal transaction", async () => {
+    const onTransaction = vi.fn();
+    const gate = createHostedAccountDeletionConcurrentReadGate(6);
+    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+      privyUserId: null,
+      stripeCheckoutSessionId: null,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    let phoneTransferSessionReadCount = 0;
+    let fingerprintReadsArmed = false;
+    serviceMocks.readHostedPrivyUserById.mockImplementation(async () => {
+      phoneTransferSessionReadCount += 1;
+      if (phoneTransferSessionReadCount === 2) {
+        fingerprintReadsArmed = true;
+      }
+      return { id: "did:privy:target" };
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
+      onTransaction,
+    });
+    const root = prisma as unknown as HostedAccountDeletionRootReadFake;
+    const gateFingerprintRead = (read: HostedAccountDeletionTestRead) =>
+      gate.wrap(read, () => fingerprintReadsArmed);
+    root.hostedMemberIdentity.findUnique = gateFingerprintRead(
+      root.hostedMemberIdentity.findUnique,
+    );
+    root.hostedMember.findUnique = gateFingerprintRead(
+      root.hostedMember.findUnique,
+    );
+    root.hostedMemberEmailAuthorization.findUnique = gateFingerprintRead(
+      root.hostedMemberEmailAuthorization.findUnique,
+    );
+    root.hostedMemberRouting.findUnique = gateFingerprintRead(
+      root.hostedMemberRouting.findUnique,
+    );
+
+    const deletion = deleteHostedPrivyPhoneTransferSourceAccountData({
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+      retirement: {
+        autoTrialBilling: null,
+        sourceMemberId: "member_123",
+      },
+      targetMember: {
+        billingStatus: "active",
+        createdAt: new Date("2026-07-30T12:00:00.000Z"),
+        id: "member_target",
+        suspendedAt: null,
+        updatedAt: new Date("2026-07-30T12:00:00.000Z"),
+      },
+      targetPhoneNumberBeforeTransfer: null,
+      targetPrivyUserId: "did:privy:target",
+      transfer: {
+        phoneNumber: "+15551234567",
+        sourceMemberId: "member_123",
+        sourcePrivyUserId: "did:privy:source",
+      },
+    });
+
+    await gate.allStarted;
+    try {
+      expect(gate.peak).toBe(6);
+      expect(gate.started).toBe(6);
+      expect(onTransaction).toHaveBeenCalledTimes(2);
+      expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
+    } finally {
+      gate.release();
+    }
+
+    await expect(deletion).resolves.toMatchObject({
+      deletion: { memberId: "member_123" },
+    });
+    expect(onTransaction).toHaveBeenCalledTimes(3);
+  });
+
   it("atomically retires the transfer source after cleanup-owned billing changes", async () => {
     const order: string[] = [];
     let billingCleanupCompleted = false;
@@ -3509,6 +3629,87 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
   });
 
+  it("requires explicit provider-removal confirmation for an expired ambiguous OAuth callback", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      deviceOauthSessions: [{
+        consumedAt: new Date("2026-04-27T00:00:00.000Z"),
+        expiresAt: new Date("2026-04-27T00:15:00.000Z"),
+        provider: "oura",
+        state: "oauth-state-ambiguous",
+      }],
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_RECOVERY_REQUIRED",
+      details: { providerLabels: ["Oura"] },
+      retryable: false,
+    });
+    expect(deleteCalls).toEqual([]);
+  });
+
+  it("deletes only expired ambiguous OAuth claims after provider-removal confirmation", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const expiresAt = new Date("2026-04-27T00:15:00.000Z");
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      deviceOauthSessions: [{
+        consumedAt: new Date("2026-04-27T00:00:00.000Z"),
+        expiresAt,
+        provider: "oura",
+        state: "oauth-state-ambiguous",
+      }],
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      providerAccessRemovalConfirmed: true,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({ memberId: "member_123" });
+    expect(deleteCalls).toContainEqual({
+      model: "deviceOauthSession",
+      where: {
+        consumedAt: { not: null },
+        state: "oauth-state-ambiguous",
+        userId: "member_123",
+      },
+    });
+  });
+
+  it("retries before suspension when an ambiguous OAuth claim changes during confirmation", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCountResults: { deviceOauthSession: 0 },
+      deviceOauthSessions: [{
+        consumedAt: new Date("2026-04-27T00:00:00.000Z"),
+        expiresAt: new Date("2026-04-27T00:15:00.000Z"),
+        provider: "oura",
+        state: "oauth-state-changed",
+      }],
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      providerAccessRemovalConfirmed: true,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      retryable: true,
+    });
+    expect(hostedMemberUpdateCalls).toEqual([]);
+  });
+
   it("deletes webhook traces only for the unchanged revoked device authority set", async () => {
     const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
@@ -4728,6 +4929,79 @@ function recordHostedAccountDeletionRawLogicalOrder(input: {
   }
 }
 
+type HostedAccountDeletionTestRead = (...args: unknown[]) => Promise<unknown>;
+
+type HostedAccountDeletionRootReadFake = {
+  hostedAccountGroupBillingRef: {
+    findMany: HostedAccountDeletionTestRead;
+  };
+  hostedMember: {
+    findUnique: HostedAccountDeletionTestRead;
+  };
+  hostedMemberBillingRef: {
+    findUnique: HostedAccountDeletionTestRead;
+  };
+  hostedMemberEmailAuthorization: {
+    findUnique: HostedAccountDeletionTestRead;
+  };
+  hostedMemberIdentity: {
+    findUnique: HostedAccountDeletionTestRead;
+  };
+  hostedMemberRouting: {
+    findUnique: HostedAccountDeletionTestRead;
+  };
+  hostedMemberSubscriptionCheckout: {
+    findMany: HostedAccountDeletionTestRead;
+  };
+};
+
+function createHostedAccountDeletionConcurrentReadGate(expectedReads: number) {
+  let active = 0;
+  let peak = 0;
+  let started = 0;
+  let resolveAllStarted!: () => void;
+  let resolveRelease!: () => void;
+  const allStarted = new Promise<void>((resolve) => {
+    resolveAllStarted = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    resolveRelease = resolve;
+  });
+
+  return {
+    allStarted,
+    get peak() {
+      return peak;
+    },
+    release: resolveRelease,
+    get started() {
+      return started;
+    },
+    wrap(
+      read: HostedAccountDeletionTestRead,
+      enabled: () => boolean = () => true,
+    ): HostedAccountDeletionTestRead {
+      return async (...args) => {
+        if (!enabled()) {
+          return read(...args);
+        }
+        started += 1;
+        active += 1;
+        peak = Math.max(peak, active);
+        if (started === expectedReads) {
+          resolveAllStarted();
+        }
+        await released;
+        try {
+          return await read(...args);
+        } finally {
+          active -= 1;
+        }
+      };
+    },
+  };
+}
+
 function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
   checkoutSessionRecords?: Array<{
@@ -4754,6 +5028,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
   }>;
   deviceAuthorityLockQueries?: string[];
   inFlightDeviceOauthCallbackCount?: number;
+  deviceOauthSessions?: Array<{
+    consumedAt: Date;
+    expiresAt: Date;
+    provider: string;
+    state: string;
+  }>;
   hostedComputerRunRows?: Record<string, unknown>[];
   hostedMemberUpdateCalls?: unknown[];
   familyBillingRefRecords?: Record<string, unknown>[];
@@ -4978,6 +5258,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     deviceOauthSession: {
       ...makeDeleteDelegate("deviceOauthSession"),
       count: async () => input.inFlightDeviceOauthCallbackCount ?? 0,
+      findMany: async () => input.deviceOauthSessions ?? [],
     },
     deviceProviderApplication: makeDeleteDelegate("deviceProviderApplication"),
     hostedComputerRun: {
@@ -5463,6 +5744,12 @@ type HostedAccountDeletionPrismaTransactionFake = {
   };
   deviceOauthSession: HostedAccountDeletionPrismaDeleteDelegate & {
     count: (args: { where: unknown }) => Promise<number>;
+    findMany: (args: { select?: unknown; where?: unknown }) => Promise<Array<{
+      consumedAt: Date;
+      expiresAt: Date;
+      provider: string;
+      state: string;
+    }>>;
   };
   deviceProviderApplication: HostedAccountDeletionPrismaDeleteDelegate;
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {

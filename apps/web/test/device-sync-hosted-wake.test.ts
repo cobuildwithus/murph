@@ -3606,7 +3606,7 @@ describe("hosted device-sync wakes", () => {
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
       connection: {
         id: publicConnectionId,
-        lastErrorCode: "PROVIDER_REVOKE_NOT_CONFIGURED",
+        lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
         status: "reauthorization_required",
       },
       warning: {
@@ -3659,7 +3659,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
     expect(mocks.syncDurableConnectionState).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        lastErrorCode: "PROVIDER_REVOKE_NOT_CONFIGURED",
+        lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
         status: "reauthorization_required",
       }),
       mocks.prismaTx,
@@ -3711,7 +3711,7 @@ describe("hosted device-sync wakes", () => {
     expect(revokeAccess).toHaveBeenCalledWith(storedConnection);
     expect(mocks.syncDurableConnectionState).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        lastErrorCode: "PROVIDER_REVOKE_FAILED",
+        lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
         status: "reauthorization_required",
       }),
       mocks.prismaTx,
@@ -4151,7 +4151,7 @@ describe("hosted device-sync wakes", () => {
       buildPublicConnectionId("dsc_123"),
     )).resolves.toMatchObject({
       connection: {
-        lastErrorCode: "PROVIDER_REVOKE_NOT_CONFIGURED",
+        lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
         status: "reauthorization_required",
       },
       warning: {

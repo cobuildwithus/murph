@@ -223,7 +223,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("reports an already-consumed expired state as a replay with its stored record", async () => {
+  it("reports an already-consumed expired state as requiring manual provider recovery", async () => {
     const record = buildOAuthSessionRow({
       consumedAt: new Date("2026-04-13T12:01:00.000Z"),
     });
@@ -237,7 +237,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         record.provider,
       ),
     ).resolves.toMatchObject({
-      status: "replayed",
+      status: "recovery_required",
       consumedAt: record.consumedAt?.toISOString(),
       record: {
         state: record.state,

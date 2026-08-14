@@ -96,6 +96,8 @@ function HostedDataPrivacySettingsAuthorized(props: {
   const [exitNote, setExitNote] = useState("");
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [providerAccessRemovalRequired, setProviderAccessRemovalRequired] = useState(false);
+  const [providerAccessRemovalConfirmed, setProviderAccessRemovalConfirmed] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [privyLogoutDone, setPrivyLogoutDone] = useState(false);
@@ -103,7 +105,9 @@ function HostedDataPrivacySettingsAuthorized(props: {
 
   const exportReady = acknowledgedSensitiveDownload && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
-  const deleteReady = phraseMatches && !deletePending;
+  const deleteReady = phraseMatches
+    && (!providerAccessRemovalRequired || providerAccessRemovalConfirmed)
+    && !deletePending;
 
   useEffect(() => {
     if (!deleted) {
@@ -195,6 +199,9 @@ function HostedDataPrivacySettingsAuthorized(props: {
           authorization,
           confirmationPhrase,
           ...(exitReason ? { exitNote, exitReason } : {}),
+          ...(providerAccessRemovalConfirmed
+            ? { providerAccessRemovalConfirmed: true }
+            : {}),
         },
         url: "/api/settings/privacy/delete",
       });
@@ -203,9 +210,19 @@ function HostedDataPrivacySettingsAuthorized(props: {
       setDialogOpen(false);
       setConfirmationPhrase("");
     } catch (requestError) {
+      const providerRecoveryRequired =
+        requestError instanceof HostedOnboardingApiError
+        && requestError.code
+          === "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_RECOVERY_REQUIRED";
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
-        reloadCurrentHostedAuthDocument();
+        if (!providerRecoveryRequired) {
+          reloadCurrentHostedAuthDocument();
+        }
+      }
+      if (providerRecoveryRequired) {
+        setProviderAccessRemovalRequired(true);
+        setProviderAccessRemovalConfirmed(false);
       }
       setDialogError(requestError instanceof HostedOnboardingApiError
         ? requestError.message
@@ -238,6 +255,8 @@ function HostedDataPrivacySettingsAuthorized(props: {
     setDialogStep("reason");
     setExitReason(null);
     setExitNote("");
+    setProviderAccessRemovalRequired(false);
+    setProviderAccessRemovalConfirmed(false);
     setDialogOpen(true);
   }
 
@@ -252,6 +271,8 @@ function HostedDataPrivacySettingsAuthorized(props: {
     setDialogStep("reason");
     setExitReason(null);
     setExitNote("");
+    setProviderAccessRemovalRequired(false);
+    setProviderAccessRemovalConfirmed(false);
   }
 
   function skipExitReason() {
@@ -379,6 +400,13 @@ function HostedDataPrivacySettingsAuthorized(props: {
                   placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                 />
               </div>
+              {providerAccessRemovalRequired ? (
+                <HostedAccountProviderAccessRemovalConfirmation
+                  checked={providerAccessRemovalConfirmed}
+                  disabled={deletePending}
+                  onCheckedChange={setProviderAccessRemovalConfirmed}
+                />
+              ) : null}
               <div className="flex flex-col gap-2">
                 <Button type="button" size="xl" variant="destructive" onClick={() => void handleDeleteConfirmed()} disabled={!deleteReady} className="w-full">
                   {deletePending ? "Deleting..." : "Delete account"}
@@ -391,6 +419,32 @@ function HostedDataPrivacySettingsAuthorized(props: {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+export function HostedAccountProviderAccessRemovalConfirmation({
+  checked,
+  disabled = false,
+  id = "hosted-account-provider-access-removed",
+  onCheckedChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  id?: string;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
+      <Checkbox
+        checked={checked}
+        disabled={disabled}
+        id={id}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+      />
+      <Label className="text-sm leading-5" htmlFor={id}>
+        I removed Murph access in each provider account named above.
+      </Label>
     </div>
   );
 }

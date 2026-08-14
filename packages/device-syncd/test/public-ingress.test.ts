@@ -37,6 +37,7 @@ import type {
   ListDeviceConnectionSourcesInput,
 } from "../src/types.ts";
 import {
+  DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
   classifyDeviceSyncWebhookAcceptanceMode,
   getDeviceSyncAccountOAuthTokens,
@@ -122,8 +123,14 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
 
     if (consumedAt !== null) {
+      const recoveryRequired = Date.parse(now) >= Math.max(
+        Date.parse(record.expiresAt),
+        Date.parse(consumedAt) + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+      );
       return {
-        status: "replayed",
+        status: recoveryRequired
+          ? "recovery_required"
+          : "replayed",
         consumedAt,
         record,
       };
@@ -157,7 +164,17 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       return { status: "owner_mismatch" };
     }
     if (consumedAt !== null) {
-      return { status: "replayed", consumedAt, record };
+      const recoveryRequired = Date.parse(now) >= Math.max(
+        Date.parse(record.expiresAt),
+        Date.parse(consumedAt) + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+      );
+      return {
+        status: recoveryRequired
+          ? "recovery_required"
+          : "replayed",
+        consumedAt,
+        record,
+      };
     }
     this.oauthStates.delete(state);
     return { status: "discarded", record };
@@ -2960,6 +2977,64 @@ test("public ingress retains an ambiguous provider-exchange claim", async () => 
     /provider exchange outcome unavailable/,
   );
   assert.equal(store.hasOAuthClaim(begin.state), true);
+});
+
+test("public ingress requires manual provider recovery after an ambiguous callback lease expires", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-13T12:00:00.000Z"));
+  try {
+    const store = new InMemoryPublicIngressStore();
+    const provider = createFakeProvider({
+      async exchangeAuthorizationCode() {
+        throw new Error("provider exchange outcome unavailable");
+      },
+    });
+    const completeConnection = vi.spyOn(
+      provider.connectionHandler!,
+      "completeConnection",
+    );
+    const ingress = createDeviceSyncPublicIngress({
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      registry: createDeviceSyncRegistry([provider]),
+      sessionTtlMs: 60_000,
+      store,
+    });
+    const begin = await ingress.startConnection({
+      ownerId: "member_a",
+      provider: "demo",
+    });
+
+    await assert.rejects(
+      () => ingress.handleOAuthCallback({
+        code: "ambiguous",
+        expectedOwnerId: "member_a",
+        provider: "demo",
+        state: begin.state,
+      }),
+      /provider exchange outcome unavailable/,
+    );
+    vi.setSystemTime(new Date(
+      Date.parse("2026-08-13T12:00:00.000Z")
+        + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+    ));
+
+    await assert.rejects(
+      () => ingress.handleOAuthCallback({
+        code: "ambiguous",
+        expectedOwnerId: "member_a",
+        provider: "demo",
+        state: begin.state,
+      }),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "OAUTH_CALLBACK_RECOVERY_REQUIRED"
+        && error.httpStatus === 409,
+    );
+    assert.equal(completeConnection.mock.calls.length, 1);
+    assert.equal(store.hasOAuthClaim(begin.state), true);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("public ingress finalizes successful callback state before a redelivery", async () => {

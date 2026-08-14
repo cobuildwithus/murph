@@ -1101,6 +1101,23 @@ export class DeviceSyncPublicIngress {
       );
     }
 
+    if (stateResult.status === "recovery_required") {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "OAUTH_CALLBACK_RECOVERY_REQUIRED",
+          message: "This provider connection did not finish safely. Remove Murph access in the provider account before deleting your Murph account, or contact support.",
+          retryable: false,
+          httpStatus: 409,
+        }),
+        {
+          connectSourceId: readConnectSourceId(stateResult.record.metadata),
+          connectTarget: readConnectTarget(stateResult.record.metadata),
+          provider: provider.provider,
+          returnTo: this.sanitizeStoredReturnTo(stateResult.record.returnTo ?? null),
+        },
+      );
+    }
+
     if (stateResult.status === "discarded") {
       const callbackError = normalizeString(callbackQuery.get("error"));
       if (callbackError) {

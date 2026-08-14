@@ -2,11 +2,12 @@ import { Prisma, PrismaClient } from "@prisma/client";
 
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-import type {
-  ConsumeOAuthStateResult,
-  DiscardUnconsumedOAuthStateResult,
-  OAuthStateConsumeClaim,
-  OAuthStateRecord,
+import {
+  DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+  type ConsumeOAuthStateResult,
+  type DiscardUnconsumedOAuthStateResult,
+  type OAuthStateConsumeClaim,
+  type OAuthStateRecord,
 } from "@murphai/device-syncd/types";
 
 import {
@@ -337,7 +338,13 @@ export class PrismaHostedOAuthSessionStore {
       // durable provider-cleanup ownership.
       if (record.consumedAt !== null) {
         return {
-          status: "replayed",
+          status: Date.parse(input.now) >= Math.max(
+            record.expiresAt.getTime(),
+            record.consumedAt.getTime()
+              + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+          )
+            ? "recovery_required"
+            : "replayed",
           consumedAt: record.consumedAt.toISOString(),
           record: stateRecord,
         };
@@ -454,7 +461,13 @@ export class PrismaHostedOAuthSessionStore {
       } satisfies OAuthStateRecord;
       if (record.consumedAt !== null) {
         return {
-          status: "replayed",
+          status: Date.parse(input.now) >= Math.max(
+            record.expiresAt.getTime(),
+            record.consumedAt.getTime()
+              + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+          )
+            ? "recovery_required"
+            : "replayed",
           consumedAt: record.consumedAt.toISOString(),
           record: stateRecord,
         };

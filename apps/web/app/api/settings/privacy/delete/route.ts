@@ -51,6 +51,8 @@ export const POST = withJsonError(async (request: Request) => {
     exitFeedback: deletionRequest.exitFeedback,
     memberId: auth.member.id,
     prisma,
+    providerAccessRemovalConfirmed:
+      deletionRequest.providerAccessRemovalConfirmed,
     request,
   });
 

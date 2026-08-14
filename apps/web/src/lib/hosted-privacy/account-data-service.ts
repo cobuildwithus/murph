@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
+import { DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS } from "@murphai/device-syncd/types";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
 import { createHostedDeviceSyncRegistry } from "../device-sync/providers";
@@ -17,7 +18,10 @@ import {
   formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
-import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
+import {
+  formatHostedDeviceSyncProviderLabel,
+  resolveHostedDeviceSyncBrowserProviderLabel,
+} from "../device-sync/provider-label";
 import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import {
   hostedOnboardingError,
@@ -642,6 +646,7 @@ export type HostedAccountDataStoreSlug = typeof HOSTED_ACCOUNT_DATA_STORE_COVERA
 export interface HostedAccountDeletionRequest {
   confirmationPhrase: typeof HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
   exitFeedback: HostedAccountExitFeedback | null;
+  providerAccessRemovalConfirmed: boolean;
 }
 
 export interface HostedAccountExitFeedback {
@@ -838,6 +843,7 @@ export function parseHostedAccountDeletionRequest(
   return {
     confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
     exitFeedback: parseHostedAccountExitFeedback(body),
+    providerAccessRemovalConfirmed: body.providerAccessRemovalConfirmed === true,
   };
 }
 
@@ -867,6 +873,7 @@ export async function deleteHostedAccountData(input: {
   exitFeedback?: HostedAccountExitFeedback | null;
   memberId: string;
   prisma: PrismaClient;
+  providerAccessRemovalConfirmed?: boolean;
   request: Request;
 }): Promise<HostedAccountDeletionResult> {
   const result = await deleteHostedAccountDataInternal({
@@ -919,6 +926,7 @@ async function deleteHostedAccountDataInternal(input: {
   memberId: string;
   phoneTransfer: HostedPrivyPhoneTransferAccountDeletionCompletion | null;
   prisma: PrismaClient;
+  providerAccessRemovalConfirmed?: boolean;
   request: Request;
 }): Promise<HostedAccountDeletionInternalResult> {
   const member = await input.prisma.hostedMember.findUnique({
@@ -939,6 +947,8 @@ async function deleteHostedAccountDataInternal(input: {
     now: deletionStartedAt,
     ownerMemberId: input.memberId,
     prisma: input.prisma,
+    providerAccessRemovalConfirmed:
+      input.providerAccessRemovalConfirmed === true,
   });
   // The suspension fence is committed before provider identifiers are
   // decrypted so relationship writers cannot add ownership outside this
@@ -1800,6 +1810,7 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
   now: Date;
   ownerMemberId: string;
   prisma: PrismaClient;
+  providerAccessRemovalConfirmed: boolean;
 }): Promise<string[]> {
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberForAccountDeletionTx({
@@ -1818,6 +1829,66 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
       prisma: tx,
       requiredMemberIds: memberIds.slice(1),
     });
+    const consumedOauthSessions = await tx.deviceOauthSession.findMany({
+      select: {
+        consumedAt: true,
+        expiresAt: true,
+        provider: true,
+        state: true,
+      },
+      where: {
+        consumedAt: { not: null },
+        userId: buildStringInFilter(memberIds),
+      },
+    });
+    const liveOauthCallbackCount = consumedOauthSessions.filter(
+      (session) => input.now.getTime() < Math.max(
+        session.expiresAt.getTime(),
+        session.consumedAt!.getTime()
+          + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+      ),
+    ).length;
+    if (liveOauthCallbackCount > 0) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+        httpStatus: 503,
+        message: "A connected-health authorization is still finishing. Retry account deletion.",
+        retryable: true,
+      });
+    }
+    if (consumedOauthSessions.length > 0) {
+      const providerLabels = Array.from(new Set(
+        consumedOauthSessions.map((session) =>
+          formatHostedDeviceSyncProviderLabel(session.provider)
+        ),
+      )).sort();
+      if (!input.providerAccessRemovalConfirmed) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_RECOVERY_REQUIRED",
+          details: { providerLabels },
+          httpStatus: 409,
+          message: `A provider connection did not finish safely. Remove Murph access in these provider accounts: ${providerLabels.join(", ")}. Confirm that removal here, then try account deletion again.`,
+          retryable: false,
+        });
+      }
+      const deletedOauthSessions = await tx.deviceOauthSession.deleteMany({
+        where: {
+          consumedAt: { not: null },
+          state: buildStringInFilter(
+            consumedOauthSessions.map((session) => session.state),
+          ),
+          userId: buildStringInFilter(memberIds),
+        },
+      });
+      if (deletedOauthSessions.count !== consumedOauthSessions.length) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+          httpStatus: 503,
+          message: "A connected-health authorization changed while account deletion was starting. Retry account deletion.",
+          retryable: true,
+        });
+      }
+    }
     await tx.hostedMember.updateMany({
       data: {
         suspendedAt: input.now,

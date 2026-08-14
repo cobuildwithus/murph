@@ -279,6 +279,10 @@ export interface OAuthStateConsumeClaim {
   consumedAt: string;
 }
 
+// A callback admitted at the end of its OAuth-session window still needs a
+// full bounded interval to finish provider work and persist cleanup authority.
+export const DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS = 15 * 60_000;
+
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
   provider: string;
@@ -369,6 +373,17 @@ export type ConsumeOAuthStateResult =
       record: OAuthStateRecord;
     }
   | {
+      /**
+       * Provider work may have completed, but the callback owner did not
+       * durably finalize before its bounded session expired. Retrying the
+       * authorization code is unsafe; hosted account deletion must instead
+       * require explicit confirmation that provider access was removed.
+       */
+      status: "recovery_required";
+      consumedAt: string;
+      record: OAuthStateRecord;
+    }
+  | {
       status: "missing";
     }
   | {
@@ -384,7 +399,9 @@ export type DiscardUnconsumedOAuthStateResult =
       status: "discarded";
       record: OAuthStateRecord;
     }
-  | Extract<ConsumeOAuthStateResult, { status: "replayed" | "missing" | "provider_mismatch" | "owner_mismatch" }>;
+  | Extract<ConsumeOAuthStateResult, {
+      status: "replayed" | "recovery_required" | "missing" | "provider_mismatch" | "owner_mismatch";
+    }>;
 
 export interface DeviceSyncPublicIngressStore {
   deleteExpiredOAuthStates(now: string): number | Promise<number>;

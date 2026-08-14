@@ -4,11 +4,12 @@ import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { maybeParseJsonObject, stringifyJson } from "../shared.ts";
 
-import type {
-  ConsumeOAuthStateResult,
-  DiscardUnconsumedOAuthStateResult,
-  OAuthStateConsumeClaim,
-  OAuthStateRecord,
+import {
+  DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+  type ConsumeOAuthStateResult,
+  type DiscardUnconsumedOAuthStateResult,
+  type OAuthStateConsumeClaim,
+  type OAuthStateRecord,
 } from "../types.ts";
 
 interface OAuthStateRow {
@@ -36,6 +37,18 @@ function mapOAuthStateRow(row: OAuthStateRow | undefined): OAuthStateRecord | nu
     createdAt: row.created_at,
     expiresAt: row.expires_at,
   };
+}
+
+function oauthCallbackRecoveryRequired(row: OAuthStateRow, now: string): boolean {
+  if (row.consumed_at === null) {
+    return false;
+  }
+  const processingLeaseExpiresAt = Date.parse(row.consumed_at)
+    + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS;
+  return Date.parse(now) >= Math.max(
+    Date.parse(row.expires_at),
+    processingLeaseExpiresAt,
+  );
 }
 
 export function createOAuthState(database: DatabaseSync, input: OAuthStateRecord): OAuthStateRecord {
@@ -103,7 +116,9 @@ export function discardUnconsumedOAuthState(
     }
     if (row.consumed_at !== null) {
       return {
-        status: "replayed",
+        status: oauthCallbackRecoveryRequired(row, now)
+          ? "recovery_required"
+          : "replayed",
         consumedAt: row.consumed_at,
         record: mapOAuthStateRow(row)!,
       };
@@ -167,7 +182,9 @@ export function consumeOAuthState(
 
     if (row.consumed_at !== null) {
       return {
-        status: "replayed",
+        status: oauthCallbackRecoveryRequired(row, now)
+          ? "recovery_required"
+          : "replayed",
         consumedAt: row.consumed_at,
         record: mapOAuthStateRow(row)!,
       };

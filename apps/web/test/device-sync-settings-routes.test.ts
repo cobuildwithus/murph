@@ -470,6 +470,7 @@ describe("device sync settings routes", () => {
       state: "callback_state_1234567890",
     });
     mocks.disconnectConnection.mockResolvedValue({
+      connection: { status: "disconnected" },
       warning: {
         code: "REMOTE_REVOKE_FAILED",
         message: "Provider revocation timed out.",
@@ -1795,9 +1796,37 @@ describe("device sync settings routes", () => {
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.disconnectConnection).toHaveBeenCalledWith("member_123", "dspc_oura_123");
     await expect(response.json()).resolves.toEqual({
+      connection: { status: "disconnected" },
       warning: {
         code: "REMOTE_REVOKE_FAILED",
         message: "Provider revocation timed out.",
+      },
+    });
+  });
+
+  it("returns a retryable failure when provider revoke leaves disconnect unfinished", async () => {
+    mocks.disconnectConnection.mockResolvedValueOnce({
+      connection: { status: "reauthorization_required" },
+      warning: {
+        code: "PROVIDER_REVOKE_FAILED",
+        message: "Provider revocation timed out.",
+      },
+    });
+
+    const response = await settingsDeviceSyncDisconnectRoute.POST(
+      new Request("https://join.example.test/api/settings/device-sync/connections/dspc_oura_123/disconnect", {
+        headers: { origin: "https://join.example.test" },
+        method: "POST",
+      }),
+      createRouteContext({ connectionId: "dspc_oura_123" }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "CONNECTION_DISCONNECT_NOT_FINISHED",
+        message: "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.",
+        retryable: true,
       },
     });
   });

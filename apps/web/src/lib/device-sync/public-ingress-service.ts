@@ -682,7 +682,6 @@ export class HostedDeviceSyncPublicIngressService {
       store: this.context.store,
       userId,
     });
-
     return {
       connection: this.toBrowserConnection(disconnected.connection),
       // The browser chooses the manual-removal-before-reconnect guidance from this

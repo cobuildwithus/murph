@@ -25,6 +25,7 @@ import {
 } from "@murphai/device-syncd/hosted-hints";
 import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
   isDeviceSyncConnectionSetupPending,
@@ -1208,7 +1209,13 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     if (warning && freshStoredAccount != null) {
       const pendingConnection: PublicDeviceSyncAccount = {
         ...freshExisting,
-        lastErrorCode: warning.code,
+        // Keep the member's disconnect intent durable even when a provider
+        // returns an arbitrary error code. The exact warning remains on the
+        // signal and response for diagnostics and retry guidance.
+        lastErrorCode:
+          warning.code === DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE
+            ? DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE
+            : DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
         lastErrorMessage: warning.message,
         nextReconcileAt: null,
         setupExpiresAt: null,
