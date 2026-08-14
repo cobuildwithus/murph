@@ -755,6 +755,7 @@ export async function appendHostedMailboxEnvelopeTx(input: {
 export async function appendHostedMailboxEnvelopeWithPreparedCryptoTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   prepared: PreparedHostedMailboxItemAppendCrypto;
+  sourceMessageLookupKey?: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   return appendHostedMailboxEnvelopeInternalTx({

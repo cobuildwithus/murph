@@ -131,8 +131,8 @@ export function BrowserVaultProvider({
 
 function DisabledBrowserVaultProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
-    // A landing-page warm load may predate the server consent check. Drop any
-    // decrypted snapshot before the blocked dashboard can expose it.
+    // Current server authority disables the payload owner. Drop any decrypted
+    // dashboard snapshot before the blocked route can expose it.
     clearBrowserVaultWarmState();
   }, []);
 
@@ -417,8 +417,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       const existing = peekBrowserVaultInFlightLoad();
       if (authorityPathname !== undefined && existing) {
-        // Preserve the landing warm request. Its result stays private module
-        // state until a second, post-boundary request proves current authority
+        // Preserve the shared dashboard request. Its result stays private
+        // module state until a second, post-boundary request proves authority
         // using the resulting known replica ref.
         await existing;
         if (
