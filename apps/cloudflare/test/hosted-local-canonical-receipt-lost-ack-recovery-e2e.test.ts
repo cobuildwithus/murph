@@ -34,9 +34,7 @@ import {
 } from "@murphai/runtime-state/node";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
-import {
-  hostedBrowserVaultReplicaObjectKey,
-} from "../src/storage-paths.js";
+import { hostedBrowserVaultReplicaObjectKey } from "../src/storage-paths.js";
 import {
   buildAssistantProviderMurphToolCall,
   buildAssistantProviderShellCommandCall,
@@ -638,8 +636,8 @@ function createSnapshotBundleRef(input: {
 async function createPreferenceRecoveryBrowserVaultReplicaRef(
   sourceBundleHash: string,
 ): Promise<HostedBrowserVaultReplicaRef> {
-  const generatedAt = new Date().toISOString();
   const dataVersion = `preference-receipt-${sourceBundleHash.slice(0, 16)}`;
+  const generatedAt = new Date().toISOString();
   return {
     byteLength: 256,
     dataVersion,

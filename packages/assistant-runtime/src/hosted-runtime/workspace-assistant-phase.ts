@@ -200,6 +200,7 @@ import {
 } from "./runtime-logs.ts";
 import type {
   HostedWorkspaceDurableCheckpointEffect,
+  HostedWorkspaceDurableCheckpointEffectContext,
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
@@ -665,6 +666,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "ask":
     case "ask_current_sender":
     case "message_current_sender":
+    case "record_current_sender_daily_metric":
     case "ask_member":
       return {
         action: request.action,
@@ -4049,9 +4051,16 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
   followUpWakeAt: string;
 }): DeferredHostedSystemMailboxPostCheckpointRecord {
   const { followUpWakeAt, ...recordInput } = input;
-  return {
-    afterDurableCheckpoint: async () => {
-      const result = await recordHostedSystemMailboxItemAfterCheckpoint(recordInput);
+  const requiresVaultShareProjectionResult =
+    recordInput.item.postCheckpointRecord?.kind === "vault-share.projection";
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
+    async (context?: HostedWorkspaceDurableCheckpointEffectContext) => {
+      const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+        ...recordInput,
+        ...(requiresVaultShareProjectionResult && context?.vaultShareProjectionResult
+          ? { vaultShareProjectionResult: context.vaultShareProjectionResult }
+          : {}),
+      });
       if (result.failed > 0) {
         return {
           nextWakeAt: result.nextWakeAt,
@@ -4065,6 +4074,19 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
         requiresFollowUpCheckpoint: true,
       };
     },
+    requiresVaultShareProjectionResult
+      ? {
+          requiresVaultShareProjectionResult: true,
+          vaultShareProjectionFailureWake: {
+            nextWakeAt: followUpWakeAt,
+            nextWakeReason: "assistant",
+            requiresFollowUpCheckpoint: true,
+          },
+        }
+      : {},
+  );
+  return {
+    afterDurableCheckpoint,
     redactedStatus: {
       hostedSystemMailboxRecordDeferred: true,
     },

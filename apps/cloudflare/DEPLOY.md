@@ -1577,6 +1577,46 @@ remain available. After convergence, smoke one profile-name label, one
 unverified owner-contact label, and one participant-scoped action selected by
 an opaque accepted-message ref.
 
+Member-reported daily metrics add the
+`health.daily-metric.reported` Web producer to that existing exact-participant
+path. An old runtime quarantines this kind and can stop its ordered system lane,
+so this release is consumer-first:
+
+1. Deploy Cloudflare and the runner with `container_rollout=immediate`. Do not
+   deploy Web until managed-container smoke reports the exact new runner-bundle
+   fingerprint and the immediate rollout has converged across eligible runtime
+   targets.
+2. Deploy Web, then run one synthetic granted `steps-days.v0` correction. The
+   action must return `accepted`; the member's system-lane consumed counter and
+   workspace checkpoint must advance; a later exact-scope `read_shared` must
+   retain the device record and add one `Manual` record. Confirm aggregate
+   runtime evidence contains no `unsupported_kind` route and no unconsumed
+   `health.daily-metric.reported` item behind its system-lane counter.
+3. The first Web producer enablement or imported report makes this exact
+   contracts/query/runner bundle a hard rollback floor. The canonical
+   observation permanently retains the strict `qualifiers` field and its
+   mailbox causal sequence after the transient mailbox item drains. Web may
+   roll back first to stop new reports, but never roll the runner below this
+   floor afterward; forward-fix on this bundle or newer. A pre-floor runner can
+   reject the persisted event while scanning the vault and cannot preserve the
+   report ordering during projection rebuild.
+
+If the post-commit signal fails, keep the accepted mailbox write and let the
+existing scheduled `/api/internal/device-sync/recovery-sweep` handoff select and
+signal the exact pending item. For a bounded manual repair, keep or redeploy the
+compatible runner, roll Web back to stop new production, invoke that existing
+recovery sweep once, and verify the system-lane counter advances before
+redeploying Web. Do not delete the item, edit a mailbox counter, send an
+unrelated member message, or add another repair queue.
+
+After a Web rollback, keep the exact compatible runner fingerprint and prove
+one existing meal-photo import, one ordinary conversation, and one projection
+rebuild against a vault containing a consumed report. The Manual correction
+must remain authoritative, existing canonical imports must still scan the
+strict event ledger, and restoring compatible Web must require no event rewrite
+or migration. Mailbox drain is progress evidence only; it never relaxes this
+persisted-state rollback floor.
+
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare
 with `container_rollout=immediate`. After that deploy, runner admission rejects
