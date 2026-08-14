@@ -123,7 +123,7 @@ describe("live Junction wearable canary workflow", () => {
 
   it("keeps headed CI authorization automated and fail-closed", () => {
     expect(browserRunner).toContain(
-      'const manualAuthorizationAllowed = !headless && environment.CI !== "true";',
+      'const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";',
     );
     expect(browserRunner).toContain(
       "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",

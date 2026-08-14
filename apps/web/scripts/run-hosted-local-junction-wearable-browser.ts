@@ -1,7 +1,10 @@
+import { pathToFileURL } from "node:url";
+
 import {
   chromium,
   type Locator,
   type Page,
+  type Response,
 } from "@playwright/test";
 
 import {
@@ -59,6 +62,7 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
 const PROVIDER_CHALLENGE_GRACE_MS = 15_000;
+const PROVIDER_NO_ACTION_GRACE_MS = 15_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -131,17 +135,7 @@ async function main(): Promise<void> {
     });
 
     stage = `junction_${config.source}_authorization`;
-    const [callbackResponse] = await Promise.all([
-      page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return url.origin === config.webOrigin
-          && url.pathname === "/api/device-sync/connect/junction/callback";
-      }, { timeout: config.timeoutMs }),
-      completeExternalAuthorization(page, config),
-    ]);
-    if (callbackResponse.status() !== 302) {
-      throw new Error("Murph did not complete the Junction callback redirect.");
-    }
+    await completeAuthorizationAndRequireCallback(page, config);
 
     stage = "murph_connected_completion";
     await page.waitForURL(
@@ -179,11 +173,13 @@ async function main(): Promise<void> {
 async function completeExternalAuthorization(
   page: Page,
   config: BrowserConfig,
+  now: () => number = Date.now,
 ): Promise<void> {
-  const deadline = Date.now() + config.timeoutMs;
+  const deadline = now() + config.timeoutMs;
+  let noActionObservedAt: number | null = null;
   let providerChallengeObservedAt: number | null = null;
 
-  while (Date.now() < deadline) {
+  while (now() < deadline) {
     if (readOrigin(page.url()) === config.webOrigin) {
       return;
     }
@@ -194,8 +190,9 @@ async function completeExternalAuthorization(
       title: await page.title().catch(() => ""),
     });
     if (providerChallenge) {
-      providerChallengeObservedAt ??= Date.now();
-      if (Date.now() - providerChallengeObservedAt >= PROVIDER_CHALLENGE_GRACE_MS) {
+      noActionObservedAt = null;
+      providerChallengeObservedAt ??= now();
+      if (now() - providerChallengeObservedAt >= PROVIDER_CHALLENGE_GRACE_MS) {
         throw new Error(
           `${config.label} authorization was blocked by an external provider challenge.`,
         );
@@ -248,10 +245,45 @@ async function completeExternalAuthorization(
       await page.waitForTimeout(1_000);
       continue;
     }
+    if (!clicked) {
+      noActionObservedAt ??= now();
+      if (now() - noActionObservedAt >= PROVIDER_NO_ACTION_GRACE_MS) {
+        throw new Error(
+          `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
+        );
+      }
+    } else {
+      noActionObservedAt = null;
+    }
     await page.waitForTimeout(clicked ? 750 : 1_000);
   }
 
   throw new Error("Timed out before Junction returned the browser to Murph.");
+}
+
+async function completeAuthorizationAndRequireCallback(
+  page: Page,
+  config: BrowserConfig,
+): Promise<void> {
+  const [callbackResponse] = await Promise.all([
+    page.waitForResponse(
+      (response) => isExpectedJunctionCallbackResponse(response, config.webOrigin),
+      { timeout: config.timeoutMs },
+    ),
+    completeExternalAuthorization(page, config),
+  ]);
+  if (callbackResponse.status() !== 302) {
+    throw new Error("Murph did not complete the Junction callback redirect.");
+  }
+}
+
+function isExpectedJunctionCallbackResponse(
+  response: Pick<Response, "url">,
+  webOrigin: string,
+): boolean {
+  const url = new URL(response.url());
+  return url.origin === webOrigin
+    && url.pathname === "/api/device-sync/connect/junction/callback";
 }
 
 async function fillVisible(
@@ -374,7 +406,8 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
   const label = source === "oura" ? "Oura" : "WHOOP";
   const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
-  const manualAuthorizationAllowed = !headless && environment.CI !== "true";
+  const ci = environment.CI?.trim().toLowerCase();
+  const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";
   const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
   const password = environment.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
   if (source === "whoop" && !password) {
@@ -441,6 +474,12 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
     webOrigin: parsedWebBaseUrl.origin,
   };
 }
+
+export {
+  completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
+  completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+};
 
 function assertTrustedAuthorizationUrl(
   value: string,
@@ -517,11 +556,13 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
   return message.slice(0, 600);
 }
 
-void main().catch((error: unknown) => {
-  process.stderr.write(
-    `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
-      sanitizeFailure(error, activeConfig)
-    }\n`,
-  );
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main().catch((error: unknown) => {
+    process.stderr.write(
+      `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
+        sanitizeFailure(error, activeConfig)
+      }\n`,
+    );
+    process.exitCode = 1;
+  });
+}
