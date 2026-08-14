@@ -11579,6 +11579,29 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(failed.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
     expect(failed.state.consecutiveFailures).toBe(0)
+    await expect(
+      listAssistantCronRuns({
+        job: 'automation-kl-midnight',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          error:
+            'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
+          finishedAt: '2026-05-04T16:00:20.000Z',
+          outcome: 'failed',
+          reason: 'delivery_failed',
+        }),
+      ],
+    })
+    const failedNotificationInput = cronMocks.sendAssistantMessageLocal.mock
+      .calls[0]?.[0] as AssistantNotificationInput
+    await expect(
+      prepareAssistantCronNotificationInput(failedNotificationInput, {
+        sessionId: 'session-default',
+      }),
+    ).resolves.toBe(failedNotificationInput)
   })
 
   it('passes an explicit participant delivery target for a source-backed mixed Linq route', async () => {
@@ -11810,6 +11833,29 @@ describe('assistant cron runtime orchestration', () => {
     expect(sent.state.lastError).toBeNull()
     expect(sent.state.consecutiveFailures).toBe(0)
     expect(sent.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+    await expect(
+      listAssistantCronRuns({
+        job: 'automation-kl-pending-sent',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          error: null,
+          finishedAt: '2026-05-04T16:00:20.000Z',
+          outcome: 'delivered',
+          reason: 'delivery_sent',
+        }),
+      ],
+    })
+    const sentNotificationInput = cronMocks.sendAssistantMessageLocal.mock
+      .calls[0]?.[0] as AssistantNotificationInput
+    const sentProjection = await prepareAssistantCronNotificationInput(
+      sentNotificationInput,
+      { sessionId: 'session-default' },
+    )
+    expect(sentProjection).not.toBe(sentNotificationInput)
+    expect(sentProjection.instructions).toContain('Remember to sleep.')
   })
 
   it('retries required one-shot delivery past the generic stale window and archives only after sent', async () => {

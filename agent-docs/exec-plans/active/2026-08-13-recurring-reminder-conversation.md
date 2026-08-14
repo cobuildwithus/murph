@@ -163,6 +163,23 @@ Updated: 2026-08-14
   rebuilding the deleted host lifecycle are rejected. The correction is an
   intent-contract and resident-copy clarification with focused horizon proof,
   not a new state or retention owner.
+- Final round 7 found that retained `delivery_pending` output still combined
+  queued intent with terminal dispatch. The fourth requirement-level
+  retrospective keeps authority in the existing cron-run outcome: pending
+  output is unavailable to cadence decisions; terminal outbox reconciliation
+  rewrites that existing run to `delivered` only after `sent`, or to `failed`
+  after failed, abandoned, or missing delivery. The next occurrence cannot run
+  while its job still owns a pending intent, so no confirmed output is lost by
+  excluding unresolved pending runs. This adds no field, enum, intent link,
+  state owner, or reminder lifecycle. Composed queue-to-sent and queue-to-failed
+  tests must prove the run transition, and output projection must admit only
+  the terminal delivered branch.
+- The final ReviewGPT loop reached its seven-round hard cap with the preceding
+  accepted finding. The cap retrospective chooses the same existing-owner
+  correction and continuation through required local audit, parent review,
+  focused verification, and PR CI. No round eight is authorized by this plan;
+  repository policy requires a fresh explicit continuation decision before any
+  eighth ReviewGPT round.
 
 ## Verification
 
@@ -173,12 +190,14 @@ Updated: 2026-08-14
   clean, the dense lifecycle remains deleted while review-driven safety and
   retention corrections stay focused, ReviewGPT has no accepted unresolved
   findings, and required CI is green on the final head.
-- Current local evidence: 9 changed-surface assistant files passed with 491
-  tests and 71 intentional provider-gated skips; focused cron output and
-  notification-turn coverage passed with 277 tests; assistant and Web
+- Current local evidence: 10 changed-surface assistant files passed with 511
+  tests and 71 intentional provider-gated skips; focused cron store, output,
+  and runtime coverage passed with 243 tests; assistant and Web
   typechecks passed; 57 focused changelog tests passed. Production UI design
   proof is not applicable because no component, style, layout, or browser state
   changed. The session replacement correction has direct selection,
   persisted-vault, and resolved-notification-path proof. The live real-model
   command is authored but cannot execute in this worktree because the isolated
-  harness requires an `OPENAI_API_KEY` and none is configured.
+  harness requires an `OPENAI_API_KEY` and none is configured. Round-seven
+  delivery-authority proof covers both composed terminal branches: queued then
+  sent becomes the only projected output, while queued then failed is excluded.

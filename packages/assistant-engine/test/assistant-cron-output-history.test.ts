@@ -37,7 +37,7 @@ afterEach(async () => {
 })
 
 describe('assistant cron output history', () => {
-  it('selects only unique accepted outputs in newest-first order', () => {
+  it('selects only unique terminally delivered outputs in newest-first order', () => {
     const runs = [
       createCronRun({
         outcome: 'delivered',
@@ -73,7 +73,6 @@ describe('assistant cron output history', () => {
 
     expect(selectAssistantCronRecentOutputs(runs)).toEqual([
       'First quote',
-      'Second quote',
     ])
   })
 

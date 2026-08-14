@@ -18,7 +18,6 @@ const ASSISTANT_CRON_OUTPUT_HISTORY_OUTCOMES = new Set<
   AssistantCronRunRecord['outcome']
 >([
   'delivered',
-  'delivery_pending',
 ])
 
 interface AssistantCronOutputHistorySelection {
