@@ -42,6 +42,40 @@ export function encodeHostedBrowserVaultReplicaJson(input: {
   };
 }
 
+export async function encodeHostedBrowserVaultReplicaShardJson(input: {
+  maxBytes?: number;
+  shard: unknown;
+}): Promise<{
+  byteLength: number;
+  bytes: Uint8Array;
+  contentEncoding: "gzip" | "identity";
+  encodedByteLength: number;
+}> {
+  const decodedBytes = utf8Encoder.encode(JSON.stringify(input.shard));
+  assertHostedBrowserVaultReplicaByteLength({
+    byteLength: decodedBytes.byteLength,
+    maxBytes: input.maxBytes,
+  });
+  const body = new Blob([toArrayBuffer(decodedBytes)])
+    .stream()
+    .pipeThrough(new CompressionStream("gzip"));
+  const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+  if (bytes.byteLength >= decodedBytes.byteLength) {
+    return {
+      byteLength: decodedBytes.byteLength,
+      bytes: decodedBytes,
+      contentEncoding: "identity",
+      encodedByteLength: decodedBytes.byteLength,
+    };
+  }
+  return {
+    byteLength: decodedBytes.byteLength,
+    bytes,
+    contentEncoding: "gzip",
+    encodedByteLength: bytes.byteLength,
+  };
+}
+
 export function measureHostedBrowserVaultReplicaBytes(replica: unknown): number {
   return utf8Encoder.encode(JSON.stringify(replica)).byteLength;
 }
@@ -57,4 +91,11 @@ export function assertHostedBrowserVaultReplicaByteLength(input: {
       maxBytes,
     });
   }
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
 }

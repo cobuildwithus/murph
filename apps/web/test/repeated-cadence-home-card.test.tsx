@@ -3,15 +3,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   createBrowserVaultQueryClient,
+  createBrowserVaultCoreQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
   selectBrowserVaultTrackedExperiments,
+  splitBrowserVaultReplica,
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser";
 import { expect, test, vi } from "vitest";
 
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
-import { buildExperimentLibraryCards } from "@/src/lib/experiments/library-cards";
+import {
+  buildExperimentLibraryCards,
+  buildHomeExperimentLibraryCards,
+} from "@/src/lib/experiments/library-cards";
 
 vi.mock("next/link", () => ({
   default(props: {
@@ -38,10 +43,18 @@ const GENERATED_AT = "2026-04-09T02:00:00.000Z";
 
 test("repeated daily experiments lead with today's completed target count", async () => {
   const client = await createClient();
-  const [card] = buildExperimentLibraryCards({
+  const [metricsCard] = buildExperimentLibraryCards({
     client,
     protocols: [],
     trackedExperiments: selectBrowserVaultTrackedExperiments(client),
+  });
+  const coreClient = createBrowserVaultCoreQueryClient(
+    (await splitBrowserVaultReplica(client.replica)).core,
+  );
+  const [card] = buildHomeExperimentLibraryCards({
+    client: coreClient,
+    protocols: [],
+    trackedExperiments: selectBrowserVaultTrackedExperiments(coreClient),
   });
 
   expect(card?.runSummary?.dailyCadence).toEqual({
@@ -50,6 +63,7 @@ test("repeated daily experiments lead with today's completed target count", asyn
     expected: 6,
     label: "Movement practice",
   });
+  expect(card?.runSummary).toEqual(metricsCard?.runSummary);
 
   const markup = renderToStaticMarkup(createElement(HomeExperimentCard, {
     card: card!,
@@ -67,14 +81,44 @@ test("repeated daily experiments lead with today's completed target count", asyn
   expect(markup).not.toContain("14%");
 });
 
-async function createClient(): Promise<BrowserVaultQueryClient> {
+test.each([
+  ["active", "active"],
+  ["paused", "paused"],
+  ["completed", "finished"],
+] as const)(
+  "core home cards preserve v1 run-card semantics for %s runs",
+  async (sourceStatus, expectedStatus) => {
+    const client = await createClient(sourceStatus);
+    const [metricsCard] = buildExperimentLibraryCards({
+      client,
+      protocols: [],
+      trackedExperiments: selectBrowserVaultTrackedExperiments(client),
+    });
+    const coreClient = createBrowserVaultCoreQueryClient(
+      (await splitBrowserVaultReplica(client.replica)).core,
+    );
+    const [coreCard] = buildHomeExperimentLibraryCards({
+      client: coreClient,
+      protocols: [],
+      trackedExperiments: selectBrowserVaultTrackedExperiments(coreClient),
+    });
+
+    expect(coreCard?.runStatus).toBe(expectedStatus);
+    expect(coreCard?.statusLabel).toBe(metricsCard?.statusLabel);
+    expect(coreCard?.runSummary).toEqual(metricsCard?.runSummary);
+  },
+);
+
+async function createClient(
+  status: "active" | "completed" | "paused" = "active",
+): Promise<BrowserVaultQueryClient> {
   const replica = await createBrowserVaultReplica({
     generatedAt: GENERATED_AT,
     metricPoints: [],
     sourceBundleHash: "b".repeat(64),
     vault: createVaultReadModel({
       entities: [
-        createExperimentEntity(),
+        createExperimentEntity(status),
         createSessionEntity(1, "2026-04-08T12:00:00.000Z"),
         createSessionEntity(2, "2026-04-08T14:00:00.000Z"),
         createSessionEntity(3, "2026-04-08T16:00:00.000Z"),
@@ -91,7 +135,9 @@ async function createClient(): Promise<BrowserVaultQueryClient> {
   });
 }
 
-function createExperimentEntity(): BrowserVaultEntity {
+function createExperimentEntity(
+  status: "active" | "completed" | "paused",
+): BrowserVaultEntity {
   return {
     attributes: {},
     body: "A synthetic repeated daily movement experiment.",
@@ -130,7 +176,7 @@ function createExperimentEntity(): BrowserVaultEntity {
       schemaVersion: "murph.frontmatter.experiment.v1",
       slug: EXPERIMENT_SLUG,
       startedOn: "2026-04-08",
-      status: "active",
+      status,
       title: "Movement practice",
     },
     kind: "experiment_entry",
@@ -141,7 +187,7 @@ function createExperimentEntity(): BrowserVaultEntity {
     primaryLookupId: EXPERIMENT_ID,
     recordClass: "bank",
     relatedIds: [],
-    status: "active",
+    status,
     stream: null,
     tags: ["movement"],
     title: "Movement practice",

@@ -15,7 +15,17 @@ import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+  type HostedBrowserVaultReplicaContentEncoding,
+  type HostedBrowserVaultReplicaMetricBucketId,
+  type HostedBrowserVaultReplicaMetricBucketRef,
   type HostedBrowserVaultReplicaRef,
+  type HostedBrowserVaultReplicaShardKind,
+  type HostedBrowserVaultReplicaShardRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRuntimeEnsureProcessingResponse,
@@ -65,13 +75,94 @@ import {
   type DeviceWebhookQueueEnvelopeV1,
 } from "./device-webhook-queue.ts";
 
-export interface CloudflareHostedControlBrowserVaultSession {
+export type CloudflareHostedControlBrowserVaultShardKind =
+  HostedBrowserVaultReplicaShardKind;
+
+export type CloudflareHostedControlBrowserVaultMetricBucketId =
+  HostedBrowserVaultReplicaMetricBucketId;
+
+export type CloudflareHostedControlBrowserVaultShardSchema =
+  | "murph.browser-vault-replica.core.v1"
+  | "murph.browser-vault-replica.metrics-index.v1"
+  | "murph.browser-vault-replica.labs.v1";
+
+export interface CloudflareHostedControlBrowserVaultLegacySession {
   encryptedReplica: HostedCipherEnvelope;
   replicaAad: CloudflareHostedControlBrowserVaultReplicaAad;
   replicaKeyEnvelope: HostedBrowserSessionKeyEnvelope;
   replicaRef: HostedBrowserVaultReplicaRef;
   state: "ready";
 }
+
+export interface CloudflareHostedControlBrowserVaultShardAad
+  extends CloudflareHostedControlBrowserVaultReplicaAad {
+  byteLength: number;
+  contentEncoding: HostedBrowserVaultReplicaContentEncoding;
+  encodedByteLength: number;
+  generatedAt: string;
+  generation?: number;
+  shard: CloudflareHostedControlBrowserVaultShardKind;
+  shardSchema: CloudflareHostedControlBrowserVaultShardSchema;
+  shardSetRefSchema: typeof HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA;
+}
+
+export interface CloudflareHostedControlBrowserVaultEncryptedShard {
+  encryptedShard: HostedCipherEnvelope;
+  shardAad: CloudflareHostedControlBrowserVaultShardAad;
+}
+
+export interface CloudflareHostedControlBrowserVaultMetricBucketAad
+  extends CloudflareHostedControlBrowserVaultReplicaAad {
+  byteLength: number;
+  contentEncoding: HostedBrowserVaultReplicaContentEncoding;
+  encodedByteLength: number;
+  generatedAt: string;
+  generation?: number;
+  metricBucketCount: typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT;
+  metricBucketId: CloudflareHostedControlBrowserVaultMetricBucketId;
+  metricBucketSchema: "murph.browser-vault-replica.metric-bucket.v1";
+  metricBucketSetRefSchema:
+    typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA;
+}
+
+export interface CloudflareHostedControlBrowserVaultEncryptedMetricBucket {
+  encryptedMetricBucket: HostedCipherEnvelope;
+  metricBucketAad: CloudflareHostedControlBrowserVaultMetricBucketAad;
+}
+
+export interface CloudflareHostedControlBrowserVaultShardedSession {
+  metricBuckets?: Partial<Record<
+    CloudflareHostedControlBrowserVaultMetricBucketId,
+    CloudflareHostedControlBrowserVaultEncryptedMetricBucket
+  >>;
+  replicaKeyEnvelope: HostedBrowserSessionKeyEnvelope;
+  replicaRef: HostedBrowserVaultReplicaRef;
+  shards?: Partial<Record<
+    CloudflareHostedControlBrowserVaultShardKind,
+    CloudflareHostedControlBrowserVaultEncryptedShard
+  >>;
+  state: "ready";
+}
+
+export type CloudflareHostedControlBrowserVaultSession =
+  | CloudflareHostedControlBrowserVaultLegacySession
+  | CloudflareHostedControlBrowserVaultShardedSession;
+
+export interface CloudflareHostedControlBrowserVaultExportShardedSession
+  extends CloudflareHostedControlBrowserVaultShardedSession {
+  metricBuckets: Record<
+    CloudflareHostedControlBrowserVaultMetricBucketId,
+    CloudflareHostedControlBrowserVaultEncryptedMetricBucket
+  >;
+  shards: Record<
+    CloudflareHostedControlBrowserVaultShardKind,
+    CloudflareHostedControlBrowserVaultEncryptedShard
+  >;
+}
+
+export type CloudflareHostedControlBrowserVaultExportSession =
+  | CloudflareHostedControlBrowserVaultLegacySession
+  | CloudflareHostedControlBrowserVaultExportShardedSession;
 
 export interface CloudflareHostedControlBrowserVaultReplicaAad {
   dataKeyId?: string;
@@ -147,8 +238,15 @@ export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
     replicaRef: HostedBrowserVaultReplicaRef;
+    requestedMetricBuckets?: readonly CloudflareHostedControlBrowserVaultMetricBucketId[];
+    requestedShards?: readonly CloudflareHostedControlBrowserVaultShardKind[];
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
+  createBrowserVaultExportSession(input: {
+    browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
+    replicaRef: HostedBrowserVaultReplicaRef;
+    userId: string;
+  }): Promise<CloudflareHostedControlBrowserVaultExportSession>;
   deleteUserData(
     userId: string,
     options?: { signal?: AbortSignal },
@@ -237,6 +335,19 @@ const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
+export class CloudflareHostedControlBrowserVaultReplicaNotFoundError extends Error {
+  constructor() {
+    super(BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE);
+    this.name = "CloudflareHostedControlBrowserVaultReplicaNotFoundError";
+  }
+}
+
+export function isCloudflareHostedControlBrowserVaultReplicaNotFoundError(
+  error: unknown,
+): error is CloudflareHostedControlBrowserVaultReplicaNotFoundError {
+  return error instanceof CloudflareHostedControlBrowserVaultReplicaNotFoundError;
+}
+
 export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
   value: unknown,
 ): CloudflareHostedControlTelegramUsageLimitNoticeRequest {
@@ -260,6 +371,110 @@ export function createCloudflareHostedControlClient(
     options.getBearerToken,
   );
 
+  const requestBrowserVaultSession = (input: {
+    browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
+    replicaRef: HostedBrowserVaultReplicaRef;
+    requestedMetricBuckets?: readonly CloudflareHostedControlBrowserVaultMetricBucketId[];
+    requestedShards?: readonly CloudflareHostedControlBrowserVaultShardKind[];
+    sessionPurpose?: "export";
+    userId: string;
+  }): Promise<CloudflareHostedControlBrowserVaultSession> => {
+    const userId = requireCloudflareHostedControlUserId(input.userId);
+    const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(input.browserPublicKeyJwk);
+    const replicaRef = parseHostedBrowserVaultReplicaRef(
+      input.replicaRef,
+      "Cloudflare browser vault session request replicaRef",
+    );
+    if (!replicaRef) {
+      throw new TypeError("Cloudflare browser vault session request replicaRef must not be null.");
+    }
+
+    const requestedMetricBuckets = input.requestedMetricBuckets === undefined
+      ? undefined
+      : parseCloudflareHostedControlBrowserVaultRequestedMetricBuckets(
+          input.requestedMetricBuckets,
+          "Cloudflare browser vault session request requestedMetricBuckets",
+        );
+    const requestedShards = input.requestedShards === undefined
+      ? undefined
+      : parseCloudflareHostedControlBrowserVaultRequestedShards(
+          input.requestedShards,
+          "Cloudflare browser vault session request requestedShards",
+        );
+    const expectedRequestedMetricBuckets = input.sessionPurpose === "export"
+      ? HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS
+      : requestedMetricBuckets;
+    const expectedRequestedShards = input.sessionPurpose === "export"
+      ? HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS
+      : requestedShards;
+
+    const body = JSON.stringify({
+      browserPublicKeyJwk,
+      replicaRef,
+      ...(requestedMetricBuckets === undefined ? {} : { requestedMetricBuckets }),
+      ...(requestedShards === undefined ? {} : { requestedShards }),
+      ...(input.sessionPurpose === undefined
+        ? {}
+        : { sessionPurpose: input.sessionPurpose }),
+    });
+
+    return requestHostedExecutionAuthorizedJson({
+      baseUrl,
+      boundUserId: userId,
+      fetchImpl,
+      getAuthorizationHeader,
+      label: "browser vault session",
+      parse: (value) =>
+        parseCloudflareHostedControlBrowserVaultSession(value, {
+          replicaRef,
+          requestedMetricBuckets: expectedRequestedMetricBuckets,
+          requestedShards: expectedRequestedShards,
+          userId,
+        }),
+      path: buildCloudflareHostedControlBrowserVaultSessionPath(userId),
+      request: {
+        body,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+      timeoutMs: options.timeoutMs,
+    }).catch((error) => {
+      if (
+        isHostedExecutionHttpError(
+          error,
+          404,
+          CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+        )
+      ) {
+        throw new CloudflareHostedControlBrowserVaultReplicaNotFoundError();
+      }
+
+      throw error;
+    });
+  };
+
+  const requestBrowserVaultExportSession = async (input: {
+    browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
+    replicaRef: HostedBrowserVaultReplicaRef;
+    userId: string;
+  }): Promise<CloudflareHostedControlBrowserVaultExportSession> => {
+    const session = await requestBrowserVaultSession({
+      ...input,
+      sessionPurpose: "export",
+    });
+    if ("encryptedReplica" in session) {
+      return session;
+    }
+    if (!isCloudflareHostedControlCompleteBrowserVaultExportSession(session)) {
+      throw new TypeError(
+        "Cloudflare browser vault export session must include every fixed child.",
+      );
+    }
+    return session;
+  };
+
   return {
     enqueueDeviceWebhook(envelope) {
       const request = parseDeviceWebhookQueueEnvelope(envelope);
@@ -280,56 +495,13 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+
     createBrowserVaultSession(input) {
-      const userId = requireCloudflareHostedControlUserId(input.userId);
-      const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(input.browserPublicKeyJwk);
-      const replicaRef = parseHostedBrowserVaultReplicaRef(
-        input.replicaRef,
-        "Cloudflare browser vault session request replicaRef",
-      );
+      return requestBrowserVaultSession(input);
+    },
 
-      if (!replicaRef) {
-        throw new TypeError("Cloudflare browser vault session request replicaRef must not be null.");
-      }
-
-      const body = JSON.stringify({
-        browserPublicKeyJwk,
-        replicaRef,
-      });
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "browser vault session",
-        parse: (value) =>
-          parseCloudflareHostedControlBrowserVaultSession(value, {
-            replicaRef,
-            userId,
-          }),
-        path: buildCloudflareHostedControlBrowserVaultSessionPath(userId),
-        request: {
-          body,
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      }).catch((error) => {
-        if (
-          isHostedExecutionHttpError(
-            error,
-            404,
-            CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
-          )
-        ) {
-          throw new Error(BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE);
-        }
-
-        throw error;
-      });
+    createBrowserVaultExportSession(input) {
+      return requestBrowserVaultExportSession(input);
     },
 
     deleteUserData(userId, requestOptions) {
@@ -780,6 +952,8 @@ function parseCloudflareHostedControlBrowserVaultSession(
   value: unknown,
   expected: {
     replicaRef: HostedBrowserVaultReplicaRef;
+    requestedMetricBuckets?: readonly CloudflareHostedControlBrowserVaultMetricBucketId[];
+    requestedShards?: readonly CloudflareHostedControlBrowserVaultShardKind[];
     userId: string;
   },
 ): CloudflareHostedControlBrowserVaultSession {
@@ -799,11 +973,58 @@ function parseCloudflareHostedControlBrowserVaultSession(
     throw new TypeError("Cloudflare browser vault session replicaRef must not be null.");
   }
 
-  assertHostedBrowserVaultReplicaRefMatches(
-    replicaRef,
-    expected.replicaRef,
-    "Cloudflare browser vault session replicaRef",
-  );
+  const hasMetricBuckets = record.metricBuckets !== undefined;
+  const hasShards = record.shards !== undefined;
+  if (hasMetricBuckets || hasShards) {
+    if (record.encryptedReplica !== undefined || record.replicaAad !== undefined) {
+      throw new TypeError(
+        "Cloudflare browser vault selected session must not include the legacy replica payload.",
+      );
+    }
+    assertHostedBrowserVaultReplicaRefMatches(
+      replicaRef,
+      expected.replicaRef,
+      "Cloudflare browser vault session replicaRef",
+    );
+    if (!expected.requestedMetricBuckets && !expected.requestedShards) {
+      throw new TypeError(
+        "Cloudflare browser vault selected session requires an explicit selection.",
+      );
+    }
+    const replicaKeyEnvelope = parseCloudflareHostedControlBrowserVaultReplicaKeyEnvelope(
+      record.replicaKeyEnvelope,
+      expected,
+    );
+    const metricBuckets = expected.requestedMetricBuckets === undefined
+      ? undefined
+      : parseCloudflareHostedControlBrowserVaultMetricBuckets(
+          record.metricBuckets,
+          { ...expected, requestedMetricBuckets: expected.requestedMetricBuckets },
+        );
+    if (expected.requestedMetricBuckets === undefined && hasMetricBuckets) {
+      throw new TypeError(
+        "Cloudflare browser vault session metricBuckets require requestedMetricBuckets.",
+      );
+    }
+    const shards = expected.requestedShards === undefined
+      ? undefined
+      : parseCloudflareHostedControlBrowserVaultShards(
+          record.shards,
+          { ...expected, requestedShards: expected.requestedShards },
+        );
+    if (expected.requestedShards === undefined && hasShards) {
+      throw new TypeError(
+        "Cloudflare browser vault session shards require requestedShards.",
+      );
+    }
+    return {
+      ...(metricBuckets === undefined ? {} : { metricBuckets }),
+      replicaKeyEnvelope,
+      replicaRef,
+      ...(shards === undefined ? {} : { shards }),
+      state,
+    };
+  }
 
   const encryptedReplica = parseHostedCipherEnvelope(
     record.encryptedReplica,
@@ -816,6 +1037,13 @@ function parseCloudflareHostedControlBrowserVaultSession(
   const replicaKeyEnvelope = parseHostedBrowserSessionKeyEnvelope(
     record.replicaKeyEnvelope,
     "Cloudflare browser vault session replicaKeyEnvelope",
+  );
+
+  assertHostedBrowserVaultReplicaRefMatches(
+    replicaRef,
+    expected.replicaRef,
+    "Cloudflare browser vault session replicaRef",
+    { allowMissingReplicaParts: true },
   );
 
   assertMatchingString(
@@ -904,9 +1132,515 @@ function parseCloudflareHostedControlBrowserVaultSession(
     encryptedReplica,
     replicaAad,
     replicaKeyEnvelope,
-    replicaRef,
+    // An older Worker parser legitimately omits additive shard metadata from
+    // its legacy fallback response. The authenticated request ref remains the
+    // canonical logical identity after every legacy field is matched above.
+    replicaRef: expected.replicaRef,
     state,
   };
+}
+
+function isCloudflareHostedControlCompleteBrowserVaultExportSession(
+  session: CloudflareHostedControlBrowserVaultShardedSession,
+): session is CloudflareHostedControlBrowserVaultExportShardedSession {
+  return session.metricBuckets !== undefined
+    && session.shards !== undefined
+    && HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.every(
+      (bucketId) => session.metricBuckets?.[bucketId] !== undefined,
+    )
+    && HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS.every(
+      (shard) => session.shards?.[shard] !== undefined,
+    );
+}
+
+function parseCloudflareHostedControlBrowserVaultShards(
+  value: unknown,
+  expected: {
+    replicaRef: HostedBrowserVaultReplicaRef;
+    requestedShards: readonly CloudflareHostedControlBrowserVaultShardKind[];
+    userId: string;
+  },
+): CloudflareHostedControlBrowserVaultShardedSession["shards"] {
+  const record = requireRecord(value, "Cloudflare browser vault session shards");
+  const requested = new Set(expected.requestedShards);
+  const returnedKinds = Object.keys(record);
+  if (
+    returnedKinds.length !== requested.size
+    || returnedKinds.some((kind) => !requested.has(
+      requireCloudflareHostedControlBrowserVaultShardKind(
+        kind,
+        "Cloudflare browser vault session shard kind",
+      ),
+    ))
+  ) {
+    throw new TypeError(
+      "Cloudflare browser vault session shards must match requestedShards exactly.",
+    );
+  }
+
+  const shards: CloudflareHostedControlBrowserVaultShardedSession["shards"] = {};
+  for (const shard of expected.requestedShards) {
+    const label = `Cloudflare browser vault session shards.${shard}`;
+    const entry = requireRecord(record[shard], label);
+    const encryptedShard = parseHostedCipherEnvelope(
+      entry.encryptedShard,
+      `${label}.encryptedShard`,
+    );
+    const shardAad = parseCloudflareHostedControlBrowserVaultShardAad(
+      entry.shardAad,
+      `${label}.shardAad`,
+      shard,
+    );
+    const expectedShardRef = readHostedBrowserVaultShardRef(
+      expected.replicaRef,
+      shard,
+    );
+    const expectedShardSet = expected.replicaRef.shards;
+    if (!expectedShardRef || !expectedShardSet) {
+      throw new TypeError(
+        `Cloudflare browser vault session requested replicaRef is missing shards.${shard}.`,
+      );
+    }
+
+    assertMatchingString(
+      encryptedShard.keyId,
+      getHostedBrowserVaultReplicaStorageKeyId(expected.replicaRef),
+      `${label}.encryptedShard.keyId`,
+      "the requested replica storage key id",
+    );
+    assertMatchingString(
+      encryptedShard.scope,
+      "browser-vault-replica",
+      `${label}.encryptedShard.scope`,
+      "the browser-vault-replica storage scope",
+    );
+    assertMatchingString(
+      shardAad.userId,
+      expected.userId,
+      `${label}.shardAad.userId`,
+      "the requested userId",
+    );
+    assertMatchingString(
+      shardAad.dataVersion,
+      expected.replicaRef.dataVersion,
+      `${label}.shardAad.dataVersion`,
+      "the requested replicaRef.dataVersion",
+    );
+    assertMatchingString(
+      shardAad.sourceBundleHash,
+      expected.replicaRef.sourceBundleHash,
+      `${label}.shardAad.sourceBundleHash`,
+      "the requested replicaRef.sourceBundleHash",
+    );
+    assertMatchingString(
+      shardAad.runtimeRootKeyId,
+      requireHostedBrowserVaultReplicaRuntimeRootKeyId(expected.replicaRef),
+      `${label}.shardAad.runtimeRootKeyId`,
+      "the requested replicaRef.runtimeRootKeyId",
+    );
+    assertMatchingString(
+      shardAad.generatedAt,
+      expected.replicaRef.generatedAt,
+      `${label}.shardAad.generatedAt`,
+      "the requested replicaRef.generatedAt",
+    );
+    assertMatchingOptionalNumber(
+      shardAad.generation,
+      expected.replicaRef.generation,
+      `${label}.shardAad.generation`,
+      "the requested replicaRef.generation",
+    );
+    assertMatchingString(
+      shardAad.objectKey,
+      expectedShardRef.objectKey,
+      `${label}.shardAad.objectKey`,
+      `the requested replicaRef.shards.${shard}.objectKey`,
+    );
+    assertMatchingNumber(
+      shardAad.byteLength,
+      expectedShardRef.byteLength,
+      `${label}.shardAad.byteLength`,
+      `the requested replicaRef.shards.${shard}.byteLength`,
+    );
+    assertMatchingNumber(
+      shardAad.encodedByteLength,
+      expectedShardRef.encodedByteLength,
+      `${label}.shardAad.encodedByteLength`,
+      `the requested replicaRef.shards.${shard}.encodedByteLength`,
+    );
+    assertMatchingString(
+      shardAad.contentEncoding,
+      expectedShardRef.contentEncoding,
+      `${label}.shardAad.contentEncoding`,
+      `the requested replicaRef.shards.${shard}.contentEncoding`,
+    );
+    assertMatchingString(
+      shardAad.shardSetRefSchema,
+      expectedShardSet.schema,
+      `${label}.shardAad.shardSetRefSchema`,
+      "the requested replicaRef.shards.schema",
+    );
+    if (expected.replicaRef.dataKeyEnvelope) {
+      assertMatchingString(
+        shardAad.dataKeyId ?? "",
+        expected.replicaRef.dataKeyEnvelope.dataKeyId,
+        `${label}.shardAad.dataKeyId`,
+        "the requested replicaRef.dataKeyEnvelope.dataKeyId",
+      );
+      assertMatchingString(
+        shardAad.dataKeyRootKeyId ?? "",
+        expected.replicaRef.dataKeyEnvelope.rootKeyId,
+        `${label}.shardAad.dataKeyRootKeyId`,
+        "the requested replicaRef.dataKeyEnvelope.rootKeyId",
+      );
+    }
+    shards[shard] = { encryptedShard, shardAad };
+  }
+  return shards;
+}
+
+function parseCloudflareHostedControlBrowserVaultShardAad(
+  value: unknown,
+  label: string,
+  expectedShard: CloudflareHostedControlBrowserVaultShardKind,
+): CloudflareHostedControlBrowserVaultShardAad {
+  const record = requireRecord(value, label);
+  const base = parseCloudflareHostedControlBrowserVaultReplicaAad(record, label);
+  const shard = requireCloudflareHostedControlBrowserVaultShardKind(
+    record.shard,
+    `${label}.shard`,
+  );
+  if (shard !== expectedShard) {
+    throw new TypeError(`${label}.shard must match its response key.`);
+  }
+  const shardSchema = requireCloudflareHostedControlBrowserVaultShardSchema(
+    record.shardSchema,
+    `${label}.shardSchema`,
+    shard,
+  );
+  const encoded = parseCloudflareHostedControlBrowserVaultEncodedAadFields(
+    record,
+    label,
+  );
+  const generatedAt = requireString(record.generatedAt, `${label}.generatedAt`);
+  const generation = record.generation === undefined
+    ? undefined
+    : requirePositiveSafeInteger(record.generation, `${label}.generation`);
+  const shardSetRefSchema = requireString(
+    record.shardSetRefSchema,
+    `${label}.shardSetRefSchema`,
+  );
+  if (shardSetRefSchema !== HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA) {
+    throw new TypeError(
+      `${label}.shardSetRefSchema must be ${HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA}.`,
+    );
+  }
+  return {
+    ...base,
+    ...encoded,
+    generatedAt,
+    ...(generation === undefined ? {} : { generation }),
+    shard,
+    shardSchema,
+    shardSetRefSchema,
+  };
+}
+
+function parseCloudflareHostedControlBrowserVaultMetricBuckets(
+  value: unknown,
+  expected: {
+    replicaRef: HostedBrowserVaultReplicaRef;
+    requestedMetricBuckets: readonly CloudflareHostedControlBrowserVaultMetricBucketId[];
+    userId: string;
+  },
+): NonNullable<CloudflareHostedControlBrowserVaultShardedSession["metricBuckets"]> {
+  const record = requireRecord(value, "Cloudflare browser vault session metricBuckets");
+  const requested = new Set(expected.requestedMetricBuckets);
+  const returnedIds = Object.keys(record);
+  if (
+    returnedIds.length !== requested.size
+    || returnedIds.some((bucketId) => !requested.has(
+      requireCloudflareHostedControlBrowserVaultMetricBucketId(
+        bucketId,
+        "Cloudflare browser vault session metric bucket id",
+      ),
+    ))
+  ) {
+    throw new TypeError(
+      "Cloudflare browser vault session metricBuckets must match requestedMetricBuckets exactly.",
+    );
+  }
+
+  const metricBuckets: NonNullable<
+    CloudflareHostedControlBrowserVaultShardedSession["metricBuckets"]
+  > = {};
+  for (const bucketId of expected.requestedMetricBuckets) {
+    const label = `Cloudflare browser vault session metricBuckets.${bucketId}`;
+    const entry = requireRecord(record[bucketId], label);
+    const encryptedMetricBucket = parseHostedCipherEnvelope(
+      entry.encryptedMetricBucket,
+      `${label}.encryptedMetricBucket`,
+    );
+    const metricBucketAad = parseCloudflareHostedControlBrowserVaultMetricBucketAad(
+      entry.metricBucketAad,
+      `${label}.metricBucketAad`,
+      bucketId,
+    );
+    const expectedBucketRef = readHostedBrowserVaultMetricBucketRef(
+      expected.replicaRef,
+      bucketId,
+    );
+    if (!expectedBucketRef || !expected.replicaRef.metricBuckets) {
+      throw new TypeError(
+        `Cloudflare browser vault session requested replicaRef is missing metricBuckets.buckets.${bucketId}.`,
+      );
+    }
+
+    assertMatchingString(
+      encryptedMetricBucket.keyId,
+      getHostedBrowserVaultReplicaStorageKeyId(expected.replicaRef),
+      `${label}.encryptedMetricBucket.keyId`,
+      "the requested replica storage key id",
+    );
+    assertMatchingString(
+      encryptedMetricBucket.scope,
+      "browser-vault-replica",
+      `${label}.encryptedMetricBucket.scope`,
+      "the browser-vault-replica storage scope",
+    );
+    assertCloudflareHostedControlBrowserVaultChildAadMatches(metricBucketAad, {
+      childLabel: `the requested replicaRef.metricBuckets.buckets.${bucketId}`,
+      childRef: expectedBucketRef,
+      label: `${label}.metricBucketAad`,
+      replicaRef: expected.replicaRef,
+      userId: expected.userId,
+    });
+    assertMatchingString(
+      metricBucketAad.metricBucketSetRefSchema,
+      expected.replicaRef.metricBuckets.schema,
+      `${label}.metricBucketAad.metricBucketSetRefSchema`,
+      "the requested replicaRef.metricBuckets.schema",
+    );
+    assertMatchingNumber(
+      metricBucketAad.metricBucketCount,
+      expected.replicaRef.metricBuckets.bucketCount,
+      `${label}.metricBucketAad.metricBucketCount`,
+      "the requested replicaRef.metricBuckets.bucketCount",
+    );
+    metricBuckets[bucketId] = { encryptedMetricBucket, metricBucketAad };
+  }
+  return metricBuckets;
+}
+
+function parseCloudflareHostedControlBrowserVaultMetricBucketAad(
+  value: unknown,
+  label: string,
+  expectedBucketId: CloudflareHostedControlBrowserVaultMetricBucketId,
+): CloudflareHostedControlBrowserVaultMetricBucketAad {
+  const record = requireRecord(value, label);
+  const base = parseCloudflareHostedControlBrowserVaultReplicaAad(record, label);
+  const encoded = parseCloudflareHostedControlBrowserVaultEncodedAadFields(
+    record,
+    label,
+  );
+  const generatedAt = requireString(record.generatedAt, `${label}.generatedAt`);
+  const generation = record.generation === undefined
+    ? undefined
+    : requirePositiveSafeInteger(record.generation, `${label}.generation`);
+  const metricBucketId = requireCloudflareHostedControlBrowserVaultMetricBucketId(
+    record.metricBucketId,
+    `${label}.metricBucketId`,
+  );
+  if (metricBucketId !== expectedBucketId) {
+    throw new TypeError(`${label}.metricBucketId must match its response key.`);
+  }
+  const metricBucketCount = requirePositiveSafeInteger(
+    record.metricBucketCount,
+    `${label}.metricBucketCount`,
+  );
+  if (metricBucketCount !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
+    throw new TypeError(
+      `${label}.metricBucketCount must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT}.`,
+    );
+  }
+  const metricBucketSchema = requireString(
+    record.metricBucketSchema,
+    `${label}.metricBucketSchema`,
+  );
+  if (metricBucketSchema !== "murph.browser-vault-replica.metric-bucket.v1") {
+    throw new TypeError(
+      `${label}.metricBucketSchema must be murph.browser-vault-replica.metric-bucket.v1.`,
+    );
+  }
+  const metricBucketSetRefSchema = requireString(
+    record.metricBucketSetRefSchema,
+    `${label}.metricBucketSetRefSchema`,
+  );
+  if (
+    metricBucketSetRefSchema
+    !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA
+  ) {
+    throw new TypeError(
+      `${label}.metricBucketSetRefSchema must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA}.`,
+    );
+  }
+  return {
+    ...base,
+    ...encoded,
+    generatedAt,
+    ...(generation === undefined ? {} : { generation }),
+    metricBucketCount,
+    metricBucketId,
+    metricBucketSchema,
+    metricBucketSetRefSchema,
+  };
+}
+
+function parseCloudflareHostedControlBrowserVaultEncodedAadFields(
+  record: Record<string, unknown>,
+  label: string,
+): Pick<
+  CloudflareHostedControlBrowserVaultShardAad,
+  "byteLength" | "contentEncoding" | "encodedByteLength"
+> {
+  const byteLength = requirePositiveSafeInteger(record.byteLength, `${label}.byteLength`);
+  const encodedByteLength = requirePositiveSafeInteger(
+    record.encodedByteLength,
+    `${label}.encodedByteLength`,
+  );
+  const contentEncoding = requireString(record.contentEncoding, `${label}.contentEncoding`);
+  if (contentEncoding !== "gzip" && contentEncoding !== "identity") {
+    throw new TypeError(`${label}.contentEncoding must be gzip or identity.`);
+  }
+  if (
+    (contentEncoding === "identity" && encodedByteLength !== byteLength)
+    || (contentEncoding === "gzip" && encodedByteLength >= byteLength)
+  ) {
+    throw new TypeError(`${label} encoding lengths are invalid.`);
+  }
+  return { byteLength, contentEncoding, encodedByteLength };
+}
+
+function assertCloudflareHostedControlBrowserVaultChildAadMatches(
+  aad: CloudflareHostedControlBrowserVaultMetricBucketAad,
+  expected: {
+    childLabel: string;
+    childRef: HostedBrowserVaultReplicaMetricBucketRef;
+    label: string;
+    replicaRef: HostedBrowserVaultReplicaRef;
+    userId: string;
+  },
+): void {
+  assertMatchingString(
+    aad.userId,
+    expected.userId,
+    `${expected.label}.userId`,
+    "the requested userId",
+  );
+  assertMatchingString(
+    aad.dataVersion,
+    expected.replicaRef.dataVersion,
+    `${expected.label}.dataVersion`,
+    "the requested replicaRef.dataVersion",
+  );
+  assertMatchingString(
+    aad.sourceBundleHash,
+    expected.replicaRef.sourceBundleHash,
+    `${expected.label}.sourceBundleHash`,
+    "the requested replicaRef.sourceBundleHash",
+  );
+  assertMatchingString(
+    aad.runtimeRootKeyId,
+    requireHostedBrowserVaultReplicaRuntimeRootKeyId(expected.replicaRef),
+    `${expected.label}.runtimeRootKeyId`,
+    "the requested replicaRef.runtimeRootKeyId",
+  );
+  assertMatchingString(
+    aad.generatedAt,
+    expected.replicaRef.generatedAt,
+    `${expected.label}.generatedAt`,
+    "the requested replicaRef.generatedAt",
+  );
+  assertMatchingOptionalNumber(
+    aad.generation,
+    expected.replicaRef.generation,
+    `${expected.label}.generation`,
+    "the requested replicaRef.generation",
+  );
+  assertMatchingString(
+    aad.objectKey,
+    expected.childRef.objectKey,
+    `${expected.label}.objectKey`,
+    `${expected.childLabel}.objectKey`,
+  );
+  assertMatchingNumber(
+    aad.byteLength,
+    expected.childRef.byteLength,
+    `${expected.label}.byteLength`,
+    `${expected.childLabel}.byteLength`,
+  );
+  assertMatchingNumber(
+    aad.encodedByteLength,
+    expected.childRef.encodedByteLength,
+    `${expected.label}.encodedByteLength`,
+    `${expected.childLabel}.encodedByteLength`,
+  );
+  assertMatchingString(
+    aad.contentEncoding,
+    expected.childRef.contentEncoding,
+    `${expected.label}.contentEncoding`,
+    `${expected.childLabel}.contentEncoding`,
+  );
+  if (expected.replicaRef.dataKeyEnvelope) {
+    assertMatchingString(
+      aad.dataKeyId ?? "",
+      expected.replicaRef.dataKeyEnvelope.dataKeyId,
+      `${expected.label}.dataKeyId`,
+      "the requested replicaRef.dataKeyEnvelope.dataKeyId",
+    );
+    assertMatchingString(
+      aad.dataKeyRootKeyId ?? "",
+      expected.replicaRef.dataKeyEnvelope.rootKeyId,
+      `${expected.label}.dataKeyRootKeyId`,
+      "the requested replicaRef.dataKeyEnvelope.rootKeyId",
+    );
+  }
+}
+
+function parseCloudflareHostedControlBrowserVaultReplicaKeyEnvelope(
+  value: unknown,
+  expected: { replicaRef: HostedBrowserVaultReplicaRef; userId: string },
+): HostedBrowserSessionKeyEnvelope {
+  const envelope = parseHostedBrowserSessionKeyEnvelope(
+    value,
+    "Cloudflare browser vault session replicaKeyEnvelope",
+  );
+  assertMatchingString(
+    envelope.userId,
+    expected.userId,
+    "Cloudflare browser vault session replicaKeyEnvelope.userId",
+    "the requested userId",
+  );
+  assertMatchingString(
+    envelope.keyId,
+    getHostedBrowserVaultReplicaStorageKeyId(expected.replicaRef),
+    "Cloudflare browser vault session replicaKeyEnvelope.keyId",
+    "the requested replica storage key id",
+  );
+  if (envelope.recipients.length === 0) {
+    throw new TypeError(
+      "Cloudflare browser vault session replicaKeyEnvelope.recipients must not be empty.",
+    );
+  }
+  for (const [index, recipient] of envelope.recipients.entries()) {
+    assertMatchingString(
+      recipient.keyId,
+      getHostedBrowserVaultReplicaStorageKeyId(expected.replicaRef),
+      `Cloudflare browser vault session replicaKeyEnvelope.recipients[${index}].keyId`,
+      "the requested replica storage key id",
+    );
+  }
+  return envelope;
 }
 
 function parseCloudflareHostedControlBrowserVaultReplicaAad(
@@ -1171,6 +1905,7 @@ function assertHostedBrowserVaultReplicaRefMatches(
   actual: HostedBrowserVaultReplicaRef,
   expected: HostedBrowserVaultReplicaRef,
   label: string,
+  options: { allowMissingReplicaParts?: boolean } = {},
 ): void {
   assertMatchingNumber(
     actual.byteLength,
@@ -1189,6 +1924,12 @@ function assertHostedBrowserVaultReplicaRefMatches(
     expected.generatedAt,
     `${label}.generatedAt`,
     "the requested replicaRef.generatedAt",
+  );
+  assertMatchingOptionalNumber(
+    actual.generation,
+    expected.generation,
+    `${label}.generation`,
+    "the requested replicaRef.generation",
   );
   assertMatchingString(
     actual.keyId,
@@ -1220,6 +1961,114 @@ function assertHostedBrowserVaultReplicaRefMatches(
     `${label}.dataKeyEnvelope`,
     "the requested replicaRef.dataKeyEnvelope",
   );
+  if (!(options.allowMissingReplicaParts && actual.shards === undefined)) {
+    assertMatchingOptionalJson(
+      actual.shards,
+      expected.shards,
+      `${label}.shards`,
+      "the requested replicaRef.shards",
+    );
+  }
+  if (!(options.allowMissingReplicaParts && actual.metricBuckets === undefined)) {
+    assertMatchingOptionalJson(
+      actual.metricBuckets,
+      expected.metricBuckets,
+      `${label}.metricBuckets`,
+      "the requested replicaRef.metricBuckets",
+    );
+  }
+}
+
+function parseCloudflareHostedControlBrowserVaultRequestedMetricBuckets(
+  value: unknown,
+  label: string,
+): CloudflareHostedControlBrowserVaultMetricBucketId[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty array.`);
+  }
+  const bucketIds = value.map((entry, index) =>
+    requireCloudflareHostedControlBrowserVaultMetricBucketId(
+      entry,
+      `${label}[${index}]`,
+    ));
+  if (new Set(bucketIds).size !== bucketIds.length) {
+    throw new TypeError(`${label} must not contain duplicates.`);
+  }
+  if (bucketIds.length === HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
+    throw new TypeError(
+      `${label} must not request all ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT} buckets from the interactive session route.`,
+    );
+  }
+  return bucketIds;
+}
+
+function requireCloudflareHostedControlBrowserVaultMetricBucketId(
+  value: unknown,
+  label: string,
+): CloudflareHostedControlBrowserVaultMetricBucketId {
+  const bucketId = requireString(value, label);
+  if (!(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS as readonly string[]).includes(bucketId)) {
+    throw new TypeError(`${label} must be a browser vault metric bucket id from 00 through 1f.`);
+  }
+  return bucketId as CloudflareHostedControlBrowserVaultMetricBucketId;
+}
+
+function parseCloudflareHostedControlBrowserVaultRequestedShards(
+  value: unknown,
+  label: string,
+): CloudflareHostedControlBrowserVaultShardKind[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty array.`);
+  }
+  const shards = value.map((entry, index) =>
+    requireCloudflareHostedControlBrowserVaultShardKind(
+      entry,
+      `${label}[${index}]`,
+    ));
+  if (new Set(shards).size !== shards.length) {
+    throw new TypeError(`${label} must not contain duplicates.`);
+  }
+  return shards;
+}
+
+function requireCloudflareHostedControlBrowserVaultShardKind(
+  value: unknown,
+  label: string,
+): CloudflareHostedControlBrowserVaultShardKind {
+  const shard = requireString(value, label);
+  if (!(HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS as readonly string[]).includes(shard)) {
+    throw new TypeError(`${label} must be core, labs, or metricsIndex.`);
+  }
+  return shard as CloudflareHostedControlBrowserVaultShardKind;
+}
+
+function requireCloudflareHostedControlBrowserVaultShardSchema(
+  value: unknown,
+  label: string,
+  shard: CloudflareHostedControlBrowserVaultShardKind,
+): CloudflareHostedControlBrowserVaultShardSchema {
+  const schema = requireString(value, label);
+  const expected: CloudflareHostedControlBrowserVaultShardSchema = shard === "metricsIndex"
+    ? "murph.browser-vault-replica.metrics-index.v1"
+    : `murph.browser-vault-replica.${shard}.v1`;
+  if (schema !== expected) {
+    throw new TypeError(`${label} must be ${expected}.`);
+  }
+  return schema as CloudflareHostedControlBrowserVaultShardSchema;
+}
+
+function readHostedBrowserVaultShardRef(
+  replicaRef: HostedBrowserVaultReplicaRef,
+  shard: CloudflareHostedControlBrowserVaultShardKind,
+): HostedBrowserVaultReplicaShardRef | null {
+  return replicaRef.shards?.[shard] ?? null;
+}
+
+function readHostedBrowserVaultMetricBucketRef(
+  replicaRef: HostedBrowserVaultReplicaRef,
+  bucketId: CloudflareHostedControlBrowserVaultMetricBucketId,
+): HostedBrowserVaultReplicaMetricBucketRef | null {
+  return replicaRef.metricBuckets?.buckets[bucketId] ?? null;
 }
 
 function assertMatchingNumber(
@@ -1240,6 +2089,17 @@ function assertMatchingString(
   expectedLabel: string,
 ): void {
   if (actual !== expected) {
+    throw new TypeError(`${label} must match ${expectedLabel}.`);
+  }
+}
+
+function assertMatchingOptionalNumber(
+  actual: number | null | undefined,
+  expected: number | null | undefined,
+  label: string,
+  expectedLabel: string,
+): void {
+  if ((actual ?? null) !== (expected ?? null)) {
     throw new TypeError(`${label} must match ${expectedLabel}.`);
   }
 }
@@ -1535,6 +2395,17 @@ function requireString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
 
+  return value;
+}
+
+function requirePositiveSafeInteger(value: unknown, label: string): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value <= 0
+  ) {
+    throw new TypeError(`${label} must be a positive safe integer.`);
+  }
   return value;
 }
 

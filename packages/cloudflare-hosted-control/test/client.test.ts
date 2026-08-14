@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+  type HostedBrowserVaultReplicaMetricBucketId,
+  type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 
 import {
+  CloudflareHostedControlBrowserVaultReplicaNotFoundError,
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
   readCloudflareHostedControlHttpError,
@@ -30,6 +36,7 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     expect(Object.keys(client).sort()).toEqual([
+      "createBrowserVaultExportSession",
       "createBrowserVaultSession",
       "deleteEnvironmentVoice",
       "deleteMealPhoto",
@@ -800,6 +807,372 @@ describe("createCloudflareHostedControlClient", () => {
     }));
   });
 
+  it("requests and validates only the selected browser vault shards", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const replicaRef = createShardedReplicaRef();
+    const responseBody = {
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      shards: {
+        core: createEncryptedReplicaShard("core"),
+        labs: createEncryptedReplicaShard("labs"),
+      },
+      state: "ready",
+    };
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(responseBody);
+      }) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedShards: ["core", "labs"],
+      userId: "user_123",
+    })).resolves.toEqual(responseBody);
+
+    expect(JSON.parse(String(requireObservedRequest(observedRequest).init?.body))).toEqual({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedShards: ["core", "labs"],
+    });
+  });
+
+  it("requests and validates the exact selected browser vault metric buckets", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const replicaRef = createShardedReplicaRef();
+    const responseBody = {
+      metricBuckets: {
+        "00": createEncryptedReplicaMetricBucket("00"),
+        "1f": createEncryptedReplicaMetricBucket("1f"),
+      },
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      shards: {
+        metricsIndex: createEncryptedReplicaShard("metricsIndex"),
+      },
+      state: "ready",
+    };
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(responseBody);
+      }) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedMetricBuckets: ["00", "1f"],
+      requestedShards: ["metricsIndex"],
+      userId: "user_123",
+    })).resolves.toEqual(responseBody);
+
+    expect(JSON.parse(String(requireObservedRequest(observedRequest).init?.body))).toEqual({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedMetricBuckets: ["00", "1f"],
+      requestedShards: ["metricsIndex"],
+    });
+  });
+
+  it("rejects browser vault metric bucket responses outside the exact requested set", async () => {
+    const replicaRef = createShardedReplicaRef();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse({
+        metricBuckets: {
+          "00": createEncryptedReplicaMetricBucket("00"),
+          "01": createEncryptedReplicaMetricBucket("01"),
+        },
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef,
+        state: "ready",
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedMetricBuckets: ["00"],
+      userId: "user_123",
+    })).rejects.toThrow(
+      "metricBuckets must match requestedMetricBuckets exactly",
+    );
+  });
+
+  it("rejects selected browser vault responses with a different logical generation", async () => {
+    const replicaRef = createShardedReplicaRef();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse({
+        metricBuckets: {
+          "00": createEncryptedReplicaMetricBucket("00"),
+        },
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: { ...replicaRef, generation: 2 },
+        state: "ready",
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedMetricBuckets: ["00"],
+      userId: "user_123",
+    })).rejects.toThrow(
+      "replicaRef.generation must match the requested replicaRef.generation",
+    );
+  });
+
+  it("uses a distinct export session purpose for the fixed full replica selection", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const replicaRef = createShardedReplicaRef();
+    const responseBody = {
+      metricBuckets: Object.fromEntries(
+        HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => [
+          bucketId,
+          createEncryptedReplicaMetricBucket(bucketId),
+        ]),
+      ),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      shards: {
+        core: createEncryptedReplicaShard("core"),
+        labs: createEncryptedReplicaShard("labs"),
+        metricsIndex: createEncryptedReplicaShard("metricsIndex"),
+      },
+      state: "ready",
+    };
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(responseBody);
+      }) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultExportSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      userId: "user_123",
+    })).resolves.toEqual(responseBody);
+
+    const body = JSON.parse(String(requireObservedRequest(observedRequest).init?.body));
+    expect(body).toMatchObject({ replicaRef, sessionPurpose: "export" });
+    expect(body).not.toHaveProperty("requestedMetricBuckets");
+    expect(body).not.toHaveProperty("requestedShards");
+  });
+
+  it("accepts an old Worker legacy response for an export session", async () => {
+    const replicaRef = createShardedReplicaRef();
+    const responseBody = createBrowserVaultSession({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse(responseBody)) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultExportSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      userId: "user_123",
+    })).resolves.toEqual({
+      ...responseBody,
+      replicaRef,
+    });
+  });
+
+  it("accepts a legacy browser-vault response for a shard-capable request against an old ref", async () => {
+    const replicaRef = createReplicaRef();
+    const responseBody = createBrowserVaultSession({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse(responseBody)) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedMetricBuckets: ["00"],
+      requestedShards: ["core"],
+      userId: "user_123",
+    })).resolves.toEqual(responseBody);
+  });
+
+  it("accepts an old Worker legacy response that stripped additive shard refs", async () => {
+    const replicaRef = createShardedReplicaRef();
+    const responseBody = createBrowserVaultSession({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse(responseBody)) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef,
+      requestedMetricBuckets: ["00"],
+      requestedShards: ["core"],
+      userId: "user_123",
+    })).resolves.toEqual({
+      ...responseBody,
+      replicaRef,
+    });
+  });
+
+  it("rejects empty, duplicate, and unsupported browser vault shard requests", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => {
+        throw new Error("fetch must not run");
+      }) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+    const base = {
+      browserPublicKeyJwk: {
+        crv: "P-256" as const,
+        kty: "EC" as const,
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
+    };
+
+    expect(() => client.createBrowserVaultSession({
+      ...base,
+      requestedShards: [],
+    })).toThrow("requestedShards must be a non-empty array");
+    expect(() => client.createBrowserVaultSession({
+      ...base,
+      requestedShards: ["core", "core"],
+    })).toThrow("requestedShards must not contain duplicates");
+    expect(() => Reflect.apply(client.createBrowserVaultSession, client, [{
+      ...base,
+      requestedShards: ["private"],
+    }])).toThrow(
+      "requestedShards[0] must be core, labs, or metricsIndex",
+    );
+  });
+
+  it("rejects empty, duplicate, unsupported, and all-bucket interactive requests", () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => {
+        throw new Error("fetch must not run");
+      }) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+    const base = {
+      browserPublicKeyJwk: {
+        crv: "P-256" as const,
+        kty: "EC" as const,
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
+    };
+
+    expect(() => client.createBrowserVaultSession({
+      ...base,
+      requestedMetricBuckets: [],
+    })).toThrow("requestedMetricBuckets must be a non-empty array");
+    expect(() => client.createBrowserVaultSession({
+      ...base,
+      requestedMetricBuckets: ["00", "00"],
+    })).toThrow("requestedMetricBuckets must not contain duplicates");
+    expect(() => Reflect.apply(client.createBrowserVaultSession, client, [{
+      ...base,
+      requestedMetricBuckets: ["20"],
+    }])).toThrow(
+      "requestedMetricBuckets[0] must be a browser vault metric bucket id from 00 through 1f",
+    );
+    expect(() => client.createBrowserVaultSession({
+      ...base,
+      requestedMetricBuckets: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+    })).toThrow("must not request all 32 buckets from the interactive session route");
+  });
+
   it("rejects browser vault sessions that are not ready", async () => {
     const responseBody = createBrowserVaultSession({
       encryptedReplica: null,
@@ -839,7 +1212,7 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.createBrowserVaultSession({
+    const promise = client.createBrowserVaultSession({
       browserPublicKeyJwk: {
         crv: "P-256",
         kty: "EC",
@@ -848,7 +1221,14 @@ describe("createCloudflareHostedControlClient", () => {
       },
       replicaRef: createReplicaRef(),
       userId: "user_123",
-    })).rejects.toThrow("Hosted execution browser vault replica was not found.");
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(
+      CloudflareHostedControlBrowserVaultReplicaNotFoundError,
+    );
+    await expect(promise).rejects.toThrow(
+      "Hosted execution browser vault replica was not found.",
+    );
   });
 
   it("leaves generic browser vault 404s as HTTP failures", async () => {
@@ -1356,12 +1736,95 @@ function createReplicaRef() {
     },
     dataVersion: "d".repeat(64),
     generatedAt: "2026-04-20T08:00:00.000Z",
+    generation: 1,
     keyId: "browser-vault-replica:d",
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica" as const,
     schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
     runtimeRootKeyId: "udrk:runtime:test-root",
     sourceBundleHash: "a".repeat(64),
+  };
+}
+
+function createShardedReplicaRef(): HostedBrowserVaultReplicaRef {
+  return {
+    ...createReplicaRef(),
+    metricBuckets: {
+      bucketCount: 32 as const,
+      buckets: Object.fromEntries(
+        HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => [
+          bucketId,
+          createReplicaMetricBucketRef(bucketId),
+        ]),
+      ) as NonNullable<HostedBrowserVaultReplicaRef["metricBuckets"]>["buckets"],
+      schema: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+    },
+    shards: {
+      core: createReplicaShardRef("core"),
+      labs: createReplicaShardRef("labs"),
+      metricsIndex: createReplicaShardRef("metricsIndex"),
+      schema: HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+    },
+  };
+}
+
+function createReplicaShardRef(shard: "core" | "labs" | "metricsIndex") {
+  return {
+    byteLength: 512,
+    contentEncoding: "gzip" as const,
+    encodedByteLength: 128,
+    objectKey: `users/browser-vault-replicas/opaque/replica.${shard}.json.gz`,
+  };
+}
+
+function createEncryptedReplicaShard(shard: "core" | "labs" | "metricsIndex") {
+  const shardSchema = shard === "metricsIndex"
+    ? "murph.browser-vault-replica.metrics-index.v1"
+    : `murph.browser-vault-replica.${shard}.v1`;
+  return {
+    encryptedShard: createReplicaEnvelope(),
+    shardAad: {
+      ...createReplicaAad(),
+      byteLength: 512,
+      contentEncoding: "gzip" as const,
+      encodedByteLength: 128,
+      generatedAt: "2026-04-20T08:00:00.000Z",
+      generation: 1,
+      objectKey: createReplicaShardRef(shard).objectKey,
+      shard,
+      shardSchema,
+      shardSetRefSchema: HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+    },
+  };
+}
+
+function createReplicaMetricBucketRef(bucketId: HostedBrowserVaultReplicaMetricBucketId) {
+  return {
+    byteLength: 512,
+    contentEncoding: "gzip" as const,
+    encodedByteLength: 128,
+    objectKey: `users/browser-vault-replicas/opaque/replica.metrics.${bucketId}.json.gz`,
+  };
+}
+
+function createEncryptedReplicaMetricBucket(
+  bucketId: HostedBrowserVaultReplicaMetricBucketId,
+) {
+  return {
+    encryptedMetricBucket: createReplicaEnvelope(),
+    metricBucketAad: {
+      ...createReplicaAad(),
+      byteLength: 512,
+      contentEncoding: "gzip" as const,
+      encodedByteLength: 128,
+      generatedAt: "2026-04-20T08:00:00.000Z",
+      generation: 1,
+      metricBucketCount: 32,
+      metricBucketId: bucketId,
+      metricBucketSchema: "murph.browser-vault-replica.metric-bucket.v1",
+      metricBucketSetRefSchema: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+      objectKey: createReplicaMetricBucketRef(bucketId).objectKey,
+    },
   };
 }
 
