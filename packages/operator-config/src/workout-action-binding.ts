@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import type { WorkoutExercise, WorkoutSet } from '@murphai/contracts'
+import type { WorkoutExercise, WorkoutSession, WorkoutSet } from '@murphai/contracts'
 
 type CompleteNullableProjection<T> = {
   [Key in keyof Required<T>]: T[Key] | null
@@ -13,10 +13,32 @@ type CanonicalWorkoutExercise = CompleteNullableProjection<
 
 export function deriveWorkoutActionBinding(
   workoutEntityId: string,
-  lastMemberActionId?: string,
+  workout: Pick<WorkoutSession, 'exercises' | 'lastMemberActionId'>,
 ): string {
+  const positionalIdentity = workout.exercises
+    .slice()
+    .sort((left, right) => left.order - right.order)
+    .map((exercise) => ({
+      groupId: exercise.groupId ?? null,
+      mode: exercise.mode ?? null,
+      name: exercise.name,
+      note: exercise.note ?? null,
+      order: exercise.order,
+      sets: exercise.sets
+        .slice()
+        .sort((left, right) => left.order - right.order)
+        .map((set) => ({
+          order: set.order,
+          type: set.type ?? null,
+        })),
+      sourceExerciseId: exercise.sourceExerciseId ?? null,
+      unitOverride: exercise.unitOverride ?? null,
+    }))
+
   return createHash('sha256')
-    .update(`workout-action:v2:${workoutEntityId}:${lastMemberActionId ?? ''}`)
+    .update(
+      `workout-action:v3:${workoutEntityId}:${workout.lastMemberActionId ?? ''}:${JSON.stringify(positionalIdentity)}`,
+    )
     .digest('hex')
 }
 

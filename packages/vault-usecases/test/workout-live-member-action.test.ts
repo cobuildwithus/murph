@@ -44,7 +44,10 @@ const BASE_WORKOUT: WorkoutSession = {
   startedAt: "2026-08-12T14:00:00.000Z",
 };
 const ACCEPTED_AT = "2026-08-12T15:00:00.000Z";
-const ACTION_BINDING = deriveWorkoutActionBinding("evt_test_workout");
+const ACTION_BINDING = deriveWorkoutActionBinding(
+  "evt_test_workout",
+  BASE_WORKOUT,
+);
 const ACTION_ID = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
 const SECOND_ACTION_ID = "8676b264-9b91-4b50-8c73-184d7a63b901";
 
@@ -139,37 +142,40 @@ function removeAction(input: {
     { logged: false, result: null },
     { logged: true, result: { kind: "reps" as const, reps: 8 } },
   ];
+  const exercises: WorkoutSession["exercises"] = [{
+    ...BASE_WORKOUT.exercises[0],
+    sets: expectedSets.map((set, index) => ({
+      order: index + 1,
+      ...(set.result?.kind === "note" && set.result.note !== null
+        ? { note: set.result.note }
+        : {}),
+      ...(set.result?.kind === "reps" && set.result.reps !== null
+        ? { reps: set.result.reps }
+        : {}),
+      ...(set.result?.kind === "weight_reps"
+        ? {
+            ...(set.result.reps !== null ? { reps: set.result.reps } : {}),
+            ...(set.result.weight !== null
+              ? { weight: set.result.weight }
+              : {}),
+            ...(set.result.weightUnit !== null
+              ? { weightUnit: set.result.weightUnit }
+              : {}),
+          }
+        : {}),
+    })),
+  }];
   return {
     expectedWorkout: {
-      actionBinding: ACTION_BINDING,
+      actionBinding: deriveWorkoutActionBinding("evt_test_workout", {
+        exercises,
+      }),
       exercises: [{
         name: "Leg press",
         sets: expectedSets.map(({ logged }) => ({ logged })),
       }],
       setRemovalBinding: input.setRemovalBinding
-        ?? deriveWorkoutSetRemovalBinding("evt_test_workout", [{
-          ...BASE_WORKOUT.exercises[0],
-          sets: expectedSets.map((set, index) => ({
-            order: index + 1,
-            ...(set.result?.kind === "note" && set.result.note !== null
-              ? { note: set.result.note }
-              : {}),
-            ...(set.result?.kind === "reps" && set.result.reps !== null
-              ? { reps: set.result.reps }
-              : {}),
-            ...(set.result?.kind === "weight_reps"
-              ? {
-                  ...(set.result.reps !== null ? { reps: set.result.reps } : {}),
-                  ...(set.result.weight !== null
-                    ? { weight: set.result.weight }
-                    : {}),
-                  ...(set.result.weightUnit !== null
-                    ? { weightUnit: set.result.weightUnit }
-                    : {}),
-                }
-              : {}),
-          })),
-        }]),
+        ?? deriveWorkoutSetRemovalBinding("evt_test_workout", exercises),
     },
     kind: "workout.live.apply" as const,
     mutations: [{

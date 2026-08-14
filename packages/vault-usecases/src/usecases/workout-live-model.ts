@@ -206,7 +206,7 @@ export function buildLiveWorkoutCardEditor(input: {
     editor: {
       actionBinding: deriveWorkoutActionBinding(
         input.workoutId,
-        input.workout.lastMemberActionId,
+        input.workout,
       ),
       exercises: editorExercises,
       setRemovalBinding: deriveWorkoutSetRemovalBinding(input.workoutId, exercises),

@@ -1492,17 +1492,20 @@ item. The scoped client reads that action-id-keyed outcome from the same member
 mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
 requires the V6 card's opaque workout-revision binding under the existing
-workout mutation lock. That binding combines the canonical workout identity
-with its last applied member-action marker, so delayed or forwarded cards cannot
-retarget a later workout and a card predating another direct action cannot
-mutate a shifted positional set.
+workout mutation lock. That binding combines the canonical workout identity,
+ordered hidden exercise/set-slot identity, and the last applied member-action
+generation. Delayed or forwarded cards therefore cannot retarget a later
+workout, a set shifted by another direct action, or a same-name exercise moved
+by the generic workout editor. Mutable set results and annotations remain under
+their existing result-family optimistic comparisons rather than the positional
+identity binding.
 Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
 across the bounded canonical workout collection before revision and active-only
-eligibility, so the revision change caused by the original write, workout
+eligibility, so the generation change caused by the original write, workout
 completion, or a newer active workout cannot replace a committed success with a
 terminal rejection. Every different action must match the current revision
 before positional mutation. The serialized mailbox lane means

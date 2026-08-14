@@ -75,7 +75,7 @@ describe('live workout model', () => {
       workoutId: 'evt_test_workout',
     }), {
       editor: {
-        actionBinding: deriveWorkoutActionBinding('evt_test_workout'),
+        actionBinding: deriveWorkoutActionBinding('evt_test_workout', workout),
         version: 1,
         setRemovalBinding: deriveWorkoutSetRemovalBinding(
           'evt_test_workout',
@@ -194,6 +194,8 @@ describe('live workout model', () => {
         sets: [{ order: 1 }],
       }],
     })
+    const earlierWorkout = structuredClone(workout)
+    delete earlierWorkout.lastMemberActionId
 
     assert.equal(
       buildLiveWorkoutCardEditor({
@@ -203,14 +205,14 @@ describe('live workout model', () => {
       })?.editor.actionBinding,
       deriveWorkoutActionBinding(
         'evt_test_workout',
-        workout.lastMemberActionId,
+        workout,
       ),
     )
     assert.notEqual(
-      deriveWorkoutActionBinding('evt_test_workout'),
+      deriveWorkoutActionBinding('evt_test_workout', earlierWorkout),
       deriveWorkoutActionBinding(
         'evt_test_workout',
-        workout.lastMemberActionId,
+        workout,
       ),
     )
   })

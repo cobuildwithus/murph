@@ -660,8 +660,11 @@ Last verified: 2026-08-13
   envelopes and V5 challenge-standings envelopes. V3, V4, and V5 carry no
   tracking, identity, canonical references, credentials, tokens, or write
   authority. V6 adds a 64-character lowercase SHA-256 workout-revision binding
-  derived from the canonical workout id plus its last applied member-action
-  marker. It also
+  derived from the canonical workout id, its ordered hidden exercise/set-slot
+  identity, and its last applied member-action generation. Ordered identity
+  includes source/group identity and set type but excludes mutable set results
+  and annotations, so every canonical structural writer invalidates shifted
+  coordinates without claiming ownership of unrelated fields. It also
   carries a separate opaque 64-character removal binding derived from the hidden
   canonical workout id and complete ordered canonical exercise/set state. That
   binding reveals no raw hidden field and is checked only as a destructive
@@ -675,8 +678,9 @@ Last verified: 2026-08-13
   and only that exact marker—not visible-state coincidence—proves replay before
   revision, active-only, and destructive preconditions. Every different action
   must match the current revision before positional mutation, so a card that
-  predates another direct action fails closed even when repeated visible values
-  would make the wrong target appear unchanged. The same bounded canonical workout
+  predates either another direct action or a generic structural reorder fails
+  closed even when repeated visible values would make the wrong target appear
+  unchanged. The same bounded canonical workout
   read resolves that marker after the target completes and before considering a
   newer active workout, so replay cannot retarget. This adds no client-visible
   set id or second receipt store. Canonical persistence keeps the generic no-deletion guard and exposes

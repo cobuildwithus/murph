@@ -13,7 +13,9 @@ import {
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
-import { deriveWorkoutActionBinding } from '../src/workout-action-binding.js'
+
+const OPAQUE_ACTION_BINDING =
+  '95958f9f83e6943ceb56704e19216f7ff6e105a9b74d8a5e466754b266f67a9a'
 
 const ACTIVE_WORKOUT_CARD = {
   kind: 'compact_table',
@@ -73,9 +75,7 @@ const ACTIVE_WORKOUT_CARD = {
     ],
   },
   editor: {
-    actionBinding: deriveWorkoutActionBinding(
-      'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-    ),
+    actionBinding: OPAQUE_ACTION_BINDING,
     version: 1,
     setRemovalBinding: 'b'.repeat(64),
     exercises: [

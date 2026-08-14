@@ -124,7 +124,7 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   }
   if (
     input.action.expectedWorkout.actionBinding
-      !== deriveWorkoutActionBinding(shown.entity.id, workout.lastMemberActionId)
+      !== deriveWorkoutActionBinding(shown.entity.id, workout)
   ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }

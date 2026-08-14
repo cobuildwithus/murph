@@ -79,11 +79,14 @@ Messages extension as the first action family.
   from targeting a later workout or overwriting a newer set correction without
   adding a second version store. The client timestamp stays stable across an
   exact retry and remains bounded by the credential lifetime at admission.
-- The exact-workout binding also incorporates the workout's last applied
-  member-action marker. Every different action must match that current revision
-  before positional mutation, so a stale card cannot retarget a compacted set
-  when repeated visible values collide. Exact action-id replay is resolved first
-  because its own successful write necessarily changed that revision.
+- The exact-workout binding incorporates the workout's ordered hidden
+  exercise/set-slot identity plus its last applied member-action generation.
+  Every different action must match that current revision before positional
+  mutation, so a stale card cannot retarget either a compacted set or a
+  same-name exercise moved by the generic workout editor. Mutable set results
+  and annotations remain outside the identity binding and under their existing
+  result-family compare-and-merge path. Exact action-id replay is resolved first
+  because its own successful write necessarily changed that generation.
 - A successful foreground reply checkpoint services at most one due requested
   member action through the existing system-mailbox owner before another model
   pass. Completion receipts and unrelated system work retain ordinary ordering.
