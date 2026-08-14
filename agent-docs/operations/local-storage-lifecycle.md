@@ -80,16 +80,18 @@ open-PR, plan, cleanliness, process-CWD, and retirement gates.
 The creation helper prepares the shared local exclude rule before registration,
 registers each worktree with checkout materialization suppressed, and writes
 `.metadata_never_index` at the worktree root before tracked files exist. It then
-materializes the checkout and invokes the configured `post-checkout` hook once
-from the canonical target root with Git's worktree-add arguments and launch
-environment. The launcher clears repository-local variables, sets Git's exec
-path and empty prefix, prepends the exec path to `PATH`, and removes Murph's
-lock-held flags so hook descendants must acquire the real creation lock instead
-of inheriting authority to bypass it. It also gives the hook native end-of-file
-standard input while preserving standard output and error. After the hook
-succeeds, the helper restores the marker in case hook cleanup removed ignored
-files, then publishes storage-guard authorization as the final completion step.
-Keep the marker in place for the worktree's lifetime.
+materializes the checkout under Git's linked-worktree directory and work-tree
+environment with submodule recursion disabled, then invokes the configured
+`post-checkout` hook once from the canonical target root with Git's worktree-add
+arguments and launch environment. The launcher clears repository-local
+variables, sets Git's exec path and empty prefix, prepends the exec path to
+`PATH`, and removes Murph's lock-held flags so hook descendants must acquire the
+real creation lock instead of inheriting authority to bypass it. It also gives
+the hook native end-of-file standard input while preserving standard output and
+error. After the hook succeeds, the helper restores the shared exclude rule and
+the marker in case hook cleanup changed either one, then publishes storage-guard
+authorization as the final completion step. Keep the marker in place for the
+worktree's lifetime.
 
 Marker creation, materialization, hook completion, marker restoration, and
 final authorization publication form one post-registration boundary. If any

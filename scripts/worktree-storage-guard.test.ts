@@ -569,8 +569,145 @@ touch hook-installed
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
-  it('restores the Spotlight marker after a successful cleanup hook', () => {
+  it('matches native checkout-filter worktree context', () => {
+    const configureFilter = (harness: Harness, output: string): void => {
+      const attributes = runGit(harness.primary, [
+        'rev-parse',
+        '--path-format=absolute',
+        '--git-path',
+        'info/attributes',
+      ])
+      writeFileSync(attributes, 'tracked.txt filter=materialization-contract\n')
+      runGit(harness.primary, [
+        'config',
+        'filter.materialization-contract.smudge',
+        `test -n "\${GIT_DIR-}" && test -n "\${GIT_WORK_TREE-}" && printf '%s|%s|%s\\n' "$PWD" "$GIT_DIR" "$GIT_WORK_TREE" >${JSON.stringify(output)} && cat`,
+      ])
+      runGit(harness.primary, [
+        'config',
+        'filter.materialization-contract.clean',
+        'cat',
+      ])
+      runGit(harness.primary, [
+        'config',
+        'filter.materialization-contract.required',
+        'true',
+      ])
+    }
+    const normalizeContext = (context: string, target: string): string => {
+      const admin = runGit(target, [
+        'rev-parse',
+        '--path-format=absolute',
+        '--git-dir',
+      ])
+      return context
+        .replaceAll(realpathSync(target), '<TARGET>')
+        .replaceAll(realpathSync(admin), '<GIT_DIR>')
+    }
+
+    const nativeHarness = createHarness()
+    const nativeOutput = path.join(nativeHarness.root, 'native-filter-context')
+    configureFilter(nativeHarness, nativeOutput)
+    const nativeTarget = path.join(nativeHarness.root, 'native-filter-target')
+    const nativeCreation = spawnSync(
+      'git',
+      ['worktree', 'add', '-b', 'native-filter-context', nativeTarget],
+      { cwd: nativeHarness.primary, encoding: 'utf8' },
+    )
+
+    const helperHarness = createHarness()
+    const helperOutput = path.join(helperHarness.root, 'helper-filter-context')
+    configureFilter(helperHarness, helperOutput)
+    const helperTarget = path.join(helperHarness.root, 'helper-filter-target')
+    const helperCreation = runScript(helperHarness, 'create-worktree', [
+      '-b',
+      'helper-filter-context',
+      helperTarget,
+    ])
+
+    expect(nativeCreation.status, nativeCreation.stderr).toBe(0)
+    expect(helperCreation.status, helperCreation.stderr).toBe(0)
+    expect(
+      normalizeContext(readFileSync(helperOutput, 'utf8'), helperTarget),
+    ).toBe(normalizeContext(readFileSync(nativeOutput, 'utf8'), nativeTarget))
+    expect(readFileSync(path.join(helperTarget, 'tracked.txt'), 'utf8')).toBe(
+      'baseline\n',
+    )
+    expect(existsSync(path.join(helperTarget, '.metadata_never_index'))).toBe(true)
+  })
+
+  it('matches native non-recursive worktree materialization', () => {
+    const addSubmoduleFixture = (harness: Harness): void => {
+      const source = path.join(harness.root, 'submodule-source')
+      mkdirSync(source)
+      runGit(source, ['init', '-b', 'main'])
+      runGit(source, ['config', 'user.name', 'Worktree Guard Test'])
+      runGit(source, [
+        'config',
+        'user.email',
+        'worktree-guard@users.noreply.github.com',
+      ])
+      writeFileSync(path.join(source, 'submodule.txt'), 'submodule\n')
+      runGit(source, ['add', 'submodule.txt'])
+      runGit(source, ['commit', '-m', 'submodule baseline'])
+      const addition = spawnSync(
+        'git',
+        [
+          '-c',
+          'protocol.file.allow=always',
+          'submodule',
+          'add',
+          source,
+          'nested',
+        ],
+        { cwd: harness.primary, encoding: 'utf8' },
+      )
+      if (addition.status !== 0) {
+        throw new Error(`submodule fixture failed: ${addition.stderr}`)
+      }
+      runGit(harness.primary, ['commit', '-am', 'add submodule fixture'])
+      runGit(harness.primary, ['config', 'submodule.recurse', 'true'])
+    }
+
+    const nativeHarness = createHarness()
+    addSubmoduleFixture(nativeHarness)
+    const nativeTarget = path.join(nativeHarness.root, 'native-submodule-target')
+    const nativeCreation = spawnSync(
+      'git',
+      ['worktree', 'add', '-b', 'native-submodule-context', nativeTarget],
+      { cwd: nativeHarness.primary, encoding: 'utf8' },
+    )
+
+    const helperHarness = createHarness()
+    addSubmoduleFixture(helperHarness)
+    const helperTarget = path.join(helperHarness.root, 'helper-submodule-target')
+    const helperCreation = runScript(helperHarness, 'create-worktree', [
+      '-b',
+      'helper-submodule-context',
+      helperTarget,
+    ])
+
+    expect(nativeCreation.status, nativeCreation.stderr).toBe(0)
+    expect(helperCreation.status, helperCreation.stderr).toBe(0)
+    expect(existsSync(path.join(nativeTarget, 'nested', 'submodule.txt'))).toBe(
+      false,
+    )
+    expect(existsSync(path.join(helperTarget, 'nested', 'submodule.txt'))).toBe(
+      false,
+    )
+    expect(runGit(helperTarget, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('restores shared and checkout Spotlight state after a successful hook', () => {
     const harness = createHarness()
+    const sibling = path.join(harness.root, 'cleanup-hook-sibling')
+    expect(
+      runScript(harness, 'create-worktree', [
+        '-b',
+        'cleanup-hook-sibling',
+        sibling,
+      ]).status,
+    ).toBe(0)
     const target = path.join(harness.root, 'cleanup-hook-spotlight')
     const markerObserved = path.join(harness.root, 'cleanup-hook-marker-observed')
     const hookInvocations = path.join(harness.root, 'cleanup-hook-invocations')
@@ -601,6 +738,8 @@ touch hook-installed
       `#!/bin/sh
 printf '%s|%s|%s\n' "$1" "$2" "$3" >>${JSON.stringify(hookInvocations)}
 git clean -fdX
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+printf '/hook-owned-only\n' >"$exclude"
 `,
     )
 
@@ -616,11 +755,26 @@ git clean -fdX
     expect(readFileSync(hookInvocations, 'utf8')).toMatch(
       new RegExp(`^0{40,64}\\|[0-9a-f]{40,64}\\|1\\n$`),
     )
+    const excludeFile = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'info/exclude',
+    ])
+    const excludeRules = readFileSync(excludeFile, 'utf8').trim().split('\n')
+    expect(excludeRules).toContain('/hook-owned-only')
+    expect(
+      excludeRules.filter((rule) => rule === '/.metadata_never_index'),
+    ).toHaveLength(1)
     expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
     expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
       '.metadata_never_index',
     )
+    expect(runGit(sibling, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(runGit(sibling, ['status', '--porcelain'])).toBe('')
   })
 
   it('rolls back when final authorization publication fails', () => {

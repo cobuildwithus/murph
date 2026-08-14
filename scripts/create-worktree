@@ -213,8 +213,10 @@ if [[ -d "$target_path" ]] \
     "$common_dir"/worktrees/*)
       set +e
       mark_worktree_non_indexable \
-        && git -C "$target_path" reset --hard \
+        && GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+          git -C "$target_path" reset --hard --no-recurse-submodules \
         && run_post_checkout_hook \
+        && prepare_worktree_spotlight_exclusion \
         && mark_worktree_non_indexable \
         && : >"$admin_dir/murph-storage-guard-authorized"
       setup_status=$?
