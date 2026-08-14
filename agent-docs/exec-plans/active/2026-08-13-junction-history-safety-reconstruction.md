@@ -48,8 +48,10 @@ Updated: 2026-08-13
 ## Constraints
 
 - Technical constraints:
-  - Start from exact origin/main snapshot `96d23af`; port behavior manually into
-    current owners and treat the old branch only as a reference.
+  - The reconstruction started from exact origin/main snapshot `96d23af` and
+    then integrated current main through `fc954786c9` before candidate proof;
+    port behavior manually into current owners and treat the old branch only as
+    a reference.
   - Reuse the existing source row, job queue, metadata slots, scheduler cadence,
     and immediate SQLite enqueue transaction. Add no table, cursor owner,
     manager, queue, lifecycle service, or permanent verification process.
@@ -120,9 +122,18 @@ Updated: 2026-08-13
   not a new member-visible capability, interaction, or safely distinct public
   outcome.
 - Maximum schedule-time candidate cardinality remains 396 source/resource
-  coordinates, but one deterministic uncovered root is offered per scheduler
-  pass and fully covered accounts offer none. Rolling verification remains out
-  of scope because it would reintroduce unbounded composed provider work.
+  reconnect obligations: 33 source slots multiplied by 12 schedule-time
+  resource/version coordinates. Blood pressure remains the thirteenth matrix
+  slot, but its source-first history is not cleared by reconnect and therefore
+  is not one of those 396 obligations. The account scheduler offers one
+  deterministic uncovered root per pass and fully covered accounts offer none.
+  Rolling verification remains out of scope because it would reintroduce
+  unbounded composed provider work.
+- Deploy the additive Prisma migration first, then the Cloudflare runner and
+  confirm new runner builds are active before deploying Web. The Web write
+  guard rejects missing lifecycle observations for epochs above one and protects
+  against old-runner stragglers; Web-first is unsafe because it can clear
+  schedule-time coverage before the cap-one runner behavior is active.
 
 ## Verification
 
@@ -140,18 +151,23 @@ Updated: 2026-08-13
     named with the narrow reproducer and direct proof that the diff did not
     cause it.
 - Results on the integrated candidate before PR creation:
-  - Focused device-sync lifecycle/provider/store: 3 files, 249 tests passed.
+  - Integrated current main through `fc954786c9` without conflicts, preserving
+    its configurable Junction summary/timeseries resource ownership.
+  - Focused Junction lifecycle/backfill proof: 1 file, 87 tests passed.
   - Assistant hosted-device-sync runtime: 1 file, 100 tests passed.
-  - Hosted Web runtime authority, wake, migration, Prisma source, and due-wake
-    owners: 5 files, 232 tests passed.
-  - Full `@murphai/device-syncd`: 47 files, 1,078 tests passed.
+  - Hosted Web runtime authority, wake, migration, and Prisma source owners:
+    4 files, 230 tests passed.
+  - Full `@murphai/device-syncd`: 47 files, 1,079 tests passed.
   - Device-sync, assistant-runtime, and Web typechecks passed; Prisma schema
-    validation, device-sync runner package boundary, workspace package cycles,
-    docs drift, diff check, and privacy/secret/path scan passed.
+    validation and workspace package cycles passed. Device-sync package-boundary
+    coverage is included in the green full package suite.
   - Workspace boundary verification reports an unchanged current-main sibling
     test import violation outside this branch's diff; current-main contains the
     same offending line.
-  - Production runner assembly built and passed parity probes, then measured
-    10,226,960 total bytes and an 8,088,603-byte static boot closure, exceeding
-    the checked-in limits by 57,261 and 133 bytes respectively. Hold ratchet
-    changes until the exact current-main benchmark classifies base drift.
+  - Supported production runner assembly rebuilt workspace artifacts and passed
+    all six parity probes. The vault bundle measured 9,086,709/9,100,000 total
+    bytes and 791/20,000 entry bytes. The runner measured 1,701,391 entry bytes,
+    8,088,219/8,088,470 static-closure bytes, and
+    10,219,811/10,251,013 total bytes, with no budget ratchet.
+  - Final diff check plus privacy, secret, local-path, and stale-symbol scans
+    passed immediately before the scoped candidate checkpoint.

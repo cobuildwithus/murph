@@ -82,11 +82,11 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   "weight",
 ] as const);
 export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.freeze([
-  ["note", 2],
+  ["note", 2] as const,
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
     (resource) => [resource, 1] as const,
   ),
-  ["weight", 1],
+  ["weight", 1] as const,
 ]);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
   ["blood_pressure", 1],

@@ -2132,11 +2132,11 @@ export function createJunctionDeviceSyncProvider(
           });
         }
         const sourceLifecycleEpoch = extendedHistoricalPolicy?.anchor === "current_day"
-          ? readJunctionPositiveInteger(job.payload.sourceLifecycleEpoch)
+          ? readSafeInteger(job.payload.sourceLifecycleEpoch)
           : null;
         if (
           extendedHistoricalPolicy?.anchor === "current_day"
-          && sourceLifecycleEpoch === null
+          && (sourceLifecycleEpoch === null || sourceLifecycleEpoch < 1)
         ) {
           return {};
         }
@@ -7734,8 +7734,11 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return null;
   }
 
-  const sourceLifecycleEpoch = readJunctionPositiveInteger(payload.sourceLifecycleEpoch);
-  if (policy.anchor === "current_day" && sourceLifecycleEpoch === null) {
+  const sourceLifecycleEpoch = readSafeInteger(payload.sourceLifecycleEpoch);
+  if (
+    policy.anchor === "current_day"
+    && (sourceLifecycleEpoch === null || sourceLifecycleEpoch < 1)
+  ) {
     return null;
   }
 
@@ -7877,12 +7880,6 @@ function readJunctionNoteHistoryBackfillVersion(
   return typeof version === "number" && Number.isSafeInteger(version) && version >= 1
     ? version
     : 1;
-}
-
-function readJunctionPositiveInteger(
-  value: unknown,
-): number | null {
-  return typeof value === "number" && value >= 1 && Number.isSafeInteger(value) ? value : null;
 }
 
 function buildJunctionWebhookJobs(input: {
