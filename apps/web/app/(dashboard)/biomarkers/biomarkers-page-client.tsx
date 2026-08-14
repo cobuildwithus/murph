@@ -56,7 +56,7 @@ export interface DeviceTrackedBiomarker {
   valuePrecision: number;
 }
 
-interface DeviceMetricListItem {
+export interface DeviceMetricListItem {
   entry: DeviceTrackedBiomarker;
   summary: BrowserVaultDeviceMetricSummary;
 }
@@ -67,7 +67,7 @@ interface BiomarkersPageClientProps {
   uploadLabsAction?: ReactNode;
 }
 
-interface MeasuredBiomarkerGroup {
+export interface MeasuredBiomarkerGroup {
   id: string;
   items: BrowserVaultMeasuredBiomarker[];
   label: string;
@@ -273,7 +273,7 @@ function countSavedLabResults(client: BrowserVaultLabsCapableQueryClient): numbe
   return client.labResults.list().length;
 }
 
-function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
+export function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
   return (
     <section aria-labelledby="biomarker-devices-heading" className="border-y border-border/70">
       <div className="flex items-baseline justify-between gap-4 border-b border-border/70 py-4">
@@ -406,7 +406,7 @@ function MeasuredBiomarkerControls({
   );
 }
 
-function MeasuredBiomarkerSection({
+export function MeasuredBiomarkerSection({
   group,
 }: {
   group: MeasuredBiomarkerGroup;
@@ -546,7 +546,7 @@ function EmptyBiomarkersState({
   );
 }
 
-function BiomarkerListSkeleton() {
+export function BiomarkerListSkeleton() {
   return (
     <div aria-label="Loading biomarkers" className="flex flex-col gap-6" role="status">
       <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto]">

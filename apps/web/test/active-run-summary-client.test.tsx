@@ -27,10 +27,17 @@ vi.mock("@/src/components/experiments/experiment-detail/share-results-card", () 
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
+  isBrowserVaultMetricsCapable: () => true,
   useBrowserVault: mocks.useBrowserVault,
+  useBrowserVaultExperimentMetricBucketDemand: () => true,
 }));
 
 vi.mock("@/src/lib/browser-vault/experiment-run", () => ({
+  buildBrowserVaultExperimentResultLookups: () => ({
+    experimentIds: [],
+    protocolKeys: [],
+    slugs: [],
+  }),
   resolveBrowserVaultExperimentRun: mocks.resolveBrowserVaultExperimentRun,
 }));
 

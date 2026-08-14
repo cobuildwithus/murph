@@ -52,7 +52,7 @@ interface TrendContextValue {
   valuePrecision: number;
 }
 
-type PrivateTrendState =
+export type BiomarkerPrivateTrendState =
   | { status: "loading" }
   | {
       action?: { href: string; label: string } | null;
@@ -93,6 +93,24 @@ export function BiomarkerPrivateTrendCard({
     [biomarker, deviceSyncImportPending, error, metricBucketsLoaded, metricsClient, status],
   );
 
+  return (
+    <BiomarkerPrivateTrendCardView
+      biomarker={biomarker}
+      onRetry={refresh}
+      trend={trend}
+    />
+  );
+}
+
+export function BiomarkerPrivateTrendCardView({
+  biomarker,
+  onRetry,
+  trend,
+}: {
+  biomarker: Pick<BiomarkerOverviewProjection, "shortName" | "unit" | "valuePrecision">;
+  onRetry: () => Promise<void>;
+  trend: BiomarkerPrivateTrendState;
+}) {
   const { avg7, avg30, pctChange, pctDirection } = useMemo(
     () => trend.status === "ready"
       ? computeAverages(trend.series)
@@ -155,7 +173,7 @@ export function BiomarkerPrivateTrendCard({
           <CardDescription>{trend.message}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button size="sm" variant="outline" onClick={() => void refresh()}>
+          <Button size="sm" variant="outline" onClick={() => void onRetry()}>
             Retry private trend
           </Button>
         </CardContent>
@@ -271,7 +289,7 @@ function resolvePrivateTrend(input: {
   client: BrowserVaultMetricSeriesCapableQueryClient | null;
   deviceSyncImportPending: boolean;
   error: string | null;
-}): PrivateTrendState {
+}): BiomarkerPrivateTrendState {
   if (input.browserVaultStatus === "loading") {
     return { status: "loading" };
   }
@@ -372,7 +390,7 @@ function resolvePrivateTrend(input: {
 function pendingDeviceImportState(
   panelStatus: BrowserVaultBiomarkerPanelStatus,
   detail?: string,
-): Extract<PrivateTrendState, { status: "empty" }> {
+): Extract<BiomarkerPrivateTrendState, { status: "empty" }> {
   return {
     action: null,
     body: "Wearable data is still importing. This trend may fill in shortly.",

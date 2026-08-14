@@ -14,6 +14,7 @@ import {
   isBrowserVaultMetricsCapable,
   useBrowserVault,
   useBrowserVaultExperimentMetricBucketDemand,
+  type BrowserVaultStatus,
 } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRunById } from "@/src/lib/browser-vault/experiment-run";
 
@@ -42,6 +43,27 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
     );
   }
 
+  return (
+    <PrivateRunResultsView
+      error={browserVault.error}
+      onRetry={browserVault.refresh}
+      privateRun={privateRun}
+      status={browserVault.status}
+    />
+  );
+}
+
+export function PrivateRunResultsView({
+  error,
+  onRetry,
+  privateRun,
+  status,
+}: {
+  error: string | null;
+  onRetry: () => Promise<void>;
+  privateRun: NonNullable<ReturnType<typeof resolveBrowserVaultExperimentRunById>>;
+  status: BrowserVaultStatus;
+}) {
   const experiment: ResultsTabExperiment = {
     analysisAvailableOn: privateRun.analysisAvailableOn,
     baselineDays: privateRun.baselineDays ?? 0,
@@ -90,9 +112,9 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
 
       <ResultsTab
         experiment={experiment}
-        onPrivateRunRetry={browserVault.refresh}
-        privateRunError={browserVault.error}
-        privateRunStatus={browserVault.status}
+        onPrivateRunRetry={onRetry}
+        privateRunError={error}
+        privateRunStatus={status}
         showFinishedOutcomeSummary={false}
         showHeader={false}
       />
@@ -100,7 +122,7 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
   );
 }
 
-function PrivateRunRouteState({
+export function PrivateRunRouteState({
   error,
   loading,
   onRetry,
