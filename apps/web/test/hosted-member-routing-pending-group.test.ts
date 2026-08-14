@@ -4,7 +4,10 @@ import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
 } from "../src/lib/hosted-onboarding/contact-privacy";
-import { lookupHostedMemberRoutingByPendingLinqParticipantContact } from "../src/lib/hosted-onboarding/hosted-member-routing-store";
+import {
+  lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  readHostedMemberRoutingHomeLinqRecipientPhoneRecords,
+} from "../src/lib/hosted-onboarding/hosted-member-routing-store";
 import { createHostedLinqParticipantContact } from "../src/lib/hosted-onboarding/linq-participant-contact";
 
 describe("pending Linq group contact lookup", () => {
@@ -63,4 +66,29 @@ describe("pending Linq group contact lookup", () => {
       "Pending Linq group contact lookup requires both chat and recipient line.",
     );
   });
+  it("reads only bounded home-line routing fingerprints in one set projection", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        linqRecipientPhoneEncrypted: "sealed-routing-value",
+        linqRecipientPhoneLookupKey: "routing-line-key",
+        memberId: "member-a",
+      },
+    ]);
+
+    await expect(readHostedMemberRoutingHomeLinqRecipientPhoneRecords({
+      memberIds: ["member-b", "member-a", "member-b"],
+      prisma: { hostedMemberRouting: { findMany } } as never,
+    })).resolves.toHaveLength(1);
+
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      orderBy: { memberId: "asc" },
+      select: {
+        linqRecipientPhoneEncrypted: true,
+        linqRecipientPhoneLookupKey: true,
+        memberId: true,
+      },
+      where: { memberId: { in: ["member-b", "member-a"] } },
+    });
+  });
+
 });

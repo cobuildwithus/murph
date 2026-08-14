@@ -1400,6 +1400,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         event_id: "evt_edit_123",
         event_type: "message.edited",
       }),
+      preparation: expect.objectContaining({
+        rows: [],
+        sourceMessageLookupKeys: [
+          createHostedLinqMessageLookupKey("msg_123"),
+        ],
+      }),
       prisma,
     });
     expectHostedLinqPointerSignalAccepted("evt_edit_123");

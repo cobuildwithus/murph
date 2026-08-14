@@ -629,10 +629,17 @@ Last verified: 2026-08-14
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
 - New Linq-group ownership preparation adds one bounded, non-retried provider
-  roster read before the unbound-group transaction. Provider timeout or failure
-  leaves recovery-backed ownership indeterminate and must return the existing
-  typed retry before route creation. A completed empty, oversized, or non-group
-  result cannot select another member's setup; no eligible intent or unresolved
+  roster read before the unbound-group transaction. The provider-proven roster
+  admits at most 32 members. One request-local package then prepares candidate,
+  canonical access, managed-line, narrow home-phone, recovery-intent, and exact
+  selected-payload-root facts before `BEGIN`; it retains the observed failure,
+  decrypts home-phone ciphertext only after access, managed-line, and routing-
+  lookup eligibility are known, and uses set-based root metadata with at most
+  four external unwraps in flight, and performs no provider or KMS work while a
+  transaction or setup-row lock is active. Provider timeout or failure leaves
+  recovery-backed ownership indeterminate and must return the existing typed
+  retry before route creation. A completed empty, oversized, or non-group result
+  cannot select another member's setup; no eligible intent or unresolved
   ambiguity otherwise preserves the existing active-sender decision. After the
   request-local existing-route and roster preflight, explicit suspension or
   health-data-consent withdrawal prevents route creation and setup outreach.
@@ -642,9 +649,22 @@ Last verified: 2026-08-14
   boundary returns no route. When first-contact admission enforcement is
   enabled, an unknown sender must pass that gate before setup outreach. The
   one-use setup claim and route creation share one transaction. Claim
-  eligibility requires
-  the setup to cover the provider event time and to remain unexpired at
-  processing time, so a delayed pre-arm event cannot spend a newer intent. The
+  eligibility requires the complete live candidate set and sender precedence to
+  match preparation before and after locking the exact winner; current access
+  and consent, both managed lines, routing and setup ciphertext/root
+  fingerprints, and exact replacement-line recovery authority are revalidated.
+  A changed required fact may spend only the existing single typed fresh-
+  preparation retry. Replacement-line ownership is pinned in request memory
+  across that retry; a different fresh selection returns route-free. A
+  selected-root, envelope, KMS/provider, signature, and authentication failures
+  preserve the row for retry. Only successfully authenticated plaintext with
+  malformed JSON or an invalid application schema is consumed after exact lock
+  and revalidation. That exact terminal `invalid_payload` result may continue
+  same-event fallback or ordinary handoff; claim races, authority changes, and
+  transient failures remain route-free. The setup must cover the provider event
+  time and remain
+  unexpired at processing and lock time, so a delayed pre-arm event cannot spend
+  a newer intent. Final ownership remains with the canonical route owner. The
   selected setup row stays locked until route admission finishes and is deleted
   only when that transaction creates the route; rollback and convergence leave
   it unchanged without a compensation lifecycle. A concurrent loser re-reads
@@ -827,11 +847,19 @@ Last verified: 2026-08-14
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;
-  no caller can supply a prepared ciphertext or classification bundle.
-  Consent-gated webhook and companion admissions instead perform that
-  preparation inside the existing member-row transaction, after the consent
-  re-read and before the dirty-marker lock or mutation. This keeps completed
-  withdrawal authoritative without adding another fence or state owner. The
+  no caller can supply a prepared ciphertext or classification bundle. A
+  consent-gated webhook or companion admission first performs a short
+  member/connection/source authority check, then prepares through the same
+  request-local, non-serializable dirty-store capability outside every database
+  lock. The final transaction reacquires the canonical member/connection locks,
+  re-reads consent and exact connection/source authority, and requires both the
+  exact dirty-marker snapshot and, when payloads exist, device-domain root
+  before inserting them.
+  A clean-to-dirty wake similarly uses an ingress-root capability prepared
+  outside the locks. Drift permits one full replan with a fresh root cache;
+  repeated drift fails retryably. Withdrawal may commit while ephemeral
+  preparation is in flight, but the final consent re-read then rejects without
+  durable dirty, receipt, signal, trace-completion, or mailbox state. The
   steady-state connection-replacement path reads no payload and uses set-based writes only.
   Nullable rows from mixed-version writers are the bounded transitional
   exception: replacement classifies at most 800 rows after taking the existing
@@ -841,6 +869,53 @@ Last verified: 2026-08-14
   lock the dirty marker before touching payload rows.
   A larger nullable backlog fails retryably until runtime acknowledgement
   reduces it; classification may never run before the consent fence.
+- Queue-enabled provider webhooks verify once, freeze a versioned prepared
+  event, and encrypt before any Postgres read. Raw provider signature headers
+  and payload bytes do not enter Queue state. The prepared event enters one
+  Cloudflare Queue consumer configured for batches of 100, five-second
+  collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
+  decrypts outside Postgres and sends sequential Web subbatches of at most 25;
+  Web admits each prepared entry through the existing canonical ingress in an
+  explicit serial loop and never reruns a provider verifier whose secret,
+  parser, or replay window may have rotated. The original receipt instant
+  remains the signature and audit instant, while the trace-processing lease
+  starts when Web admits the queued delivery. Only `accepted` and `duplicate`
+  results ack one Queue
+  message; all failed, missing, malformed, tampered, ambiguous, or unavailable
+  results retain only that encrypted message for retry and DLQ recovery.
+  Current provider registration, connection epoch/status, consent, source
+  lifecycle, and provider-application authority are revalidated at admission.
+  Apple Health source-registration observation first captures an ephemeral
+  exact authority proof under the existing member-plus-connection admission
+  lock, releases the transaction before provider I/O, then re-enters the same
+  owner to exact-match connection, public application, stored-account, and
+  source epochs before committing source activation, receipt state, dirty
+  work, mailbox/signal effects, and trace completion together. Determinate
+  authority loss consumes only the trace; missing or ambiguous reads, a
+  credential change during provider I/O, and provider registration that is not
+  yet active remain retryable without mutation.
+  No provider call runs inside a database transaction and no additional
+  authority owner or durable fence is introduced.
+  Every emitted prepared-event schema decoder remains readable through the
+  maximum Queue/DLQ retention and redrive horizon, just as old transport keys
+  remain decrypt-only until those encrypted envelopes are proven drained.
+  Queue is transport,
+  not device truth, and cannot weaken consent, source, setup, reconnect,
+  disconnect, trace, dirty-payload, mailbox, or Temporal authority.
+  A separate five-minute SQLite Durable Object monitor reads only native Queue
+  metrics from the main transport and encrypted DLQ. It pages immediately for
+  any DLQ backlog or a main message at least 15 minutes old, and after two
+  consecutive metric-collection failures. A two-minute persisted run lease
+  coalesces overlapping cron deliveries. Incident sequence, exact pending body
+  and idempotency key, latest typed observation, and the last successful page
+  time survive restart. A failed page retries with the same bytes and key on
+  the next five-minute scheduled check, and every newly opened incident admits
+  its first page independently of an earlier incident. Only successfully
+  delivered repeat pages in one continuously open incident are paced to one
+  hour. Only acknowledged delivery to both configured operator chats clears
+  pending state; an incident closes only after the pending page is cleared and
+  both Queue observations are healthy. The monitor persists no
+  webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do

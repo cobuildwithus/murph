@@ -18,6 +18,8 @@ import {
   cancelHostedPendingGroupSetupTx,
   claimHostedPendingGroupSetupForParticipantsTx,
   consumeHostedPendingGroupSetupClaimTx,
+  hasHostedPreparedPendingGroupSetupRecoveryInFlight,
+  prepareHostedPendingGroupSetupForParticipants,
   readHostedPendingGroupSetup,
 } from "@/src/lib/hosted-groups/pending-group-setup";
 import {
@@ -36,10 +38,12 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import {
-  resolveHostedLinqRecoveredPendingGroupSetup,
-} from "@/src/lib/hosted-onboarding/webhook-provider-linq";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
+import {
+  runWithPrismaOperationTimings,
+  type PrismaOperationTiming,
+} from "@/src/lib/prisma-operation-timing";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
@@ -73,7 +77,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     it("allows one group to claim an intent and cascades replacement state with its owner", async () => {
       const fixtureId = randomUUID();
       const ownerMemberId = `member_pending_group_${fixtureId}`;
-      const recipientPhoneLookupKey = `pending-group-line:${fixtureId}`;
+      const recipientPhone = createUniqueTestPhone("+1444");
+      const recipientPhoneLookupKey =
+        createHostedPhoneLookupKey(recipientPhone);
+      if (!recipientPhoneLookupKey) {
+        throw new Error("Expected a pending-group line lookup key.");
+      }
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -93,7 +102,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             billingStatus: HostedBillingStatus.active,
             id: ownerMemberId,
             routing: {
-              create: { linqRecipientPhoneLookupKey: recipientPhoneLookupKey },
+              create: {
+                linqRecipientPhoneEncrypted:
+                  await encryptHostedWebNullableString({
+                    field:
+                      "hosted-member-routing.home-linq-recipient-phone",
+                    memberId: ownerMemberId,
+                    value: recipientPhone,
+                  }),
+                linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
+              },
             },
           },
         });
@@ -105,16 +123,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
           tx,
         }));
-        await expect(observer.$transaction((tx) =>
-          claimHostedPendingGroupSetupForParticipantsTx({
-            now: new Date("2026-07-29T18:00:10.000Z"),
-            occurredAt: new Date("2026-07-29T17:59:59.999Z"),
-            participantMemberIds: [ownerMemberId],
-            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
-            senderMemberId: "member_first_speaker",
-            tx,
-          })
-        )).resolves.toEqual({
+        await expect(claimPreparedPendingGroupSetup(observer, {
+          now: new Date("2026-07-29T18:00:10.000Z"),
+          occurredAt: new Date("2026-07-29T17:59:59.999Z"),
+          participantMemberIds: [ownerMemberId],
+          recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+          senderMemberId: "member_first_speaker",
+        })).resolves.toEqual({
           kind: "none",
           reason: "no_candidates",
         });
@@ -122,24 +137,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { ownerMemberId },
         })).toBe(1);
 
-        const claim = (client: PrismaClient) => client.$transaction(async (tx) => {
-          const result = await claimHostedPendingGroupSetupForParticipantsTx({
+        const claim = (client: PrismaClient) =>
+          claimPreparedPendingGroupSetup(client, {
             now: new Date("2026-07-29T18:01:00.000Z"),
             occurredAt: new Date("2026-07-29T18:00:30.000Z"),
             participantMemberIds: [ownerMemberId],
             recipientPhoneLookupKeys: [recipientPhoneLookupKey],
             senderMemberId: "member_first_speaker",
-            tx,
-          });
-          if (result.kind === "claimed") {
-            await consumeHostedPendingGroupSetupClaimTx({
-              id: result.setup.id,
-              ownerMemberId: result.setup.ownerMemberId,
-              tx,
-            });
-          }
-          return result;
-        });
+          }, { consume: true });
         const results = await Promise.all([
           claim(firstClient),
           claim(secondClient),
@@ -159,24 +164,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           })
         );
         const [, rearmedSetup] = await Promise.all([
-          firstClient.$transaction(async (tx) => {
-            const result =
-              await claimHostedPendingGroupSetupForParticipantsTx({
-                now: new Date("2026-07-29T18:02:30.000Z"),
-                occurredAt: new Date("2026-07-29T18:02:10.000Z"),
-                participantMemberIds: [ownerMemberId],
-                recipientPhoneLookupKeys: [recipientPhoneLookupKey],
-                senderMemberId: "member_first_speaker",
-                tx,
-              });
-            if (result.kind === "claimed") {
-              await consumeHostedPendingGroupSetupClaimTx({
-                id: result.setup.id,
-                ownerMemberId: result.setup.ownerMemberId,
-                tx,
-              });
-            }
-            return result;
+          claimPreparedPendingGroupSetup(firstClient, {
+            now: new Date("2026-07-29T18:02:30.000Z"),
+            occurredAt: new Date("2026-07-29T18:02:10.000Z"),
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+            senderMemberId: "member_first_speaker",
+          }, { consume: true }).catch((error: unknown) => {
+            expect(error).toMatchObject({
+              code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+            });
+            return null;
           }),
           secondClient.$transaction((tx) =>
             armHostedPendingGroupSetupTx({
@@ -187,16 +185,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             })
           ),
         ]);
-        await expect(observer.$transaction((tx) =>
-          claimHostedPendingGroupSetupForParticipantsTx({
-            now: new Date("2026-07-29T18:02:40.000Z"),
-            occurredAt: new Date("2026-07-29T18:02:19.999Z"),
-            participantMemberIds: [ownerMemberId],
-            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
-            senderMemberId: "member_first_speaker",
-            tx,
-          })
-        )).resolves.toEqual({
+        await expect(claimPreparedPendingGroupSetup(observer, {
+          now: new Date("2026-07-29T18:02:40.000Z"),
+          occurredAt: new Date("2026-07-29T18:02:19.999Z"),
+          participantMemberIds: [ownerMemberId],
+          recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+          senderMemberId: "member_first_speaker",
+        })).resolves.toEqual({
           kind: "none",
           reason: "no_candidates",
         });
@@ -223,16 +218,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }
           WHERE "id" = ${malformedSetup.id}
         `);
-        await expect(observer.$transaction((tx) =>
-          claimHostedPendingGroupSetupForParticipantsTx({
-            now: new Date("2026-07-29T18:05:30.000Z"),
-            occurredAt: new Date("2026-07-29T18:05:15.000Z"),
-            participantMemberIds: [ownerMemberId],
-            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
-            senderMemberId: "member_first_speaker",
-            tx,
-          })
-        )).resolves.toEqual({
+        await expect(claimPreparedPendingGroupSetup(observer, {
+          now: new Date("2026-07-29T18:05:30.000Z"),
+          occurredAt: new Date("2026-07-29T18:05:15.000Z"),
+          participantMemberIds: [ownerMemberId],
+          recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+          senderMemberId: "member_first_speaker",
+        })).resolves.toEqual({
           kind: "none",
           reason: "invalid_payload",
         });
@@ -256,16 +248,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           encrypt: ({ value }) =>
             `sealed:${Buffer.from(value, "utf8").toString("base64url")}`,
         });
-        await expect(observer.$transaction((tx) =>
-          claimHostedPendingGroupSetupForParticipantsTx({
-            now: new Date("2026-07-29T18:05:50.000Z"),
-            occurredAt: new Date("2026-07-29T18:05:45.000Z"),
-            participantMemberIds: [ownerMemberId],
-            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
-            senderMemberId: "member_first_speaker",
-            tx,
-          })
-        )).rejects.toBe(authenticationFailure);
+        await expect(claimPreparedPendingGroupSetup(observer, {
+          now: new Date("2026-07-29T18:05:50.000Z"),
+          occurredAt: new Date("2026-07-29T18:05:45.000Z"),
+          participantMemberIds: [ownerMemberId],
+          recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+          senderMemberId: "member_first_speaker",
+        })).rejects.toBe(authenticationFailure);
         expect(await observer.hostedPendingGroupSetup.count({
           where: { ownerMemberId },
         })).toBe(1);
@@ -312,7 +301,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     it("expires read and claim authority at the exact 30-minute boundary", async () => {
       const fixtureId = randomUUID();
       const ownerMemberId = `member_pending_group_expiry_${fixtureId}`;
-      const recipientPhoneLookupKey = `pending-group-expiry-line:${fixtureId}`;
+      const recipientPhone = createUniqueTestPhone("+1777");
+      const recipientPhoneLookupKey =
+        createHostedPhoneLookupKey(recipientPhone);
+      if (!recipientPhoneLookupKey) {
+        throw new Error("Expected an expiry line lookup key.");
+      }
       const client = createPrismaClient({ databaseUrl, poolMax: 1 });
       const armedAt = new Date("2026-07-29T18:00:00.000Z");
       const expiresAt = new Date("2026-07-29T18:30:00.000Z");
@@ -332,7 +326,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             billingStatus: HostedBillingStatus.active,
             id: ownerMemberId,
             routing: {
-              create: { linqRecipientPhoneLookupKey: recipientPhoneLookupKey },
+              create: {
+                linqRecipientPhoneEncrypted:
+                  await encryptHostedWebNullableString({
+                    field:
+                      "hosted-member-routing.home-linq-recipient-phone",
+                    memberId: ownerMemberId,
+                    value: recipientPhone,
+                  }),
+                linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
+              },
             },
           },
         });
@@ -356,16 +359,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           ownerMemberId,
           prisma: client,
         })).resolves.toBeNull();
-        await expect(client.$transaction((tx) =>
-          claimHostedPendingGroupSetupForParticipantsTx({
-            now: expiresAt,
-            occurredAt: expiresAt,
-            participantMemberIds: [ownerMemberId],
-            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
-            senderMemberId: ownerMemberId,
-            tx,
-          })
-        )).resolves.toEqual({
+        await expect(claimPreparedPendingGroupSetup(client, {
+          now: expiresAt,
+          occurredAt: expiresAt,
+          participantMemberIds: [ownerMemberId],
+          recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+          senderMemberId: ownerMemberId,
+        })).resolves.toEqual({
           kind: "none",
           reason: "no_candidates",
         });
@@ -378,6 +378,157 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         await client.hostedLinqLine.deleteMany({
           where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+        });
+        await client.$disconnect();
+      }
+    });
+
+    it("replays the 32-candidate incident shape with constant SQL and one pooled connection", async () => {
+      const fixtureId = randomUUID();
+      const candidateCount = 32;
+      const participantMemberIds = Array.from(
+        { length: candidateCount },
+        (_, index) => `member_pending_group_fanout_${index}_${fixtureId}`,
+      );
+      const incomingRecipientPhone = createUniqueTestPhone("+1666");
+      const incomingRecipientPhoneLookupKey = createHostedPhoneLookupKey(
+        incomingRecipientPhone,
+      );
+      if (!incomingRecipientPhoneLookupKey) {
+        throw new Error("Expected an incident replay line lookup key.");
+      }
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const armedAt = new Date("2026-08-11T21:30:00.000Z");
+      const occurredAt = new Date("2026-08-11T21:35:00.000Z");
+      const expiresAt = new Date("2026-08-11T22:00:00.000Z");
+      const payloadEncrypted = `sealed:${Buffer.from(JSON.stringify({
+        schemaVersion: 1,
+        setup: {},
+      }), "utf8").toString("base64url")}`;
+
+      try {
+        await client.hostedLinqLine.create({
+          data: {
+            configuredAt: armedAt,
+            healthStatus: "healthy",
+            phoneNumberEncrypted: "test-only-encrypted-incident-line",
+            phoneNumberHint: "0000",
+            phoneNumberLookupKey: incomingRecipientPhoneLookupKey,
+          },
+        });
+        await client.hostedMember.createMany({
+          data: participantMemberIds.map((id) => ({
+            billingStatus: HostedBillingStatus.active,
+            id,
+          })),
+        });
+        const routingRows = await Promise.all(
+          participantMemberIds.map(async (memberId) => ({
+            linqRecipientPhoneEncrypted:
+              await encryptHostedWebNullableString({
+                field: "hosted-member-routing.home-linq-recipient-phone",
+                memberId,
+                value: incomingRecipientPhone,
+              }),
+            linqRecipientPhoneLookupKey: incomingRecipientPhoneLookupKey,
+            memberId,
+          })),
+        );
+        await client.hostedMemberRouting.createMany({ data: routingRows });
+        await client.hostedPendingGroupSetup.createMany({
+          data: participantMemberIds.map((ownerMemberId, index) => ({
+            armedAt,
+            channel: "linq",
+            expiresAt,
+            id: `hpgs_fanout_${index}_${fixtureId}`,
+            ownerMemberId,
+            payloadEncrypted,
+            recipientPhoneLookupKey: incomingRecipientPhoneLookupKey,
+          })),
+        });
+
+        const runReplay = async (senderMemberId: string | null) => {
+          const operations: PrismaOperationTiming[] = [];
+          const result = await runWithPrismaOperationTimings(
+            operations,
+            async () => {
+              const prepared =
+                await prepareHostedPendingGroupSetupForParticipants({
+                  incomingRecipientPhoneLookupKeys: [
+                    incomingRecipientPhoneLookupKey,
+                  ],
+                  now: occurredAt,
+                  occurredAt,
+                  participantMemberIds,
+                  prisma: client,
+                  recoveredRecipientPhoneLookupKey:
+                    incomingRecipientPhoneLookupKey,
+                  senderMemberId,
+                  threadId: `incident-replay-${fixtureId}`,
+                });
+              return client.$transaction((tx) =>
+                claimHostedPendingGroupSetupForParticipantsTx({
+                  incomingRecipientPhoneLookupKeys: [
+                    incomingRecipientPhoneLookupKey,
+                  ],
+                  now: occurredAt,
+                  occurredAt,
+                  participantMemberIds,
+                  prepared,
+                  recipientPhoneLookupKeys: [
+                    incomingRecipientPhoneLookupKey,
+                  ],
+                  recoveredRecipientPhoneLookupKey:
+                    incomingRecipientPhoneLookupKey,
+                  senderMemberId,
+                  threadId: `incident-replay-${fixtureId}`,
+                  tx,
+                })
+              );
+            },
+          );
+          return { operations, result };
+        };
+
+        const noSender = await runReplay(null);
+        const selected = await runReplay(participantMemberIds.at(-1)!);
+
+        expect(noSender.result).toEqual({
+          kind: "none",
+          reason: "ambiguous",
+        });
+        expect(selected.result).toMatchObject({
+          kind: "claimed",
+          reason: "sender_wins_conflict",
+          setup: {
+            ownerMemberId: participantMemberIds.at(-1),
+          },
+        });
+        expect(countPrismaOperations(noSender.operations)).toEqual(new Map([
+          ["$queryRaw", 2],
+          ["HostedLinqLine.findMany", 2],
+          ["HostedMember.findMany", 2],
+          ["HostedMemberRouting.findMany", 2],
+        ]));
+        expect(countPrismaOperations(selected.operations)).toEqual(new Map([
+          ["$queryRaw", 4],
+          ["HostedLinqLine.findMany", 3],
+          ["HostedMember.findMany", 3],
+          ["HostedMemberRouting.findMany", 3],
+        ]));
+
+        console.info("pending-group 32-candidate database replay", {
+          candidateCount,
+          noSenderSqlStatements: noSender.operations.length,
+          poolMax: 1,
+          selectedSqlStatements: selected.operations.length,
+        });
+      } finally {
+        await client.hostedMember.deleteMany({
+          where: { id: { in: participantMemberIds } },
+        });
+        await client.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: incomingRecipientPhoneLookupKey },
         });
         await client.$disconnect();
       }
@@ -530,19 +681,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           setupArmedAt: setup.armedAt,
           threadId,
         })).resolves.toBe("in_flight");
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: retryOccurredAt,
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
-            recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        )).rejects.toMatchObject({
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: retryOccurredAt,
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).rejects.toMatchObject({
           code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
           httpStatus: 503,
           retryable: true,
@@ -599,19 +748,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           setupArmedAt: setup.armedAt,
           threadId,
         })).resolves.toBe("in_flight");
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: retryOccurredAt,
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
-            recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        )).rejects.toMatchObject({
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: retryOccurredAt,
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).rejects.toMatchObject({
           code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
           httpStatus: 503,
           retryable: true,
@@ -648,89 +795,78 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           threadId,
         })).resolves.toBe(true);
 
-        const recoveredSetup = await client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: retryOccurredAt,
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
-            recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        );
+        const recoveredSetup = await resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: retryOccurredAt,
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        });
         expect(recoveredSetup).toEqual({
           id: setup.id,
           ownerMemberId,
           recipientPhoneLookupKey: originalRecipientPhoneLookupKey,
         });
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: retryOccurredAt,
-            participantMemberIds: [firstSpeakerMemberId],
-            recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        )).resolves.toBeNull();
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: retryOccurredAt,
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
-            recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId: `${threadId}-other`,
-            tx,
-          })
-        )).resolves.toBeNull();
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: retryOccurredAt,
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
-            recoveredRecipientPhoneLookupKey:
-              `wrong-recovery-line:${fixtureId}`,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        )).resolves.toBeNull();
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: retryOccurredAt,
+          participantMemberIds: [firstSpeakerMemberId],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).resolves.toBeNull();
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: retryOccurredAt,
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId: `${threadId}-other`,
+        })).resolves.toBeNull();
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: retryOccurredAt,
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey:
+            `wrong-recovery-line:${fixtureId}`,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).resolves.toBeNull();
 
-        const claimed = await client.$transaction(async (tx) => {
-          const result =
-            await claimHostedPendingGroupSetupForParticipantsTx({
-              now: retryOccurredAt,
-              occurredAt: retryOccurredAt,
-              participantMemberIds: recoveredSetup
-                ? [recoveredSetup.ownerMemberId]
-                : [],
-              recipientPhoneLookupKeys: [
-                recoveredRecipientPhoneLookupKey,
-                ...(recoveredSetup
-                  ? [recoveredSetup.recipientPhoneLookupKey]
-                  : []),
-              ],
-              requiredCandidateId: recoveredSetup?.id,
-              senderMemberId: firstSpeakerMemberId,
-              tx,
-            });
-          if (result.kind === "claimed") {
-            await consumeHostedPendingGroupSetupClaimTx({
-              id: result.setup.id,
-              ownerMemberId: result.setup.ownerMemberId,
-              tx,
-            });
-          }
-          return result;
-        });
+        const claimed = await claimPreparedPendingGroupSetup(
+          client,
+          {
+            incomingRecipientPhoneLookupKeys: [
+              recoveredRecipientPhoneLookupKey,
+            ],
+            now: retryOccurredAt,
+            occurredAt: retryOccurredAt,
+            participantMemberIds: recoveredSetup
+              ? [recoveredSetup.ownerMemberId]
+              : [],
+            recipientPhoneLookupKeys: [
+              recoveredRecipientPhoneLookupKey,
+              ...(recoveredSetup
+                ? [recoveredSetup.recipientPhoneLookupKey]
+                : []),
+            ],
+            recoveredRecipientPhoneLookupKey,
+            requiredCandidateId: recoveredSetup?.id,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+          },
+          { consume: true },
+        );
         expect(claimed).toMatchObject({
           kind: "claimed",
           setup: {
@@ -748,19 +884,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         const replacementArmedAt =
           new Date(retryOccurredAt.getTime() + 1_000);
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: replacementArmedAt,
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
-            recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        )).resolves.toBeNull();
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: replacementArmedAt,
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).resolves.toBeNull();
         const replacement = await client.$transaction((tx) =>
           armHostedPendingGroupSetupTx({
             now: replacementArmedAt,
@@ -772,54 +906,52 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           })
         );
         expect(replacement.id).not.toBe(setup.id);
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: new Date(replacementArmedAt.getTime() + 1_000),
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
-            recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        )).resolves.toBeNull();
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: new Date(replacementArmedAt.getTime() + 1_000),
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).resolves.toBeNull();
         await expect(client.$transaction((tx) =>
           cancelHostedPendingGroupSetupTx({
             ownerMemberId,
             tx,
           })
         )).resolves.toBe(true);
-        await expect(client.$transaction((tx) =>
-          resolveHostedLinqRecoveredPendingGroupSetup({
-            occurredAt: new Date(replacementArmedAt.getTime() + 2_000),
-            participantMemberIds: [
-              ownerMemberId,
-              firstSpeakerMemberId,
-            ],
+        await expect(resolveHostedLinqRecoveredPendingGroupSetup({
+          occurredAt: new Date(replacementArmedAt.getTime() + 2_000),
+          participantMemberIds: [
+            ownerMemberId,
+            firstSpeakerMemberId,
+          ],
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).resolves.toBeNull();
+        await expect(claimPreparedPendingGroupSetup(client, {
+          incomingRecipientPhoneLookupKeys: [
             recoveredRecipientPhoneLookupKey,
-            senderMemberId: firstSpeakerMemberId,
-            threadId,
-            tx,
-          })
-        )).resolves.toBeNull();
-        await expect(client.$transaction((tx) =>
-          claimHostedPendingGroupSetupForParticipantsTx({
-            now: retryOccurredAt,
-            occurredAt: retryOccurredAt,
-            participantMemberIds: [ownerMemberId],
-            recipientPhoneLookupKeys: [
-              recoveredRecipientPhoneLookupKey,
-              originalRecipientPhoneLookupKey,
-            ],
-            requiredCandidateId: setup.id,
-            senderMemberId: firstSpeakerMemberId,
-            tx,
-          })
-        )).resolves.toEqual({
+          ],
+          now: retryOccurredAt,
+          occurredAt: retryOccurredAt,
+          participantMemberIds: [ownerMemberId],
+          recipientPhoneLookupKeys: [
+            recoveredRecipientPhoneLookupKey,
+            originalRecipientPhoneLookupKey,
+          ],
+          recoveredRecipientPhoneLookupKey,
+          requiredCandidateId: setup.id,
+          senderMemberId: firstSpeakerMemberId,
+          threadId,
+        })).resolves.toEqual({
           kind: "none",
-          reason: "no_candidates",
+          reason: "claim_raced",
         });
       } finally {
         if (deliveryId) {
@@ -850,6 +982,119 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     });
   },
 );
+
+interface PreparedPendingGroupClaimInput {
+  incomingRecipientPhoneLookupKeys?: readonly string[];
+  now: Date;
+  occurredAt: Date;
+  participantMemberIds: readonly string[];
+  recipientPhoneLookupKeys: readonly string[];
+  recoveredRecipientPhoneLookupKey?: string;
+  requiredCandidateId?: string | null;
+  senderMemberId?: string | null;
+  threadId?: string;
+}
+
+async function claimPreparedPendingGroupSetup(
+  prisma: PrismaClient,
+  input: PreparedPendingGroupClaimInput,
+  options: { consume?: boolean } = {},
+) {
+  const incomingRecipientPhoneLookupKeys =
+    input.incomingRecipientPhoneLookupKeys ?? input.recipientPhoneLookupKeys;
+  const recoveredRecipientPhoneLookupKey =
+    input.recoveredRecipientPhoneLookupKey
+    ?? incomingRecipientPhoneLookupKeys[0];
+  if (!recoveredRecipientPhoneLookupKey) {
+    throw new Error("Expected a pending-group claim recipient line.");
+  }
+  const threadId = input.threadId
+    ?? `pending-group-postgres:${input.participantMemberIds.join(":")}`;
+  const prepared = await prepareHostedPendingGroupSetupForParticipants({
+    incomingRecipientPhoneLookupKeys,
+    now: input.now,
+    occurredAt: input.occurredAt,
+    participantMemberIds: input.participantMemberIds,
+    prisma,
+    recoveredRecipientPhoneLookupKey,
+    senderMemberId: input.senderMemberId,
+    threadId,
+  });
+  return prisma.$transaction(async (tx) => {
+    const result = await claimHostedPendingGroupSetupForParticipantsTx({
+      incomingRecipientPhoneLookupKeys,
+      now: input.now,
+      occurredAt: input.occurredAt,
+      participantMemberIds: input.participantMemberIds,
+      prepared,
+      recipientPhoneLookupKeys: input.recipientPhoneLookupKeys,
+      recoveredRecipientPhoneLookupKey,
+      requiredCandidateId: input.requiredCandidateId,
+      senderMemberId: input.senderMemberId,
+      threadId,
+      tx,
+    });
+    if (options.consume === true && result.kind === "claimed") {
+      await consumeHostedPendingGroupSetupClaimTx({
+        id: result.setup.id,
+        ownerMemberId: result.setup.ownerMemberId,
+        tx,
+      });
+    }
+    return result;
+  });
+}
+
+async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
+  occurredAt: Date;
+  participantMemberIds: readonly string[];
+  recoveredRecipientPhoneLookupKey: string;
+  senderMemberId?: string | null;
+  threadId: string;
+  prisma: PrismaClient;
+}): Promise<{
+  id: string;
+  ownerMemberId: string;
+  recipientPhoneLookupKey: string;
+} | null> {
+  const prepared = await prepareHostedPendingGroupSetupForParticipants({
+    incomingRecipientPhoneLookupKeys: [
+      input.recoveredRecipientPhoneLookupKey,
+    ],
+    now: input.occurredAt,
+    occurredAt: input.occurredAt,
+    participantMemberIds: input.participantMemberIds,
+    prisma: input.prisma,
+    recoveredRecipientPhoneLookupKey:
+      input.recoveredRecipientPhoneLookupKey,
+    senderMemberId: input.senderMemberId,
+    threadId: input.threadId,
+  });
+  if (hasHostedPreparedPendingGroupSetupRecoveryInFlight(prepared)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
+      httpStatus: 503,
+      message: "The exact recovery attempt is still in flight.",
+      retryable: true,
+    });
+  }
+  const selection = prepared.selected?.admissionKind === "replacement_line"
+    ? prepared.selected
+    : null;
+  if (!selection) {
+    return null;
+  }
+  const candidate = prepared.candidates.find((entry) =>
+    entry.id === selection.candidateId
+  );
+  return candidate
+    ? {
+        id: candidate.id,
+        ownerMemberId: candidate.ownerMemberId,
+        recipientPhoneLookupKey: candidate.recipientPhoneLookupKey,
+      }
+    : null;
+}
 
 function createSynchronizedRecoveryClaimClients(
   first: PrismaClient,
@@ -914,4 +1159,14 @@ function createUniqueTestPhone(prefix: string): string {
   const digits = BigInt(`0x${randomUUID().replaceAll("-", "").slice(0, 12)}`)
     % 10_000_000n;
   return `${prefix}${digits.toString().padStart(7, "0")}`;
+}
+
+function countPrismaOperations(
+  operations: readonly PrismaOperationTiming[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const operation of operations) {
+    counts.set(operation.key, (counts.get(operation.key) ?? 0) + 1);
+  }
+  return counts;
 }

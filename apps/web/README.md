@@ -807,6 +807,10 @@ Hosted onboarding extras:
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall; recovery silently rearms each monitor independently.
 - `HOSTED_EXECUTION_CONTROL_URL`
+- `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` is an optional comma-separated
+  provider rollout gate for the encrypted Cloudflare Queue transport. Leave it
+  empty until the Queue-capable Worker, main Queue, DLQ, and signed Web batch
+  callback are live; enable one supported provider at a time.
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
 Hosted managed crypto:
