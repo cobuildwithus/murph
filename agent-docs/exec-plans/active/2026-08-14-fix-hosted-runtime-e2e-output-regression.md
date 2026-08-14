@@ -136,8 +136,8 @@ Updated: 2026-08-14
   assistant-engine usage, and assistant-runtime idle maintenance, including
   negative proof that command arguments cannot satisfy tool-output evidence and
   local OpenAI Flex compaction records the hosted OpenAI identity. All four
-  changed owners typecheck. The full protected deploy auth test has 46 passing
-  tests and 2 intentional skips, including the exact local OpenAI authentication
+  changed owners typecheck. The full protected deploy auth test has 44 passing
+  tests and 4 intentional skips, including the exact local OpenAI authentication
   journey. Exact-head private run 31845724644 assembled the Linux runner bundle
   within every byte budget, then stopped at GitHub's account-level artifact
   storage quota before the scenario matrix could start. The same bundle exceeds
