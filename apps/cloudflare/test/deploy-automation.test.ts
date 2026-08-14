@@ -1104,4 +1104,21 @@ describe("hosted deploy automation helpers", () => {
     expect(deleteOcBuckets).toBeGreaterThan(deployNoOcWorker);
     expect(removeWebGuard).toBeGreaterThan(deleteOcBuckets);
   });
+
+  it("keeps the daily-report rollback floor after transient mailbox state drains", async () => {
+    const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
+    const sectionStart = deployGuide.indexOf("Member-reported daily metrics add the");
+    const sectionEnd = deployGuide.indexOf("The scheduled Linq authority release", sectionStart);
+    expect(sectionStart).toBeGreaterThan(-1);
+    expect(sectionEnd).toBeGreaterThan(sectionStart);
+
+    const dailyReportRollout = deployGuide.slice(sectionStart, sectionEnd);
+    expect(dailyReportRollout).toContain("hard rollback floor");
+    expect(dailyReportRollout).toContain("after the transient mailbox item drains");
+    expect(dailyReportRollout).toMatch(/never roll the runner below this\s+floor afterward/u);
+    expect(dailyReportRollout).toContain("existing meal-photo import");
+    expect(dailyReportRollout).toContain("projection rebuild");
+    expect(dailyReportRollout).toContain("no event rewrite");
+    expect(dailyReportRollout).not.toContain("until the retained population has drained");
+  });
 });

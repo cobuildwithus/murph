@@ -128,3 +128,13 @@ Updated: 2026-08-14
   verifier passed all selected typechecks, package tests, Web tests/build, and
   Cloudflare Node/Workers tests; it reported only the two pre-existing
   workspace-boundary findings in untouched Web tests.
+- ReviewGPT round 6 found that mailbox drain was incorrectly documented as
+  relaxing the consumer rollback floor even though the strict observation
+  qualifier and its causal ordering remain durable vault state. The corrected
+  deployment contract makes the exact contracts/query/runner bundle a hard
+  floor after producer enablement or the first import; Web may roll back to
+  stop new reports, but the runner must be forward-fixed on that floor or newer.
+- Focused proof persists a causal-sequence report and then imports the existing
+  meal-photo flow through the same strict event-ledger scan. A deployment-doc
+  contract test prohibits the former drain-based rollback, and the affected
+  assistant-runtime and Cloudflare tests and typechecks pass under Node 24.
