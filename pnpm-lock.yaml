@@ -149,6 +149,9 @@ importers:
       '@murphai/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
+      '@murphai/query':
+        specifier: workspace:*
+        version: link:../../packages/query
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../../packages/runtime-state
@@ -165,9 +168,6 @@ importers:
       '@murphai/hosted-local-harness':
         specifier: workspace:*
         version: link:../../packages/hosted-local-harness
-      '@murphai/query':
-        specifier: workspace:*
-        version: link:../../packages/query
       '@types/node':
         specifier: ^25.6.2
         version: 25.6.2
