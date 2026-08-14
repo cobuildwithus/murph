@@ -3676,8 +3676,8 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
     })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
-      retryable: true,
+      code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+      retryable: false,
     });
 
     expect(hostedMemberUpdateCalls).toEqual([]);
@@ -3701,12 +3701,13 @@ describe("deleteHostedAccountData", () => {
     expect(createSignal).toHaveBeenCalledTimes(1);
   });
 
-  it("recovers the final stale lease and revokes with the retained credential before deletion", async () => {
+  it("recovers the final stale lease but requires reconnect before provider cleanup or deletion", async () => {
     const hostedMemberUpdateCalls: unknown[] = [];
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       credentialKind: "oauth_tokens",
       id: "dsc_oauth_cleanup",
+      lastErrorCode: null as string | null,
       provider: "oura",
       providerAccountBlindIndex: "hbdi_refresh_expired",
       providerApplicationRevision: null,
@@ -3714,6 +3715,7 @@ describe("deleteHostedAccountData", () => {
       refreshLeaseOwner: "refresh_owner" as string | null,
       refreshLeaseTokenVersion: 1 as number | null,
       sources: [],
+      status: "active" as string,
       tokenVersion: 1,
     };
     const storedAccount = buildStoredOAuthDeviceAccountForDeletion();
@@ -3745,7 +3747,19 @@ describe("deleteHostedAccountData", () => {
       connection.refreshLeaseTokenVersion = null;
       return true;
     });
-    const revokeAccess = vi.fn(async () => undefined);
+    const revokeAccess = vi.fn(async () => {
+      throw Object.assign(
+        new Error("The obsolete credential no longer identifies the active provider grant."),
+        { status: 401 },
+      );
+    });
+    const syncDurableConnectionState = vi.fn(async (nextConnection: {
+      lastErrorCode: string | null;
+      status: string;
+    }) => {
+      connection.lastErrorCode = nextConnection.lastErrorCode;
+      connection.status = nextConnection.status;
+    });
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
         clearStaleConnectionRefreshLease,
@@ -3753,7 +3767,7 @@ describe("deleteHostedAccountData", () => {
         getConnectionForUser: vi.fn(async () => publicAccount),
         getConnectionRecordForUser: vi.fn(async () => connection),
         getStoredConnectionAccountForUser: vi.fn(async () => storedAccount),
-        syncDurableConnectionState: vi.fn(async () => undefined),
+        syncDurableConnectionState,
         withConnectionMutationLock: vi.fn(async (
           _connectionId: string,
           callback: (tx: { __tx: true }) => Promise<unknown>,
@@ -3769,20 +3783,30 @@ describe("deleteHostedAccountData", () => {
       onTransaction: () => undefined,
     });
 
-    await expect(deleteHostedAccountData({
+    const deletionInput = {
       memberId: "member_123",
       prisma,
       request: new Request("https://join.example.test/settings"),
-    })).resolves.toMatchObject({
-      providerRevocations: [{
-        connectionId: connection.id,
-        status: "revoked",
-      }],
+    };
+    await expect(deleteHostedAccountData(deletionInput)).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+      retryable: false,
+    });
+    await expect(deleteHostedAccountData(deletionInput)).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+      retryable: false,
     });
 
     expect(clearStaleConnectionRefreshLease).toHaveBeenCalledTimes(1);
-    expect(revokeAccess).toHaveBeenCalledWith(storedAccount);
-    expect(hostedMemberUpdateCalls.length).toBeGreaterThan(0);
+    expect(syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        status: "reauthorization_required",
+      }),
+      { __tx: true },
+    );
+    expect(revokeAccess).not.toHaveBeenCalled();
+    expect(hostedMemberUpdateCalls).toEqual([]);
   });
 
   it("keeps the terminal fence for a token refresh that starts after suspension", async () => {
@@ -5322,6 +5346,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     connectedAt?: Date;
     credentialKind?: string;
     id: string;
+    lastErrorCode?: string | null;
     provider: string;
     providerApplicationRevision?: number | null;
     providerAccountBlindIndex: string;
@@ -5375,6 +5400,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     connectedAt?: Date;
     credentialKind?: string;
     id: string;
+    lastErrorCode?: string | null;
     provider: string;
     providerApplicationRevision?: number | null;
     providerAccountBlindIndex: string;
@@ -5805,16 +5831,23 @@ function createHostedAccountDeletionPrismaForTest(input: {
 }
 
 function normalizeHostedAccountDeletionDeviceConnectionsForTest<
-  T extends { credentialKind?: string },
+  T extends {
+    credentialKind?: string;
+    lastErrorCode?: string | null;
+    status?: string;
+  },
 >(connections: readonly T[]): Array<T & {
   credentialKind: string;
+  lastErrorCode: string | null;
   refreshLeaseExpiresAt: Date | null;
   refreshLeaseOwner: string | null;
   refreshLeaseTokenVersion: number | null;
+  status: string;
 }> {
   return connections.map((connection) => ({
     ...connection,
     credentialKind: connection.credentialKind ?? "none",
+    lastErrorCode: connection.lastErrorCode ?? null,
     refreshLeaseExpiresAt: "refreshLeaseExpiresAt" in connection
       ? (connection.refreshLeaseExpiresAt as Date | null)
       : null,
@@ -5824,6 +5857,7 @@ function normalizeHostedAccountDeletionDeviceConnectionsForTest<
     refreshLeaseTokenVersion: "refreshLeaseTokenVersion" in connection
       ? (connection.refreshLeaseTokenVersion as number | null)
       : null,
+    status: connection.status ?? "active",
   }));
 }
 

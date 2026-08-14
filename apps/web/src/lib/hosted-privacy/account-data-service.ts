@@ -1942,9 +1942,11 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
     orderBy: { id: "asc" },
     select: {
       id: true,
+      lastErrorCode: true,
       refreshLeaseExpiresAt: true,
       refreshLeaseOwner: true,
       refreshLeaseTokenVersion: true,
+      status: true,
       tokenVersion: true,
     },
     take: HOSTED_ACCOUNT_DELETION_REFRESH_LEASE_RECOVERY_LIMIT + 1,
@@ -1954,9 +1956,19 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
         { refreshLeaseExpiresAt: { not: null } },
         { refreshLeaseOwner: { not: null } },
         { refreshLeaseTokenVersion: { not: null } },
+        {
+          lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+          status: "reauthorization_required",
+        },
       ],
     },
   });
+  if (candidateConnections.some((record) =>
+    record.status === "reauthorization_required"
+    && record.lastErrorCode === "TOKEN_REFRESH_STATE_UNKNOWN"
+  )) {
+    throw accountDeletionDeviceTokenRefreshRecoveryRequiredError();
+  }
   const now = input.now.toISOString();
   const leasedConnections = candidateConnections.filter((record) =>
     classifyHostedTokenRefreshLease({ now, record }).status !== "none"
@@ -2029,14 +2041,18 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
       retryable: true,
     });
   }
-  if (resolution.status === "stale_recovered" && leasedConnections.length > 1) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
-      httpStatus: 503,
-      message: "One connected-health credential refresh state was recovered. Retry account deletion to check the remaining connections.",
-      retryable: true,
-    });
+  if (resolution.status === "stale_failed_closed") {
+    throw accountDeletionDeviceTokenRefreshRecoveryRequiredError();
   }
+}
+
+function accountDeletionDeviceTokenRefreshRecoveryRequiredError() {
+  return hostedOnboardingError({
+    code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+    httpStatus: 409,
+    message: "A connected-health credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
+    retryable: false,
+  });
 }
 
 function buildProviderAccessRemovalConfirmationToken(input: {

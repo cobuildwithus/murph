@@ -98,6 +98,7 @@ import {
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
+  buildHostedTokenRefreshStateUnknownError,
   classifyHostedTokenRefreshLease,
   failClosedStaleHostedTokenRefreshLease,
 } from "./agent-session-token-refresh";
@@ -1054,7 +1055,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 }> {
   const disconnectStartedAt = toIsoTimestamp(new Date());
   const target = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
-    let connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
+    const connection = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
     if (!connection) {
       throw deviceSyncError({
         code: "CONNECTION_NOT_FOUND",
@@ -1074,6 +1075,13 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       connectionChangedDuringDisconnectError();
     }
 
+    if (
+      connection.status === "reauthorization_required"
+      && connection.lastErrorCode === "TOKEN_REFRESH_STATE_UNKNOWN"
+    ) {
+      throw buildHostedTokenRefreshStateUnknownError();
+    }
+
     const refreshLeaseStatus = classifyHostedTokenRefreshLease({
       now: disconnectStartedAt,
       record: connectionRecord,
@@ -1087,22 +1095,16 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       });
     }
     if (refreshLeaseStatus.status === "stale") {
-      await failClosedStaleHostedTokenRefreshLease({
-        account: connection,
-        now: disconnectStartedAt,
-        store: input.store,
-        tx,
-        userId: input.userId,
-      });
-      const recoveredConnection = await input.store.getConnectionForUser(
-        input.userId,
-        input.connectionId,
-        tx,
-      );
-      if (!recoveredConnection) {
-        connectionChangedDuringDisconnectError();
-      }
-      connection = recoveredConnection;
+      return {
+        refreshLeaseRecoveryError:
+          await failClosedStaleHostedTokenRefreshLease({
+            account: connection,
+            now: disconnectStartedAt,
+            store: input.store,
+            tx,
+            userId: input.userId,
+          }),
+      };
     }
 
     // The raw durable credential kind is the cleanup authority. In particular,
@@ -1154,6 +1156,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       storedAccount,
     };
   });
+  if ("refreshLeaseRecoveryError" in target) {
+    throw target.refreshLeaseRecoveryError;
+  }
   const existing = target.connection;
   const storedAccount = target.storedAccount;
 

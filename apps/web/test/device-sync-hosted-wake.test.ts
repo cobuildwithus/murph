@@ -3241,25 +3241,14 @@ describe("hosted device-sync wakes", () => {
       refreshLeaseOwner: "agent-refresh:obsolete",
       refreshLeaseTokenVersion: 1,
     }],
-  ])("clears only the lease and revokes the retained OAuth credential when a refresh lease is %s", async (_label, lease) => {
+  ])("clears only the lease and blocks provider work when a refresh lease is %s", async (_label, lease) => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection();
-    const recoveredConnection = buildHostedConnection({
-      lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
-      lastErrorMessage: "Token refresh state is unknown. Reconnect this source.",
-      lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
-      status: "reauthorization_required",
-    });
-    const storedConnection = buildStoredConnection();
     const revokeAccess = vi.fn(async () => undefined);
     mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
-    mocks.getConnectionForUser
-      .mockResolvedValueOnce(activeConnection)
-      .mockResolvedValueOnce(recoveredConnection)
-      .mockResolvedValueOnce(buildDisconnectingConnection(recoveredConnection));
-    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
     mocks.getConnectionRecordForUser.mockResolvedValue({
       credentialKind: "oauth_tokens",
       ...lease,
@@ -3270,10 +3259,10 @@ describe("hosted device-sync wakes", () => {
     await expect(controlPlane.disconnectConnection(
       "user-123",
       buildPublicConnectionId("dsc_123"),
-    )).resolves.toMatchObject({
-      connection: {
-        status: "disconnected",
-      },
+    )).rejects.toMatchObject({
+      accountStatus: "reauthorization_required",
+      code: "TOKEN_REFRESH_STATE_UNKNOWN",
+      retryable: false,
     });
 
     expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
@@ -3289,70 +3278,63 @@ describe("hosted device-sync wakes", () => {
       tx: mocks.prismaTx,
       userId: "user-123",
     });
-    expect(revokeAccess).toHaveBeenCalledWith(storedConnection);
-    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
-      clearCredential: true,
-      connectionId: "dsc_123",
-      clearRefreshLease: true,
-      externalAccountId: storedConnection.externalAccountId,
-      provider: "oura",
-      tokenBundle: null,
-      tx: mocks.prismaTx,
-    });
+    expect(revokeAccess).not.toHaveBeenCalled();
+    expect(mocks.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
       kind: "reauthorization_required",
       reason: "token_refresh_state_unknown",
     }));
-    expect(mocks.clearStaleConnectionRefreshLease.mock.invocationCallOrder[0]).toBeLessThan(
-      revokeAccess.mock.invocationCallOrder[0],
-    );
-    expect(revokeAccess.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.persistStoredConnectionTokenBundle.mock.invocationCallOrder[0],
-    );
   });
 
-  it("retains the cleanup credential when stale-lease disconnect cannot revoke provider access", async () => {
-    const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
-    );
-    const activeConnection = buildHostedConnection();
-    const recoveredConnection = buildHostedConnection({
-      lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
-      lastErrorMessage: "Token refresh state is unknown. Reconnect this source.",
-      lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
-      status: "reauthorization_required",
-    });
-    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
-    mocks.getConnectionForUser
-      .mockResolvedValueOnce(activeConnection)
-      .mockResolvedValueOnce(recoveredConnection)
-      .mockResolvedValueOnce(buildDisconnectingConnection(recoveredConnection));
-    mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection());
-    mocks.getConnectionRecordForUser.mockResolvedValue({
-      credentialKind: "oauth_tokens",
-      refreshLeaseExpiresAt: new Date("2020-03-26T12:05:00.000Z"),
-      refreshLeaseOwner: "agent-refresh:expired",
-      refreshLeaseTokenVersion: 2,
-      tokenVersion: 2,
-    });
-    mocks.registryGet.mockReturnValue(undefined);
-
-    await expect(controlPlane.disconnectConnection(
-      "user-123",
-      buildPublicConnectionId("dsc_123"),
-    )).resolves.toMatchObject({
-      connection: {
+  it.each([401, 404])(
+    "keeps disconnect blocked after stale recovery even if the obsolete credential would receive provider %i",
+    async (providerStatus) => {
+      const controlPlane = createHostedDeviceSyncPublicIngressService(
+        new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+      );
+      const recoveredConnection = buildHostedConnection({
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        lastErrorMessage: "Token refresh state is unknown. Reconnect this source.",
+        lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
         status: "reauthorization_required",
-      },
-      warning: {
-        code: "PROVIDER_REVOKE_NOT_CONFIGURED",
-      },
-    });
+      });
+      const revokeAccess = vi.fn(async () => {
+        throw deviceSyncError({
+          code: "PROVIDER_REVOKE_FAILED",
+          message: "The obsolete credential no longer identifies the active provider grant.",
+          retryable: false,
+          httpStatus: providerStatus,
+        });
+      });
+      mocks.listConnectionsForUser.mockResolvedValue([recoveredConnection]);
+      mocks.getConnectionForUser.mockResolvedValue(recoveredConnection);
+      mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection());
+      mocks.getConnectionRecordForUser.mockResolvedValue({
+        credentialKind: "oauth_tokens",
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        tokenVersion: 2,
+      });
+      mocks.registryGet.mockReturnValue({ connectionHandler: { revokeAccess } });
 
-    expect(mocks.clearStaleConnectionRefreshLease).toHaveBeenCalledTimes(1);
-    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
-    expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
-  });
+      await expect(controlPlane.disconnectConnection(
+        "user-123",
+        buildPublicConnectionId("dsc_123"),
+      )).rejects.toMatchObject({
+        accountStatus: "reauthorization_required",
+        code: "TOKEN_REFRESH_STATE_UNKNOWN",
+        retryable: false,
+      });
+
+      expect(mocks.clearStaleConnectionRefreshLease).not.toHaveBeenCalled();
+      expect(revokeAccess).not.toHaveBeenCalled();
+      expect(mocks.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+      expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+      expect(mocks.markConnectionSourcesDisconnected).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects a stale disconnect when OAuth tokens rotate during provider revoke", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(

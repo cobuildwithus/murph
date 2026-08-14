@@ -32,7 +32,7 @@ export type HostedDestructiveActionRefreshLeaseResolution =
   | { status: "missing" }
   | { status: "none" }
   | { status: "in_progress"; leaseExpiresAt: string }
-  | { status: "stale_recovered" };
+  | { status: "stale_failed_closed"; error: unknown };
 
 export function classifyHostedTokenRefreshLease(input: {
   now: string;
@@ -102,14 +102,16 @@ export async function resolveHostedRefreshLeaseBeforeDestructiveAction(input: {
       return { status: "missing" };
     }
 
-    await failClosedStaleHostedTokenRefreshLease({
-      account,
-      now: input.now,
-      store: input.store,
-      tx,
-      userId: input.userId,
-    });
-    return { status: "stale_recovered" };
+    return {
+      status: "stale_failed_closed",
+      error: await failClosedStaleHostedTokenRefreshLease({
+        account,
+        now: input.now,
+        store: input.store,
+        tx,
+        userId: input.userId,
+      }),
+    };
   });
 }
 
