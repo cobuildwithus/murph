@@ -607,12 +607,26 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       .toBe(false);
   });
 
-  it("logs a completion failure but returns the runtime wake that follows it", async () => {
+  it("returns a runtime wake before a raced completion-failure log settles", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const controller = new AbortController();
     const interruption = new HostedRuntimeCheckpointInterruptedByWakeError();
     const completionFailure = new Error("snapshot completion transport failed");
+    let releaseFailureLog!: () => void;
+    const failureLogGate = new Promise<void>((resolve) => {
+      releaseFailureLog = resolve;
+    });
+    let settledFailureLogWrites = 0;
+    calls.logWrite.mockImplementation(async (request) => {
+      if (request.entries.some((entry) =>
+        entry.eventCode === "checkpoint.snapshot_failed"
+      )) {
+        await failureLogGate;
+        settledFailureLogWrites += 1;
+      }
+      return { loggedCount: request.entries.length };
+    });
     calls.completeSnapshotSession.mockImplementationOnce(async () => {
       controller.abort(interruption);
       throw completionFailure;
@@ -626,9 +640,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       createCheckpointInput("idle_shutdown"),
       { signal: controller.signal },
     )).rejects.toBe(interruption);
+    expect(settledFailureLogWrites).toBe(0);
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
-    expect(entries).toEqual(expect.arrayContaining([
+    const failureEntries = entries.filter((entry) =>
+      entry.eventCode === "checkpoint.snapshot_failed"
+    );
+    expect(failureEntries).toEqual([
       expect.objectContaining({
         eventCode: "checkpoint.snapshot_failed",
         level: "error",
@@ -636,11 +654,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           errorCode: "runtime_error",
         }),
       }),
-    ]));
+    ]);
     expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
       .toBe(false);
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+
+    releaseFailureLog();
+    await vi.waitFor(() => {
+      expect(settledFailureLogWrites).toBe(1);
+    });
   });
 
   it("propagates checkpoint interruption into runtime-owned symlink cleanup", async () => {

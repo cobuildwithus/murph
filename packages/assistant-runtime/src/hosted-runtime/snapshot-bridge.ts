@@ -777,7 +777,9 @@ async function createHostedWorkspaceV2Snapshot(
       request: input.request,
       signal: null,
     });
-    if (interruptedBeforeCommit) {
+    if (controlInterruptionError) {
+      // Failure telemetry remains best effort whenever an interruption owns
+      // runtime control. Foreground work must not wait on this remote write.
       void snapshotFailureLog;
     } else {
       await snapshotFailureLog;
