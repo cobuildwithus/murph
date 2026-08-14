@@ -547,21 +547,21 @@ test("daily workout rollup adds distinct sessions and suppresses an imported mir
   assert.equal(point("activity-minutes"), undefined);
 });
 
-test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
+test("unadmitted Junction timeseries stay out of default query/search and wearable summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-raw-timeseries-query-"));
-  const rawTimeseriesSnapshot = {
+  const unadmittedTimeseriesSnapshot = {
     importedAt: "2026-05-20T12:00:00.000Z",
     timeseries: {
-      heartrate: [{
+      experimental_raw: [{
         sourceProviderSlug: "garmin",
         sourceType: "watch",
         timestamp: "2026-05-20T08:00:00Z",
-        unit: "bpm",
-        value: 61,
+        unit: "sample",
+        value: 0.42,
       }],
     },
   };
-  const rawOnlyPayload = normalizeJunctionSnapshot(rawTimeseriesSnapshot);
+  const rawOnlyPayload = normalizeJunctionSnapshot(unadmittedTimeseriesSnapshot);
 
   assert.deepEqual(rawOnlyPayload.events, []);
   assert.deepEqual(rawOnlyPayload.samples ?? [], []);
@@ -574,7 +574,7 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
         formatVersion: CURRENT_VAULT_FORMAT_VERSION,
         vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4B",
         createdAt: "2026-05-20T00:00:00.000Z",
-        title: "Junction raw timeseries query vault",
+        title: "Junction unadmitted timeseries query vault",
         timezone: "UTC",
       })}\n`,
       "utf8",
@@ -583,15 +583,15 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
     const persistedRawVault = await readVault(vaultRoot);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["event"] }), []);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["sample"] }), []);
-    assert.equal(searchVault(persistedRawVault, "heart rate").total, 0);
-    assert.equal((await searchVaultRuntime(vaultRoot, "heart rate")).total, 0);
+    assert.equal(searchVault(persistedRawVault, "vendor waveform").total, 0);
+    assert.equal((await searchVaultRuntime(vaultRoot, "vendor waveform")).total, 0);
     assert.equal(summarizeWearableLatest(persistedRawVault, { providers: ["garmin"] }), null);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 
   const compactSummaryVault = makeVaultFromJunctionSnapshot({
-    ...rawTimeseriesSnapshot,
+    ...unadmittedTimeseriesSnapshot,
     summaries: {
       activity: [{
         sourceProviderSlug: "garmin",
@@ -605,6 +605,110 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
 
   assert.equal(latest?.latestDate, "2026-05-20");
   assert.equal(latest?.activity?.steps.selection.value, 7200);
+});
+
+test("Junction hourly features remain independently queryable without becoming day summaries", () => {
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    timeseries: {
+      heartrate: [
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T08:00:00Z",
+          unit: "bpm",
+          value: 61,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T09:00:00Z",
+          unit: "bpm",
+          value: 72,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T10:15:00Z",
+          sessionId: "workout-1",
+          sessionStart: "2026-05-20T10:00:00Z",
+          sessionEnd: "2026-05-20T11:00:00Z",
+          unit: "bpm",
+          value: 90,
+        },
+      ],
+      calories_active: [
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T08:15:00Z",
+          unit: "kcal",
+          value: 100,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T09:15:00Z",
+          unit: "kcal",
+          value: 200,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T10:15:00Z",
+          sessionId: "workout-1",
+          sessionStart: "2026-05-20T10:00:00Z",
+          sessionEnd: "2026-05-20T11:00:00Z",
+          unit: "kcal",
+          value: 50,
+        },
+      ],
+    },
+  };
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const vault = makeVaultFromJunctionSnapshot(snapshot);
+  const sleepVault = makeVaultFromJunctionSnapshot({
+    ...snapshot,
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "garmin-sleep-1",
+        calendar_date: "2026-05-20",
+        bedtime_start: "2026-05-20T02:00:00Z",
+        bedtime_stop: "2026-05-20T07:00:00Z",
+        duration: 18000,
+        total: 16200,
+        hr_lowest: 45,
+        hr_average: 50,
+      }],
+    },
+  });
+  const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
+  const heartRateSummary = summarizeWearableMetricLatest(vault, "max-heart-rate", {
+    providers: ["garmin"],
+    windowDays: 1,
+  });
+  const projection = buildMetricProjection(vault);
+  const maxHeartRatePoints = projection.metricPoints
+    .filter((point) => point.metricKey === "max-heart-rate")
+    .flatMap((point) => typeof point.value === "number" ? [point.value] : [])
+    .sort((left, right) => left - right);
+  const activeCaloriePoints = projection.metricPoints
+    .filter((point) => point.metricKey === "active-calories")
+    .flatMap((point) => typeof point.value === "number" ? [point.value] : [])
+    .sort((left, right) => left - right);
+
+  assert.equal(payload.events?.length, 12);
+  assert.deepEqual(payload.samples ?? [], []);
+  assert.ok(payload.events?.every((event) => event.fields?.observationGrain === "derived_fact"));
+  assert.equal(listEntities(vault, { families: ["event"] }).length, 12);
+  assert.equal(latest, null);
+  assert.equal(heartRateSummary?.value, null);
+  assert.equal(heartRateSummary?.recentWindow.count, 0);
+  assert.deepEqual(maxHeartRatePoints, [61, 72, 90]);
+  assert.deepEqual(activeCaloriePoints, [50, 100, 200]);
+  assert.equal(summarizeWearableLatest(sleepVault)?.sleep?.averageHeartRate.selection.value, 50);
+  assert.equal(summarizeWearableLatest(sleepVault)?.sleep?.lowestHeartRate.selection.value, 45);
 });
 
 test("latest surface sees Junction Garmin object data envelopes as usable summaries", () => {

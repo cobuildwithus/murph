@@ -1,3 +1,9 @@
+import {
+  ElevenLabsClient,
+  ElevenLabsError,
+  ElevenLabsTimeoutError,
+} from '@elevenlabs/elevenlabs-js'
+
 import type {
   AssistantVoiceMemoGeneration,
 } from './assistant-cli-contracts.js'
@@ -19,6 +25,13 @@ import { VaultCliError } from './vault-cli-errors.js'
 const DEFAULT_ELEVENLABS_API_BASE_URL = 'https://api.elevenlabs.io'
 const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2'
 const ELEVENLABS_MUSIC_TIMEOUT_MS = 5 * 60_000
+const ELEVENLABS_MAX_RETRIES = 0
+const ELEVENLABS_ERROR_BODY_MAX_BYTES = 16 * 1024
+
+// The longest supported music response is five minutes of 192 kbps MP3
+// (roughly 7.2 MB). Leave ample codec/container headroom while preventing a
+// provider or intermediary from exhausting the process with an unbounded body.
+export const ELEVENLABS_AUDIO_MAX_BYTES = 16 * 1024 * 1024
 
 // Speech synthesis time scales with the text, so the accepted length and the
 // request timeout are one decision and must be read together. Measured against
@@ -37,6 +50,7 @@ export const ELEVENLABS_MUSIC_OUTPUT_FORMAT = assistantVoiceMemoMusicOutputForma
 
 export interface ElevenLabsFetchResponse {
   arrayBuffer(): Promise<ArrayBuffer>
+  body?: ReadableStream<Uint8Array> | null
   headers?: ResponseHeadersLike | null
   ok: boolean
   status: number
@@ -49,6 +63,7 @@ export type ElevenLabsFetch = (
     body?: string
     headers?: Record<string, string>
     method: string
+    redirect: 'error'
     signal?: AbortSignal
   },
 ) => Promise<ElevenLabsFetchResponse>
@@ -94,14 +109,18 @@ export async function generateElevenLabsSpeech(input: {
 
   return await requestElevenLabsAudio({
     apiKey: input.apiKey,
-    body: {
-      model_id: modelId,
-      text,
-    },
     fetchImplementation: input.fetchImplementation,
     operation: 'speech',
-    outputFormat: input.outputFormat ?? ELEVENLABS_TTS_OUTPUT_FORMAT,
-    path: `/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
+    request: async (client, requestOptions) =>
+      await client.textToSpeech.convert(
+        voiceId,
+        {
+          modelId,
+          outputFormat: input.outputFormat ?? ELEVENLABS_TTS_OUTPUT_FORMAT,
+          text,
+        },
+        requestOptions,
+      ),
     signal: input.signal,
     timeoutMs: ELEVENLABS_TTS_TIMEOUT_MS,
   })
@@ -145,16 +164,19 @@ export async function generateElevenLabsMusic(input: {
 
   return await requestElevenLabsAudio({
     apiKey: input.apiKey,
-    body: {
-      force_instrumental: input.forceInstrumental,
-      model_id: input.modelId,
-      music_length_ms: input.durationMs,
-      prompt,
-    },
     fetchImplementation: input.fetchImplementation,
     operation: 'music',
-    outputFormat: input.outputFormat,
-    path: '/v1/music',
+    request: async (client, requestOptions) =>
+      await client.music.compose(
+        {
+          forceInstrumental: input.forceInstrumental,
+          modelId: input.modelId,
+          musicLengthMs: input.durationMs,
+          outputFormat: input.outputFormat,
+          prompt,
+        },
+        requestOptions,
+      ),
     signal: input.signal,
     timeoutMs: ELEVENLABS_MUSIC_TIMEOUT_MS,
   })
@@ -191,13 +213,24 @@ export async function generateElevenLabsVoiceMemoAudio(input: {
   }
 }
 
+type ElevenLabsRequestOptions = NonNullable<
+  Parameters<ElevenLabsClient['textToSpeech']['convert']>[2]
+>
+
+interface ElevenLabsRequestDiagnostics {
+  errorBodyText: string | null
+  requestId: string | null
+  responseTooLarge: boolean
+}
+
 async function requestElevenLabsAudio(input: {
   apiKey: string
-  body: Record<string, unknown>
   fetchImplementation?: ElevenLabsFetch
   operation: 'music' | 'speech'
-  outputFormat: string
-  path: string
+  request: (
+    client: ElevenLabsClient,
+    requestOptions: ElevenLabsRequestOptions,
+  ) => Promise<ReadableStream<Uint8Array>>
   signal?: AbortSignal
   timeoutMs: number
 }): Promise<GenerateElevenLabsAudioResult> {
@@ -215,27 +248,72 @@ async function requestElevenLabsAudio(input: {
     )
   }
 
-  const url = new URL(input.path, DEFAULT_ELEVENLABS_API_BASE_URL)
-  url.searchParams.set('output_format', input.outputFormat)
   const timeout = createTimeoutAbortController(input.signal, input.timeoutMs)
+  const diagnostics: ElevenLabsRequestDiagnostics = {
+    errorBodyText: null,
+    requestId: null,
+    responseTooLarge: false,
+  }
+  const client = new ElevenLabsClient({
+    apiKey,
+    baseUrl: DEFAULT_ELEVENLABS_API_BASE_URL,
+    fetch: createElevenLabsSdkFetch(fetchImplementation, diagnostics),
+    headers: {
+      accept: 'audio/mpeg',
+    },
+    maxRetries: ELEVENLABS_MAX_RETRIES,
+    timeoutInSeconds: input.timeoutMs / 1_000,
+  })
+  const requestOptions: ElevenLabsRequestOptions = {
+    abortSignal: timeout.signal,
+    maxRetries: ELEVENLABS_MAX_RETRIES,
+    timeoutInSeconds: input.timeoutMs / 1_000,
+  }
   const startedAtMs = Date.now()
   try {
-    const response = await fetchImplementation(url.toString(), {
-      body: JSON.stringify(input.body),
-      headers: {
-        accept: 'audio/mpeg',
-        'content-type': 'application/json',
-        'xi-api-key': apiKey,
-      },
-      method: 'POST',
-      signal: timeout.signal,
-    })
+    const stream = await input.request(client, requestOptions)
+    return {
+      bytes: await readElevenLabsAudioStream(stream),
+      contentType: 'audio/mpeg',
+      filenameExtension: 'mp3',
+    }
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw timeout.signal.reason ?? error
+    }
 
-    if (!response.ok) {
-      const responseBody = await readElevenLabsErrorBody(response)
+    if (
+      diagnostics.responseTooLarge ||
+      error instanceof ElevenLabsResponseTooLargeError
+    ) {
       throw new VaultCliError(
         'ELEVENLABS_API_REQUEST_FAILED',
-        `ElevenLabs ${input.operation} request failed with HTTP ${response.status}.`,
+        `ElevenLabs ${input.operation} returned a response larger than the ${ELEVENLABS_AUDIO_MAX_BYTES}-byte limit.`,
+        {
+          elapsedMs: Date.now() - startedAtMs,
+          failureStage: 'response_body',
+          maxResponseBytes: ELEVENLABS_AUDIO_MAX_BYTES,
+          operation: input.operation,
+          provider: 'elevenlabs',
+          retryable: false,
+        },
+      )
+    }
+
+    if (
+      error instanceof ElevenLabsError &&
+      typeof error.statusCode === 'number'
+    ) {
+      const status = error.statusCode
+      const responseBody = readElevenLabsErrorBody({
+        fallbackBody: error.body,
+        fallbackRequestId: error.requestId,
+        rawText: diagnostics.errorBodyText,
+        requestId: diagnostics.requestId,
+      })
+      throw new VaultCliError(
+        'ELEVENLABS_API_REQUEST_FAILED',
+        `ElevenLabs ${input.operation} request failed with HTTP ${status}.`,
         {
           elapsedMs: Date.now() - startedAtMs,
           failureStage: 'http',
@@ -245,28 +323,17 @@ async function requestElevenLabsAudio(input: {
           providerErrorMessage: responseBody.message,
           providerRequestId: responseBody.requestId,
           responseBodyTextLength: responseBody.textLength,
-          retryable: response.status === 408 || response.status === 429 ||
-            response.status >= 500,
-          status: response.status,
+          retryable: status === 408 || status === 429 || status >= 500,
+          status,
         },
       )
     }
 
-    return {
-      bytes: new Uint8Array(await response.arrayBuffer()),
-      contentType: 'audio/mpeg',
-      filenameExtension: 'mp3',
-    }
-  } catch (error) {
-    if (error instanceof VaultCliError) {
-      throw error
-    }
-    if (input.signal?.aborted) {
-      throw error
-    }
+    const timedOut = timeout.timedOut() ||
+      error instanceof ElevenLabsTimeoutError
     throw new VaultCliError(
       'ELEVENLABS_API_REQUEST_FAILED',
-      timeout.timedOut()
+      timedOut
         ? `ElevenLabs ${input.operation} request timed out after ${input.timeoutMs}ms.`
         : `ElevenLabs ${input.operation} request failed before a response was returned.`,
       {
@@ -276,7 +343,7 @@ async function requestElevenLabsAudio(input: {
         provider: 'elevenlabs',
         retryable: true,
         timeoutMs: input.timeoutMs,
-        timedOut: timeout.timedOut(),
+        timedOut,
         transportErrorName: readSafeTransportErrorName(error),
         transportErrorTextLength: errorMessage(error).length,
       },
@@ -284,6 +351,283 @@ async function requestElevenLabsAudio(input: {
   } finally {
     timeout.cleanup()
   }
+}
+
+function createElevenLabsSdkFetch(
+  fetchImplementation: ElevenLabsFetch,
+  diagnostics: ElevenLabsRequestDiagnostics,
+): typeof fetch {
+  return async (input, init) => {
+    const request = readRequestInput(input)
+    const headers = mergeFetchHeaders(request?.headers, init?.headers)
+    const body = readSdkRequestBody(init?.body)
+    const response = await fetchImplementation(
+      request?.url ?? String(input),
+      {
+        ...(body === undefined ? {} : { body }),
+        headers,
+        method: init?.method ?? request?.method ?? 'GET',
+        redirect: 'error',
+        signal: init?.signal ?? request?.signal ?? undefined,
+      },
+    )
+
+    if (response instanceof Response) {
+      if (!response.ok) {
+        diagnostics.errorBodyText = await readElevenLabsErrorResponseText(
+          response,
+        ).catch(() => null)
+        diagnostics.requestId = readElevenLabsRequestId(response.headers)
+        return new Response(diagnostics.errorBodyText, {
+          headers: response.headers,
+          status: response.status,
+          statusText: response.statusText,
+        })
+      }
+      if (
+        responseExceedsDeclaredByteLimit(
+          response.headers,
+          ELEVENLABS_AUDIO_MAX_BYTES,
+        )
+      ) {
+        diagnostics.responseTooLarge = true
+        await cancelElevenLabsResponseBody(response)
+        throw new ElevenLabsResponseTooLargeError()
+      }
+      return response
+    }
+
+    const responseHeaders = createSdkResponseHeaders(response.headers)
+    if (!response.ok) {
+      const text = await readElevenLabsErrorResponseText(
+        response,
+        responseHeaders,
+      ).catch(() => null)
+      diagnostics.errorBodyText = text
+      diagnostics.requestId = readElevenLabsRequestId(responseHeaders)
+      return new Response(text, {
+        headers: responseHeaders,
+        status: response.status,
+      })
+    }
+
+    if (
+      responseExceedsDeclaredByteLimit(
+        responseHeaders,
+        ELEVENLABS_AUDIO_MAX_BYTES,
+      )
+    ) {
+      diagnostics.responseTooLarge = true
+      await cancelElevenLabsResponseBody(response)
+      throw new ElevenLabsResponseTooLargeError()
+    }
+
+    if (response.body) {
+      return new Response(response.body, {
+        headers: responseHeaders,
+        status: response.status,
+      })
+    }
+
+    const bodyBytes = await response.arrayBuffer()
+    if (bodyBytes.byteLength > ELEVENLABS_AUDIO_MAX_BYTES) {
+      diagnostics.responseTooLarge = true
+      throw new ElevenLabsResponseTooLargeError()
+    }
+    return new Response(bodyBytes, {
+      headers: responseHeaders,
+      status: response.status,
+    })
+  }
+}
+
+function readRequestInput(input: RequestInfo | URL): Request | null {
+  return typeof Request !== 'undefined' && input instanceof Request
+    ? input
+    : null
+}
+
+function mergeFetchHeaders(
+  requestHeaders: Headers | undefined,
+  initHeaders: HeadersInit | undefined,
+): Record<string, string> {
+  const headers = new Headers(requestHeaders)
+  new Headers(initHeaders).forEach((value, name) => {
+    headers.set(name, value)
+  })
+  return Object.fromEntries(headers.entries())
+}
+
+function readSdkRequestBody(
+  body: BodyInit | null | undefined,
+): string | undefined {
+  if (body === null || body === undefined) {
+    return undefined
+  }
+  if (typeof body === 'string') {
+    return body
+  }
+  throw new Error('ElevenLabs SDK emitted an unsupported request body type.')
+}
+
+function createSdkResponseHeaders(
+  headers: ResponseHeadersLike | null | undefined,
+): Headers {
+  const result = new Headers()
+  for (const name of [
+    'content-length',
+    'content-type',
+    'request-id',
+    'x-request-id',
+  ]) {
+    const value = readResponseHeader(headers, name)
+    if (value) {
+      result.set(name, value)
+    }
+  }
+  return result
+}
+
+function readResponseHeader(
+  headers: ResponseHeadersLike | null | undefined,
+  name: string,
+): string | null {
+  if (!headers) {
+    return null
+  }
+  if (typeof headers.get === 'function') {
+    return normalizeNullableString(headers.get(name))
+  }
+  const matchingEntry = Object.entries(headers).find(
+    ([key]) => key.toLowerCase() === name.toLowerCase(),
+  )
+  const value = matchingEntry?.[1]
+  return typeof value === 'string' ? normalizeNullableString(value) : null
+}
+
+function readElevenLabsRequestId(headers: Headers): string | null {
+  return readBoundedErrorString(
+    headers.get('x-request-id') ?? headers.get('request-id'),
+    100,
+  )
+}
+
+async function readElevenLabsAudioStream(
+  stream: ReadableStream<Uint8Array>,
+): Promise<Uint8Array> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let totalLength = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) {
+        break
+      }
+      totalLength += next.value.byteLength
+      if (totalLength > ELEVENLABS_AUDIO_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        throw new ElevenLabsResponseTooLargeError()
+      }
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(totalLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+class ElevenLabsResponseTooLargeError extends Error {
+  constructor() {
+    super('ElevenLabs response exceeded the configured byte limit.')
+    this.name = 'ElevenLabsResponseTooLargeError'
+  }
+}
+
+async function readElevenLabsErrorResponseText(
+  response: ElevenLabsFetchResponse,
+  headers: ResponseHeadersLike | null | undefined = response.headers,
+): Promise<string | null> {
+  if (
+    responseExceedsDeclaredByteLimit(
+      headers,
+      ELEVENLABS_ERROR_BODY_MAX_BYTES,
+    )
+  ) {
+    await cancelElevenLabsResponseBody(response)
+    return null
+  }
+
+  if (response.body) {
+    const bytes = await readBoundedElevenLabsStream(
+      response.body,
+      ELEVENLABS_ERROR_BODY_MAX_BYTES,
+    )
+    return bytes === null ? null : new TextDecoder().decode(bytes)
+  }
+
+  const text = await response.text()
+  return new TextEncoder().encode(text).byteLength <=
+      ELEVENLABS_ERROR_BODY_MAX_BYTES
+    ? text
+    : null
+}
+
+async function readBoundedElevenLabsStream(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<Uint8Array | null> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let totalLength = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) {
+        break
+      }
+      totalLength += next.value.byteLength
+      if (totalLength > maxBytes) {
+        await reader.cancel().catch(() => undefined)
+        return null
+      }
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(totalLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+function responseExceedsDeclaredByteLimit(
+  headers: ResponseHeadersLike | null | undefined,
+  maxBytes: number,
+): boolean {
+  const contentLength = readResponseHeader(headers, 'content-length')
+  if (!contentLength || !/^\d+$/.test(contentLength)) {
+    return false
+  }
+  return Number(contentLength) > maxBytes
+}
+
+async function cancelElevenLabsResponseBody(
+  response: ElevenLabsFetchResponse,
+): Promise<void> {
+  await response.body?.cancel().catch(() => undefined)
 }
 
 function normalizeRequiredElevenLabsString(
@@ -325,44 +669,64 @@ interface ElevenLabsErrorBody {
 // is length-capped before it reaches an assistant context or a runtime log.
 const ELEVENLABS_ERROR_MESSAGE_MAX_LENGTH = 300
 
-async function readElevenLabsErrorBody(
-  response: Pick<ElevenLabsFetchResponse, 'text'>,
-): Promise<ElevenLabsErrorBody> {
-  let text: string
-  try {
-    text = await response.text()
-  } catch {
-    return { code: null, message: null, requestId: null, textLength: null }
-  }
-
-  const detail = readElevenLabsErrorDetail(text)
+function readElevenLabsErrorBody(input: {
+  fallbackBody: unknown
+  fallbackRequestId: string | undefined
+  rawText: string | null
+  requestId: string | null
+}): ElevenLabsErrorBody {
+  const text = input.rawText ?? stringifyElevenLabsErrorBody(input.fallbackBody)
+  const detail = text === null
+    ? readElevenLabsErrorDetail(input.fallbackBody)
+    : readElevenLabsErrorDetailFromText(text)
   return {
     code: readBoundedErrorString(detail?.code ?? detail?.status, 100),
     message: readBoundedErrorString(
       detail?.message,
       ELEVENLABS_ERROR_MESSAGE_MAX_LENGTH,
     ),
-    requestId: readBoundedErrorString(detail?.request_id, 100),
-    textLength: text.length,
+    requestId: readBoundedErrorString(
+      detail?.request_id ?? input.requestId ?? input.fallbackRequestId,
+      100,
+    ),
+    textLength: text?.length ?? null,
   }
 }
 
-function readElevenLabsErrorDetail(text: string): {
+function stringifyElevenLabsErrorBody(body: unknown): string | null {
+  if (typeof body === 'string') {
+    return body
+  }
+  try {
+    return JSON.stringify(body) ?? null
+  } catch {
+    return null
+  }
+}
+
+function readElevenLabsErrorDetailFromText(text: string): {
   code?: unknown
   message?: unknown
   request_id?: unknown
   status?: unknown
 } | null {
-  let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    return readElevenLabsErrorDetail(JSON.parse(text))
   } catch {
     return null
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+}
+
+function readElevenLabsErrorDetail(value: unknown): {
+  code?: unknown
+  message?: unknown
+  request_id?: unknown
+  status?: unknown
+} | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null
   }
-  const detail = (parsed as { detail?: unknown }).detail
+  const detail = (value as { detail?: unknown }).detail
   // A plain-string `detail` carries no structured fields worth splitting out.
   if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
     return null

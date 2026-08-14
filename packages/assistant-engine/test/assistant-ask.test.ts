@@ -622,6 +622,41 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
     )
   })
 
+  it('keeps the outgoing reviewer limited to allow or deny for the fixed audience', async () => {
+    const workspaceRoot = await createTempRoot('murph-fixed-audience-ask-')
+    const answer = 'Your synthetic activity increased.'
+    askMocks.buildEvidence.mockResolvedValue('Synthetic activity evidence.')
+    askMocks.executeTurn
+      .mockResolvedValueOnce({
+        finalMessage: JSON.stringify({ answer, outcome: 'answered' }),
+      })
+      .mockResolvedValueOnce({
+        finalMessage: JSON.stringify({ decision: 'allow' }),
+      })
+
+    await expect(executeConsentedReadOnlyAssistantAsk({
+      answerMode: 'caller_handoff',
+      permissionText: 'Share only the fixed group-authorized synthetic activity answer.',
+      question: 'How has my synthetic activity changed?',
+      workspaceRoot,
+    })).resolves.toEqual({ answer, outcome: 'answered' })
+
+    const reviewInput = askMocks.executeTurn.mock.calls[1]?.[0]
+    expect(reviewInput.outputSchema).toEqual({
+      additionalProperties: false,
+      properties: {
+        decision: {
+          enum: ['allow', 'deny'],
+          type: 'string',
+        },
+      },
+      required: ['decision'],
+      type: 'object',
+    })
+    expect(reviewInput.baseInstructions).not.toMatch(/audience|destination/u)
+    expect(reviewInput.prompt).not.toContain('responseDestination')
+  })
+
   it('rechecks provider authority before the disclosure reviewer', async () => {
     const workspaceRoot = await createTempRoot('murph-consented-authority-')
     const beforeProviderEntry = vi.fn()

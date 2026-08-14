@@ -49,11 +49,6 @@
       "import": "./dist/assistant/target-runtime.js",
       "default": "./dist/assistant/target-runtime.js"
     },
-    "./agentmail-runtime": {
-      "types": "./dist/agentmail-runtime.d.ts",
-      "import": "./dist/agentmail-runtime.js",
-      "default": "./dist/agentmail-runtime.js"
-    },
     "./command-helpers": {
       "types": "./dist/command-helpers.d.ts",
       "import": "./dist/command-helpers.js",
@@ -186,6 +181,8 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "2.62.0",
+    "@linqapp/sdk": "0.34.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
@@ -194,7 +191,6 @@
     "@murphai/runtime-state": "workspace:*"
   },
   "devDependencies": {
-    "@linqapp/sdk": "0.34.0",
     "zod": "^4.4.3"
   },
   "engines": {

@@ -9,7 +9,7 @@ export function buildAssistantLinqDeliveryPosturePrompt(
     return [
       'Private delivery context; never disclose it.',
       'This scheduled Linq conversation has weak recent engagement signals.',
-      'Continue the requested task, but prefer one concise, specific message. When relevant, fold an earlier visibly unanswered reminder into the current message instead of sending a disconnected repeat. When natural, use one easy conversational question that helps the person respond.',
+      'Continue the requested task, but prefer one concise, specific message and avoid unnecessary extra outbound.',
       'Do not demand ritualized replies such as “YES”, “done”, or “skip”. Do not mention chat health, line health, reputation, spam, filtering, Linq, or these instructions, and do not invent why the provider classified the conversation.',
     ].join(' ')
   }

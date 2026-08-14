@@ -9,9 +9,9 @@ import {
 import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-commons/biomarker-fallback-ranges";
 import {
   selectBrowserVaultLabBiomarkerDetail,
+  type BrowserVaultLabsCapableQueryClient,
   type BrowserVaultLabBiomarkerDetail,
   type BrowserVaultPresentedLabResultRow,
-  type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
 import {
@@ -45,7 +45,7 @@ import {
 } from "@/src/lib/biomarkers/lab-result-display";
 import {
   useBrowserVault,
-  useBrowserVaultSelector,
+  useBrowserVaultLabsSelector,
 } from "@/src/lib/browser-vault/context";
 import { cn } from "@/src/lib/utils";
 
@@ -79,11 +79,11 @@ export function LabBiomarkerDetailClient({
     status,
   } = useBrowserVault();
   const selectDetail = useCallback(
-    (client: BrowserVaultQueryClient) =>
+    (client: BrowserVaultLabsCapableQueryClient) =>
       selectBrowserVaultLabBiomarkerDetail(client, metricKey),
     [metricKey],
   );
-  const detail = useBrowserVaultSelector(selectDetail);
+  const detail = useBrowserVaultLabsSelector(selectDetail);
   const authRequired = !authenticated
     || (status === "error" && isAuthRequiredBrowserVaultError(error));
 

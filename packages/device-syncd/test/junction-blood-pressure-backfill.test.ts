@@ -602,7 +602,10 @@ async function executeImmediateResourceContinuations(input: {
     const continuation = result.scheduledJobs?.find((job) =>
       job.kind === "resource" && job.payload?.resource === input.resource
     );
-    if (!continuation || continuation.availableAt) {
+    if (
+      !continuation
+      || (continuation.availableAt && continuation.availableAt !== input.context.now)
+    ) {
       return { executionCount, result, results };
     }
     currentJob = toJobRecord(continuation, nextIndex);
@@ -610,6 +613,43 @@ async function executeImmediateResourceContinuations(input: {
   }
 
   throw new Error(`${input.resource} history did not reach a delayed or terminal result.`);
+}
+
+async function executeImmediateFullTimeseriesContinuations(input: {
+  context: ProviderJobContext;
+  initialResult: ProviderJobResult;
+  provider: ReturnType<typeof createProvider>;
+  startingIndex?: number;
+}): Promise<{
+  executionCount: number;
+  result: ProviderJobResult;
+  results: ProviderJobResult[];
+}> {
+  const executor = requireValue(input.provider.jobExecutor);
+  let result = input.initialResult;
+  let executionCount = 0;
+  let nextIndex = input.startingIndex ?? 20_000;
+  const results: ProviderJobResult[] = [];
+
+  while (executionCount < 1_000) {
+    const continuation = result.scheduledJobs?.find((job) =>
+      (job.kind === "backfill" || job.kind === "reconcile")
+      && typeof job.payload?.timeseriesResourceCursor === "string"
+    );
+    if (!continuation) {
+      return { executionCount, result, results };
+    }
+    assert.equal(continuation.availableAt, input.context.now);
+    result = await executor.executeJob(
+      input.context,
+      toJobRecord(continuation, nextIndex),
+    );
+    results.push(result);
+    executionCount += 1;
+    nextIndex += 1;
+  }
+
+  throw new Error("Full Junction timeseries continuation did not terminate.");
 }
 
 test("the persisted-source scheduler gives sparse blood pressure its own full-history resumable job", async () => {
@@ -649,14 +689,15 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
     toJobRecord(backfill, 1),
   );
   const boundedRequests = [...requests];
-  assert.equal(boundedRequests.length, 28);
+  assert.equal(boundedRequests.length, 0);
+  assert.equal(boundedResult.scheduledJobs?.length, 1);
   assert.equal(
-    boundedRequests.filter((request) => request.resource === "stress_level").length,
-    14,
+    boundedResult.scheduledJobs?.[0]?.payload?.timeseriesResourceCursor,
+    "blood_pressure",
   );
   assert.equal(
-    boundedRequests.filter((request) => request.resource === "blood_pressure").length,
-    14,
+    boundedResult.scheduledJobs?.[0]?.payload?.timeseriesCursor,
+    "2026-05-28T00:00:00.000Z",
   );
   assert.equal(
     Object.hasOwn(
@@ -713,10 +754,16 @@ test("covered Link reconnects retain bounded blood-pressure catch-up", async () 
       sources: [createSourceSummary("omron", "2026-03-20T23:55:00.000Z")],
     });
 
+    const context = createJobContext({ account, importedSnapshots, now: callbackAt });
     const result = await requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ account, importedSnapshots, now: callbackAt }),
+      context,
       toJobRecord(backfill, timeseriesBackfillDays),
     );
+    await executeImmediateFullTimeseriesContinuations({
+      context,
+      initialResult: result,
+      provider,
+    });
     const bloodPressureRequests = requests.filter(
       (request) => request.resource === "blood_pressure",
     );
@@ -998,12 +1045,18 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
 
   requests.length = 0;
   const bounded = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
-  await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const boundedContext = createJobContext({
       account: createAccount({ metadata: result.metadataPatch }),
-    }),
+    });
+  const boundedResult = await requireValue(provider.jobExecutor).executeJob(
+    boundedContext,
     toJobRecord(bounded, 2),
   );
+  await executeImmediateFullTimeseriesContinuations({
+    context: boundedContext,
+    initialResult: boundedResult,
+    provider,
+  });
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
     7,
@@ -1457,8 +1510,9 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
       resource: "caffeine",
     });
     const reconcileSnapshots: unknown[] = [];
-    await executor.executeJob(
-      createJobContext({ importedSnapshots: reconcileSnapshots }),
+    const reconcileContext = createJobContext({ importedSnapshots: reconcileSnapshots });
+    const reconcileSetup = await executor.executeJob(
+      reconcileContext,
       toJobRecord({
         dedupeKey: `reconcile-${label}`,
         kind: "reconcile",
@@ -1469,6 +1523,11 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
         priority: 40,
       }, 2),
     );
+    await executeImmediateFullTimeseriesContinuations({
+      context: reconcileContext,
+      initialResult: reconcileSetup,
+      provider,
+    });
 
     const externalRefs = [];
     for (const snapshots of [historicalSnapshots, reconcileSnapshots]) {

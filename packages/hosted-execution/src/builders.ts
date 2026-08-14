@@ -17,6 +17,7 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionDailyMetricReportedWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
@@ -65,6 +66,9 @@ import {
 import {
   parseHostedExecutionInitialGroupRoomModelMarkdown,
 } from "./pending-group-setup.ts";
+import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "./daily-metric.ts";
 
 function cloneLinqMessagePart(
   value: HostedExecutionLinqConversationMessagePart,
@@ -902,6 +906,31 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
       mealPhotoKey: input.mealPhotoKey,
       sha256: input.sha256,
     },
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionDailyMetricReportedWake(input: {
+  date: string;
+  eventId: string;
+  memberId: string;
+  metric: string;
+  occurredAt: string;
+  unit: string;
+  value: number;
+}): HostedExecutionDailyMetricReportedWake {
+  const dailyMetric = parseHostedExecutionDailyMetricReportedPayload({
+    date: input.date,
+    metric: input.metric,
+    unit: input.unit,
+    value: input.value,
+  });
+
+  return {
+    dailyMetric,
+    eventId: input.eventId,
+    kind: "health.daily-metric.reported",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

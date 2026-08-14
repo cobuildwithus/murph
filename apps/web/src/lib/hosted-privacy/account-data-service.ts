@@ -270,6 +270,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member's disclosure grants and every grant in generic groups they own or back. The Settings export remains vault-only; the private list_memberships response exposes the exact granted policy text without exposing other members' grants.",
   },
   {
+    slug: "prisma.hosted_group_current_sender_clarification",
+    label: "Pending group answer-audience clarifications",
+    deletion: "live-delete",
+    note: "Deletes short-lived exact-message pointers used to resume one ambiguous group request. The original question remains in the ordinary mailbox lifecycle and is not copied into this table.",
+  },
+  {
     slug: "prisma.hosted_account_deletion_cleanup",
     label: "Encrypted account-deletion cleanup receipt",
     deletion: "documented-retention",
@@ -2191,6 +2197,14 @@ async function deleteHostedAccountPrismaRows(input: {
         { membership: { memberId: memberIdFilter } },
         { membership: { group: { ownerMemberId: memberIdFilter } } },
         { membership: { group: { runtimeMemberId: memberIdFilter } } },
+      ],
+    },
+  }));
+  record("prisma.hosted_group_current_sender_clarification", await input.prisma.hostedGroupCurrentSenderClarification.deleteMany({
+    where: {
+      OR: [
+        { groupRuntimeMemberId: memberIdFilter },
+        { targetMemberId: memberIdFilter },
       ],
     },
   }));

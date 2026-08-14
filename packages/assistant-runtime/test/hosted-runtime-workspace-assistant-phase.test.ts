@@ -216,6 +216,7 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 
 import {
   initializeVault,
+  patchAutomation,
   showAutomation,
   splitAutomationAvailabilityConflictBlock,
   upsertAutomation,
@@ -5479,6 +5480,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
         status: "active",
         timingVerified: false,
+        timingVerificationIssues: ["stale_recurring_occurrence"],
       }));
       await expect(requestAutomation({
         action: "patch",
@@ -5571,6 +5573,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
         status: "active",
         timingVerified: true,
+        timingVerificationIssues: [],
         updatedAt: dailyRevised.updatedAt,
       });
       await expect(readFile(recordPath, "utf8")).resolves.toBe(
@@ -5625,6 +5628,308 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       )).resolves.toMatchObject({
         state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
       });
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("logs content-free timing verification failure and recovery details", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T01:00:00.000Z"));
+    const parentRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "hosted-automation-verification-telemetry-",
+    ));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_45454545454545454545454545454545";
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    try {
+      await initializeVault({
+        createdAt: "2026-08-13T01:00:00.000Z",
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_verification_telemetry",
+          actorId: "linq_participant_verification_telemetry",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_verification_telemetry",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_verification_telemetry",
+          threadId: "linq_chat_verification_telemetry",
+        },
+      });
+      mocks.resolveAssistantCronDefaultTimeZoneProjection
+        .mockResolvedValueOnce({
+          timeZone: "America/New_York",
+          vaultTimeZoneVerified: false,
+        })
+        .mockResolvedValue({
+          timeZone: "America/New_York",
+          vaultTimeZoneVerified: true,
+        });
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        await laneInput.operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext: AssistantExecutionContext) => {
+            const automationTool = executionContext.hosted?.automationTool;
+            if (!automationTool) {
+              throw new Error("Expected scoped hosted automation tool.");
+            }
+            const recoveredProjectionCallsBefore =
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+            const saved = await automationTool.request({
+              action: "save",
+              instructions: "Send the synthetic private reminder payload.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "22:30",
+              },
+              slug: "synthetic-private-verification-reminder",
+              title: "Synthetic private verification reminder",
+            });
+            expect(saved).toEqual(expect.objectContaining({
+              timingVerified: true,
+              timingVerificationIssues: [],
+            }));
+            expect(
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+              - recoveredProjectionCallsBefore,
+            ).toBe(2);
+
+            mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValue({
+              timeZone: "America/New_York",
+              vaultTimeZoneVerified: false,
+            });
+            const persistentProjectionCallsBefore =
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+            await expect(automationTool.request({
+              action: "save",
+              instructions: "Send another synthetic private reminder payload.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "23:30",
+              },
+              slug: "synthetic-private-persistent-verification-reminder",
+              title: "Synthetic private persistent verification reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              timingVerified: false,
+              timingVerificationIssues: ["default_timezone_unverified"],
+            }));
+            expect(
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+              - persistentProjectionCallsBefore,
+            ).toBe(2);
+
+            mocks.resolveAssistantCronDefaultTimeZoneProjection
+              .mockImplementationOnce(async () => {
+                const current = await showAutomation({
+                  slug: "synthetic-readback-mismatch-reminder",
+                  vaultRoot,
+                });
+                if (!current) {
+                  throw new Error("Expected the readback mismatch fixture.");
+                }
+                await patchAutomation({
+                  expectedUpdatedAt: current.updatedAt,
+                  lookup: current.automationId,
+                  schedule: {
+                    kind: "dailyLocal",
+                    localTime: "08:45",
+                  },
+                  vaultRoot,
+                });
+                return {
+                  timeZone: "America/New_York",
+                  vaultTimeZoneVerified: false,
+                };
+              })
+              .mockResolvedValue({
+                timeZone: "America/New_York",
+                vaultTimeZoneVerified: true,
+              });
+            await expect(automationTool.request({
+              action: "save",
+              instructions: "Send the original synthetic mismatch reminder.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "08:30",
+              },
+              slug: "synthetic-readback-mismatch-reminder",
+              title: "Synthetic readback mismatch reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              nextOccurrenceAt: null,
+              timingVerified: false,
+              timingVerificationIssues: expect.arrayContaining([
+                "record_readback_mismatch",
+              ]),
+            }));
+
+            mocks.resolveAssistantCronDefaultTimeZoneProjection
+              .mockImplementationOnce(async () => {
+                const current = await showAutomation({
+                  slug: "synthetic-projection-failure-reminder",
+                  vaultRoot,
+                });
+                if (!current) {
+                  throw new Error("Expected the projection failure fixture.");
+                }
+                await rm(path.join(vaultRoot, current.relativePath));
+                return {
+                  timeZone: "America/New_York",
+                  vaultTimeZoneVerified: true,
+                };
+              });
+            await expect(automationTool.request({
+              action: "save",
+              instructions: "Send the synthetic projection failure reminder.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "07:30",
+              },
+              slug: "synthetic-projection-failure-reminder",
+              title: "Synthetic projection failure reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              nextOccurrenceAt: null,
+              timingVerified: false,
+              timingVerificationIssues: expect.arrayContaining([
+                "projection_unavailable",
+                "record_readback_mismatch",
+              ]),
+            }));
+          },
+          turnEnvironment: null,
+        });
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        logRequests,
+        vaultRoot,
+      }));
+
+      const verificationEntries = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) =>
+          entry.eventCode === "assistant.automation_detail"
+          && entry.redactedJson?.schema
+            === "murph.hosted-automation-timing-verification.v1"
+        );
+      expect(verificationEntries).toHaveLength(8);
+      expect(verificationEntries[0]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationIssues: ["default_timezone_unverified"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "initial",
+          detailComponent: "automation.tool",
+        }),
+      }));
+      expect(verificationEntries[1]).toEqual(expect.objectContaining({
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationRecovered: true,
+          automationTimingVerificationStage: "readback",
+          detailComponent: "automation.tool",
+        }),
+      }));
+      expect(verificationEntries[2]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "initial",
+        }),
+      }));
+      expect(verificationEntries[3]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
+      expect(verificationEntries[5]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationIssues: expect.arrayContaining([
+            "record_readback_mismatch",
+          ]),
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
+      expect(verificationEntries[7]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationIssues: expect.arrayContaining([
+            "projection_unavailable",
+            "record_readback_mismatch",
+          ]),
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-private-verification-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic private reminder payload",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic private verification reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-private-persistent-verification-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "another synthetic private reminder payload",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic private persistent verification reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-readback-mismatch-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "original synthetic mismatch reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic readback mismatch reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain("08:45");
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-projection-failure-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic projection failure reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic projection failure reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain("07:30");
+      expect(() => logRequests.forEach(parseHostedRuntimeLogRequest)).not.toThrow();
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -14496,7 +14801,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     },
     {
       dedupeKey: "aask_done_private_completion",
-      label: "private Assistant Ask completion",
+      label: "legacy private Assistant Ask completion",
+    },
+    {
+      dedupeKey: "aask_private_completion",
+      label: "current private Assistant Ask completion",
     },
   ])("drains an exact $label through the causal-only fixed-route outbox once", async ({
     dedupeKey,
@@ -14593,6 +14902,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             "assistant.notification.requested:phone-call-result:",
             "assistant.notification.requested:usage-referral-reward:",
             "aask_done_",
+            "aask_private_",
           ],
           allowedRouteActions: ["dispatch-assistant-notification"],
           allowedWakeKinds: ["assistant.notification.requested"],
@@ -15503,11 +15813,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     if (!effect) {
       throw new Error("Expected deferred vault-share projection effect.");
     }
-    await effect();
+    expect(effect.requiresVaultShareProjectionResult).toBe(true);
+    await effect({
+      vaultShareProjectionResult: { outcome: "delivered" },
+    });
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: vaultShareItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
+      vaultShareProjectionResult: { outcome: "delivered" },
       vaultRoot: "/tmp/murph-vault",
     });
   });

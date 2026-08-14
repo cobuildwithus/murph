@@ -47,6 +47,7 @@ import {
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
+  type AssistantAutomationTimingVerificationIssue,
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
@@ -197,6 +198,7 @@ import {
 } from "./runtime-logs.ts";
 import type {
   HostedWorkspaceDurableCheckpointEffect,
+  HostedWorkspaceDurableCheckpointEffectContext,
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
@@ -310,6 +312,7 @@ const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
   "aask_done_",
+  "aask_private_",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS = [
   "continue-assistant-ask",
@@ -666,11 +669,15 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
     case "ask":
-    case "ask_current_sender":
-    case "message_current_sender":
+    case "record_current_sender_daily_metric":
     case "ask_member":
       return {
         action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
+    case "ask_current_sender":
+      return {
+        action: "ask_current_sender",
         result: { status: "unavailable", unavailableReason },
       };
     case "list_memberships":
@@ -944,6 +951,7 @@ function readHostedInitialAssistantInputIds(
 
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  redactedLogEntries: HostedExecutionRedactedLogEntry[],
 ): AssistantAutomationOperationScope {
   return {
     async runAutoReplyGroup<T>(scopeInput: {
@@ -981,6 +989,7 @@ function createHostedAssistantAutomationOperationScope(
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
+        redactedLogEntries,
         route,
         vaultRoot: input.restored.vaultRoot,
       });
@@ -1392,6 +1401,7 @@ type HostedAssistantAutomationTool = NonNullable<
 
 function scopeHostedAutomationToolToAssistantOperation(input: {
   executionContext: AssistantExecutionContext;
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute | null;
   vaultRoot: string;
 }): AssistantExecutionContext {
@@ -1409,6 +1419,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
       && input.route.threadIsDirect === false
     )
     ? createHostedAssistantAutomationTool({
+        redactedLogEntries: input.redactedLogEntries,
         route: input.route,
         vaultRoot: input.vaultRoot,
       })
@@ -1423,6 +1434,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
 }
 
 function createHostedAssistantAutomationTool(input: {
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute;
   vaultRoot: string;
 }): HostedAssistantAutomationTool {
@@ -1544,6 +1556,7 @@ function createHostedAssistantAutomationTool(input: {
         });
         return await buildHostedAutomationToolResponse({
           action: "save",
+          redactedLogEntries: input.redactedLogEntries,
           result,
           routeBinding: "current_conversation",
           vaultRoot: input.vaultRoot,
@@ -1622,6 +1635,7 @@ function createHostedAssistantAutomationTool(input: {
       });
       return await buildHostedAutomationToolResponse({
         action: "patch",
+        redactedLogEntries: input.redactedLogEntries,
         result,
         routeBinding: request.retargetToCurrentConversation === true
           ? "current_conversation"
@@ -1643,6 +1657,33 @@ function stripHostedAssistantAvailabilityConflictBlock(
     }
     throw error;
   }
+}
+
+function buildHostedAutomationTimingVerificationLogEntry(input: {
+  action: "patch" | "save";
+  issues: readonly AssistantAutomationTimingVerificationIssue[];
+  recovered: boolean;
+  stage: "initial" | "readback";
+}): HostedExecutionRedactedLogEntry {
+  return {
+    component: "automation.tool",
+    level: "info",
+    message: input.recovered
+      ? "Hosted automation timing verification recovered after automatic readback."
+      : "Hosted automation timing verification was incomplete.",
+    phase: "timing-verification",
+    redacted: {
+      ...(input.recovered
+        ? {}
+        : { errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED" }),
+      automationTimingVerificationAction: input.action,
+      automationTimingVerificationIssues: [...input.issues],
+      automationTimingVerificationRecovered: input.recovered,
+      automationTimingVerificationStage: input.stage,
+      schema: "murph.hosted-automation-timing-verification.v1",
+      type: "automation.timing-verification",
+    },
+  };
 }
 
 function normalizeHostedAutomationSupportTags(input: {
@@ -1689,7 +1730,7 @@ function assertActiveHostedAutomationRoute(input: {
   }
 }
 
-async function buildHostedAutomationToolResponse(input:
+type HostedAutomationToolResponseInput =
   | {
       action: "inspect";
       record: AutomationRecord;
@@ -1698,19 +1739,25 @@ async function buildHostedAutomationToolResponse(input:
     }
   | {
       action: "patch" | "save";
+      redactedLogEntries: HostedExecutionRedactedLogEntry[];
       result: Awaited<ReturnType<typeof upsertAutomation>>;
       routeBinding: "current_conversation" | "preserved";
       vaultRoot: string;
-    }
-): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
-  const record = input.action === "inspect" ? input.record : input.result.record;
-  const schedule = record.schedule;
+    };
+
+async function projectHostedAutomationResponseFields(input: {
+  record: AutomationRecord;
+  vaultRoot: string;
+}) {
+  const schedule = input.record.schedule;
   let effectiveTimeZone =
     schedule.kind === "cron" || schedule.kind === "dailyLocal"
       ? schedule.timeZone ?? null
       : null;
   let nextOccurrenceAt: string | null = null;
-  let timingVerified = true;
+  const timingVerificationIssues = new Set<
+    AssistantAutomationTimingVerificationIssue
+  >();
   let defaultTimeZone: string | undefined;
   if (schedule.kind !== "deviceActivity") {
     const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
@@ -1723,12 +1770,12 @@ async function buildHostedAutomationToolResponse(input:
     ) {
       effectiveTimeZone = timeZoneProjection.timeZone;
       if (!timeZoneProjection.vaultTimeZoneVerified) {
-        timingVerified = false;
+        timingVerificationIssues.add("default_timezone_unverified");
       }
     }
   }
   if (
-    record.status !== "archived"
+    input.record.status !== "archived"
     && schedule.kind !== "deviceActivity"
   ) {
     try {
@@ -1737,46 +1784,142 @@ async function buildHostedAutomationToolResponse(input:
       }
       const projection = await getAssistantCronAutomationTimingProjection(
         input.vaultRoot,
-        record.relativePath,
+        input.record.relativePath,
         defaultTimeZone,
       );
       const { job } = projection;
       nextOccurrenceAt = projection.nextOccurrenceAt;
       if (!projection.occurrenceVerified) {
-        timingVerified = false;
+        timingVerificationIssues.add(
+          projection.occurrenceUnverifiedReason ?? "projection_unavailable",
+        );
       }
       if (
-        job.updatedAt !== record.updatedAt
+        job.updatedAt !== input.record.updatedAt
         || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
       ) {
-        timingVerified = false;
+        timingVerificationIssues.add("record_readback_mismatch");
       }
     } catch {
-      timingVerified = false;
+      timingVerificationIssues.add("projection_unavailable");
     }
   }
-  const responseFields = {
-    automationId: record.automationId,
+  const timingVerificationIssueList = [...timingVerificationIssues];
+  return {
+    automationId: input.record.automationId,
     effectiveTimeZone,
-    lookupId: record.slug,
+    lookupId: input.record.slug,
     nextOccurrenceAt,
     schedule,
-    status: record.status,
-    timingVerified,
-    updatedAt: record.updatedAt,
+    status: input.record.status,
+    timingVerificationIssues: timingVerificationIssueList,
+    timingVerified: timingVerificationIssueList.length === 0,
+    updatedAt: input.record.updatedAt,
   };
-  return input.action === "inspect"
-    ? {
-        action: "inspect",
-        ...responseFields,
-        routeBinding: "preserved",
-      }
-    : {
+}
+
+async function buildHostedAutomationToolResponse(
+  input: HostedAutomationToolResponseInput,
+): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
+  const record = input.action === "inspect" ? input.record : input.result.record;
+  const responseFields = await projectHostedAutomationResponseFields({
+    record,
+    vaultRoot: input.vaultRoot,
+  });
+  if (input.action === "inspect") {
+    return {
+      action: "inspect" as const,
+      ...responseFields,
+      routeBinding: "preserved" as const,
+    };
+  }
+
+  const response: HostedAssistantAutomationWriteResponse = {
+    action: input.action,
+    ...responseFields,
+    created: input.result.created,
+    routeBinding: input.routeBinding,
+  };
+  if (response.timingVerified) {
+    return response;
+  }
+  input.redactedLogEntries.push(
+    buildHostedAutomationTimingVerificationLogEntry({
+      action: input.action,
+      issues: response.timingVerificationIssues ?? [],
+      recovered: false,
+      stage: "initial",
+    }),
+  );
+
+  let readbackResponse = response;
+  try {
+    const readbackRecord = await showAutomation({
+      automationId: record.automationId,
+      vaultRoot: input.vaultRoot,
+    });
+    if (!readbackRecord) {
+      readbackResponse = markHostedAutomationTimingUnverified(
+        response,
+        "record_readback_mismatch",
+      );
+    } else {
+      const readbackFields = await projectHostedAutomationResponseFields({
+        record: readbackRecord,
+        vaultRoot: input.vaultRoot,
+      });
+      const projectedReadback: HostedAssistantAutomationWriteResponse = {
         action: input.action,
-        ...responseFields,
+        ...readbackFields,
         created: input.result.created,
         routeBinding: input.routeBinding,
       };
+      const recordChanged =
+        readbackRecord.updatedAt !== record.updatedAt
+        || JSON.stringify(readbackRecord.schedule)
+          !== JSON.stringify(record.schedule);
+      readbackResponse = recordChanged
+        ? markHostedAutomationTimingUnverified(
+            projectedReadback,
+            "record_readback_mismatch",
+          )
+        : projectedReadback;
+    }
+  } catch {
+    readbackResponse = markHostedAutomationTimingUnverified(
+      response,
+      "projection_unavailable",
+    );
+  }
+  input.redactedLogEntries.push(
+    buildHostedAutomationTimingVerificationLogEntry({
+      action: input.action,
+      issues: readbackResponse.timingVerificationIssues ?? [],
+      recovered: readbackResponse.timingVerified,
+      stage: "readback",
+    }),
+  );
+  return readbackResponse;
+}
+
+type HostedAssistantAutomationWriteResponse = Extract<
+  Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>,
+  { action: "patch" | "save" }
+>;
+
+function markHostedAutomationTimingUnverified(
+  response: HostedAssistantAutomationWriteResponse,
+  issue: AssistantAutomationTimingVerificationIssue,
+): HostedAssistantAutomationWriteResponse {
+  return {
+    ...response,
+    nextOccurrenceAt: null,
+    timingVerificationIssues: [...new Set([
+      ...(response.timingVerificationIssues ?? []),
+      issue,
+    ])],
+    timingVerified: false,
+  };
 }
 
 export async function runHostedWorkspaceAssistantPhase(
@@ -2075,7 +2218,11 @@ export async function runHostedWorkspaceAssistantPhase(
     },
   );
   const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
-  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
+  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(
+    input,
+    assistantAutomationRedactedLogEntries,
+  );
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const systemMailboxMaintenanceStartedAt = Date.now();
@@ -2201,7 +2348,6 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
-    const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
@@ -3904,9 +4050,16 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
   followUpWakeAt: string;
 }): DeferredHostedSystemMailboxPostCheckpointRecord {
   const { followUpWakeAt, ...recordInput } = input;
-  return {
-    afterDurableCheckpoint: async () => {
-      const result = await recordHostedSystemMailboxItemAfterCheckpoint(recordInput);
+  const requiresVaultShareProjectionResult =
+    recordInput.item.postCheckpointRecord?.kind === "vault-share.projection";
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
+    async (context?: HostedWorkspaceDurableCheckpointEffectContext) => {
+      const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+        ...recordInput,
+        ...(requiresVaultShareProjectionResult && context?.vaultShareProjectionResult
+          ? { vaultShareProjectionResult: context.vaultShareProjectionResult }
+          : {}),
+      });
       if (result.failed > 0) {
         return {
           nextWakeAt: result.nextWakeAt,
@@ -3920,6 +4073,19 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
         requiresFollowUpCheckpoint: true,
       };
     },
+    requiresVaultShareProjectionResult
+      ? {
+          requiresVaultShareProjectionResult: true,
+          vaultShareProjectionFailureWake: {
+            nextWakeAt: followUpWakeAt,
+            nextWakeReason: "assistant",
+            requiresFollowUpCheckpoint: true,
+          },
+        }
+      : {},
+  );
+  return {
+    afterDurableCheckpoint,
     redactedStatus: {
       hostedSystemMailboxRecordDeferred: true,
     },

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 100,
+  "item": {
+    "id": "group-shares-keep-every-source",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Group health updates keep every source",
+    "summary": "When several wearables report the same shared health measure, group Murph now keeps each value and labels it with its source instead of showing only one device.",
+    "details": "This applies across steps, sleep, workouts, activity, heart-rate zones, and other existing group health shares. The same permission choices and controls remain in place, and their descriptions now state that shared values include public source names.",
+    "relevanceTags": ["groups", "wearables", "health-data", "reliability"],
+    "sourcePullRequests": [1765]
+  }
+}

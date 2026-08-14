@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, rm, writeFile } from 'node:fs/promises'
+import { access, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { Cli } from 'incur'
@@ -518,7 +518,6 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
     (
       await runWorkoutCli<{
         estimatedWorkouts: number
-        headers: string[]
         importable: boolean
         rowCount: number
         source: string
@@ -530,6 +529,8 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
         csvPath,
         '--vault',
         vaultRoot,
+        '--source',
+        'strong',
       ])
     ).envelope,
   )
@@ -537,8 +538,63 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
   assert.equal(inspected.estimatedWorkouts, 1)
   assert.equal(inspected.rowCount, 2)
   assert.equal(inspected.source, 'strong')
-  assert.equal(inspected.headers.includes('Workout Name'), true)
+  assert.equal('headers' in inspected, false)
   assert.deepEqual(inspected.warnings, [])
+
+  const privateSentinels = [
+    'PRIVATE_WORKOUT_TITLE',
+    'PRIVATE_WORKOUT_TIMESTAMP',
+    'PRIVATE_EXERCISE_NAME',
+    'PRIVATE_WORKOUT_NOTE',
+  ]
+  const headerlessPath = path.join(vaultRoot, 'headerless.csv')
+  await writeFile(headerlessPath, privateSentinels.join(','), 'utf8')
+  const headerless = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    headerlessPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])
+  const headerlessOutput = JSON.stringify(headerless.envelope)
+  for (const sentinel of privateSentinels) {
+    assert.equal(headerlessOutput.includes(sentinel), false)
+  }
+
+  const largeHeaderPath = path.join(vaultRoot, 'large-header.csv')
+  await writeFile(largeHeaderPath, 'x'.repeat(9 * 1024 * 1024), 'utf8')
+  const largeHeader = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    largeHeaderPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])
+  const largeHeaderOutput = JSON.stringify(largeHeader.envelope)
+  assert.equal(largeHeaderOutput.length < 4096, true)
+  assert.equal(largeHeaderOutput.includes('x'.repeat(100)), false)
+
+  const unsupportedSource = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong-app',
+  ])
+  assert.equal(unsupportedSource.envelope.ok, false)
+  if (unsupportedSource.envelope.ok) {
+    throw new Error('Expected an unsupported workout source to fail validation.')
+  }
+  assert.equal(unsupportedSource.envelope.error.code, 'VALIDATION_ERROR')
 
   const imported = requireData(
     (
@@ -555,6 +611,8 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
         csvPath,
         '--vault',
         vaultRoot,
+        '--source',
+        'strong',
         '--store-raw-only',
       ])
     ).envelope,
@@ -564,6 +622,436 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
   assert.deepEqual(imported.lookupIds, [])
   await access(path.join(vaultRoot, imported.rawFile))
   await access(path.join(vaultRoot, imported.manifestFile))
+})
+
+test('Strong CSV import requires weight provenance, commits once, and returns bounded replay output', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-strong-import-')
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutSliceCli()
+
+  await runWorkoutCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
+  ])
+
+  const header = 'Date,Workout Name,Duration,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE'
+  const rows = Array.from({ length: 12 }, (_, index) => {
+    const day = String(index + 1).padStart(2, '0')
+    const distance = index === 0 ? 1.5 : 0
+    return `2026-04-${day} 07:00:00,Session ${index + 1},45m,Press,1,50,8,${distance},0,,Direct proof,7`
+  })
+  const csvPath = path.join(parentRoot, 'strong.csv')
+  await writeFile(csvPath, [header, ...rows, ''].join('\n'), 'utf8')
+
+  const inspection = requireData(
+    (
+      await runWorkoutCli<{
+        importable: boolean
+        requiresDistanceUnit: boolean
+        requiresWeightUnit: boolean
+        timeZone: string
+      }>(cli, [
+        'workout',
+        'import',
+        'inspect',
+        csvPath,
+        '--vault',
+        vaultRoot,
+      ])
+    ).envelope,
+  )
+  assert.equal(inspection.importable, false)
+  assert.equal(inspection.requiresWeightUnit, true)
+  assert.equal(inspection.requiresDistanceUnit, true)
+  assert.equal(inspection.timeZone, 'America/Los_Angeles')
+
+  const missingUnit = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(missingUnit.envelope.ok, false)
+  if (missingUnit.envelope.ok) {
+    throw new Error('Expected Strong CSV import to require an explicit weight unit.')
+  }
+  assert.equal(missingUnit.envelope.error.code, 'invalid_option')
+  assert.deepEqual(await readdir(path.join(vaultRoot, 'raw', 'workouts')), [])
+
+  const missingDistanceUnit = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'lb',
+  ])
+  assert.equal(missingDistanceUnit.envelope.ok, false)
+  if (missingDistanceUnit.envelope.ok) {
+    throw new Error('Expected Strong CSV import to require an explicit distance unit.')
+  }
+  assert.equal(missingDistanceUnit.envelope.error.code, 'invalid_option')
+  assert.deepEqual(await readdir(path.join(vaultRoot, 'raw', 'workouts')), [])
+
+  const invalidCsvPath = path.join(parentRoot, 'strong-invalid.csv')
+  await writeFile(
+    invalidCsvPath,
+    [
+      header,
+      rows[0],
+      `2026-05-01 07:00:00,${'X'.repeat(161)},45m,Press,1,50,8,0,0,,Direct proof,7`,
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  const invalidBatch = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    invalidCsvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'lb',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(invalidBatch.envelope.ok, false)
+  if (invalidBatch.envelope.ok) {
+    throw new Error('Expected one invalid workout to reject the complete batch.')
+  }
+  assert.equal(invalidBatch.envelope.error.code, 'invalid_payload')
+  assert.deepEqual(await readdir(path.join(vaultRoot, 'raw', 'workouts')), [])
+
+  const imported = requireData(
+    (
+      await runWorkoutCli<{
+        createdCount: number
+        importedCount: number
+        lookupIds: string[]
+        lookupIdsTruncated: boolean
+        rawStored: boolean
+        receivedCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'lb',
+        '--distance-unit',
+        'km',
+      ])
+    ).envelope,
+  )
+  assert.equal(imported.receivedCount, 12)
+  assert.equal(imported.createdCount, 12)
+  assert.equal(imported.importedCount, 12)
+  assert.equal(imported.rawStored, true)
+  assert.equal(imported.lookupIds.length, 10)
+  assert.equal(imported.lookupIdsTruncated, true)
+
+  const replay = requireData(
+    (
+      await runWorkoutCli<{
+        importedCount: number
+        manifestFile: string | null
+        rawFile: string | null
+        rawStored: boolean
+        skippedExistingCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'lb',
+        '--distance-unit',
+        'km',
+      ])
+    ).envelope,
+  )
+  assert.equal(replay.importedCount, 0)
+  assert.equal(replay.skippedExistingCount, 12)
+  assert.equal(replay.rawStored, false)
+  assert.equal(replay.rawFile, null)
+  assert.equal(replay.manifestFile, null)
+
+  const rawFilesBeforeConflict = await readdir(
+    path.join(vaultRoot, 'raw', 'workouts'),
+    { recursive: true },
+  )
+  const changedCsvPath = path.join(parentRoot, 'strong-changed.csv')
+  const firstRow = rows[0]
+  assert.ok(firstRow)
+  await writeFile(
+    changedCsvPath,
+    [header, firstRow.replace('Session 1', 'Renamed session'), ...rows.slice(1), ''].join('\n'),
+    'utf8',
+  )
+  const changedSameRevision = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    changedCsvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'lb',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(changedSameRevision.envelope.ok, false)
+  if (changedSameRevision.envelope.ok) {
+    throw new Error('Expected changed content at the same source revision to fail closed.')
+  }
+  assert.equal(changedSameRevision.envelope.error.code, 'conflict')
+  assert.deepEqual(
+    await readdir(path.join(vaultRoot, 'raw', 'workouts'), { recursive: true }),
+    rawFilesBeforeConflict,
+  )
+
+  const unconfirmedUnitChange = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'kg',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(unconfirmedUnitChange.envelope.ok, false)
+  if (unconfirmedUnitChange.envelope.ok) {
+    throw new Error('Expected an unconfirmed unit change to fail closed.')
+  }
+  assert.equal(unconfirmedUnitChange.envelope.error.code, 'conflict')
+
+  const expandedUnitChangePath = path.join(parentRoot, 'strong-expanded-unit-change.csv')
+  await writeFile(
+    expandedUnitChangePath,
+    [header, ...rows, '2026-05-01 07:00:00,New Session,45m,Press,1,50,8,0,0,,,', ''].join('\n'),
+    'utf8',
+  )
+  const expandedUnitChange = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    expandedUnitChangePath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'kg',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(expandedUnitChange.envelope.ok, false)
+  if (expandedUnitChange.envelope.ok) {
+    throw new Error('Expected an expanded snapshot with changed unit semantics to fail closed.')
+  }
+  assert.equal(expandedUnitChange.envelope.error.code, 'conflict')
+
+  const corrected = requireData(
+    (
+      await runWorkoutCli<{
+        createdCount: number
+        rawStored: boolean
+        supersededCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'kg',
+        '--distance-unit',
+        'km',
+        '--correct-units',
+      ])
+    ).envelope,
+  )
+  assert.equal(corrected.createdCount, 0)
+  assert.equal(corrected.supersededCount, 12)
+  assert.equal(corrected.rawStored, false)
+
+  const correctedReplay = requireData(
+    (
+      await runWorkoutCli<{
+        importedCount: number
+        rawStored: boolean
+        skippedExistingCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'kg',
+        '--distance-unit',
+        'km',
+      ])
+    ).envelope,
+  )
+  assert.equal(correctedReplay.importedCount, 0)
+  assert.equal(correctedReplay.skippedExistingCount, 12)
+  assert.equal(correctedReplay.rawStored, false)
+})
+
+test('Strong CSV import keeps structured sets when source duration is unknown', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-strong-duration-')
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutSliceCli()
+
+  await runWorkoutCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'UTC',
+  ])
+
+  const csvPath = path.join(parentRoot, 'strong-duration.csv')
+  await writeFile(csvPath, [
+    'Date,Workout Name,Duration,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE',
+    '2026-04-08 10:00:00,Malformed,45m unexpected,Squat,1,100,5,0,0,,,',
+    '2026-04-09 10:00:00,Over range,30h 1m,Press,1,80,8,0,0,,,',
+    '2026-04-10 10:00:00,Missing,,Row,1,60,10,0,0,,,',
+    '',
+  ].join('\n'), 'utf8')
+
+  const imported = requireData((await runWorkoutCli<{
+    createdCount: number
+    lookupIds: string[]
+    warnings: string[]
+  }>(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'kg',
+  ])).envelope)
+  assert.equal(imported.createdCount, 3)
+  assert.equal(imported.lookupIds.length, 3)
+  assert.match(imported.warnings.join(' '), /duration/u)
+
+  for (const lookupId of imported.lookupIds) {
+    const shown = requireData((await runWorkoutCli<{
+      entity: {
+        data: {
+          durationMinutes?: number
+          workout?: { exercises?: Array<{ sets?: unknown[] }> }
+        }
+      }
+    }>(cli, [
+      'workout',
+      'show',
+      lookupId,
+      '--vault',
+      vaultRoot,
+    ])).envelope)
+    assert.equal(shown.entity.data.durationMinutes, undefined)
+    assert.equal(shown.entity.data.workout?.exercises?.[0]?.sets?.length, 1)
+  }
+})
+
+test('workout CSV manifests omit arbitrary source headers from storage and public output', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-header-privacy-')
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutSliceCli()
+
+  await runWorkoutCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'UTC',
+  ])
+
+  const privateHeader = 'PRIVATE_FREEFORM_HEADER_SENTINEL'
+  const privateValue = 'PRIVATE_FREEFORM_VALUE_SENTINEL'
+  const csvPath = path.join(parentRoot, 'workout-with-extra-column.csv')
+  await writeFile(csvPath, [
+    `Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,Weight Kg,Reps,${privateHeader}`,
+    `Upper,2026-04-08,10:00,45,Press,1,40,8,${privateValue}`,
+  ].join('\n'), 'utf8')
+
+  const inspected = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])
+  assert.equal(JSON.stringify(inspected.envelope).includes(privateHeader), false)
+  assert.equal(JSON.stringify(inspected.envelope).includes(privateValue), false)
+
+  const imported = requireData((await runWorkoutCli<{
+    lookupIds: string[]
+    manifestFile: string
+  }>(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])).envelope)
+  assert.equal(imported.lookupIds.length, 1)
+  const storedManifest = await readFile(path.join(vaultRoot, imported.manifestFile), 'utf8')
+  assert.equal(storedManifest.includes(privateHeader), false)
+  assert.equal(storedManifest.includes(privateValue), false)
+
+  const publicManifest = await runWorkoutCli(cli, [
+    'workout',
+    'manifest',
+    imported.lookupIds[0]!,
+    '--vault',
+    vaultRoot,
+  ])
+  const publicManifestOutput = JSON.stringify(publicManifest.envelope)
+  assert.equal(publicManifestOutput.includes(privateHeader), false)
+  assert.equal(publicManifestOutput.includes(privateValue), false)
+
+  const replay = requireData((await runWorkoutCli<{
+    importedCount: number
+    skippedExistingCount: number
+  }>(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])).envelope)
+  assert.equal(replay.importedCount, 0)
+  assert.equal(replay.skippedExistingCount, 1)
 })
 
 test('workout format save rejects missing name or text when --input is absent', async () => {
@@ -859,6 +1347,45 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
   assert.equal(structuredCreated.kind, 'activity_session')
   assert.equal(structuredCreated.durationMinutes, 35)
 
+  await writeFile(
+    workoutPayloadPath,
+    JSON.stringify({
+      title: 'No duration',
+      note: 'Structured workout payload.',
+      workout: {
+        routineName: 'No duration',
+        exercises: [{
+          name: 'pushups',
+          order: 1,
+          sets: [{ order: 1, reps: 20 }],
+        }],
+      },
+    }),
+    'utf8',
+  )
+  const structuredMissingDuration = await runWorkoutCli(cli, [
+    'workout',
+    'import-json',
+    '--input',
+    `@${workoutPayloadPath}`,
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(structuredMissingDuration.envelope.ok, false)
+  if (structuredMissingDuration.envelope.ok) {
+    throw new Error('Expected structured import-json without a duration to fail.')
+  }
+  assert.equal(structuredMissingDuration.envelope.error.code, 'invalid_option')
+  const afterRejectedStructured = requireData((await runWorkoutCli<{
+    count: number
+  }>(cli, [
+    'workout',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])).envelope)
+  assert.equal(afterRejectedStructured.count, 1)
+
   const minimalCreated = (
     await runWorkoutCli(cli, [
       'workout',
@@ -1118,4 +1645,53 @@ test('workout format save, show, list, and log handle structured input and media
   assert.equal(loggedDefault.activityType, 'strength-training')
   assert.equal(loggedDefault.durationMinutes, 20)
   assert.equal(loggedDefault.note, 'Strength training block.')
+
+  const noDurationPayloadPath = path.join(parentRoot, 'workout-format-no-duration.json')
+  await writeFile(
+    noDurationPayloadPath,
+    JSON.stringify({
+      title: 'No Duration Format',
+      activityType: 'strength-training',
+      template: {
+        routineNote: 'Train hard.',
+        exercises: [{
+          name: 'squats',
+          order: 1,
+          plannedSets: [{ order: 1, targetReps: 5 }],
+        }],
+      },
+    }),
+    'utf8',
+  )
+  requireData((await runWorkoutCli(cli, [
+    'workout',
+    'format',
+    'import-json',
+    '--input',
+    `@${noDurationPayloadPath}`,
+    '--vault',
+    vaultRoot,
+  ])).envelope)
+  const rejectedFormatLog = await runWorkoutCli(cli, [
+    'workout',
+    'format',
+    'log',
+    'No Duration Format',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(rejectedFormatLog.envelope.ok, false)
+  if (rejectedFormatLog.envelope.ok) {
+    throw new Error('Expected format log without a duration to fail.')
+  }
+  assert.equal(rejectedFormatLog.envelope.error.code, 'invalid_option')
+  const workoutsAfterRejectedFormatLog = requireData((await runWorkoutCli<{
+    count: number
+  }>(cli, [
+    'workout',
+    'list',
+    '--vault',
+    vaultRoot,
+  ])).envelope)
+  assert.equal(workoutsAfterRejectedFormatLog.count, 2)
 })

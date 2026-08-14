@@ -1230,6 +1230,7 @@ const noteEventFieldsShape = {
 const observationEventFieldsShape = {
   metric: patternedString(SLUG_PATTERN),
   queryVisibility: z.enum(["default"]).optional(),
+  qualifiers: measurementQualifiersSchema.optional(),
   value: numberSchema(),
   visibility: z.enum(["display"]).optional(),
   canonicalFact: z.literal(true).optional(),
@@ -1291,7 +1292,7 @@ const supplementIntakeEventFieldsShape = {
 
 const activitySessionEventFieldsShape = {
   activityType: patternedString(SLUG_PATTERN),
-  durationMinutes: integerSchema(1),
+  durationMinutes: integerSchema(1).optional(),
   distanceKm: numberSchema(0).optional(),
   ...experimentLinkShape,
   workout: workoutSessionSchema,
@@ -1365,6 +1366,13 @@ const supplementIntakeEventImportJsonlRowPayloadSchema = eventImportJsonlRowSche
 );
 const activitySessionEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema(
   "activity_session",
+  {
+    ...activitySessionEventFieldsShape,
+    durationMinutes: integerSchema(1),
+  },
+);
+const activitySessionEventImportDecisionPayloadSchema = eventImportJsonlRowSchema(
+  "activity_session",
   activitySessionEventFieldsShape,
 );
 const bodyMeasurementEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema(
@@ -1422,10 +1430,35 @@ export const versionedExternalRefSchema = externalRefSchema.extend({
   version: writableIsoDateTimeString(200),
 });
 
+const eventImportDecisionPayloadSchema = z.discriminatedUnion("kind", [
+  symptomEventImportJsonlRowPayloadSchema,
+  noteEventImportJsonlRowPayloadSchema,
+  observationEventImportJsonlRowPayloadSchema,
+  clinicalAssertionEventImportJsonlRowPayloadSchema,
+  exposureEventImportJsonlRowPayloadSchema,
+  measurementEventImportJsonlRowPayloadSchema,
+  testEventImportJsonlRowPayloadSchema,
+  medicationIntakeEventImportJsonlRowPayloadSchema,
+  supplementIntakeEventImportJsonlRowPayloadSchema,
+  activitySessionEventImportDecisionPayloadSchema,
+  bodyMeasurementEventImportJsonlRowPayloadSchema,
+  sleepSessionEventImportJsonlRowPayloadSchema,
+  interventionSessionEventImportJsonlRowPayloadSchema,
+  experimentContextEventImportJsonlRowPayloadSchema,
+]);
+
+export const expectedLatestEventSchema = z
+  .object({
+    eventId: idSchema(ID_PREFIXES.event),
+    lifecycleRevision: z.number().int().positive(),
+  })
+  .strict();
+
 export const eventImportUpsertDecisionSchema = z
   .object({
     action: z.literal("upsert"),
-    payload: publicEventImportJsonlRowPayloadSchema,
+    payload: eventImportDecisionPayloadSchema,
+    expectedLatest: expectedLatestEventSchema.optional(),
   })
   .strict();
 

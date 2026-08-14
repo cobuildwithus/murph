@@ -34,6 +34,9 @@ import {
 import {
   parseHostedExecutionInitialGroupRoomModelMarkdown,
 } from "./pending-group-setup.ts";
+import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "./daily-metric.ts";
 
 import type {
   HostedExecutionAssistantAskCompletedEvent,
@@ -97,6 +100,7 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActionCompletedWake,
@@ -145,6 +149,9 @@ export {
   parseHostedExecutionAssistantAskCompletedPayload,
   parseHostedExecutionAssistantAskRequestedPayload,
 } from "./assistant-ask-payload.ts";
+export {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "./daily-metric.ts";
 export {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
@@ -471,6 +478,24 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
         sha256: mealPhoto.sha256,
+      });
+    }
+    case "health.daily-metric.reported": {
+      assertExactHostedExecutionKeys(record, [
+        "dailyMetric",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution health.daily-metric.reported wake");
+      const dailyMetric = parseHostedExecutionDailyMetricReportedPayload(
+        record.dailyMetric,
+      );
+      return buildHostedExecutionDailyMetricReportedWake({
+        ...dailyMetric,
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
       });
     }
     case "environment-voice.captured": {

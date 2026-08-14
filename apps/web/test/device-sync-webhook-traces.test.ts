@@ -34,6 +34,7 @@ describe("PrismaHostedWebhookTraceStore", () => {
       store.claimWebhookTrace({
         eventType: "sleep.updated",
         externalAccountId: "external-account-123",
+        claimedAt: "2026-04-12T00:00:00.000Z",
         claimToken: "claim-token",
         processingExpiresAt: "2026-04-12T00:05:00.000Z",
         provider: "oura",
@@ -68,6 +69,7 @@ describe("PrismaHostedWebhookTraceStore", () => {
       store.claimWebhookTrace({
         eventType: "sleep.updated",
         externalAccountId: "external-account-123",
+        claimedAt: "2026-04-12T00:00:00.000Z",
         claimToken: "claim-token",
         processingExpiresAt: "2026-04-12T00:05:00.000Z",
         provider: "oura",
@@ -105,6 +107,7 @@ describe("PrismaHostedWebhookTraceStore", () => {
       store.claimWebhookTrace({
         eventType: "sleep.updated",
         externalAccountId: "external-account-123",
+        claimedAt: "2026-04-12T00:00:00.000Z",
         claimToken: "claim-token",
         processingExpiresAt: "2026-04-12T00:05:00.000Z",
         provider: "oura",
@@ -117,5 +120,49 @@ describe("PrismaHostedWebhookTraceStore", () => {
     expect(prisma.deviceWebhookTrace.findUnique).toHaveBeenCalledOnce();
     expect(prisma.deviceWebhookTrace.updateMany).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("compares trace leases with claim time rather than the frozen receipt time", async () => {
+    const prisma = createPrismaStub();
+    prisma.deviceWebhookTrace.createMany.mockResolvedValue({ count: 0 });
+    prisma.deviceWebhookTrace.findUnique.mockResolvedValue({
+      status: "processing",
+      processingExpiresAt: new Date("2026-04-12T12:03:00.000Z"),
+    });
+    prisma.deviceWebhookTrace.updateMany.mockResolvedValue({ count: 1 });
+    const store = new PrismaHostedWebhookTraceStore({ prisma: prisma as never });
+
+    await expect(store.claimWebhookTrace({
+      claimedAt: "2026-04-12T12:04:00.000Z",
+      claimToken: "claim-new",
+      eventType: "sleep.updated",
+      externalAccountId: "external-account-123",
+      processingExpiresAt: "2026-04-12T12:09:00.000Z",
+      provider: "oura",
+      receivedAt: "2026-04-12T11:00:00.000Z",
+      traceId: "trace-delayed",
+    })).resolves.toBe("claimed");
+    expect(prisma.deviceWebhookTrace.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { processingExpiresAt: { lte: new Date("2026-04-12T12:04:00.000Z") } },
+          ]),
+        }),
+      }),
+    );
+
+    prisma.deviceWebhookTrace.updateMany.mockClear();
+    await expect(store.claimWebhookTrace({
+      claimedAt: "2026-04-12T12:02:00.000Z",
+      claimToken: "claim-still-active",
+      eventType: "sleep.updated",
+      externalAccountId: "external-account-123",
+      processingExpiresAt: "2026-04-12T12:07:00.000Z",
+      provider: "oura",
+      receivedAt: "2026-04-12T13:00:00.000Z",
+      traceId: "trace-active",
+    })).resolves.toBe("processing");
+    expect(prisma.deviceWebhookTrace.updateMany).not.toHaveBeenCalled();
   });
 });

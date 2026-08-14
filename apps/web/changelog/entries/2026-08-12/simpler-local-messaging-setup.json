@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 100,
+  "item": {
+    "id": "simpler-local-messaging-setup",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Simpler local messaging setup",
+    "summary": "Local Murph setup now focuses on Telegram and no longer asks you to configure a separate email inbox.",
+    "details": "Hosted email conversations, connected-app email actions, and Murph account or service emails are unchanged.",
+    "relevanceTags": ["assistant", "setup", "telegram", "email"],
+    "sourcePullRequests": [1751]
+  }
+}

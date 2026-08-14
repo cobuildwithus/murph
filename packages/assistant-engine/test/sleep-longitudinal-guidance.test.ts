@@ -283,9 +283,10 @@ describe('plan ownership and closeout guidance', () => {
     )
   })
 
-  it('gives every habit-plan automation a finite, reconcilable support-series lifecycle', async () => {
+  it('keeps habit-plan support reconcilable while allowing explicitly ongoing cues', async () => {
     const skill = await readSkill('behavior-followthrough')
     const automation = readSection(skill, 'Support and automation policy')
+    const compactAutomation = automation.replace(/\s+/gu, ' ')
     const closeout = readSection(skill, 'Non-Experiment Closeout')
 
     expect(automation).toContain('supportSeriesId: "habit:<regimenId>"')
@@ -295,7 +296,9 @@ describe('plan ownership and closeout guidance', () => {
     expect(automation).toContain(
       '`tags` are only for ordinary descriptive values.',
     )
-    expect(automation).toContain('set `activeUntil: "<ISO timestamp>"`')
+    expect(compactAutomation).toContain(
+      'When the user explicitly requests an ongoing recurring cue, it may omit `activeUntil`',
+    )
     expect(automation).toContain(
       '`murph.automation` action `reconcile`',
     )
@@ -305,8 +308,9 @@ describe('plan ownership and closeout guidance', () => {
     expect(closeout).toContain(
       'reconcile it with an empty desired-id list to archive the whole series',
     )
-    expect(automation).toContain('Never create open-ended nag loops.')
-    expect(automation).toContain('continuing beyond that window requires fresh consent')
+    expect(compactAutomation).toContain(
+      'Do not add a finite check-in or review lifecycle merely because the reminder recurs.',
+    )
   })
 
   it('keeps sleep restriction clinician-screened and gives silence one lane-specific meaning', async () => {

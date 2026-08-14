@@ -23,8 +23,8 @@ import {
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
 import {
-  decryptHostedLinqLinePhoneNumber,
-} from "./linq-line-phone-codec";
+  readHostedLinqLinePhoneNumberByLookupKey,
+} from "./linq-line-phone-resolver";
 import {
   normalizeHostedLinqParticipantContactKind,
 } from "./linq-participant-contact";
@@ -208,8 +208,8 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     if (!target) {
       throwHostedLinqRouteAuthorityMismatch();
     }
-    const fromPhoneNumber = await resolveHostedLinqLinePhoneNumberByLookupKey({
-      linePhoneNumberLookupKey: targetThreadRoute.accountLookupKey,
+    const fromPhoneNumber = await readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: targetThreadRoute.accountLookupKey,
       prisma: input.prisma,
     });
 
@@ -249,8 +249,8 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
         conversationThreadId: null,
         directRecipientPhoneNumber:
           normalizePhoneNumber(persistedDirectInbound.directRecipient),
-        fromPhoneNumber: await resolveHostedLinqLinePhoneNumberByLookupKey({
-          linePhoneNumberLookupKey,
+        fromPhoneNumber: await readHostedLinqLinePhoneNumberByLookupKey({
+          phoneNumberLookupKey: linePhoneNumberLookupKey,
           prisma: input.prisma,
         }),
         target: persistedDirectInbound.target,
@@ -872,33 +872,6 @@ async function resolveHostedMemberDirectLinqParticipant(input: {
     lookupKey: expectedLookupKey,
     phoneNumber,
   };
-}
-
-async function resolveHostedLinqLinePhoneNumberByLookupKey(input: {
-  linePhoneNumberLookupKey: string | null | undefined;
-  prisma: HostedLinqEngagementClient;
-}): Promise<string | null> {
-  const linePhoneNumberLookupKey = normalizeNullable(
-    input.linePhoneNumberLookupKey,
-  );
-  if (!linePhoneNumberLookupKey) {
-    return null;
-  }
-  const line = await input.prisma.hostedLinqLine.findUnique({
-    select: { phoneNumberEncrypted: true },
-    where: { phoneNumberLookupKey: linePhoneNumberLookupKey },
-  });
-  const phoneNumber = normalizePhoneNumber(
-    decryptHostedLinqLinePhoneNumber(line?.phoneNumberEncrypted),
-  );
-  if (
-    phoneNumber
-    && createHostedPhoneLookupKeyReadCandidates(phoneNumber)
-      .includes(linePhoneNumberLookupKey)
-  ) {
-    return phoneNumber;
-  }
-  return null;
 }
 
 function resolveHostedLinqConversationThreadId(input: {

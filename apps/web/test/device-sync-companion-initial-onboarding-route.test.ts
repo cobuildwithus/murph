@@ -78,7 +78,6 @@ describe("companion initial onboarding routes", () => {
       initialContactChannels: { email: false, telegram: false, text: true },
       murphEmailAddress: null,
       murphPhoneNumber: "+15555550123",
-      userEmailAddress: null,
     });
     mocks.parseHostedInitialOnboardingCompletionRequest.mockReturnValue({
       action: "skip",

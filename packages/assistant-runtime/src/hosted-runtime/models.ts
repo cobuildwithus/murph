@@ -2,6 +2,7 @@ import type {
   ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import type {
+  HostedExecutionDeviceSyncWake,
   HostedExecutionWake,
   HostedExecutionRedactedLogEntry,
 } from "@murphai/hosted-execution";
@@ -163,6 +164,8 @@ export type HostedSystemMailboxPostCheckpointRecord =
   | {
       kind: "device-sync.dirty-processed-batch";
       nextWakeAt?: string | null;
+      retainMailboxItemUntil?: string | null;
+      retainedWake?: HostedExecutionDeviceSyncWake;
       records: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
     }
   | {

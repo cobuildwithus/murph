@@ -1501,73 +1501,54 @@ export async function readHostedAiUsageGate(input: {
 
 /**
  * Canonical read projection for low-frequency operator/reporting surfaces.
- * All member decisions run through the ordinary gate owner in one transaction;
- * only the exact resolved period metadata is batch-loaded afterward.
+ * Each member decision and its exact period metadata run through the ordinary
+ * gate owner in one short transaction. Callers must cap member IDs; this owner
+ * processes them sequentially so it never pins multiple pooled connections.
  */
 export async function readHostedAiUsageGateSnapshots(input: {
   memberIds: readonly string[];
   now?: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
+  prisma?: PrismaClient;
 }): Promise<Map<string, HostedAiUsageGateSnapshot>> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
   const memberIds = [...new Set(input.memberIds.map((memberId) => memberId.trim()))]
     .filter(Boolean);
   if (memberIds.length === 0) {
-    return new Map();
+    return new Map<string, HostedAiUsageGateSnapshot>();
   }
 
-  return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    const decisions = new Map<string, HostedAiUsageGateDecisionWithSource>();
-    for (const memberId of memberIds) {
-      decisions.set(memberId, await readHostedAiUsageGate({
-        memberId,
-        now,
-        prisma: tx,
-      }));
-    }
-    const currentPeriodKeys = [...decisions.values()].flatMap((decision) =>
-      decision.allowed || decision.reason === "ai_usage_limit_exceeded"
-        ? [{ memberId: decision.memberId, periodStart: decision.periodStart }]
-        : []
+  const snapshots = new Map<string, HostedAiUsageGateSnapshot>();
+  for (const memberId of memberIds) {
+    const snapshot = await prisma.$transaction(
+      async (tx) => {
+        const decision = await readHostedAiUsageGate({
+          memberId,
+          now,
+          prisma: tx,
+        });
+        const persisted = decision.allowed
+          || decision.reason === "ai_usage_limit_exceeded"
+          ? await tx.hostedAiUsagePeriod.findUnique({
+              select: { updatedAt: true },
+              where: {
+                memberId_periodStart: {
+                  memberId,
+                  periodStart: decision.periodStart,
+                },
+              },
+            })
+          : null;
+        return {
+          decision,
+          periodPersistedAt: persisted?.updatedAt ?? null,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
-    const persistedPeriods = currentPeriodKeys.length > 0
-      ? await tx.hostedAiUsagePeriod.findMany({
-          select: {
-            memberId: true,
-            periodStart: true,
-            updatedAt: true,
-          },
-          where: {
-            OR: currentPeriodKeys,
-          },
-        })
-      : [];
-    const periodByKey = new Map(
-      persistedPeriods.map((period) => [
-        buildHostedAiUsagePeriodMapKey(period.memberId, period.periodStart),
-        period,
-      ]),
-    );
-
-    return new Map([...decisions].map(([memberId, decision]) => {
-      const persisted = periodByKey.get(buildHostedAiUsagePeriodMapKey(
-        memberId,
-        decision.periodStart,
-      )) ?? null;
-      return [memberId, {
-        decision,
-        periodPersistedAt: persisted?.updatedAt ?? null,
-      }] as const;
-    }));
-  }, Prisma.TransactionIsolationLevel.RepeatableRead);
-}
-
-function buildHostedAiUsagePeriodMapKey(
-  memberId: string,
-  periodStart: Date,
-): string {
-  return `${memberId}\u0000${periodStart.toISOString()}`;
+    snapshots.set(memberId, snapshot);
+  }
+  return snapshots;
 }
 
 // Read-first gate for hot-path checks: denials are confirmed by the mutating

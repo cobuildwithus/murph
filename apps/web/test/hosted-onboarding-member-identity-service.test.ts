@@ -9,6 +9,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
+  bindHostedMemberPhoneToPreparedMemberTx,
   ensureHostedMemberForPhoneResolutionTx,
   reconcileHostedPrivyIdentityOnMember,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
@@ -23,8 +24,21 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
   readHostedPrivyUserById: privyProvider.readUser,
 }));
 
-vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
-  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >()),
+  provisionActiveHostedDomainRootEnvelopeForUserOnly:
+    vi.fn().mockResolvedValue(undefined),
+  revalidatePreparedHostedDomainRootForWebTx: vi.fn(async (input: {
+    prepared: { rootKeyId: string };
+  }) => ({
+    root: Promise.resolve({
+      envelope: input.prepared,
+      rootKey: new Uint8Array(32),
+    }),
+    rootKeyId: input.prepared.rootKeyId,
+  })),
 }));
 
 const NOW = new Date("2026-04-06T10:00:00.000Z");
@@ -171,6 +185,99 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(participantContactLock).toHaveBeenCalledTimes(1);
     expect(participantContactLock.mock.invocationCallOrder[0])
       .toBeLessThan(identityCreateMany.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("binds a verified phone to the exact prepared member without creating another member", async () => {
+    const member = makeMember({ id: "member_prepared" });
+    const identityUpsert = vi.fn(async ({ create, update }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...update,
+      createdAt: NOW,
+      updatedAt: NOW,
+      walletAddressEncrypted: null,
+      walletAddressLookupKey: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    }));
+    const prisma = asRootPrisma({
+      hostedMember: {
+        create: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: identityUpsert,
+      },
+    });
+    const preparedControlRoot = {
+      domain: "control",
+      rootKeyId: "root_control_prepared",
+      userId: member.id,
+    } as const;
+
+    await expect(bindHostedMemberPhoneToPreparedMemberTx({
+      currentIdentity: null,
+      member,
+      phoneNumber: "+1 555 123 4567",
+      phoneNumberVerifiedAt: NOW,
+      preparedControlRoot,
+      prisma: prisma as never,
+    })).resolves.toBe(member);
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        memberId: member.id,
+        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+        phoneNumberVerifiedAt: NOW,
+      }),
+      where: { memberId: member.id },
+    }));
+  });
+
+  it("fails closed instead of rebinding a prepared member from another phone", async () => {
+    const member = makeMember({ id: "member_prepared" });
+    const prisma = asRootPrisma({
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: vi.fn(),
+      },
+    });
+
+    await expect(bindHostedMemberPhoneToPreparedMemberTx({
+      currentIdentity: {
+        maskedPhoneNumberHint: "*** 0000",
+        memberId: member.id,
+        phoneLookupKey: "hbidx:phone:v1:another-phone",
+        phoneNumber: "+15550000000",
+        phoneNumberVerifiedAt: NOW,
+        privyUserId: null,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
+        walletAddress: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+      member,
+      phoneNumber: "+15551234567",
+      phoneNumberVerifiedAt: NOW,
+      preparedControlRoot: {
+        domain: "control",
+        rootKeyId: "root_control_prepared",
+        userId: member.id,
+      },
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_DOMAIN_ROOT_PREPARATION_MISMATCH",
+    });
+
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
   });
 
   it("blocks a suspended member before reconciling any identity fields", async () => {

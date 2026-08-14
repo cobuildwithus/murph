@@ -1155,12 +1155,12 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'import', 'inspect'],
-        description: 'Inspect one workout CSV file without writing anything.',
+        description: 'Inspect one workout CSV file without writing anything, including timezone and unit requirements.',
       },
       {
         path: ['workout', 'import', 'csv'],
         description:
-          'Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events.',
+          'Validate one complete workout CSV and bulk-commit replay-safe activity_session events with bounded output.',
       },
       {
         path: ['workout', 'format', 'save'],

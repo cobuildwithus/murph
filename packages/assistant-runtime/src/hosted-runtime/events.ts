@@ -317,6 +317,7 @@ async function executeHostedSystemWake(input: {
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
+        retainFollowUpWakeUntilCheckpoint: true,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         ...(input.shouldYieldDeviceSync
@@ -428,6 +429,14 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
       );
+    case "health.daily-metric.reported":
+      // The canonical observation landed at mailbox import. After that write
+      // checkpoints, refresh any already-granted group projections.
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: { kind: "vault-share.projection" },
+      });
   }
 
   const exhaustiveWake: never = input.wake;
