@@ -64,8 +64,12 @@ continuation authority, including causally monotonic clarification replacement
 and resolved-pointer replay closure. Current-sender clarification and
 continuation reuse the stateful dynamic-tool chain in provider request order,
 so one cannot overtake the other while independent new exact-ref requests stay
-concurrent. One `current_sender_personal` target owns the read while a separate result destination owns group or same-channel direct
-delivery; replay cannot switch that destination. Private delivery has a distinct
+concurrent. A marked current caller may start a group-bound read only after the
+required notice; unmarked old group calls fail closed during Web-first rollout,
+while unmarked private calls and already-persisted legacy work retain their
+bounded drain. One `current_sender_personal` target owns the read while a
+separate result destination owns group or same-channel direct delivery; replay
+cannot switch that destination. Private delivery has a distinct
 identity from the canonical group completion/fallback, so expiry or a lost
 private route produces only a fresh non-disclosing group `cannot_answer`
 completion. Its exact
@@ -290,7 +294,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation contract for individual, team, and collective challenge standings with truthful partial and unscored states, authenticated Linq group-only delivery, complete semantic captions, and an identity-free static-image projection with the canonical Murph badge. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Hosted group self-awareness | High | 2026-07-10 |
 | `agent-docs/product-specs/private-group-consultation.md` | Implemented Assistant Ask request/reply primitive, first composed as an automatically resolved, read-only private-to-group Murph ask, with exact requester identity, deterministic exact unavailable delivery, bounded foreground-causal draining, bounded opaque failure correlation, and post-Temporal direct latency hints. | Hosted group consultation | High | 2026-07-26 |
-| `agent-docs/product-specs/consented-group-disclosure.md` | Exact-grant group-to-member Assistant Ask plus exact-message current-sender requests, with independent valid sources in one accepted turn, model-inferred natural-language audience and clarification, Web-owned exact sender/source/route admission, same-channel private-route proof, group notice before a personal read, one outgoing allow/deny review, mutually exclusive private/group terminal retry, non-disclosing fallback, replay/concurrency ownership, and bounded legacy drain. | Hosted group disclosure | High | 2026-08-13 |
+| `agent-docs/product-specs/consented-group-disclosure.md` | Exact-grant group-to-member Assistant Ask plus exact-message current-sender requests, with independent valid sources in one accepted turn, model-inferred natural-language audience and clarification, Web-owned exact sender/source/route admission, same-channel private-route proof, group notice before a personal read, fail-closed unmarked group rollout skew, one outgoing allow/deny review, mutually exclusive private/group terminal retry, non-disclosing fallback, replay/concurrency ownership, and bounded private/persisted legacy drain. | Hosted group disclosure | High | 2026-08-13 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | First-join private Murph confirmation with a sanitized group name, deterministic web or reaction copy, first-party sharing-editor link, and one durable member-row owner for Linq routing, activation, invite, and mailbox writes. | Hosted group membership behavior | High | 2026-07-23 |
 | `agent-docs/product-specs/clinical-records-intake.md` | Epic SMART clinical-record connection, exact API-registration catalog, all-24 primary query activation across 17 permissions, provider-directory, credential/control-plane, query-slice-bound retrieval, raw-first vault import, privacy, recovery, and rollout contract. | Clinical Records intake behavior | High | 2026-07-21 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |

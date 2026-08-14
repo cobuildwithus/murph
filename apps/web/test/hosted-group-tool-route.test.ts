@@ -325,31 +325,6 @@ describe("hosted group tool route", () => {
     {
       expectedRequest: {
         action: "ask_current_sender",
-        audience: "group",
-        mode: "new",
-        origin: {
-          assistantInputId: `ain_${"c".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-      },
-      expectedResponse: {
-        action: "ask_current_sender",
-        result: { status: "accepted" },
-      },
-      label: "bounded unmarked canonical legacy protocol",
-      requestBody: {
-        action: "ask_current_sender",
-        origin: {
-          assistantInputId: `ain_${"c".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-      },
-    },
-    {
-      expectedRequest: {
-        action: "ask_current_sender",
         audience: "current_sender",
         mode: "new",
         origin: {
@@ -400,6 +375,36 @@ describe("hosted group tool route", () => {
       await expect(response.json()).resolves.toEqual(expectedResponse);
     },
   );
+
+  it("rejects an unmarked legacy group request before admission", async () => {
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify({
+          action: "ask_current_sender",
+          origin: {
+            assistantInputId: `ain_${"c".repeat(32)}`,
+            kind: "accepted_input",
+            sessionId: "session_group",
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.handleTool).not.toHaveBeenCalled();
+    expect(mocks.handoffHostedMailboxWake).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+  });
 
   it.each([
     {
@@ -554,6 +559,10 @@ describe("hosted group tool route", () => {
     {
       body: {
         action: "ask_current_sender",
+        audience: "group",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"c".repeat(32)}`,
           kind: "accepted_input",
@@ -570,6 +579,10 @@ describe("hosted group tool route", () => {
     {
       body: {
         action: "ask_current_sender",
+        audience: "current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"d".repeat(32)}`,
           kind: "accepted_input",

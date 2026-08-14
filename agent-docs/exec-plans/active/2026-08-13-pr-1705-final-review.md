@@ -87,8 +87,9 @@ Local replacement-candidate evidence on 2026-08-13:
   while an independent exact-ref request still starts concurrently. The focused
   runtime test, seven current-sender engine tests, Assistant Engine typecheck,
   owner-doc contract, and docs drift pass.
-- ReviewGPT round 15 found that a committed route-loss fallback did not fence a
-  later private provider-entry retry after route recovery, while expired
+- The first untrusted attempted ReviewGPT round 15 found that a committed
+  route-loss fallback did not fence a later private provider-entry retry after
+  route recovery, while expired
   detached control could append a group terminal beside a committed private
   effect. Both paths failed in focused reproduction. Provider-entry authority
   now recognizes and re-hands the existing fallback before route resolution;
@@ -98,5 +99,17 @@ Local replacement-candidate evidence on 2026-08-13:
   typecheck passes. Round 15 returned findings but reported unknown model
   confirmation, so it is remediation evidence rather than the required trusted
   final PASS.
+- The replacement untrusted attempted round 15 found that Web accepted an
+  unmarked old `ask_current_sender` group request even though that old runtime
+  could not send the now-required advance room notice. A focused route test
+  reproduced the bypass as HTTP 200 instead of the required fail-closed 400.
+  Web now rejects that unmarked group admission before tool or mailbox work,
+  while unmarked private compatibility and persisted legacy drains remain.
+  This deletes the unsafe compatibility upgrade and adds no state or owner.
+  The focused Web suite passes 45 tests, the current-sender Assistant Engine
+  suite passes 7 tests, the Cloudflare marker/replay suite passes 19 tests,
+  prepared Web typecheck and focused Web lint pass, and docs drift passes. The
+  replacement response again reported unknown model confirmation, so it also
+  remains remediation evidence rather than a trusted final result.
 - A fresh full-snapshot ReviewGPT PASS and required GitHub checks remain pending
   on the remediated exact head.

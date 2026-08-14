@@ -71,6 +71,13 @@ cannot occupy the canonical group completion/fallback identity. This path
 creates no group, membership, permission, or grant row and grants no future or
 scheduled access.
 
+Current callers mark this protocol only after the runtime's required exact-room
+notice succeeds. During Web-first rollout, an unmarked request from an old
+runtime may still choose the private destination, but it cannot start a
+group-bound personal read because that runtime cannot prove the notice boundary.
+That optional group consultation fails closed until the runtime is recycled;
+already-persisted legacy work continues to drain under its stored authority.
+
 ## Product flow
 
 1. During an authenticated group-chat turn, group Murph calls

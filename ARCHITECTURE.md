@@ -419,10 +419,13 @@ private effect. A terminal or unavailable control response
 without a valid persisted completion is never successful consumption.
 
 Rolling-deploy compatibility is transport-only. New Cloudflare callers send one
-strict body marker, which old Web rejects as an unknown field. New Web also
-accepts the deployed unmarked `ask_current_sender` and
-`message_current_sender` calls, then validates the exact source with the same
-deterministic rules. The undeployed dual URL marker, model-authored destination
+strict body marker, which old Web rejects as an unknown field. New Web rejects
+deployed unmarked `ask_current_sender` calls because an old runtime cannot prove
+that the required exact-room notice preceded the personal read; during Web-first
+rollout, those optional group consultations fail closed until the runtime is
+recycled. New Web continues to accept deployed unmarked
+`message_current_sender` calls because their private destination has no room
+notice prerequisite. The undeployed dual URL marker, model-authored destination
 dialect, and intermediate request-id alias are absent. Already-accepted former
 `group_sender` / `group_sender_private` mailbox work drains under its stored
 request id, target kind, and permission digest, while new work writes only the

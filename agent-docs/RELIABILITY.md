@@ -1158,11 +1158,13 @@ Last verified: 2026-08-13
   requests, whose stable identities make identical replay idempotent. New
   current-sender callers use one strict JSON-body protocol marker; the URL has
   no duplicate marker. Old Web rejects that unknown field, while new Web strips
-  it before canonical parsing. Deployed unmarked old `ask_current_sender` and
-  `message_current_sender` calls may drain through the same exact-source
-  admission. The undeployed dual URL marker and destination dialect are
-  rejected. Caller cancellation, exhausted deadlines, authority failures, and
-  other `4xx` responses do not replay.
+  it before canonical parsing. New Web rejects deployed unmarked old
+  `ask_current_sender` calls because those runtimes cannot prove the mandatory
+  pre-read room notice; the optional group consultation fails closed until the
+  runtime is recycled. Unmarked old `message_current_sender` calls may still
+  drain through exact-source private admission. The undeployed dual URL marker
+  and destination dialect are rejected. Caller cancellation, exhausted
+  deadlines, authority failures, and other `4xx` responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct

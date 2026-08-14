@@ -110,7 +110,7 @@ function readHostedAssistantAskDiagnosticCode(error: unknown): string | undefine
 }
 
 type HostedCurrentSenderWireCompatibility = {
-  action: "ask_current_sender" | "message_current_sender";
+  action: "message_current_sender";
 };
 
 type HostedCurrentSenderWire = {
@@ -118,15 +118,10 @@ type HostedCurrentSenderWire = {
   payload: unknown;
 };
 
-type HostedCurrentSenderLegacyWireResponse =
-  | {
-      action: "ask_current_sender";
-      result: HostedRuntimeGroupCurrentSenderDirectResult;
-    }
-  | {
-      action: "message_current_sender";
-      result: HostedRuntimeGroupCurrentSenderDirectResult;
-    };
+type HostedCurrentSenderLegacyWireResponse = {
+  action: "message_current_sender";
+  result: HostedRuntimeGroupCurrentSenderDirectResult;
+};
 
 function readHostedCurrentSenderWire(
   payload: unknown,
@@ -156,18 +151,14 @@ function readHostedCurrentSenderWire(
   }
 
   const action = readHostedCurrentSenderWireAction(payload);
-  if (action === "message_current_sender" || action === "ask_current_sender") {
+  if (action === "ask_current_sender") {
+    throw new TypeError("Hosted current-sender group protocol marker is required.");
+  }
+  if (action === "message_current_sender") {
     assertHostedCurrentSenderLegacyWireShape(payload);
     return {
       compatibility: { action },
-      payload: action === "ask_current_sender"
-        ? {
-            action,
-            audience: "group",
-            mode: "new",
-            origin: readHostedWireProperty(payload, "origin"),
-          }
-        : payload,
+      payload,
     };
   }
   return { compatibility: null, payload };
@@ -225,11 +216,5 @@ function encodeHostedCurrentSenderLegacyWireResponse(
   if (response.action !== "ask_current_sender" || compatibility === null) {
     return response;
   }
-  if (compatibility.action === "message_current_sender") {
-    return { action: compatibility.action, result: response.result };
-  }
-  return {
-    action: compatibility.action,
-    result: response.result,
-  };
+  return { action: compatibility.action, result: response.result };
 }

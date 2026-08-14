@@ -999,15 +999,18 @@ runner must requeue rather than consume a terminal or unavailable response that
 has no persisted completion.
 
 New callers identify the strict protocol with the single
-`currentSenderProtocol: "v3"` body field. During the bounded drain, Web also
-accepts deployed unmarked old `ask_current_sender` or
-`message_current_sender` bodies and drains already-accepted `group_sender` or
-`group_sender_private` mailbox work. It reloads the exact source and preserves
-the old call's already-defined group/private meaning. New work writes only the
-unified current-sender target and separate result destination. The
-undeployed dual URL marker, model-authored destination dialect, and intermediate
-request-id alias are rejected rather than preserved. Remove the old action
-parsing and legacy request-id lookup eleven minutes after all old runners are
+`currentSenderProtocol: "v3"` body field. During Web-first rollout, Web rejects
+deployed unmarked old `ask_current_sender` bodies because those runtimes cannot
+prove that the required exact-room notice preceded the personal read. That
+optional group consultation fails closed until the runtime is recycled. Web
+continues to accept unmarked old `message_current_sender` bodies for private
+delivery, whose authority has no room-notice prerequisite, and drains
+already-accepted `group_sender` or `group_sender_private` mailbox work. It
+reloads the exact source and preserves the old private call's meaning. New work
+writes only the unified current-sender target and separate result destination.
+The undeployed dual URL marker, model-authored destination dialect, and
+intermediate request-id alias are rejected rather than preserved. Remove the
+old action parsing and legacy request-id lookup eleven minutes after all old runners are
 recycled: the existing ten-minute request TTL plus a one-minute queue margin.
 
 

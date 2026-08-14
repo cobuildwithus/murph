@@ -814,11 +814,14 @@ Last verified: 2026-08-13
   still-valid private effect instead of appending another group terminal; only
   its provider-entry authority may convert that effect to the fixed fallback.
 - Rolling compatibility is legacy-facing only. New callers use one strict body
-  marker. Deployed unmarked old `ask_current_sender` /
-  `message_current_sender` requests remain accepted and are subjected to the
-  same canonical source-text authority. The undeployed dual URL marker,
-  model-authored destination fields, and intermediate request-id alias are not
-  compatibility surfaces.
+  marker. New Web rejects deployed unmarked old `ask_current_sender` requests:
+  the old runtime cannot prove the required exact-room notice happened before
+  the personal read. During Web-first rollout, that optional group consultation
+  fails closed until the runtime is recycled. Deployed unmarked
+  `message_current_sender` remains accepted because private delivery has no room
+  notice prerequisite. The undeployed dual URL marker, model-authored
+  destination fields, and intermediate request-id alias are not compatibility
+  surfaces.
   Already-accepted former request ids and `group_sender` /
   `group_sender_private` targets drain only under their stored target kind and
   permission digest; new requests write only `current_sender_personal` plus the
