@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
@@ -120,6 +120,49 @@ function runScript(
     encoding: 'utf8',
     env: guardEnvironment(harness, overrides),
   })
+}
+
+async function interruptScriptAfterPath(
+  harness: Harness,
+  args: string[],
+  readyPath: string,
+): Promise<{ status: number | null; stderr: string }> {
+  const child = spawn('bash', [path.join('scripts', 'create-worktree'), ...args], {
+    cwd: harness.primary,
+    detached: true,
+    env: guardEnvironment(harness),
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk
+  })
+  const completed = new Promise<{ status: number | null; stderr: string }>(
+    (resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', (status) => resolve({ status, stderr }))
+    },
+  )
+
+  try {
+    const deadline = Date.now() + 10_000
+    while (!existsSync(readyPath)) {
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for ${path.basename(readyPath)}`)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    if (child.pid === undefined) throw new Error('create-worktree did not start')
+    process.kill(-child.pid, 'SIGINT')
+    return await completed
+  } catch (error) {
+    if (child.exitCode === null && child.pid !== undefined) {
+      process.kill(-child.pid, 'SIGTERM')
+      await completed
+    }
+    throw error
+  }
 }
 
 function installLegacyWorktreeEntrypoints(primary: string): void {
@@ -469,6 +512,60 @@ touch hook-installed
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
+  it('restores the Spotlight marker after a successful cleanup hook', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'cleanup-hook-spotlight')
+    const markerObserved = path.join(harness.root, 'cleanup-hook-marker-observed')
+    const hookInvocations = path.join(harness.root, 'cleanup-hook-invocations')
+    runGit(harness.primary, [
+      'config',
+      'filter.cleanup-hook-marker.smudge',
+      `test -f .metadata_never_index && touch ${JSON.stringify(markerObserved)} && cat`,
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.cleanup-hook-marker.clean',
+      'cat',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.cleanup-hook-marker.required',
+      'true',
+    ])
+    writeFileSync(
+      path.join(harness.primary, '.gitattributes'),
+      'cleanup-hook-probe.txt filter=cleanup-hook-marker\n',
+    )
+    writeFileSync(path.join(harness.primary, 'cleanup-hook-probe.txt'), 'probe\n')
+    runGit(harness.primary, ['add', '.gitattributes', 'cleanup-hook-probe.txt'])
+    runGit(harness.primary, ['commit', '-m', 'add cleanup hook marker probe'])
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+printf '%s|%s|%s\n' "$1" "$2" "$3" >>${JSON.stringify(hookInvocations)}
+git clean -fdX
+`,
+    )
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'cleanup-hook-spotlight',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(existsSync(markerObserved)).toBe(true)
+    expect(readFileSync(hookInvocations, 'utf8').trim().split('\n')).toHaveLength(1)
+    expect(readFileSync(hookInvocations, 'utf8')).toMatch(
+      new RegExp(`^0{40,64}\\|[0-9a-f]{40,64}\\|1\\n$`),
+    )
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
   it('rolls back a marked worktree when checkout materialization fails', () => {
     const harness = createHarness()
     const target = path.join(harness.root, 'partial-materialization')
@@ -543,6 +640,129 @@ touch ${JSON.stringify(hookInvoked)}
     expect(existsSync(hookInvoked)).toBe(true)
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
+
+  it('rolls back an interrupted materialization and preserves retry state', async () => {
+    const harness = createHarness()
+    const unrelatedTarget = path.join(harness.root, 'unrelated-existing')
+    expect(
+      runScript(harness, 'create-worktree', [
+        '-b',
+        'unrelated-existing',
+        unrelatedTarget,
+      ]).status,
+    ).toBe(0)
+
+    const target = path.join(harness.root, 'interrupted-materialization')
+    const filterStarted = path.join(harness.root, 'materialization-started')
+    const hookInvoked = path.join(harness.root, 'interrupted-hook-invoked')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+touch ${JSON.stringify(hookInvoked)}
+`,
+    )
+    runGit(harness.primary, [
+      'config',
+      'filter.interrupted-materialization.smudge',
+      `test -f .metadata_never_index && touch ${JSON.stringify(filterStarted)} && sleep 2`,
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.interrupted-materialization.clean',
+      'cat',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.interrupted-materialization.required',
+      'true',
+    ])
+    writeFileSync(
+      path.join(harness.primary, '.gitattributes'),
+      'interrupted-probe.txt filter=interrupted-materialization\n',
+    )
+    writeFileSync(path.join(harness.primary, 'interrupted-probe.txt'), 'probe\n')
+    runGit(harness.primary, ['add', '.gitattributes', 'interrupted-probe.txt'])
+    runGit(harness.primary, ['commit', '-m', 'add interrupted materialization probe'])
+
+    const creation = await interruptScriptAfterPath(
+      harness,
+      ['-b', 'interrupted-materialization', target],
+      filterStarted,
+    )
+
+    expect(creation.status, creation.stderr).toBe(130)
+    const listing = runGit(harness.primary, ['worktree', 'list', '--porcelain'])
+    expect(listing).not.toContain(target)
+    expect(listing).toContain(unrelatedTarget)
+    expect(existsSync(target)).toBe(false)
+    expect(existsSync(unrelatedTarget)).toBe(true)
+    expect(existsSync(hookInvoked)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/interrupted-materialization',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
+
+    runGit(harness.primary, [
+      'config',
+      'filter.interrupted-materialization.smudge',
+      'cat',
+    ])
+    const retry = runScript(harness, 'create-worktree', [
+      '-B',
+      'interrupted-materialization',
+      target,
+    ])
+    expect(retry.status, retry.stderr).toBe(0)
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    expect(existsSync(hookInvoked)).toBe(true)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  }, 15_000)
+
+  it('rolls back an interrupted post-checkout hook and permits retry', async () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'interrupted-post-checkout')
+    const hookStarted = path.join(harness.root, 'post-checkout-started')
+    const postCheckout = path.join(harness.primary, '.githooks', 'post-checkout')
+    executable(
+      postCheckout,
+      `#!/bin/sh
+touch ${JSON.stringify(hookStarted)}
+sleep 2
+`,
+    )
+
+    const creation = await interruptScriptAfterPath(
+      harness,
+      ['-b', 'interrupted-post-checkout', target],
+      hookStarted,
+    )
+
+    expect(creation.status, creation.stderr).toBe(130)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/interrupted-post-checkout',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
+
+    executable(postCheckout, '#!/bin/sh\nexit 0\n')
+    const retry = runScript(harness, 'create-worktree', [
+      '-B',
+      'interrupted-post-checkout',
+      target,
+    ])
+    expect(retry.status, retry.stderr).toBe(0)
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  }, 15_000)
 
   it('does not register a worktree when shared Spotlight exclusion setup fails', () => {
     const harness = createHarness()
@@ -1631,6 +1851,64 @@ git -C ${JSON.stringify(secondary)} add secondary-only.txt
       runGit(helperHarness.primary, ['worktree', 'list', '--porcelain']),
     ).not.toContain(helperTarget)
     expect(existsSync(helperTarget)).toBe(false)
+  })
+
+  it('matches native executable post-checkout shebang handling', () => {
+    const variants = [
+      { name: 'compact', prefix: '#!/bin/sh\n' },
+      { name: 'space', prefix: '#! /bin/sh\n' },
+      { name: 'tab', prefix: '#!\t/bin/sh\n' },
+      { name: 'env-argument', prefix: '#!/usr/bin/env sh\n' },
+      { name: 'no-shebang', prefix: '' },
+    ]
+
+    for (const variant of variants) {
+      const nativeHarness = createHarness()
+      const nativeInvocation = path.join(
+        nativeHarness.root,
+        `${variant.name}-native-invocation`,
+      )
+      executable(
+        path.join(nativeHarness.primary, '.githooks', 'post-checkout'),
+        `${variant.prefix}printf '%s|%s|%s\\n' "$1" "$2" "$3" >${JSON.stringify(nativeInvocation)}\n`,
+      )
+      expect(runScript(nativeHarness, 'install-git-hooks').status).toBe(0)
+      const nativeHead = runGit(nativeHarness.primary, ['rev-parse', 'HEAD'])
+      const nativeTarget = path.join(nativeHarness.root, `${variant.name}-native`)
+      const nativeCreation = spawnSync(
+        'git',
+        ['worktree', 'add', '-b', `${variant.name}-native`, nativeTarget],
+        { cwd: nativeHarness.primary, encoding: 'utf8' },
+      )
+
+      const helperHarness = createHarness()
+      const helperInvocation = path.join(
+        helperHarness.root,
+        `${variant.name}-helper-invocation`,
+      )
+      executable(
+        path.join(helperHarness.primary, '.githooks', 'post-checkout'),
+        `${variant.prefix}printf '%s|%s|%s\\n' "$1" "$2" "$3" >${JSON.stringify(helperInvocation)}\n`,
+      )
+      const helperHead = runGit(helperHarness.primary, ['rev-parse', 'HEAD'])
+      const helperTarget = path.join(helperHarness.root, `${variant.name}-helper`)
+      const helperCreation = runScript(helperHarness, 'create-worktree', [
+        '-b',
+        `${variant.name}-helper`,
+        helperTarget,
+      ])
+
+      expect(nativeCreation.status, nativeCreation.stderr).toBe(0)
+      expect(helperCreation.status, helperCreation.stderr).toBe(nativeCreation.status)
+      expect(readFileSync(nativeInvocation, 'utf8')).toBe(
+        `${'0'.repeat(nativeHead.length)}|${nativeHead}|1\n`,
+      )
+      expect(readFileSync(helperInvocation, 'utf8')).toBe(
+        `${'0'.repeat(helperHead.length)}|${helperHead}|1\n`,
+      )
+      expect(existsSync(path.join(helperTarget, '.metadata_never_index'))).toBe(true)
+      expect(runGit(helperTarget, ['status', '--porcelain'])).toBe('')
+    }
   })
 
   it('preserves ignored non-executable post-checkout hook behavior', () => {

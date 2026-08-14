@@ -72,6 +72,7 @@ rollback_registered_worktree() {
   local failure_status="$1"
   local rollback_status
 
+  trap - EXIT INT TERM HUP
   set +e
   git -C "$repo_root" worktree remove --force --force "$target_path"
   rollback_status=$?
@@ -83,6 +84,15 @@ rollback_registered_worktree() {
     exit "$rollback_status"
   fi
   exit "$failure_status"
+}
+
+rollback_registered_worktree_on_exit() {
+  local failure_status="$?"
+
+  if (( failure_status == 0 )); then
+    failure_status=1
+  fi
+  rollback_registered_worktree "$failure_status"
 }
 
 run_post_checkout_hook() {
@@ -102,6 +112,9 @@ run_post_checkout_hook() {
 
   if IFS= read -r first_line <"$hook_path" && [[ "$first_line" == '#!'* ]]; then
     interpreter="${first_line#\#!}"
+    while [[ "$interpreter" == ' '* || "$interpreter" == $'\t'* ]]; do
+      interpreter="${interpreter:1}"
+    done
     interpreter="${interpreter%%[[:space:]]*}"
     if [[ "$interpreter" != /* || ! -f "$interpreter" || ! -x "$interpreter" ]]; then
       printf 'create-worktree: post-checkout hook interpreter is unavailable\n' >&2
@@ -186,6 +199,11 @@ if (( add_status != 0 )); then
   exit "$add_status"
 fi
 
+trap rollback_registered_worktree_on_exit EXIT
+trap 'rollback_registered_worktree 130' INT
+trap 'rollback_registered_worktree 143' TERM
+trap 'rollback_registered_worktree 129' HUP
+
 setup_status=0
 if [[ -d "$target_path" ]] \
   && admin_dir="$(git -C "$target_path" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
@@ -197,7 +215,8 @@ if [[ -d "$target_path" ]] \
       : >"$admin_dir/murph-storage-guard-authorized" \
         && mark_worktree_non_indexable \
         && git -C "$target_path" reset --hard \
-        && run_post_checkout_hook
+        && run_post_checkout_hook \
+        && mark_worktree_non_indexable
       setup_status=$?
       set -e
       ;;
@@ -215,4 +234,5 @@ if (( setup_status != 0 )); then
   rollback_registered_worktree "$setup_status"
 fi
 
+trap - EXIT INT TERM HUP
 exit 0
