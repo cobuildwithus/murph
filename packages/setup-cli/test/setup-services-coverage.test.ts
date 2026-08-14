@@ -58,7 +58,6 @@ vi.mock('../src/setup-services/toolchain.ts', async () => {
 import {
   listAssistantCronPresets,
 } from '@murphai/assistant-engine/assistant-cron'
-import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
@@ -66,9 +65,6 @@ import {
   createIntegratedVaultServices,
   showWearablePreferences,
 } from '@murphai/vault-usecases'
-import { createIntegratedInboxServices } from '@murphai/inbox-services'
-import { listAutomations, upsertAutomation } from '@murphai/core'
-import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import type {
   InboxSourceSetEnabledResult,
 } from '@murphai/inbox-services'
@@ -84,11 +80,6 @@ import type {
   SetupStepResult,
 } from '@murphai/operator-config/setup-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import {
-  listAssistantSelfDeliveryTargets,
-  saveAssistantSelfDeliveryTarget,
-  saveDefaultVaultConfig,
-} from '@murphai/operator-config/operator-config'
 import {
   incurErrorBridge,
 } from '../src/incur-error-bridge.ts'
@@ -252,25 +243,6 @@ function makeInboxBootstrapResult(
       connectors: [],
       databasePath,
       ok: true,
-      parserToolchain: {
-        configPath,
-        discoveredAt: TEST_TIMESTAMP,
-        tools: {
-          ffmpeg: {
-            available: true,
-            command: '/usr/bin/ffmpeg',
-            reason: 'configured for tests',
-            source: 'config',
-          },
-          whisper: {
-            available: true,
-            command: '/usr/bin/whisper-cli',
-            modelPath: '/tmp/whisper.bin',
-            reason: 'configured for tests',
-            source: 'config',
-          },
-        },
-      },
       target: null,
     },
   }
@@ -391,7 +363,6 @@ test('configureSetupChannels reuses and enables the Telegram connector while pre
     JSON.stringify({
       version: 1,
       autoReply: [
-        { channel: 'email', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
         { channel: 'linq', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
       ],
       updatedAt: TEST_TIMESTAMP,
@@ -1433,384 +1404,7 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
   }
 })
 
-test('createSetupServices reconciles the prior local email state through real services exactly once', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-retired-email-'))
-  const cwd = path.join(root, 'workspace')
-  const homeDirectory = path.join(root, 'home')
-  const binDirectory = path.join(root, 'bin')
-  const toolchainRoot = path.join(root, 'toolchain')
-  const vaultPath = path.join(cwd, 'vault')
-  const cliBinPath = path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js')
-  const parserConfigPath = path.join(
-    vaultPath,
-    '.runtime',
-    'operations',
-    'parsers',
-    'toolchain.json',
-  )
-  const logs: string[] = []
-  let telegramProbeFailuresRemaining = 1
-
-  await mkdir(cwd, { recursive: true })
-  await mkdir(homeDirectory, { recursive: true })
-  await mkdir(binDirectory, { recursive: true })
-  await mkdir(path.dirname(cliBinPath), { recursive: true })
-  await writeFile(cliBinPath, '// cli stub\n', 'utf8')
-
-  for (const tool of ['ffmpeg', 'whisper-cli']) {
-    const toolPath = path.join(binDirectory, tool)
-    await writeFile(toolPath, '#!/usr/bin/env bash\nexit 0\n', 'utf8')
-    await chmod(toolPath, 0o755)
-  }
-
-  const whisperModelPath = path.join(
-    toolchainRoot,
-    'models',
-    'whisper',
-    'ggml-base.en.bin',
-  )
-  await mkdir(path.dirname(whisperModelPath), { recursive: true })
-  await writeFile(whisperModelPath, 'model', 'utf8')
-
-  try {
-    const vaultCore = createIntegratedVaultServices().core
-    await vaultCore.init({ requestId: null, vault: vaultPath })
-    const paths = resolveRuntimePaths(vaultPath)
-    await mkdir(path.dirname(paths.inboxConfigPath), { recursive: true })
-    await writeFile(
-      paths.inboxConfigPath,
-      JSON.stringify({
-        schema: 'murph.inbox-runtime-config.v1',
-        schemaVersion: 1,
-        value: {
-          connectors: [
-            {
-              id: 'email:primary',
-              source: 'email',
-              enabled: true,
-              accountId: 'primary@example.test',
-              options: { emailAddress: 'primary@example.test' },
-            },
-            {
-              id: 'email:disabled',
-              source: 'email',
-              enabled: false,
-              accountId: 'disabled@example.test',
-              options: { emailAddress: 'disabled@example.test' },
-            },
-            {
-              id: 'telegram:bot',
-              source: 'telegram',
-              enabled: true,
-              accountId: 'bot',
-              options: { backfillLimit: 25 },
-            },
-          ],
-        },
-      }),
-      'utf8',
-    )
-    const automationStatePath = resolveAssistantStatePaths(vaultPath).automationStatePath
-    await mkdir(path.dirname(automationStatePath), { recursive: true })
-    await writeFile(
-      automationStatePath,
-      JSON.stringify({
-        version: 1,
-        autoReply: [
-          { channel: 'email', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
-          { channel: 'telegram', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
-          { channel: 'linq', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
-          { channel: 'custom', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
-        ],
-        updatedAt: TEST_TIMESTAMP,
-      }),
-      'utf8',
-    )
-    const cronPaths = resolveAssistantStatePaths(vaultPath)
-    const localCronJobs = [
-      assistantCronJobSchema.parse({
-        createdAt: TEST_TIMESTAMP,
-        enabled: true,
-        jobId: 'local-retired-email',
-        keepAfterRun: true,
-        name: 'Retired local email reminder',
-        prompt: 'Send the reminder.',
-        schedule: { expression: '0 11 * * 5', kind: 'cron' },
-        schema: 'murph.assistant-cron-job.v1',
-        state: {
-          consecutiveFailures: 0,
-          lastError: null,
-          lastFailedAt: null,
-          lastRunAt: null,
-          lastSucceededAt: null,
-          nextRunAt: '2026-04-10T15:00:00.000Z',
-          runningAt: null,
-          runningPid: null,
-        },
-        target: {
-          alias: null,
-          channel: 'email',
-          deliverySource: null,
-          deliveryTarget: 'recipient@example.test',
-          identityId: null,
-          participantId: null,
-          sessionId: null,
-          threadId: null,
-        },
-        updatedAt: TEST_TIMESTAMP,
-      }),
-      ...(['telegram', 'linq'] as const).map((channel) =>
-        assistantCronJobSchema.parse({
-          createdAt: TEST_TIMESTAMP,
-          enabled: true,
-          jobId: `local-retained-${channel}`,
-          keepAfterRun: true,
-          name: `Retained ${channel} reminder`,
-          prompt: 'Send the reminder.',
-          schedule: { expression: '0 12 * * 5', kind: 'cron' },
-          schema: 'murph.assistant-cron-job.v1',
-          state: {
-            consecutiveFailures: 0,
-            lastError: null,
-            lastFailedAt: null,
-            lastRunAt: null,
-            lastSucceededAt: null,
-            nextRunAt: '2026-04-10T16:00:00.000Z',
-            runningAt: null,
-            runningPid: null,
-          },
-          target: {
-            alias: null,
-            channel,
-            deliverySource: null,
-            deliveryTarget: `${channel}-room`,
-            identityId: null,
-            participantId: null,
-            sessionId: null,
-            threadId: null,
-          },
-          updatedAt: TEST_TIMESTAMP,
-        }),
-      ),
-    ]
-    await mkdir(path.dirname(cronPaths.cronJobsPath), { recursive: true })
-    await writeFile(
-      cronPaths.cronJobsPath,
-      `${JSON.stringify({ jobs: localCronJobs, version: 1 }, null, 2)}\n`,
-      'utf8',
-    )
-    await upsertAutomation({
-      continuityPolicy: 'fresh',
-      instructions: 'Send the reminder.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: 'recipient@example.test',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      },
-      schedule: { expression: '0 11 * * 5', kind: 'cron' },
-      slug: 'retired-local-email',
-      status: 'active',
-      tags: ['assistant', 'scheduled'],
-      title: 'Retired local email reminder',
-      vaultRoot: vaultPath,
-    })
-    await saveDefaultVaultConfig(vaultPath, homeDirectory)
-    for (const [channel, deliveryTarget] of [
-      ['email', 'retired@example.test'],
-      ['linq', 'retained-linq-thread'],
-      ['telegram', 'retained-telegram-thread'],
-    ] as const) {
-      await saveAssistantSelfDeliveryTarget(
-        {
-          channel,
-          deliverySource: null,
-          deliveryTarget,
-          identityId: null,
-          participantId: null,
-          threadId: deliveryTarget,
-        },
-        homeDirectory,
-      )
-    }
-    const retainedSelfDeliveryTargetsBeforeSetup = (
-      await listAssistantSelfDeliveryTargets(homeDirectory)
-    ).filter((target) => target.channel !== 'email')
-
-    const runtime = {
-      close() {},
-      listCaptures() {
-        return []
-      },
-    }
-    const inboxServices = createIntegratedInboxServices({
-      async loadInboxModule() {
-        return {
-          async ensureInboxVault() {},
-          async openInboxRuntime() {
-            return runtime as never
-          },
-          async rebuildRuntimeFromVault() {},
-        } as never
-      },
-      async loadParsersModule() {
-        return {
-          async discoverParserToolchain() {
-            return {
-              configPath: parserConfigPath,
-              discoveredAt: TEST_TIMESTAMP,
-              tools: {
-                ffmpeg: {
-                  available: true,
-                  command: path.join(binDirectory, 'ffmpeg'),
-                  source: 'config',
-                  reason: 'configured',
-                },
-                whisper: {
-                  available: true,
-                  command: path.join(binDirectory, 'whisper-cli'),
-                  modelPath: whisperModelPath,
-                  source: 'config',
-                  reason: 'configured',
-                },
-              },
-            }
-          },
-          async writeParserToolchainConfig() {
-            await mkdir(path.dirname(parserConfigPath), { recursive: true })
-            await writeFile(parserConfigPath, '{}\n', 'utf8')
-            return {
-              config: { updatedAt: TEST_TIMESTAMP },
-              configPath: parserConfigPath,
-            }
-          },
-        } as never
-      },
-      async loadTelegramDriver() {
-        return {
-          async getMe() {
-            if (telegramProbeFailuresRemaining > 0) {
-              telegramProbeFailuresRemaining -= 1
-              throw new Error('Telegram probe unavailable for setup test')
-            }
-            return { username: 'test-bot' }
-          },
-          async getWebhookInfo() {
-            return { url: '' }
-          },
-        } as never
-      },
-    })
-    const services = createSetupServices({
-      arch: () => 'x64',
-      env: () => ({ PATH: binDirectory }),
-      getCwd: () => cwd,
-      getHomeDirectory: () => homeDirectory,
-      inboxServices,
-      log(message) {
-        logs.push(message)
-      },
-      platform: () => 'linux',
-      resolveCliBinPath: () => cliBinPath,
-    })
-    const assistant: SetupConfiguredAssistant = {
-      preset: 'skip',
-      enabled: false,
-      provider: null,
-      model: null,
-      codexCommand: null,
-      profile: null,
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      oss: false,
-      detail: 'Skipped',
-    }
-
-    const cleanupSummaryPattern =
-      /Removed 2 retired local email inbox sources, 1 retired local email auto-reply setting, and 1 saved local email self-delivery target; paused 2 local email automations/u
-    await assert.rejects(
-      () => services.setupHost({
-        assistant,
-        strict: true,
-        toolchainRoot,
-        vault: './vault',
-      }),
-      (error: unknown) =>
-        error instanceof VaultCliError &&
-        error.code === 'INBOX_BOOTSTRAP_STRICT_FAILED' &&
-        cleanupSummaryPattern.test(error.message) &&
-        typeof error.context?.completedCleanupSummary === 'string' &&
-        cleanupSummaryPattern.test(error.context.completedCleanupSummary),
-    )
-    assert.equal(logs.some((message) => cleanupSummaryPattern.test(message)), true)
-    assert.equal(
-      (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
-      'paused',
-    )
-    const afterFirstCronStore = await readFile(cronPaths.cronJobsPath, 'utf8')
-    assert.deepEqual(
-      (JSON.parse(afterFirstCronStore) as {
-        jobs: Array<{ enabled: boolean; jobId: string }>
-      }).jobs.map((job) => ({ enabled: job.enabled, jobId: job.jobId })),
-      [
-        { enabled: false, jobId: 'local-retired-email' },
-        { enabled: true, jobId: 'local-retained-telegram' },
-        { enabled: true, jobId: 'local-retained-linq' },
-      ],
-    )
-    const afterFirstAutomationState = await readFile(automationStatePath, 'utf8')
-    assert.deepEqual(
-      (JSON.parse(afterFirstAutomationState) as {
-        autoReply: Array<{ channel: string }>
-      }).autoReply.map((entry) => entry.channel).sort(),
-      ['custom', 'linq', 'telegram'],
-    )
-    assert.deepEqual(
-      await listAssistantSelfDeliveryTargets(homeDirectory),
-      retainedSelfDeliveryTargetsBeforeSetup,
-    )
-
-    const afterFailedSetup = await readFile(paths.inboxConfigPath, 'utf8')
-    const operatorConfigPath = path.join(homeDirectory, '.murph', 'config.json')
-    const afterFailedOperatorConfig = await readFile(operatorConfigPath, 'utf8')
-    assert.equal(JSON.parse(afterFailedSetup).schemaVersion, 2)
-    const second = await services.setupHost({
-      assistant,
-      strict: true,
-      toolchainRoot,
-      vault: './vault',
-    })
-    assert.equal(second.notes.some((note) => note.includes('retired local email')), false)
-    assert.deepEqual(second.bootstrap?.doctor.connectors, [
-      {
-        id: 'telegram:bot',
-        source: 'telegram',
-        enabled: true,
-        accountId: 'bot',
-        options: { backfillLimit: 25 },
-      },
-    ])
-    assert.equal(await readFile(paths.inboxConfigPath, 'utf8'), afterFailedSetup)
-    assert.equal(await readFile(automationStatePath, 'utf8'), afterFirstAutomationState)
-    assert.equal(await readFile(cronPaths.cronJobsPath, 'utf8'), afterFirstCronStore)
-    assert.equal(await readFile(operatorConfigPath, 'utf8'), afterFailedOperatorConfig)
-    assert.equal(
-      (await listAutomations({ vaultRoot: vaultPath })).items[0]?.status,
-      'paused',
-    )
-    assert.equal(
-      logs.filter((message) => cleanupSummaryPattern.test(message)).length,
-      1,
-    )
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test('createSetupServices keeps active and retired provider credentials out of provisioning subprocess envs', async () => {
+test('createSetupServices keeps prompted provider credentials out of provisioning subprocess envs', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-provider-env-'))
   const cwd = path.join(root, 'workspace')
   const homeDirectory = path.join(root, 'home')
@@ -1838,9 +1432,7 @@ test('createSetupServices keeps active and retired provider credentials out of p
   await writeFile(whisperModelPath, 'model', 'utf8')
 
   const commandEnvs: NodeJS.ProcessEnv[] = []
-  const logs: string[] = []
   const setupCredentialEnv: NodeJS.ProcessEnv = {
-    AGENTMAIL_API_KEY: 'retired_agentmail_secret_SENTINEL',
     JUNCTION_API_KEY: 'junction_key_SENTINEL',
     JUNCTION_CLIENT_USER_ID_SECRET: 'junction_user_secret_SENTINEL',
     OURA_CLIENT_ID: 'oura_client_id_SENTINEL',
@@ -1869,9 +1461,6 @@ test('createSetupServices keeps active and retired provider credentials out of p
       }),
       getCwd: () => cwd,
       getHomeDirectory: () => homeDirectory,
-      log(message) {
-        logs.push(message)
-      },
       platform: () => 'linux',
       resolveCliBinPath: () => cliBinPath,
       async runCommand(input) {
@@ -1938,7 +1527,6 @@ test('createSetupServices keeps active and retired provider credentials out of p
     assert.equal(JSON.stringify(result).includes('venice_secret_SENTINEL'), false)
     for (const value of Object.values(setupCredentialEnv)) {
       assert.equal(JSON.stringify(result).includes(value ?? ''), false)
-      assert.equal(logs.some((message) => message.includes(value ?? '')), false)
     }
     assert.deepEqual(
       result.wearables.map((wearable) => [wearable.wearable, wearable.ready]),

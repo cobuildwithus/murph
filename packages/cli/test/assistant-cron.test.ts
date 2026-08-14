@@ -296,17 +296,6 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
   process.env.HOME = homeRoot
 
   try {
-    await saveAssistantSelfDeliveryTarget(
-      {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: 'retired@example.test',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      },
-      homeRoot,
-    )
     await assert.rejects(
       () =>
         addAssistantCronJob({
@@ -317,17 +306,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
             every: '2h',
           }),
         }),
-      (error: unknown) => {
-        assert.match(
-          error instanceof Error ? error.message : String(error),
-          /must declare an outbound channel and delivery route/u,
-        )
-        assert.doesNotMatch(
-          error instanceof Error ? error.message : String(error),
-          /email/u,
-        )
-        return true
-      },
+      /must declare an outbound channel and delivery route/u,
     )
 
     await assert.rejects(

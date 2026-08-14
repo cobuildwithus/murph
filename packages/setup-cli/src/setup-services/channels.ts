@@ -68,8 +68,7 @@ export async function configureSetupChannels(input: {
       desiredChannels: configured
         .filter((channel) => channel.autoReply)
         .map((channel) => channel.channel),
-      isManagedChannel: (channel) =>
-        channel === 'email' || channel === 'telegram',
+      isManagedChannel: (channel) => channel === 'telegram',
       vault: input.vault,
     })
   }

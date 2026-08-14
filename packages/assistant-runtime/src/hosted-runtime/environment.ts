@@ -237,8 +237,6 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES = [
   "DEVICE_SYNC_",
   "NPM_CONFIG_",
   "npm_config_",
-  // Retired provider configuration remains permanently non-forwardable.
-  "AGENTMAIL_",
   "WRANGLER_",
 ] as const;
 let hostedProcessEnvironmentQueue: Promise<void> = Promise.resolve();

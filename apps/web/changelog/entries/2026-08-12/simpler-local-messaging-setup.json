@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Simpler local messaging setup",
     "summary": "Local Murph setup now focuses on Telegram and no longer asks you to configure a separate email inbox.",
-    "details": "Existing local email inbox settings are removed without blocking supported messaging, scheduled local-email automations are paused for retargeting, and hosted email conversations, connected-app email actions, and Murph account or service emails are unchanged.",
+    "details": "Hosted email conversations, connected-app email actions, and Murph account or service emails are unchanged.",
     "relevanceTags": ["assistant", "setup", "telegram", "email"],
     "sourcePullRequests": [1751]
   }

@@ -2,22 +2,16 @@ import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/pr
 import os from 'node:os'
 import path from 'node:path'
 import {
-  assertBootstrapStrictReady,
   createIntegratedInboxServices,
   type InboxServices,
 } from '@murphai/inbox-services'
-import {
-  enableAssistantAutoReplyChannelLocal,
-  removeRetiredLocalEmailAutoReplyChannel,
-} from '@murphai/assistant-engine/assistant-state'
-import { pauseUnsupportedLocalEmailAutomations } from '@murphai/assistant-engine/assistant-cron'
+import { enableAssistantAutoReplyChannelLocal } from '@murphai/assistant-engine/assistant-state'
 import {
   createIntegratedVaultServices,
   type VaultServices,
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveEffectiveTopLevelToken } from '@murphai/operator-config/command-helpers'
-import { clearAssistantSelfDeliveryTargets } from '@murphai/operator-config/operator-config'
 import {
   type SetupChannel,
   type SetupConfiguredAssistant,
@@ -69,7 +63,6 @@ import {
 } from './setup-services/tool-provisioning.js'
 
 const SETUP_TOOL_PROVISIONING_CREDENTIAL_ENV_KEYS = [
-  'AGENTMAIL_API_KEY',
   'JUNCTION_API_KEY',
   'JUNCTION_CLIENT_USER_ID_SECRET',
   'OURA_CLIENT_ID',
@@ -227,10 +220,6 @@ export function createSetupServices(
     const tools = provisioning.tools
 
     let bootstrap: InboxBootstrapResult | null = null
-    let localEmailCleanupSummary: string | null = null
-    let pausedLocalEmailAutomationCount = 0
-    let removedLocalEmailAutoReply = false
-    let removedLocalEmailSelfDeliveryTargetCount = 0
     const vaultMetadataPath = path.join(vault, 'vault.json')
     const hasExistingVault = await fileExists(vaultMetadataPath)
 
@@ -275,20 +264,11 @@ export function createSetupServices(
         }),
       )
 
-      pausedLocalEmailAutomationCount = (
-        await pauseUnsupportedLocalEmailAutomations({ vault })
-      ).pausedAutomationCount
-      removedLocalEmailAutoReply = (
-        await removeRetiredLocalEmailAutoReplyChannel({ vault })
-      ).changed
-      removedLocalEmailSelfDeliveryTargetCount = (
-        await clearAssistantSelfDeliveryTargets('email', homeDirectory)
-      ).length
-
       bootstrap = await inboxServices.bootstrap({
         ffmpegCommand: tools.ffmpegCommand ?? undefined,
         rebuild: input.rebuild,
         requestId,
+        strict,
         vault,
         whisperCommand: tools.whisperCommand ?? undefined,
         whisperModelPath: tools.whisperModelPath,
@@ -304,51 +284,6 @@ export function createSetupServices(
         }),
       )
 
-      const retiredLocalEmailCheck = bootstrap.doctor.checks.find(
-        (check) => check.name === 'retired-local-email',
-      )
-      const removedLocalEmailConnectorCount =
-        typeof retiredLocalEmailCheck?.details?.removedConnectorCount === 'number'
-          ? retiredLocalEmailCheck.details.removedConnectorCount
-          : 0
-      if (
-        removedLocalEmailConnectorCount > 0 ||
-        removedLocalEmailAutoReply ||
-        removedLocalEmailSelfDeliveryTargetCount > 0 ||
-        pausedLocalEmailAutomationCount > 0
-      ) {
-        localEmailCleanupSummary =
-          `Removed ${removedLocalEmailConnectorCount} retired local email inbox source${removedLocalEmailConnectorCount === 1 ? '' : 's'}, ${removedLocalEmailAutoReply ? 1 : 0} retired local email auto-reply setting${removedLocalEmailAutoReply ? '' : 's'}, and ${removedLocalEmailSelfDeliveryTargetCount} saved local email self-delivery target${removedLocalEmailSelfDeliveryTargetCount === 1 ? '' : 's'}; paused ${pausedLocalEmailAutomationCount} local email automation${pausedLocalEmailAutomationCount === 1 ? '' : 's'}. Use Telegram for local inbox messaging, and retarget paused automations to Telegram or Linq before reactivating them.`
-        notes.push(localEmailCleanupSummary)
-      }
-
-      if (strict) {
-        try {
-          assertBootstrapStrictReady({
-            ...bootstrap.doctor,
-            vault: bootstrap.vault,
-          })
-        } catch (error) {
-          if (localEmailCleanupSummary) {
-            log(localEmailCleanupSummary)
-          }
-          if (
-            localEmailCleanupSummary &&
-            error instanceof VaultCliError &&
-            error.code === 'INBOX_BOOTSTRAP_STRICT_FAILED'
-          ) {
-            throw new VaultCliError(
-              error.code,
-              `${error.message}\n\n${localEmailCleanupSummary}`,
-              {
-                ...(error.context ?? {}),
-                completedCleanupSummary: localEmailCleanupSummary,
-              },
-            )
-          }
-          throw error
-        }
-      }
     }
 
     await ensureCliShims({

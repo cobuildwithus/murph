@@ -726,31 +726,27 @@ function makeBootstrapResult(vault: string, options?: {
       ok: true,
       checks: options?.doctorChecks ?? [],
       connectors: [],
-      parserToolchain: {
-        configPath: '.runtime/operations/parsers/toolchain.json',
-        discoveredAt: '2026-03-13T12:05:00.000Z',
-        tools: {
-          ffmpeg: {
-            available: true,
-            command: '/usr/local/bin/ffmpeg',
-            reason: 'ffmpeg CLI available.',
-            source: 'config' as const,
-          },
-          whisper: {
-            available: true,
-            command:
-              options?.whisperCommand ??
-              options?.parserToolchainPath ??
-              '/usr/local/bin/whisper-cli',
-            modelPath:
-              options?.whisperModelPath ??
-              options?.parserToolchainPath ??
-              '/tmp/model.bin',
-            reason: 'whisper.cpp CLI and model path configured.',
-            source: 'config' as const,
-          },
-        },
-      },
+      parserToolchain: options?.parserToolchainPath
+        ? {
+            configPath: '.runtime/operations/parsers/toolchain.json',
+            discoveredAt: '2026-03-13T12:05:00.000Z',
+            tools: {
+              ffmpeg: {
+                available: true,
+                command: '/usr/local/bin/ffmpeg',
+                reason: 'ffmpeg CLI available.',
+                source: 'config' as const,
+              },
+              whisper: {
+                available: true,
+                command: options.whisperCommand ?? options.parserToolchainPath,
+                modelPath: options.whisperModelPath ?? options.parserToolchainPath,
+                reason: 'whisper.cpp CLI and model path configured.',
+                source: 'config' as const,
+              },
+            },
+          }
+        : null,
     },
   }
 }

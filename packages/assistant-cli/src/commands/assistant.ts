@@ -97,17 +97,6 @@ const assistantKnownChannelOptionSchema = z
     const normalized = normalizeAssistantChannelOption(value)
     return normalized === 'telegram' || normalized === 'linq'
   }, 'Known assistant channel names: telegram, linq/iMessage.')
-const assistantSelfDeliveryTargetClearChannelOptionSchema = z
-  .string()
-  .min(1)
-  .refine((value) => {
-    const normalized = normalizeAssistantChannelOption(value)
-    return (
-      normalized === 'telegram' ||
-      normalized === 'linq' ||
-      normalized === 'email'
-    )
-  }, 'Clearable assistant self-target channels: telegram, linq/iMessage, or retired email.')
 const assistantLocalChannelOptionSchema = z
   .string()
   .min(1)
@@ -1162,11 +1151,11 @@ export function registerAssistantCommands(
 
     selfTarget.command('clear', {
       args: z.object({
-        channel: assistantSelfDeliveryTargetClearChannelOptionSchema
+        channel: assistantKnownChannelOptionSchema
           .optional()
-          .describe('Optional saved outbound channel to clear. Retired email is accepted only for cleanup. Omit to clear all saved self-targets.'),
+          .describe('Optional saved outbound channel to clear. Omit to clear all saved self-targets.'),
       }),
-      description: 'Clear one saved self-delivery target, including a retired email target, or remove all of them.',
+      description: 'Clear one saved self-delivery target or remove all of them.',
       options: z.object({
         requestId: requestIdSchema,
       }),

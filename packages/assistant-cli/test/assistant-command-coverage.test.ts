@@ -242,9 +242,6 @@ function readCommand(
 ): {
   description?: string
   hint?: string
-  args?: {
-    safeParse: (value: unknown) => { success: boolean }
-  }
   options?: {
     shape: Record<string, { description?: string } | undefined>
   }
@@ -255,9 +252,6 @@ function readCommand(
     | {
         description?: string
         hint?: string
-        args?: {
-          safeParse: (value: unknown) => { success: boolean }
-        }
         options?: {
           shape: Record<string, { description?: string } | undefined>
         }
@@ -765,12 +759,6 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
     commandMocks.applyAssistantSelfDeliveryTargetDefaults.mock.calls.length,
     1,
   )
-  assert.deepEqual(
-    commandMocks.applyAssistantSelfDeliveryTargetDefaults.mock.calls[0]?.[1],
-    {
-      allowSingleSavedTargetFallback: true,
-    },
-  )
   assert.deepEqual(commandMocks.deliverAssistantMessage.mock.calls[0]?.[0], {
     alias: undefined,
     channel: 'telegram',
@@ -1211,23 +1199,6 @@ test('self-target commands preserve retained channel inspection and save Telegra
     },
     options: {},
   })
-  commandMocks.clearAssistantSelfDeliveryTargets.mockResolvedValueOnce(['email'])
-  const clearRetiredEmailResult = await readCommand(
-    selfTarget.commands,
-    'clear',
-  ).run({
-    args: {
-      channel: 'email',
-    },
-    options: {},
-  })
-
-  const showCommand = readCommand(selfTarget.commands, 'show')
-  const setCommand = readCommand(selfTarget.commands, 'set')
-  const clearCommand = readCommand(selfTarget.commands, 'clear')
-  assert.equal(showCommand.args?.safeParse({ channel: 'email' }).success, false)
-  assert.equal(setCommand.args?.safeParse({ channel: 'email' }).success, false)
-  assert.equal(clearCommand.args?.safeParse({ channel: 'email' }).success, true)
 
   assert.deepEqual(listResult, {
     configPath: 'redacted:/tmp/operator-config.json',
@@ -1257,10 +1228,6 @@ test('self-target commands preserve retained channel inspection and save Telegra
     clearedChannels: ['linq'],
     configPath: 'redacted:/tmp/operator-config.json',
   })
-  assert.deepEqual(clearRetiredEmailResult, {
-    clearedChannels: ['email'],
-    configPath: 'redacted:/tmp/operator-config.json',
-  })
   assert.deepEqual(
     commandMocks.resolveAssistantSelfDeliveryTarget.mock.calls[0]?.[0],
     '  iMessage  ',
@@ -1268,10 +1235,6 @@ test('self-target commands preserve retained channel inspection and save Telegra
   assert.deepEqual(
     commandMocks.clearAssistantSelfDeliveryTargets.mock.calls[0]?.[0],
     'linq',
-  )
-  assert.deepEqual(
-    commandMocks.clearAssistantSelfDeliveryTargets.mock.calls[1]?.[0],
-    'email',
   )
   assert.deepEqual(commandMocks.saveAssistantSelfDeliveryTarget.mock.calls[0]?.[0], {
     channel: 'telegram',

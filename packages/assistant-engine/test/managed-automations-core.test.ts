@@ -13,7 +13,6 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/env'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
-import { saveAssistantSelfDeliveryTarget } from '@murphai/operator-config/operator-config'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -211,66 +210,6 @@ describe('applyMurphManagedAutomations core integration', () => {
       created: 0,
       skipped: 0,
       updated: 0,
-    })
-  })
-
-  it('ignores a retired email self-target locally while retaining hosted fallback', async () => {
-    const vaultRoot = await createVaultRoot()
-    const operatorHomeRoot = join(dirname(vaultRoot), 'operator-home')
-    await mkdir(operatorHomeRoot, { recursive: true })
-    await saveAssistantSelfDeliveryTarget(
-      {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: 'hosted@example.test',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      },
-      operatorHomeRoot,
-    )
-    const seed = MURPH_MANAGED_AUTOMATIONS.find(
-      (candidate) =>
-        candidate.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
-    )
-    if (!seed) {
-      throw new Error('Expected the weekly health digest managed seed.')
-    }
-
-    await expect(
-      applyMurphManagedAutomations({
-        operatorHomeRoot,
-        seeds: [seed],
-        vaultRoot,
-      }),
-    ).resolves.toEqual({
-      created: 0,
-      skipped: 1,
-      updated: 0,
-    })
-
-    await expect(
-      applyMurphManagedAutomations({
-        operatorHomeRoot,
-        routeValidationProfile: 'hosted',
-        seeds: [seed],
-        vaultRoot,
-      }),
-    ).resolves.toEqual({
-      created: 1,
-      skipped: 0,
-      updated: 0,
-    })
-    await expect(
-      showAutomation({
-        automationId: seed.automationId,
-        vaultRoot,
-      }),
-    ).resolves.toMatchObject({
-      route: {
-        channel: 'email',
-        deliveryTarget: 'hosted@example.test',
-      },
     })
   })
 

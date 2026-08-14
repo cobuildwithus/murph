@@ -10,6 +10,7 @@ import type {
   InboxServices,
 } from './types.js'
 import {
+  assertBootstrapStrictReady,
   toCliParserToolchain,
   toParserToolChecks,
 } from '../inbox-services/parser.js'
@@ -17,7 +18,7 @@ import {
   ensureConfigFile,
   ensureDirectory,
   findConnector,
-  readConfigWithReconciliation,
+  readConfig,
   rebuildRuntime,
 } from '../inbox-services/state.js'
 import {
@@ -50,7 +51,7 @@ export function createInboxBootstrapDoctorOps(
       createdPaths,
       paths.absoluteVaultRoot,
     )
-    const configReconciliation = await ensureConfigFile(paths, createdPaths)
+    await ensureConfigFile(paths, createdPaths)
 
     if (!(await fileExists(paths.inboxDbPath))) {
       createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath))
@@ -78,8 +79,6 @@ export function createInboxBootstrapDoctorOps(
       configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
       createdPaths,
       rebuiltCaptures,
-      removedLegacyEmailConnectorCount:
-        configReconciliation.removedLegacyEmailConnectorCount,
     }
   }
 
@@ -208,30 +207,17 @@ export function createInboxBootstrapDoctorOps(
   }
 
   const runConfigDoctorCheck = async (context: DoctorContext): Promise<void> => {
-    const reconciliation = await runDoctorCheck(context, {
-      run: () => readConfigWithReconciliation(context.paths),
-      onSuccess: (result) => [
+    const config = await runDoctorCheck(context, {
+      run: () => readConfig(context.paths),
+      onSuccess: () =>
         passCheck('config', 'Inbox runtime config parsed successfully.'),
-        ...(result.removedLegacyEmailConnectorCount > 0
-          ? [
-              warnCheck(
-                'retired-local-email',
-                `Removed ${result.removedLegacyEmailConnectorCount} retired local email inbox source${result.removedLegacyEmailConnectorCount === 1 ? '' : 's'}. Use Telegram for local messaging.`,
-                {
-                  removedConnectorCount:
-                    result.removedLegacyEmailConnectorCount,
-                },
-              ),
-            ]
-          : []),
-      ],
       onError: (error) =>
         failCheck('config', 'Inbox runtime config is missing or invalid.', {
           error: errorMessage(error),
         }),
     })
 
-    context.config = reconciliation?.config ?? null
+    context.config = config
   }
 
   const runRuntimeDbDoctorCheck = async (
@@ -397,9 +383,6 @@ export function createInboxBootstrapDoctorOps(
       requestId: string | null
       sourceId?: string | null
     },
-    options: {
-      removedLegacyEmailConnectorCount?: number
-    } = {},
   ) => {
     const context: DoctorContext = {
       input,
@@ -410,20 +393,6 @@ export function createInboxBootstrapDoctorOps(
       databaseAvailable: false,
       parserToolchain: null,
     }
-    const removedLegacyEmailConnectorCount =
-      options.removedLegacyEmailConnectorCount ?? 0
-    if (removedLegacyEmailConnectorCount > 0) {
-      context.checks.push(
-        warnCheck(
-          'retired-local-email',
-          `Removed ${removedLegacyEmailConnectorCount} retired local email inbox source${removedLegacyEmailConnectorCount === 1 ? '' : 's'}. Use Telegram for local messaging.`,
-          {
-            removedConnectorCount: removedLegacyEmailConnectorCount,
-          },
-        ),
-      )
-    }
-
     if (!(await runBaselineDoctorChecks(context))) {
       return finalizeDoctorResult(context)
     }
@@ -484,17 +453,15 @@ export function createInboxBootstrapDoctorOps(
     async bootstrap(input) {
       const initResult = await initInboxRuntime(input)
       const setupResult = await setupInboxToolchain(input)
-      const doctorResult = await buildDoctorResult(
-        {
-          vault: input.vault,
-          requestId: input.requestId,
-          sourceId: null,
-        },
-        {
-          removedLegacyEmailConnectorCount:
-            initResult.removedLegacyEmailConnectorCount,
-        },
-      )
+      const doctorResult = await buildDoctorResult({
+        vault: input.vault,
+        requestId: input.requestId,
+        sourceId: null,
+      })
+
+      if (input.strict) {
+        assertBootstrapStrictReady(doctorResult)
+      }
 
       return {
         vault: initResult.vault,
@@ -523,11 +490,7 @@ export function createInboxBootstrapDoctorOps(
     },
 
     async init(input) {
-      const {
-        removedLegacyEmailConnectorCount: _removedLegacyEmailConnectorCount,
-        ...result
-      } = await initInboxRuntime(input)
-      return result
+      return initInboxRuntime(input)
     },
 
     async doctor(input) {

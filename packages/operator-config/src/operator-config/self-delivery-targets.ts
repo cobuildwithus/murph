@@ -146,7 +146,6 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
   dependencies: AssistantSelfDeliveryTargetDependencies,
   options: {
     allowSingleSavedTargetFallback?: boolean
-    includeEmailInSingleSavedTargetFallback?: boolean
   } | undefined,
   homeDirectory: string,
 ): Promise<AssistantSelfDeliveryTargetLookupInput> {
@@ -162,11 +161,7 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
         homeDirectory,
       )
     : options?.allowSingleSavedTargetFallback
-      ? await resolveSingleAssistantSelfDeliveryTarget(
-          dependencies,
-          homeDirectory,
-          options.includeEmailInSingleSavedTargetFallback ?? false,
-        )
+      ? await resolveSingleAssistantSelfDeliveryTarget(dependencies, homeDirectory)
       : null
 
   if (!savedTarget) {
@@ -261,12 +256,8 @@ export function normalizeUnknownAssistantSelfDeliveryTargets(
 async function resolveSingleAssistantSelfDeliveryTarget(
   dependencies: AssistantSelfDeliveryTargetDependencies,
   homeDirectory: string,
-  includeEmail: boolean,
 ): Promise<AssistantSelfDeliveryTarget | null> {
-  const targets = (await listAssistantSelfDeliveryTargets(
-    dependencies,
-    homeDirectory,
-  )).filter((target) => includeEmail || target.channel !== 'email')
+  const targets = await listAssistantSelfDeliveryTargets(dependencies, homeDirectory)
   return targets.length === 1 ? targets[0] ?? null : null
 }
 

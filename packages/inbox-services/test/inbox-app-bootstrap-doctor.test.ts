@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 
 const {
+  assertBootstrapStrictReadyMock,
   ensureConfigFileMock,
   ensureDirectoryMock,
   fileExistsMock,
@@ -13,6 +14,7 @@ const {
   toCliParserToolchainMock,
   toParserToolChecksMock,
 } = vi.hoisted(() => ({
+  assertBootstrapStrictReadyMock: vi.fn(),
   ensureConfigFileMock: vi.fn(),
   ensureDirectoryMock: vi.fn(),
   fileExistsMock: vi.fn(),
@@ -32,16 +34,12 @@ vi.mock('../src/inbox-services/state.ts', () => ({
   ensureConfigFile: ensureConfigFileMock,
   ensureDirectory: ensureDirectoryMock,
   findConnector: findConnectorMock,
-  async readConfigWithReconciliation(...args: unknown[]) {
-    return {
-      config: await readConfigMock(...args),
-      removedLegacyEmailConnectorCount: 0,
-    }
-  },
+  readConfig: readConfigMock,
   rebuildRuntime: rebuildRuntimeMock,
 }))
 
 vi.mock('../src/inbox-services/parser.ts', () => ({
+  assertBootstrapStrictReady: assertBootstrapStrictReadyMock,
   toCliParserToolchain: toCliParserToolchainMock,
   toParserToolChecks: toParserToolChecksMock,
 }))
@@ -380,10 +378,6 @@ beforeEach(() => {
   ensureConfigFileMock.mockImplementation(
     async (_paths: ReturnType<typeof createPaths>, createdPaths: string[]) => {
       createdPaths.push('.runtime/operations/inbox/config.json')
-      return {
-        config: { connectors: [] },
-        removedLegacyEmailConnectorCount: 0,
-      }
     },
   )
   readConfigMock.mockResolvedValue({ connectors: [] })
@@ -401,6 +395,7 @@ beforeEach(() => {
         ? false
         : false,
   )
+  assertBootstrapStrictReadyMock.mockImplementation(() => undefined)
   toCliParserToolchainMock.mockImplementation(() => createParserToolchain())
   toParserToolChecksMock.mockImplementation(() => [
     passCheck('parser-ffmpeg', 'ffmpeg configured'),
@@ -408,7 +403,7 @@ beforeEach(() => {
   ])
 })
 
-test('bootstrap initializes runtime, writes parser config, and returns doctor readiness', async () => {
+test('bootstrap initializes runtime, writes parser config, and optionally enforces strict readiness', async () => {
   readConfigMock.mockResolvedValue({
     connectors: [createConnector('telegram', 'telegram:bot')],
   })
@@ -476,6 +471,7 @@ test('bootstrap initializes runtime, writes parser config, and returns doctor re
     vault: '/vault',
     whisperModelPath: '/models/base.bin',
   })
+  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 0)
   assert.deepEqual(nonStrict.init.createdPaths, [
     '.runtime',
     '.runtime/operations/inbox',
@@ -512,18 +508,30 @@ test('bootstrap initializes runtime, writes parser config, and returns doctor re
   assert.equal(nonStrict.doctor.ok, true)
   assert.equal(nonStrict.doctor.target, null)
 
-  const repeated = await ops.bootstrap({
+  const strict = await ops.bootstrap({
     requestId: null,
+    strict: true,
     vault: '/vault',
   })
-  assert.equal(repeated.doctor.ok, true)
+  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 1)
+  assert.equal(assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.ok, strict.doctor.ok)
+  assert.deepEqual(
+    assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.checks,
+    strict.doctor.checks,
+  )
   assert.equal(openInboxRuntime.mock.calls.length > 0, true)
   assert.equal(discoverParserToolchain.mock.calls.length > 0, true)
 })
 
-test('bootstrap reports unhealthy configured connectors in doctor output', async () => {
+test('bootstrap reports unhealthy configured connectors in doctor output and strict mode rejects them', async () => {
   readConfigMock.mockResolvedValue({
     connectors: [createConnector('telegram', 'telegram:bot')],
+  })
+
+  assertBootstrapStrictReadyMock.mockImplementation((result: { ok: boolean }) => {
+    if (!result.ok) {
+      throw new Error('strict bootstrap failed')
+    }
   })
 
   const ops = createInboxBootstrapDoctorOps(createEnvironment())
@@ -539,6 +547,18 @@ test('bootstrap reports unhealthy configured connectors in doctor output', async
     ),
     true,
   )
+
+  await assert.rejects(
+    () =>
+      ops.bootstrap({
+        requestId: null,
+        strict: true,
+        vault: '/vault',
+      }),
+    /strict bootstrap failed/u,
+  )
+  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 1)
+  assert.equal(assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.ok, false)
 })
 
 test('doctor stops after a vault failure and keeps missing config and database paths null', async () => {
