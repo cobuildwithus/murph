@@ -158,7 +158,7 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
   it("resolves a locally encrypted line only when its blind lookup key matches", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: TEST_KEYRING_ENTRIES,
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const phoneNumber = "+15550100001";
     const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
@@ -185,7 +185,7 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
   it("fails closed for absent keys, missing rows, and mismatched lines", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: TEST_KEYRING_ENTRIES,
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const findUnique = vi.fn()
       .mockResolvedValueOnce(null)
@@ -216,7 +216,7 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
   it("surfaces a malformed local line envelope for the caller to isolate", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: TEST_KEYRING_ENTRIES,
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
 
     await expect(readHostedLinqLinePhoneNumberByLookupKey({
@@ -754,7 +754,7 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
   it("prepares every line before opening one transaction and issuing one bulk statement", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: TEST_KEYRING_ENTRIES,
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const events: string[] = [];
     const queryRaw = vi.fn().mockImplementation(() => {
@@ -807,7 +807,7 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
   it("rejects invalid preparation before transaction entry", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: TEST_KEYRING_ENTRIES,
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const transaction = vi.fn();
 
@@ -878,13 +878,16 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
   it("updates an existing legacy lookup-key row and bootstraps missing configured caps", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: TEST_KEYRING_ENTRIES,
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const phoneNumber = "+15550100001";
     const legacyLookupKey = createHostedPhoneLookupKey(phoneNumber);
 
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-    clearHostedOnboardingEnvCache();
+    restoreContactPrivacyKeyring();
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: TEST_KEYRING_ENTRIES,
+    });
     const currentLookupKey = createHostedPhoneLookupKey(phoneNumber);
 
     if (!legacyLookupKey || !currentLookupKey) {
