@@ -2,9 +2,8 @@
  * Bounded, in-memory-only warm path for the browser vault.
  *
  * Holds at most one decrypted ready snapshot and one in-flight session load in
- * module memory so an authenticated landing page can warm the replica before
- * the dashboard mounts, and so every dashboard route shares one decrypted
- * replica. Nothing here is persisted: no localStorage, sessionStorage,
+ * module memory so every dashboard route shares one decrypted replica. Nothing
+ * here is persisted: no localStorage, sessionStorage,
  * IndexedDB, Cache Storage, cookies, or service worker. Auth loss clears the
  * snapshot and bumps a generation counter so an older request that resolves
  * after the clear cannot repopulate it.
@@ -61,7 +60,8 @@ export function peekBrowserVaultInFlightLoad(): Promise<BrowserVaultWarmLoadOutc
 }
 
 /**
- * Start (or reuse) the single warm load. The store owns reusable replica work;
+ * Start (or reuse) the single dashboard load. The store owns reusable
+ * replica work;
  * callers that cross an authority boundary must separately decide when its
  * cached result may be published.
  */

@@ -113,23 +113,40 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     take?: number;
     where: {
       connectionId: string;
-      sourceProviderSlug?: {
-        in: string[];
-      };
-      status?: {
-        not?: string;
-      };
+      sourceProviderSlug?: string | { in: string[] };
+      status?: string | { not?: string };
+      OR?: Array<{
+        lastErrorCode?: null;
+        NOT?: { lastErrorCode: { in: string[] } };
+      }>;
     };
   }) => {
     const sorted = [...records.values()]
       .filter((record) => record.connectionId === input.where.connectionId)
       .filter((record) =>
-        input.where.sourceProviderSlug?.in
-          ? input.where.sourceProviderSlug.in.includes(record.sourceProviderSlug)
-          : true
+        typeof input.where.sourceProviderSlug === "string"
+          ? record.sourceProviderSlug === input.where.sourceProviderSlug
+          : input.where.sourceProviderSlug?.in
+            ? input.where.sourceProviderSlug.in.includes(record.sourceProviderSlug)
+            : true
       )
       .filter((record) =>
-        input.where.status?.not ? record.status !== input.where.status.not : true
+        typeof input.where.status === "string"
+          ? record.status === input.where.status
+          : input.where.status?.not
+            ? record.status !== input.where.status.not
+            : true
+      )
+      .filter((record) =>
+        input.where.OR
+          ? input.where.OR.some((clause) =>
+              clause.lastErrorCode === null
+                ? record.lastErrorCode === null
+                : clause.NOT
+                  ? !clause.NOT.lastErrorCode.in.includes(record.lastErrorCode ?? "")
+                  : false
+            )
+          : true
       )
       .sort((left, right) =>
         right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
@@ -523,6 +540,130 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       ],
       where: {
         connectionId: "dsc_parent",
+      },
+    }));
+  });
+
+  it("bounds ordinary source admission to one exact candidate query", async () => {
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_other",
+        sourceInstanceKey: "src_other",
+        sourceProviderSlug: "garmin",
+      }),
+      createSourceRecord({
+        id: "dcs_target",
+        sourceInstanceKey: "src_target",
+        sourceProviderSlug: "oura",
+      }),
+    ]);
+
+    await expect(store.listConnectionSourceAdmissionCandidates({
+      connectionId: "dsc_parent",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 1,
+      where: {
+        connectionId: "dsc_parent",
+        sourceProviderSlug: { in: ["oura"] },
+      },
+    }));
+  });
+
+  it("returns one exact blocked source when no admitted candidate exists", async () => {
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_target",
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceInstanceKey: "src_target",
+        sourceProviderSlug: "oura",
+      }),
+      createSourceRecord({
+        id: "dcs_unrelated",
+        sourceInstanceKey: "src_unrelated",
+        sourceProviderSlug: "garmin",
+      }),
+    ]);
+
+    await expect(store.listConnectionSourceAdmissionCandidates({
+      connectionId: "dsc_parent",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceProviderSlug: "oura",
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 1,
+      where: {
+        connectionId: "dsc_parent",
+        sourceProviderSlug: { in: ["oura"] },
+      },
+    }));
+  });
+
+  it("collapses Apple Health aliases before source admission so a same-epoch fence wins", async () => {
+    const connectionId = "dsc_parent";
+    const canonicalKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "apple_health_kit",
+    });
+    if (!canonicalKey) {
+      throw new Error("Expected a canonical Apple Health source key.");
+    }
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        connectionId,
+        id: "dcs_canonical",
+        lifecycleEpoch: 4,
+        sourceInstanceKey: canonicalKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }),
+      createSourceRecord({
+        connectionId,
+        id: "dcs_alias_fence",
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        lifecycleEpoch: 4,
+        sourceInstanceKey: "legacy_apple_health",
+        sourceProviderSlug: "apple_health",
+        status: "disconnected",
+      }),
+    ]);
+
+    await expect(store.listConnectionSourceAdmissionCandidates({
+      connectionId,
+      sourceProviderSlug: "apple_healthkit",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        lifecycleEpoch: 4,
+        sourceInstanceKey: canonicalKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "disconnected",
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 3,
+      where: {
+        connectionId,
+        sourceProviderSlug: {
+          in: expect.arrayContaining([
+            "apple_health",
+            "apple_health_kit",
+            "apple_healthkit",
+          ]),
+        },
       },
     }));
   });

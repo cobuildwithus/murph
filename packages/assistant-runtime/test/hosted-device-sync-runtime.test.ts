@@ -10185,7 +10185,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation keeps queued-job continuation in the runtime wake projection", async () => {
+  test("reconciliation keeps local continuation clocks out of canonical cadence publication", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-schedule-owner-",
     );
@@ -10194,11 +10194,11 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
     const localJobWakeAt = "2026-04-04T12:15:00.000Z";
     const providerReconcileAt = "2026-04-04T14:00:00.000Z";
-    let appliedRequest: ApplyUpdatesRequest | null = null;
+    const appliedRequests: ApplyUpdatesRequest[] = [];
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...createNoDirtyStateDeviceSyncPortMethods(),
       async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-        appliedRequest = input;
+        appliedRequests.push(input);
         return {
           appliedAt: "2026-04-04T09:11:01.000Z",
           updates: input.updates.map((update) => ({
@@ -10261,10 +10261,34 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      const request = requireApplyUpdatesRequest(appliedRequest);
+      const request = requireApplyUpdatesRequest(appliedRequests[0] ?? null);
       assert.equal(request.updates.length, 1);
       assert.deepEqual(request.updates[0]?.localState, {
         nextReconcileAt: providerReconcileAt,
+      });
+
+      getStore(service).patchAccount(localAccountId, {
+        displayName: "Local cadence owner",
+      });
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deferNextReconcileAtForLocalAccountId: localAccountId,
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T09:12:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(appliedRequests[1], {
+        occurredAt: "2026-04-04T09:12:00.000Z",
+        updates: [{
+          connection: {
+            displayName: "Local cadence owner",
+          },
+          connectionId: "hosted_conn_schedule_owner",
+          observedConnectedAt: "2026-04-04T09:00:00.000Z",
+          observedUpdatedAt: "2026-04-04T09:05:00.000Z",
+        }],
       });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);

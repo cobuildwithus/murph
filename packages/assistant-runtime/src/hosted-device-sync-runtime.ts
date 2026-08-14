@@ -536,11 +536,10 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       account,
       baseline,
       codec,
+      deferNextReconcileAtToBaseline:
+        input.deferNextReconcileAtForLocalAccountId === localAccountId,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
-      nextReconcileAt: input.deferNextReconcileAtForLocalAccountId === localAccountId
-        ? baseline?.localState.nextReconcileAt ?? null
-        : account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -1483,9 +1482,9 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   account: StoredDeviceSyncAccount;
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
+  deferNextReconcileAtToBaseline: boolean;
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
-  nextReconcileAt: string | null;
   observedTokenVersion: number | null;
   sourceApplyEnabled: boolean;
   sources: readonly StoredDeviceConnectionSource[];
@@ -1553,12 +1552,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     }
 
     assignErrorFieldUpdate(update, input.account, baselineLocalState);
-    assignNextReconcileAtUpdate(
-      update,
-      input.account.status,
-      input.nextReconcileAt,
-      baselineLocalState?.nextReconcileAt ?? null,
-    );
+    assignCanonicalNextReconcileAtUpdate(update, {
+      account: input.account,
+      baseline: baselineLocalState,
+      deferToBaseline: input.deferNextReconcileAtToBaseline,
+    });
     assignFailureDiagnosticUpdate(
       update,
       input.account.lastSyncErrorAt ?? null,
@@ -1611,12 +1609,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     };
   }
 
-  assignNextReconcileAtUpdate(
-    update,
-    input.account.status,
-    input.nextReconcileAt,
-    baselineLocalState?.nextReconcileAt ?? null,
-  );
+  assignCanonicalNextReconcileAtUpdate(update, {
+    account: input.account,
+    baseline: baselineLocalState,
+    deferToBaseline: input.deferNextReconcileAtToBaseline,
+  });
 
   if (!equalHostedDeviceSyncRuntimeCredentials(credential, baselineCredential)) {
     if (credential.kind === "none" && baselineTokenBundle !== null) {
@@ -2637,15 +2634,23 @@ function resolveHostedWakeNextReconcileAt(
     : null;
 }
 
-function assignNextReconcileAtUpdate(
+function assignCanonicalNextReconcileAtUpdate(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
-  status: StoredDeviceSyncAccount["status"],
-  localValue: string | null,
-  baselineValue: string | null,
+  input: {
+    account: Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "status">;
+    baseline: HostedDeviceSyncRuntimeLocalStateSnapshot | null;
+    deferToBaseline: boolean;
+  },
 ): void {
+  const baselineValue = input.baseline?.nextReconcileAt ?? null;
+  const nextReconcileAt = input.deferToBaseline
+    ? baselineValue
+    : input.account.nextReconcileAt ?? null;
+
   if (
-    (status === "reauthorization_required" || status === "disconnected")
-    && localValue === null
+    (input.account.status === "reauthorization_required"
+      || input.account.status === "disconnected")
+    && nextReconcileAt === null
     && baselineValue !== null
   ) {
     update.localState = {
@@ -2655,17 +2660,17 @@ function assignNextReconcileAtUpdate(
     return;
   }
 
-  if (!localValue || localValue === baselineValue) {
+  if (!nextReconcileAt || nextReconcileAt === baselineValue) {
     return;
   }
 
-  // `nextReconcileAt` is owned by device-sync execution, not an append-only
-  // event timestamp. Empty-backfill retry floors may intentionally pull it
-  // earlier; stale hosted replays are still rejected by the web apply
-  // observedUpdatedAt/version fence before localState mutates hosted state.
+  // Canonical publication derives only from the provider-owned account. The
+  // completion fence may retain the already observed Web baseline until its
+  // exact work has been checkpointed; runner-local wake clocks never enter
+  // this boundary.
   update.localState = {
     ...(update.localState ?? {}),
-    nextReconcileAt: localValue,
+    nextReconcileAt,
   } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
 }
 

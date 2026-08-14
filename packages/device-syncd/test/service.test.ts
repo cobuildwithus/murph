@@ -10006,6 +10006,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
+      claimedAt: "2099-03-27T00:00:00.000Z",
       receivedAt: "2099-03-27T00:00:00.000Z",
       processingExpiresAt: "2099-03-27T00:05:00.000Z",
     }),
@@ -10015,6 +10016,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
+      claimedAt: "2099-03-27T00:01:00.000Z",
       receivedAt: "2099-03-27T00:01:00.000Z",
       processingExpiresAt: "2099-03-27T00:06:00.000Z",
     }),
@@ -10026,6 +10028,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
+      claimedAt: "2099-03-27T00:02:00.000Z",
       receivedAt: "2099-03-27T00:02:00.000Z",
       processingExpiresAt: "2099-03-27T00:07:00.000Z",
     }),
@@ -10036,6 +10039,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-release",
+      claimedAt: "2099-03-27T00:03:00.000Z",
       receivedAt: "2099-03-27T00:03:00.000Z",
       processingExpiresAt: "2099-03-27T00:08:00.000Z",
     }),
@@ -10046,6 +10050,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-release",
+      claimedAt: "2099-03-27T00:04:00.000Z",
       receivedAt: "2099-03-27T00:04:00.000Z",
       processingExpiresAt: "2099-03-27T00:09:00.000Z",
     }),
@@ -10056,6 +10061,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-stale",
+      claimedAt: "2099-03-27T00:05:00.000Z",
       receivedAt: "2099-03-27T00:05:00.000Z",
       processingExpiresAt: "2099-03-27T00:06:00.000Z",
     }),
@@ -10065,6 +10071,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-stale",
+      claimedAt: "2099-03-27T00:07:00.000Z",
       receivedAt: "2099-03-27T00:07:00.000Z",
       processingExpiresAt: "2099-03-27T00:12:00.000Z",
     }),
@@ -10083,6 +10090,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-legacy",
+      claimedAt: "2099-03-27T00:09:00.000Z",
       receivedAt: "2099-03-27T00:09:00.000Z",
       processingExpiresAt: "2099-03-27T00:14:00.000Z",
     }),

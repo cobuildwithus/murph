@@ -5,12 +5,14 @@ import type {
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
-import { isDeviceSyncSourceDisconnectFenced } from "@murphai/device-syncd/public-account";
 import {
   buildJunctionProviderSourceInstanceKey,
   canonicalizeJunctionProviderSlug,
   listJunctionDeviceConnectRouteEntries,
 } from "@murphai/device-syncd/connect-config";
+import {
+  isDeviceSyncSourceDisconnectFenced,
+} from "@murphai/device-syncd/public-account";
 
 import {
   generateHostedRandomPrefixedId,
@@ -43,6 +45,21 @@ export const hostedConnectionSourceRecordArgs = {
 
 export type HostedConnectionSourceRecord =
   Prisma.DeviceConnectionSourceGetPayload<typeof hostedConnectionSourceRecordArgs>;
+
+export type HostedConnectionSourceAdmissionCandidate = Omit<
+  Pick<
+    HostedConnectionSourceRecord,
+    | "id"
+    | "lastErrorCode"
+    | "lastErrorMessage"
+    | "lifecycleEpoch"
+    | "lastSeenAt"
+    | "sourceInstanceKey"
+    | "sourceProviderSlug"
+    | "status"
+  >,
+  "lifecycleEpoch"
+> & { lifecycleEpoch: number };
 
 export interface HostedDeviceConnectionSource {
   id: string;
@@ -346,6 +363,37 @@ export class PrismaHostedConnectionSourceStore {
 
     return collapseHostedConnectionSourceRecords(records)
       .map(mapHostedConnectionSourceRecord);
+  }
+
+  async listConnectionSourceAdmissionCandidates(input: {
+    connectionId: string;
+    sourceProviderSlug: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
+    const prisma = input.tx ?? this.prisma;
+    const connectionId = requireConnectionId(input.connectionId);
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug)
+      ?? normalizeSourceProviderSlug(input.sourceProviderSlug);
+    const sourceProviderSlugs = expandCanonicalHostedSourceProviderSlugFilter([
+      sourceProviderSlug,
+    ]);
+    const records = await prisma.deviceConnectionSource.findMany({
+      where: {
+        connectionId,
+        sourceProviderSlug: { in: sourceProviderSlugs },
+      },
+      orderBy: [
+        { lastSeenAt: "desc" },
+        { sourceProviderSlug: "asc" },
+        { sourceInstanceKey: "asc" },
+        { id: "asc" },
+      ],
+      take: sourceProviderSlugs.length,
+      ...hostedConnectionSourceRecordArgs,
+    });
+    return collapseHostedConnectionSourceRecords(records)
+      .filter((record) => record.sourceProviderSlug === sourceProviderSlug)
+      .map(mapHostedConnectionSourceAdmissionCandidate);
   }
 
   async listConnectionSourcesForConnections(
@@ -754,6 +802,21 @@ export function mapHostedConnectionSourceRecord(
     sourceProviderSlug: normalizeSourceProviderSlug(record.sourceProviderSlug),
     status: normalizeSourceStatus(record.status),
     updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
+function mapHostedConnectionSourceAdmissionCandidate(
+  record: HostedConnectionSourceRecord,
+): HostedConnectionSourceAdmissionCandidate {
+  return {
+    id: record.id,
+    lastErrorCode: record.lastErrorCode,
+    lastErrorMessage: record.lastErrorMessage,
+    lifecycleEpoch: readSourceLifecycleEpoch(record.lifecycleEpoch),
+    lastSeenAt: record.lastSeenAt,
+    sourceInstanceKey: record.sourceInstanceKey,
+    sourceProviderSlug: record.sourceProviderSlug,
+    status: record.status,
   };
 }
 

@@ -32,6 +32,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./junction-resources",
     "./junction-source-reconnect",
     "./local-secret-codec",
+    "./prepared-webhook",
     "./provider-configs",
     "./provider-credential-policy",
     "./provider-label",
@@ -62,6 +63,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   assert.deepEqual(packageManifest.exports?.["./local-secret-codec"], {
     default: "./dist/local-secret-codec.js",
     types: "./dist/local-secret-codec.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./prepared-webhook"], {
+    default: "./dist/prepared-webhook.js",
+    types: "./dist/prepared-webhook.d.ts",
   });
   assert.deepEqual(packageManifest.exports?.["./junction-inline-authority"], {
     default: "./dist/junction-inline-authority.js",

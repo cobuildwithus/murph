@@ -496,9 +496,13 @@ export class PrismaHostedConnectionStore {
     return record ? await this.buildDurableConnectionRecord(record) : null;
   }
 
-  async markWebhookReceived(accountId: string, now: string): Promise<void> {
+  async markWebhookReceived(
+    accountId: string,
+    now: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
     const lastWebhookAt = new Date(now);
-    await this.prisma.deviceConnection.updateMany({
+    await (tx ?? this.prisma).deviceConnection.updateMany({
       where: {
         id: accountId,
         OR: [
@@ -593,6 +597,24 @@ export class PrismaHostedConnectionStore {
         scopesJson: normalizeStoredScopes(account.scopes),
         setupExpiresAt: maybeDate(account.setupExpiresAt ?? null),
         setupPhase: normalizeHostedDeviceSyncSetupPhase(account.setupPhase ?? null),
+      },
+      ...hostedConnectionRecordArgs,
+    });
+  }
+
+  async syncDurableConnectionMetadata(
+    connectionId: string,
+    metadata: Record<string, unknown>,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord> {
+    const prisma = tx ?? this.prisma;
+
+    return prisma.deviceConnection.update({
+      where: { id: connectionId },
+      data: {
+        metadataJson: toPrismaJsonObject(
+          sanitizeHostedDeviceSyncConnectionMetadata(metadata),
+        ),
       },
       ...hostedConnectionRecordArgs,
     });

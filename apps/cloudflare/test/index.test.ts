@@ -221,20 +221,20 @@ describe("cloudflare worker routes", () => {
   });
 
   it("keeps runner wake traffic off Cloudflare Queues", async () => {
-    const [deployAutomationSource, wranglerSource] = await Promise.all([
-      readFile(path.join(APP_DIR, "scripts/deploy-automation.ts"), "utf8"),
-      readFile(path.join(APP_DIR, "wrangler.jsonc"), "utf8"),
-    ]);
+    const wranglerSource = await readFile(
+      path.join(APP_DIR, "wrangler.jsonc"),
+      "utf8",
+    );
     const workerSource = await readWorkerEntrypointSource();
 
-    expect(worker).not.toHaveProperty("queue");
-    expect(workerSource).not.toMatch(/\bqueue\s*\(/u);
+    expect(worker).toHaveProperty("queue");
+    expect(workerSource).toMatch(/\bqueue\s*\(/u);
     expect(workerSource).not.toContain("legacy-runner-wake-queue");
     await expect(
       readFile(path.join(APP_DIR, "src/legacy-runner-wake-queue.ts"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
-    expect(deployAutomationSource).not.toMatch(/\bqueues\b/u);
-    expect(wranglerSource).not.toMatch(/\bqueues\b/u);
+    expect(wranglerSource).toContain("murph-hosted-device-webhooks");
+    expect(wranglerSource).not.toContain("RUNNER_WAKE_QUEUE");
   });
 
   it("keeps hosted-local test routes and toggles out of the production Worker graph", async () => {
@@ -264,15 +264,15 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("matchHostedLocalTestUserRoute");
   });
 
-  it("keeps generated worker contracts free of Queue producer bindings", async () => {
+  it("keeps the Queue binding scoped to device-webhook transport", async () => {
     const [workerSource, workerContractsSource] = await Promise.all([
       readWorkerEntrypointSource(),
       readFile(path.join(APP_DIR, "src/worker-contracts.ts"), "utf8"),
     ]);
 
     expect(workerSource).not.toContain("env.RUNNER_WAKE_QUEUE");
-    expect(workerContractsSource).not.toContain("WorkerQueueBinding");
-    expect(workerContractsSource).not.toContain("WorkerQueueMessage");
+    expect(workerContractsSource).toContain("DEVICE_WEBHOOK_QUEUE");
+    expect(workerContractsSource).not.toContain("RUNNER_WAKE_QUEUE");
   });
 
   it("serves a health endpoint even before secrets are configured", async () => {
@@ -336,6 +336,7 @@ describe("cloudflare worker routes", () => {
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
+      "device-webhook-enqueue",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
@@ -369,6 +370,7 @@ describe("cloudflare worker routes", () => {
       "test-temporal-mailbox-signal-fault-consume",
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
+      "device-webhook-enqueue",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
