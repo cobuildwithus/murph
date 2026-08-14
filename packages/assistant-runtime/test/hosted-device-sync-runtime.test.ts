@@ -29,6 +29,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceSyncAccount,
@@ -89,6 +90,44 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 const DEVICE_SYNC_SECRET = "secret-for-tests";
 type ApplyUpdatesRequest = Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0];
+const FROZEN_PRE_EPOCH_SOURCE_APPLY_FIELDS = new Set([
+  "displayName",
+  "firstSeenAt",
+  "lastDataAt",
+  "lastErrorCode",
+  "lastErrorMessage",
+  "lastSeenAt",
+  "observedLastSeenAt",
+  "resourceAvailabilitySummary",
+  "sourceInstanceKey",
+  "sourceProviderSlug",
+  "status",
+]);
+
+function assertFrozenPreEpochSourceApplyAccepts(request: ApplyUpdatesRequest): void {
+  const wireRequest: unknown = JSON.parse(
+    JSON.stringify({ ...request, userId: "member_123" }),
+  );
+  assert.ok(wireRequest !== null && typeof wireRequest === "object");
+  const updates = Reflect.get(wireRequest, "updates");
+  assert.ok(Array.isArray(updates));
+  for (const [updateIndex, update] of updates.entries()) {
+    assert.ok(update !== null && typeof update === "object");
+    const sources = Reflect.get(update, "sources");
+    assert.ok(sources === undefined || Array.isArray(sources));
+    for (const [sourceIndex, source] of (sources ?? []).entries()) {
+      assert.ok(source !== null && typeof source === "object");
+      for (const field of Object.keys(source)) {
+        assert.equal(
+          FROZEN_PRE_EPOCH_SOURCE_APPLY_FIELDS.has(field),
+          true,
+          `Legacy source apply rejects updates[${updateIndex}].sources[${sourceIndex}].${field}`,
+        );
+      }
+    }
+  }
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest(wireRequest, "member_123");
+}
 
 beforeEach(() => {
   hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
@@ -2842,6 +2881,135 @@ describe("hosted device-sync runtime", () => {
         projectedSources.map((source) => (source as { lastDataAt?: string | null }).lastDataAt),
         ["2026-04-06T10:08:00.000Z"],
       );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test.each([
+    {
+      hostedLifecycleEpoch: undefined,
+      protocol: "pre-epoch Web",
+    },
+    {
+      hostedLifecycleEpoch: 2,
+      protocol: "epoch-bearing Web",
+    },
+  ])("Junction reconciliation preserves lifecycle epoch wire presence for $protocol", async ({
+    hostedLifecycleEpoch,
+  }) => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-junction-epoch-presence-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected during source reconciliation.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity", "sleep"],
+        timeseriesResources: ["blood_pressure", "caffeine"],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const hostedConnectionId = `hosted_conn_junction_epoch_presence_${hostedLifecycleEpoch ?? 1}`;
+    const source = (sourceProviderSlug: "apple_health" | "apple_health_kit") => ({
+      displayName: "Apple Health",
+      firstSeenAt: "2026-04-06T09:00:00.000Z",
+      lastDataAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-04-06T10:05:00.000Z",
+      resourceCount: 2,
+      resourceAvailabilitySummary: {
+        activity: true,
+        sleep: true,
+      },
+      sourceInstanceKey: `legacy-${sourceProviderSlug}`,
+      sourceProviderSlug,
+      status: "connected" as const,
+      ...(hostedLifecycleEpoch === undefined ? {} : { lifecycleEpoch: hostedLifecycleEpoch }),
+    });
+    const snapshot = buildRuntimeSnapshot({
+      capabilities: { connectionSourceApply: true },
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: `junction-epoch-presence-${hostedLifecycleEpoch ?? 1}`,
+      provider: "junction",
+      sources: [source("apple_health"), source("apple_health_kit")],
+    });
+    const appliedRequests: ApplyUpdatesRequest[] = [];
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(request) {
+        appliedRequests.push(request);
+        return {
+          appliedAt: "2026-04-06T10:10:01.000Z",
+          updates: [],
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during source reconciliation");
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:06:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const [hydratedSource] = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      });
+      assert.equal(hydratedSource?.sourceProviderSlug, "apple_health_kit");
+      assert.equal(hydratedSource?.lifecycleEpoch, hostedLifecycleEpoch ?? 1);
+
+      getStore(service).markConnectionSourceDataReceived({
+        connectionId: localAccountId,
+        now: "2026-04-06T10:08:00.000Z",
+        sourceProviderSlug: "apple_health_kit",
+      });
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.equal(appliedRequests.length, 1);
+      const projectedSources = appliedRequests[0]?.updates.flatMap(
+        (update) => update.sources ?? [],
+      ) ?? [];
+      assert.equal(projectedSources.length, 1);
+      assert.equal(projectedSources[0]?.sourceProviderSlug, "apple_health_kit");
+      assert.equal(projectedSources[0]?.lastDataAt, "2026-04-06T10:08:00.000Z");
+      if (hostedLifecycleEpoch === undefined) {
+        assert.equal(Object.hasOwn(projectedSources[0] ?? {}, "observedLifecycleEpoch"), false);
+        assertFrozenPreEpochSourceApplyAccepts(appliedRequests[0]!);
+      } else {
+        assert.equal(projectedSources[0]?.observedLifecycleEpoch, hostedLifecycleEpoch);
+      }
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

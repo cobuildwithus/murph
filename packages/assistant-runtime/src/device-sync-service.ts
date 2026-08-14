@@ -205,6 +205,9 @@ function mergeHostedJunctionSourceLifecycle<T extends HostedJunctionSource>(
   connectionId: string | undefined,
 ): T {
   const lifecycleEpoch = Math.max(...candidates.map((source) => source.lifecycleEpoch ?? 1));
+  const lifecycleEpochWasObserved = candidates.some(
+    (source) => source.lifecycleEpoch !== undefined,
+  );
   const ordered = [...candidates].sort((left, right) =>
     (right.lifecycleEpoch ?? 1) - (left.lifecycleEpoch ?? 1)
     || HOSTED_JUNCTION_SOURCE_STATUS_AUTHORITY[right.status]
@@ -249,7 +252,7 @@ function mergeHostedJunctionSourceLifecycle<T extends HostedJunctionSource>(
   return {
     ...state,
     sourceProviderSlug,
-    lifecycleEpoch,
+    ...(lifecycleEpochWasObserved ? { lifecycleEpoch } : {}),
     resourceAvailabilitySummary,
     ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
     ...(firstSeenAt ? { firstSeenAt } : {}),

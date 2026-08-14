@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -186,6 +186,11 @@ Updated: 2026-08-13
   at 33 roots; the schedule-time active-key lookup remains exactly 33 by 12, or
   396. Filtered local reads expand only the catalog-equivalent slugs so legacy
   alias-only rows participate in pre-provider admission and arrival stamping.
+- Preserve lifecycle-epoch wire presence independently from its effective local
+  value. Old-Web snapshots omit the field and still hydrate locally as epoch 1,
+  but canonicalization must not manufacture a field that a strict pre-epoch Web
+  apply parser rejects. If any canonical candidate supplied an epoch, retain the
+  maximum observed value so current Web stale-apply fencing remains intact.
 
 ## ReviewGPT evidence and finding ledger
 
@@ -227,6 +232,16 @@ Updated: 2026-08-13
   local filtered reads and arrival stamping include semantic aliases; and
   blood-pressure work is lifecycle-bound before provider access. Redundant
   importer, diagnostic, and second-owner rewrites were removed from scope.
+- Valid final ReviewGPT round 3 reviewed the immutable remediated snapshot
+  `934caa27674251fd12bf416d96a6b8bbc21401c3` with `gpt-5-6-pro` and returned
+  `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE`. Accepted: Junction
+  canonicalization had converted an omitted old-Web epoch into a present epoch
+  1, so an ordinary source delta would send `observedLifecycleEpoch` to the
+  strict pre-epoch apply parser and reject the complete callback before any
+  mutation. The correction keeps effective epoch 1 for local authority while
+  serializing an epoch only when at least one hosted candidate supplied it.
+  Production-path proof covers old-Web Apple aliases through JSON wire shape and
+  a frozen pre-epoch allowlist, plus the complementary epoch-bearing reply.
 
 ## Verification
 
