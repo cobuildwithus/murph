@@ -27,7 +27,7 @@ type Frame = {
 };
 
 const ALLOWED_TAGS = new Set(
-  "aside b blockquote br caption cite code del details em footer h2 h3 hr i ins li mark ol p s strike strong sub summary sup table td tg-spoiler th tr u ul".split(
+  "aside b blockquote br caption cite code details em footer h2 h3 hr i ins li mark ol p strong summary table td th tr u ul".split(
     " ",
   ),
 );
