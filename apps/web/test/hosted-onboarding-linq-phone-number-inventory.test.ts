@@ -24,7 +24,7 @@ let restoreContactPrivacyKeyring: (() => void) | null = null;
 beforeEach(() => {
   restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
     currentVersion: "v1",
-    entries: TEST_KEYRING_ENTRIES,
+    entries: { v1: TEST_KEYRING_ENTRIES.v1 },
   });
 });
 

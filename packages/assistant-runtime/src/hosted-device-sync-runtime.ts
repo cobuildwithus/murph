@@ -125,6 +125,11 @@ interface HostedDirtyDeviceSyncApplyResult {
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
 }
 
+interface HostedDirtyDeviceSyncAdmissionResult {
+  admittedJobCount: number;
+  pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
+}
+
 type HostedRuntimeDeviceSyncStore = ReturnType<typeof requireHostedRuntimeDeviceSyncStore>;
 type HostedAccountHydrationInput = Parameters<HostedRuntimeDeviceSyncStore["hydrateHostedAccount"]>[0];
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
@@ -461,11 +466,10 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       account,
       baseline,
       codec,
+      deferNextReconcileAtToBaseline:
+        input.deferNextReconcileAtForLocalAccountId === localAccountId,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
-      nextReconcileAt: input.deferNextReconcileAtForLocalAccountId === localAccountId
-        ? baseline?.localState.nextReconcileAt ?? null
-        : account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -930,22 +934,17 @@ function applyHostedDirtyDeviceSyncState(input: {
       });
       return null;
     }
-    const admittedJobs = limitHostedDirtyDeviceSyncJobsForAccount({
-      accountId: localAccountId,
-      jobs: acceptedCompanionHrvJobs,
-      store,
-    });
-    const processedRevision = admittedJobs.length === acceptedCompanionHrvJobs.length
-      ? input.dirtyState.dirtyRevision
-      : input.dirtyState.processedRevision;
-    const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
+    const admission = admitHostedDirtyDeviceSyncJobsForAccount({
       accountId: localAccountId,
       connectionId: input.dirtyState.connectionId,
-      jobs: admittedJobs,
-      processedRevision,
+      jobs: acceptedCompanionHrvJobs,
+      processedRevision: input.dirtyState.dirtyRevision,
       provider: account.provider,
       store,
     });
+    const processedRevision = admission.admittedJobCount === acceptedCompanionHrvJobs.length
+      ? input.dirtyState.dirtyRevision
+      : input.dirtyState.processedRevision;
     markHostedTerminalDeviceSyncJobsDead({
       accountId: localAccountId,
       now: input.wake.occurredAt,
@@ -964,8 +963,11 @@ function applyHostedDirtyDeviceSyncState(input: {
         ),
         processedRevision,
       },
-      deferredJobCount: acceptedCompanionHrvJobs.length - admittedJobs.length,
-      pendingDirtyPayloadJobs,
+      deferredJobCount: acceptedCompanionHrvJobs.length - admission.admittedJobCount,
+      pendingDirtyPayloadJobs: admission.pendingDirtyPayloadJobs.map((pending) => ({
+        ...pending,
+        processedRevision,
+      })),
     };
   }
 
@@ -979,22 +981,17 @@ function applyHostedDirtyDeviceSyncState(input: {
     return null;
   }
 
-  const admittedJobs = limitHostedDirtyDeviceSyncJobsForAccount({
-    accountId: localAccountId,
-    jobs: dirtyJobs,
-    store,
-  });
-  const processedRevision = admittedJobs.length === dirtyJobs.length
-    ? input.dirtyState.dirtyRevision
-    : input.dirtyState.processedRevision;
-  const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
+  const admission = admitHostedDirtyDeviceSyncJobsForAccount({
     accountId: localAccountId,
     connectionId: input.dirtyState.connectionId,
-    jobs: admittedJobs,
-    processedRevision,
+    jobs: dirtyJobs,
+    processedRevision: input.dirtyState.dirtyRevision,
     provider: account.provider,
     store,
   });
+  const processedRevision = admission.admittedJobCount === dirtyJobs.length
+    ? input.dirtyState.dirtyRevision
+    : input.dirtyState.processedRevision;
 
   return {
     ack: {
@@ -1008,25 +1005,79 @@ function applyHostedDirtyDeviceSyncState(input: {
       ),
       processedRevision,
     },
-    deferredJobCount: dirtyJobs.length - admittedJobs.length,
-    pendingDirtyPayloadJobs,
+    deferredJobCount: dirtyJobs.length - admission.admittedJobCount,
+    pendingDirtyPayloadJobs: admission.pendingDirtyPayloadJobs.map((pending) => ({
+      ...pending,
+      processedRevision,
+    })),
   };
 }
 
-function limitHostedDirtyDeviceSyncJobsForAccount(input: {
+function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   accountId: string;
+  connectionId: string;
   jobs: readonly HostedDirtyDeviceSyncJob[];
+  processedRevision: string;
+  provider: string;
   store: HostedRuntimeDeviceSyncStore;
-}): readonly HostedDirtyDeviceSyncJob[] {
-  const pendingCount = input.store.listPendingJobsForAccount(
+}): HostedDirtyDeviceSyncAdmissionResult {
+  const pendingJobs = input.store.listPendingJobsForAccount(
     input.accountId,
     HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-  ).length;
-  const availableSlots = Math.max(
-    0,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingCount,
   );
-  return input.jobs.slice(0, availableSlots);
+  let availableSlots = Math.max(
+    0,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingJobs.length,
+  );
+  const jobIdsByDedupeKey = new Map<string, string>();
+  for (const job of pendingJobs) {
+    if (job.provider === input.provider && job.dedupeKey) {
+      jobIdsByDedupeKey.set(job.dedupeKey, job.id);
+    }
+  }
+  const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
+  let admittedJobCount = 0;
+
+  for (const job of input.jobs) {
+    const dedupeKey = job.input.dedupeKey;
+    let jobId = dedupeKey ? jobIdsByDedupeKey.get(dedupeKey) ?? null : null;
+    if (!jobId) {
+      if (availableSlots === 0) {
+        continue;
+      }
+      const enqueued = input.store.enqueueJob({
+        accountId: input.accountId,
+        availableAt: job.input.availableAt,
+        dedupeKey,
+        kind: job.input.kind,
+        maxAttempts: job.input.maxAttempts,
+        payload: job.input.payload ?? {},
+        priority: job.input.priority ?? 0,
+        provider: input.provider,
+      });
+      jobId = enqueued.id;
+      availableSlots -= 1;
+      if (dedupeKey) {
+        jobIdsByDedupeKey.set(dedupeKey, jobId);
+      }
+    }
+    admittedJobCount += 1;
+    const timing = buildHostedDeviceSyncImportTiming({
+      provider: input.provider,
+      resource: job.resource,
+    });
+    if (job.dirtyPayloadId || "timing" in timing) {
+      pendingDirtyPayloadJobs.push({
+        connectionId: input.connectionId,
+        dirtyPayloadId: job.dirtyPayloadId,
+        jobId,
+        processedRevision: input.processedRevision,
+        ...timing,
+      });
+    }
+  }
+
+  return { admittedJobCount, pendingDirtyPayloadJobs };
 }
 
 function withHostedDirtyPayloadAckIds(
@@ -1090,41 +1141,6 @@ function buildHostedDirtyDeviceSyncJobs(
     input: hostedDirtyResourceToDeviceSyncJobInput(resource, dirtyState, occurredAt),
     resource,
   }));
-}
-
-function enqueueHostedDirtyDeviceSyncJobs(input: {
-  accountId: string;
-  connectionId: string;
-  jobs: readonly HostedDirtyDeviceSyncJob[];
-  processedRevision: string;
-  provider: string;
-  store: HostedRuntimeDeviceSyncStore;
-}): HostedDeviceSyncRuntimeDirtyPayloadJob[] {
-  return input.jobs.flatMap((job) => {
-    const enqueued = input.store.enqueueJob({
-      accountId: input.accountId,
-      availableAt: job.input.availableAt,
-      dedupeKey: job.input.dedupeKey,
-      kind: job.input.kind,
-      maxAttempts: job.input.maxAttempts,
-      payload: job.input.payload ?? {},
-      priority: job.input.priority ?? 0,
-      provider: input.provider,
-    });
-    const timing = buildHostedDeviceSyncImportTiming({
-      provider: input.provider,
-      resource: job.resource,
-    });
-    return job.dirtyPayloadId || "timing" in timing
-      ? [{
-          connectionId: input.connectionId,
-          dirtyPayloadId: job.dirtyPayloadId,
-          jobId: enqueued.id,
-          processedRevision: input.processedRevision,
-          ...timing,
-        }]
-      : [];
-  });
 }
 
 function buildHostedDeviceSyncImportTiming(
@@ -1396,9 +1412,9 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   account: StoredDeviceSyncAccount;
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
+  deferNextReconcileAtToBaseline: boolean;
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
-  nextReconcileAt: string | null;
   observedTokenVersion: number | null;
   sourceApplyEnabled: boolean;
   sources: readonly StoredDeviceConnectionSource[];
@@ -1465,12 +1481,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     }
 
     assignErrorFieldUpdate(update, input.account, baselineLocalState);
-    assignNextReconcileAtUpdate(
-      update,
-      input.account.status,
-      input.nextReconcileAt,
-      baselineLocalState?.nextReconcileAt ?? null,
-    );
+    assignCanonicalNextReconcileAtUpdate(update, {
+      account: input.account,
+      baseline: baselineLocalState,
+      deferToBaseline: input.deferNextReconcileAtToBaseline,
+    });
     assignFailureDiagnosticUpdate(
       update,
       input.account.lastSyncErrorAt ?? null,
@@ -1523,12 +1538,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     };
   }
 
-  assignNextReconcileAtUpdate(
-    update,
-    input.account.status,
-    input.nextReconcileAt,
-    baselineLocalState?.nextReconcileAt ?? null,
-  );
+  assignCanonicalNextReconcileAtUpdate(update, {
+    account: input.account,
+    baseline: baselineLocalState,
+    deferToBaseline: input.deferNextReconcileAtToBaseline,
+  });
 
   if (!equalHostedDeviceSyncRuntimeCredentials(credential, baselineCredential)) {
     if (credential.kind === "none" && baselineTokenBundle !== null) {
@@ -2533,15 +2547,23 @@ function resolveHostedWakeNextReconcileAt(
     : null;
 }
 
-function assignNextReconcileAtUpdate(
+function assignCanonicalNextReconcileAtUpdate(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
-  status: StoredDeviceSyncAccount["status"],
-  localValue: string | null,
-  baselineValue: string | null,
+  input: {
+    account: Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "status">;
+    baseline: HostedDeviceSyncRuntimeLocalStateSnapshot | null;
+    deferToBaseline: boolean;
+  },
 ): void {
+  const baselineValue = input.baseline?.nextReconcileAt ?? null;
+  const nextReconcileAt = input.deferToBaseline
+    ? baselineValue
+    : input.account.nextReconcileAt ?? null;
+
   if (
-    (status === "reauthorization_required" || status === "disconnected")
-    && localValue === null
+    (input.account.status === "reauthorization_required"
+      || input.account.status === "disconnected")
+    && nextReconcileAt === null
     && baselineValue !== null
   ) {
     update.localState = {
@@ -2551,17 +2573,17 @@ function assignNextReconcileAtUpdate(
     return;
   }
 
-  if (!localValue || localValue === baselineValue) {
+  if (!nextReconcileAt || nextReconcileAt === baselineValue) {
     return;
   }
 
-  // `nextReconcileAt` is owned by device-sync execution, not an append-only
-  // event timestamp. Empty-backfill retry floors may intentionally pull it
-  // earlier; stale hosted replays are still rejected by the web apply
-  // observedUpdatedAt/version fence before localState mutates hosted state.
+  // Canonical publication derives only from the provider-owned account. The
+  // completion fence may retain the already observed Web baseline until its
+  // exact work has been checkpointed; runner-local wake clocks never enter
+  // this boundary.
   update.localState = {
     ...(update.localState ?? {}),
-    nextReconcileAt: localValue,
+    nextReconcileAt,
   } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
 }
 

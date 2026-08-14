@@ -53,7 +53,7 @@ describe("hosted runner secrets payload decoding", () => {
     })).toThrow(/not allowed/u);
 
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
-      AGENTMAIL_API_KEY: "agentmail-secret",
+      UNLISTED_PROVIDER_API_KEY: "provider-secret",
     }))).toThrow(/not allowed/u);
 
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({

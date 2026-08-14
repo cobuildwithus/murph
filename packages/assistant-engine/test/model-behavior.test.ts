@@ -1797,6 +1797,9 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
     )
     expect(prompt).toContain(
+      'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
+    )
+    expect(prompt).toContain(
       'Live workout/card: read strength-training and tracked-table.',
     )
     expect(prompt).toContain(
@@ -2003,8 +2006,9 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    // The established Apple Health/WHOOP relay contract sets this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_469)
+    // The local automation delivery limitation plus the established Apple
+    // Health/WHOOP relay and cross-route repeated-set boundary set this ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_744)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -3117,8 +3121,17 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('agentApproved: true')
     expect(prompt).not.toContain('event_duration_minutes')
     expect(prompt).not.toContain('do not retry the create call')
-    expect(prompt).toContain('Pass `--channel` with `--delivery-target`')
+    expect(prompt).toContain(
+      'Local automation delivery supports Telegram or Linq, not email.',
+    )
+    expect(prompt).toContain(
+      'offer Telegram or Linq before asking for any routing details',
+    )
+    expect(prompt).toContain('pass `--channel` with `--delivery-target`')
     expect(prompt).toContain('inspect saved local self-targets')
+    expect(prompt).not.toContain(
+      'repeat phone, Telegram, or email routing details',
+    )
     expect(prompt).not.toContain('current-conversation-only')
   })
 
@@ -3284,6 +3297,12 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain('The tool accepts no arbitrary route locator')
     expect(prompt).toContain('do not target another route')
+    expect(prompt).toContain(
+      'Do not inspect or reuse saved personal phone, Telegram, or email self-targets',
+    )
+    expect(prompt).not.toContain(
+      'Local automation delivery supports Telegram or Linq, not email.',
+    )
     expect(prompt).not.toContain('vault-cli automation')
     expect(prompt).not.toContain('inspect saved local self-targets')
   })

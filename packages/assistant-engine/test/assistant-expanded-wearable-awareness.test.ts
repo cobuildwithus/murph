@@ -31,25 +31,26 @@ async function readSkill(slug: string): Promise<string> {
 }
 
 describe('expanded wearable awareness', () => {
-  it('advertises normalized coverage without promising source support or raw streams', () => {
+  it('routes normalized facts without promising source support or raw streams', () => {
     const prompt = buildPrompt()
 
-    expect(prompt).toContain('Connected health data can include body-composition')
-    expect(prompt).toContain('respiratory, metabolic, treatment, alert, accessibility, environmental')
-    expect(prompt).toContain('ECG-summary, and workout-summary observations')
-    expect(prompt).toContain('Read these signals with bounded `vault-cli measurement entry list`')
-    expect(prompt).toContain('reserve `wearables metric` for catalog aliases')
-    expect(prompt).toContain('not proof a source supplied it')
-    expect(prompt).toContain('missing means unavailable, not zero')
+    expect(prompt).toContain('Connected observations include body composition')
+    expect(prompt).toContain('respiratory, metabolic, alerts, accessibility, environment')
+    expect(prompt).toContain('ECG/workout summaries')
+    expect(prompt).toContain('Read with bounded `vault-cli measurement entry list`')
+    expect(prompt).toContain('Connected insulin records are `intervention_session` events')
+    expect(prompt).toContain('read `cardiometabolic-health`')
+    expect(prompt).not.toContain('respiratory, metabolic, treatment, alert')
+    expect(prompt).toContain('not `wearables metric`')
+    expect(prompt).toContain('missing is unavailable, not zero or proof')
     expect(prompt).toContain(
-      'Raw ECG voltages and workout stream points are not stored or exposed',
+      'Raw ECG voltage/workout points are not stored',
     )
     expect(prompt).toContain(
-      'burned calories, carbohydrate observations, and complete meal intake distinct',
+      'Burned calories are expenditure; carbs can be partial intake evidence',
     )
-    expect(prompt).toContain(
-      'use meal totals or meal records for eaten calories',
-    )
+    expect(prompt).toContain('not proof of a complete meal or eaten-calorie total')
+    expect(prompt).toContain('read `food-journal`')
   })
 
   it('routes expanded activity signals through the lossless global metric surface', async () => {
@@ -77,6 +78,38 @@ describe('expanded wearable awareness', () => {
     expect(skill).toMatch(/No returned entries\s+means missing coverage, not zero/u)
     expect(skill).toContain('returned source and event ID as provenance')
     expect(skill).toContain('query-only and unavailable through `vault-cli show`')
+    expect(skill).toContain(
+      'vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json',
+    )
+    expect(skill).toContain('Do not run `wearables day` first')
+  })
+
+  it('routes connected insulin through the owning skill without claiming completeness', async () => {
+    const skill = await readSkill('cardiometabolic-health')
+
+    expect(skill).toContain(
+      'vault-cli event list --kind intervention_session --from <date> --to <date> --limit 200 --format json',
+    )
+    expect(skill).toContain('`data.source` is `device`')
+    expect(skill).toContain('`data.interventionType` is `insulin-injection`')
+    expect(skill).toContain('`data.fields.dose-amount`')
+    expect(skill).toContain('Report the matching')
+    expect(skill).toContain('records returned, not an exhaustive total')
+    expect(skill).toContain('not proof that no insulin was recorded')
+    expect(skill).toContain('Never turn a record read into')
+  })
+
+  it('routes connected carbohydrate records without inventing complete intake', async () => {
+    const skill = await readSkill('food-journal')
+
+    expect(skill).toContain(
+      'vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json',
+    )
+    expect(skill).toContain('Returned grams are partial intake evidence')
+    expect(skill).toContain('Do not infer food identity')
+    expect(skill).toContain('a complete meal')
+    expect(skill).toContain('eaten calories')
+    expect(skill).toContain('unavailable, not zero')
   })
 
   it('uses connected body metrics as source-aware trends rather than ground truth', async () => {
