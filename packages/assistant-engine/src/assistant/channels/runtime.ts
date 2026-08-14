@@ -571,7 +571,7 @@ export async function prepareTelegramVoiceMemoMessage(
   const target = parseTelegramTargetOrThrow(input.target)
   const audio = await generateElevenLabsVoiceMemoAudio({
     apiKey,
-    fetchImplementation: createTelegramElevenLabsFetchAdapter(fetchImplementation),
+    fetchImplementation: createTelegramElevenLabsSdkFetchAdapter(fetchImplementation),
     generation: input.generation,
     signal: dependencies.signal,
   })
@@ -2182,7 +2182,7 @@ function appendTelegramFormField(
   form.append(key, String(value))
 }
 
-function createTelegramElevenLabsFetchAdapter(
+function createTelegramElevenLabsSdkFetchAdapter(
   fetchImplementation: TelegramFetchImplementation,
 ): ElevenLabsFetch {
   return async (

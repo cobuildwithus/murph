@@ -13,6 +13,7 @@ import {
 } from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
+  AttachmentRetrieveResponse,
   CapabilityCheckIMessageParams,
   ChatCreateParams,
   ChatCreateResponse,
@@ -26,6 +27,7 @@ import type {
   WebhookEventType,
   WebhookSubscriptionCreateParams,
   WebhookSubscriptionCreateResponse,
+  WebhookSubscriptionListResponse,
 } from '@linqapp/sdk/resources'
 import type {
   MessageSendParams,
@@ -186,12 +188,14 @@ type LinqOperation =
   | 'check_imessage_capability'
   | 'create_webhook_subscription'
   | 'delete_message'
+  | 'list_webhook_subscriptions'
   | 'list_phone_numbers'
   | 'mark_read'
   | 'send_imessage_app_card'
   | 'send_message'
   | 'send_voice_memo'
   | 'set_message_reaction'
+  | 'retrieve_attachment'
   | 'typing_start'
   | 'typing_stop'
 
@@ -249,27 +253,34 @@ type LinqSafeRequestDetails = {
   timeoutMs?: number
 }
 
-export interface LinqFetchResponse {
-  arrayBuffer(): Promise<ArrayBuffer>
+export type LinqFetchResult = Omit<
+  Pick<
+    Awaited<ReturnType<typeof fetch>>,
+    'arrayBuffer' | 'body' | 'headers' | 'json' | 'ok' | 'status' | 'statusText' | 'text'
+  >,
+  'body' | 'headers' | 'statusText'
+> & {
   body?: ReadableStream<Uint8Array> | null
   headers?: ResponseHeadersLike | null
-  json(): Promise<unknown>
-  ok: boolean
-  status: number
   statusText?: string
-  text(): Promise<string>
 }
 
-export type LinqFetch = (
-  input: string,
-  init: {
-    body?: string | Blob
-    headers?: Record<string, string>
-    method: string
-    redirect?: RequestRedirect
-    signal?: AbortSignal
-  },
-) => Promise<LinqFetchResponse>
+export type LinqFetch = {
+  bivarianceHack(
+    input: Extract<Parameters<typeof fetch>[0], string>,
+    init: Omit<
+      Pick<
+        NonNullable<Parameters<typeof fetch>[1]>,
+        'body' | 'headers' | 'method' | 'redirect' | 'signal'
+      >,
+      'body' | 'headers' | 'method'
+    > & {
+      body?: string | Blob
+      headers?: Record<string, string>
+      method: string
+    },
+  ): Promise<LinqFetchResult>
+}['bivarianceHack']
 
 export interface ProbeLinqApiResult {
   ok: boolean
@@ -848,7 +859,7 @@ async function uploadLinqAttachmentBytes(
   let lastRetryableFailure: VaultCliError | null = null
 
   try {
-    await requestJsonWithRetry<void, LinqFetchResponse>({
+    await requestJsonWithRetry<void, LinqFetchResult>({
       createHttpError: async (response) => {
         const failure = await createLinqHttpError(
           response,
@@ -1496,6 +1507,76 @@ export async function createLinqWebhookSubscription(
   }
 }
 
+export async function listLinqWebhookSubscriptions(
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+    timeoutMs?: number
+  } = {},
+): Promise<WebhookSubscriptionListResponse> {
+  return await requestLinqSdk<WebhookSubscriptionListResponse>({
+    details: {
+      operation: 'list_webhook_subscriptions',
+      provider: 'linq',
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'GET',
+    path: '/webhook-subscriptions',
+    request: (client, signal) => client.webhookSubscriptions.list({ signal }),
+    signal: dependencies.signal,
+    singleAttemptTimeoutMs: dependencies.timeoutMs,
+  })
+}
+
+export async function retrieveLinqAttachment(
+  input: { attachmentId: string },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+    timeoutMs?: number
+  } = {},
+): Promise<AttachmentRetrieveResponse> {
+  const attachmentId = normalizeRequiredString(input.attachmentId, 'attachment id')
+  return await requestLinqSdk<AttachmentRetrieveResponse>({
+    details: {
+      operation: 'retrieve_attachment',
+      provider: 'linq',
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'GET',
+    path: `/attachments/${encodeURIComponent(attachmentId)}`,
+    request: (client, signal) => client.attachments.retrieve(attachmentId, { signal }),
+    signal: dependencies.signal,
+    singleAttemptTimeoutMs: dependencies.timeoutMs,
+  })
+}
+
+export function readLinqRequestFailure(error: unknown): {
+  status: number | null
+  timedOut: boolean
+  transportFailure: boolean
+} | null {
+  if (
+    !(error instanceof VaultCliError)
+    || error.code !== 'LINQ_API_REQUEST_FAILED'
+    || error.context?.provider !== 'linq'
+  ) {
+    return null
+  }
+  const status = error.context.status
+  return {
+    status: typeof status === 'number' && Number.isSafeInteger(status)
+      ? status
+      : null,
+    timedOut: error.context.timedOut === true,
+    transportFailure: error.context.failureStage === 'transport',
+  }
+}
+
 type LinqHttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT'
 
 type LinqSdkErrorResponse = {
@@ -1640,7 +1721,7 @@ function resolveDefaultLinqFetch(): LinqFetch | null {
   if (typeof globalThis.fetch !== 'function') {
     return null
   }
-  return (input, init) => globalThis.fetch(input, init)
+  return globalThis.fetch
 }
 
 function createLinqSdkClient(input: {
@@ -1671,7 +1752,7 @@ function createLinqSdkFetch(input: {
   return async (request, init) => {
     const url = mapLinqSdkRequestUrl(request, input.apiRoot)
     input.state.requestOrigin = readRequestOrigin(url)
-    let response: LinqFetchResponse
+    let response: LinqFetchResult
     try {
       response = await input.fetchImplementation.call(undefined, url, {
         ...(init?.body === null || init?.body === undefined
@@ -1749,7 +1830,7 @@ function normalizeLinqSdkRequestHeaders(
 }
 
 async function bufferLinqSdkResponse(
-  response: LinqFetchResponse,
+  response: LinqFetchResult,
   state: LinqSdkAttemptState,
   maxResponseBytes: number,
 ): Promise<Response> {
@@ -2113,7 +2194,7 @@ function createLinqConfigurationError(
 }
 
 async function createLinqHttpError(
-  response: LinqFetchResponse,
+  response: LinqFetchResult,
   details: LinqSafeRequestDetails,
   method: LinqHttpMethod,
   path: string,

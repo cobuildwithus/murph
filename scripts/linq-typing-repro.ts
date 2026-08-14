@@ -3,6 +3,8 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { pathToFileURL } from "node:url";
 
+import LinqAPIV3, { APIError, type MessageSendParams } from "@linqapp/sdk";
+
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OBSERVATION_MS = 5 * 60_000;
 const DEFAULT_POST_MESSAGE_DELAY_MS = 1_000;
@@ -545,26 +547,30 @@ async function requestLinqApi(input: {
   token: string;
 }): Promise<LinqRequestResult> {
   const fetchImplementation = input.dependencies.fetchImplementation ?? fetch;
-  const url = new URL(input.baseUrl.toString());
-  url.pathname = joinUrlPath(
-    url.pathname,
-    input.pathTemplate.replace("{chatId}", encodeURIComponent(input.chatId)),
-  );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
   const startedAt = Date.now();
+  const client = new LinqAPIV3({
+    apiKey: input.token,
+    baseURL: resolveLinqSdkBaseUrl(input.baseUrl),
+    fetch: fetchImplementation,
+    logLevel: "off",
+    maxRetries: 0,
+    timeout: input.timeoutMs,
+  });
 
   try {
-    const response = await fetchImplementation(url.toString(), {
-      body: input.body ? JSON.stringify(input.body) : undefined,
-      headers: {
-        authorization: `Bearer ${input.token}`,
-        ...(input.body ? { "content-type": "application/json" } : {}),
-      },
-      method: input.method,
-      signal: controller.signal,
-    });
-    const json = await readResponseJson(response);
+    const operation = input.pathTemplate === "/chats/{chatId}/messages"
+      ? client.chats.messages.send(
+          input.chatId,
+          input.body as MessageSendParams,
+          { signal: controller.signal },
+        )
+      : input.method === "POST"
+        ? client.chats.typing.start(input.chatId, { signal: controller.signal })
+        : client.chats.typing.stop(input.chatId, { signal: controller.signal });
+    const { data, response } = await operation.withResponse();
+    const json = data ?? null;
 
     return {
       elapsedMs: Date.now() - startedAt,
@@ -585,12 +591,18 @@ async function requestLinqApi(input: {
       ok: false,
       pathTemplate: input.pathTemplate,
       responseBodyJson: null,
-      status: null,
+      status: error instanceof APIError ? error.status : null,
       timedOut: controller.signal.aborted,
     };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function resolveLinqSdkBaseUrl(baseUrl: URL): string {
+  const sdkBase = new URL(baseUrl.toString());
+  sdkBase.pathname = sdkBase.pathname.replace(/\/v3\/?$/u, "");
+  return sdkBase.toString().replace(/\/$/u, "");
 }
 
 function toCallReport(result: LinqRequestResult): LinqApiCallReport {
@@ -647,19 +659,6 @@ function readLinqMessageField(value: unknown, key: string): string | null {
 
   const chat = readRecord(record?.chat);
   return readString(readRecord(chat?.message), key);
-}
-
-async function readResponseJson(response: Response): Promise<unknown> {
-  const text = await response.text().catch(() => "");
-  if (text.trim().length === 0) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 function redactIdentifier(
@@ -788,12 +787,6 @@ function normalizeBaseUrl(value: string): URL {
   url.hash = "";
   url.search = "";
   return url;
-}
-
-function joinUrlPath(basePath: string, path: string): string {
-  const normalizedBase = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${normalizedBase}${normalizedPath}`;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

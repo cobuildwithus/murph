@@ -2,7 +2,10 @@ import { createHmac } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { createLinqWebhookSubscription } from "@murphai/operator-config/linq-runtime";
+import {
+  createLinqWebhookSubscription,
+  listLinqWebhookSubscriptions,
+} from "@murphai/operator-config/linq-runtime";
 
 import {
   DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE,
@@ -21,7 +24,6 @@ const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
   "reaction.added",
   "reaction.removed",
 ] as const;
-const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
   "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
 const LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS_ENV =
@@ -445,18 +447,11 @@ async function findExistingLinqWebhookSubscription(input: {
     throw new Error("LINQ_API_TOKEN must be set before listing Linq webhooks.");
   }
 
-  const response = await fetchLinqWebhookSubscriptions({
+  const payload = await listLinqWebhookSubscriptions({
     env: input.env,
     fetchImplementation: input.fetchImplementation,
-    token,
+    timeoutMs: LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS,
   });
-  if (!response.ok) {
-    throw new Error(
-      `Linq request GET /webhook-subscriptions failed with HTTP ${response.status}.`,
-    );
-  }
-
-  const payload: unknown = await response.json();
   const subscriptions = parseLinqWebhookSubscriptionList(payload);
   const candidates = subscriptions.filter((subscription) =>
     subscription.isActive
@@ -521,53 +516,6 @@ function createLinqWebhookSubscriptionMatch(input: {
     secretStatus,
     subscription: input.subscription,
   };
-}
-
-async function fetchLinqWebhookSubscriptions(input: {
-  env: NodeJS.ProcessEnv;
-  fetchImplementation: typeof fetch;
-  token: string;
-}): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS);
-
-  try {
-    return await input.fetchImplementation(
-      new URL("webhook-subscriptions", resolveLinqWebhookRegistrationBaseUrl(input.env)),
-      {
-        headers: {
-          authorization: `Bearer ${input.token}`,
-        },
-        method: "GET",
-        signal: controller.signal,
-      },
-    );
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(
-        `Linq request GET /webhook-subscriptions timed out after ${LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS}ms.`,
-      );
-    }
-    throw new Error("Linq request GET /webhook-subscriptions failed before a response was returned.");
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function resolveLinqWebhookRegistrationBaseUrl(env: NodeJS.ProcessEnv): URL {
-  const configured = normalizeOptionalString(env.LINQ_API_BASE_URL);
-  let parsed: URL;
-  try {
-    parsed = new URL(configured ?? DEFAULT_LINQ_API_BASE_URL);
-  } catch {
-    throw new Error("LINQ_API_BASE_URL must be a valid URL.");
-  }
-  if (!parsed.pathname.endsWith("/")) {
-    parsed.pathname = `${parsed.pathname}/`;
-  }
-  return parsed;
 }
 
 function parseLinqWebhookSubscriptionList(

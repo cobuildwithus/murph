@@ -1240,10 +1240,15 @@ describe("check-provider-request-boundaries", () => {
 
   it("admits only the exact production SDK transport hooks", () => {
     const owners = [
+      "apps/cloudflare/src/database-health/monitor.ts",
       "apps/web/src/lib/connected-apps/composio.ts",
+      "apps/web/src/lib/hosted-onboarding/linq-first-contact-admission.ts",
       "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts",
       "apps/web/src/lib/labs/junction.ts",
+      "apps/web/src/lib/linq/api.ts",
       "apps/web/src/lib/physical-notes/lob-runtime.ts",
+      "packages/assistant-engine/src/assistant/channels/runtime.ts",
+      "packages/assistant-engine/src/assistant-codex/openai-image-generation.ts",
       "packages/cli/src/research-scout-client.ts",
       "packages/device-syncd/src/providers/junction-client.ts",
       "packages/operator-config/src/elevenlabs-runtime.ts",
@@ -1260,17 +1265,28 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
-  it("rejects URL, init, and wiring mutations in official SDK fetch hooks", () => {
+  it("rejects implementation and wiring mutations in official SDK transport adapters", () => {
     const cases = [
       {
-        after: "fetchImpl.call(undefined, new URL(String(request)), init)",
-        before: "fetchImpl.call(undefined, request, init)",
+        after: "redirect: \"follow\",",
+        before: "redirect: \"manual\",",
+        path: "apps/cloudflare/src/database-health/monitor.ts",
+      },
+      {
+        after: "request,",
+        before: "preserveRepeatedComposioListQueryParams(request),",
         path: "apps/web/src/lib/connected-apps/composio.ts",
       },
       {
-        after: "fetchImpl.call(undefined, request, { ...init, method: \"GET\" })",
+        after: "body: 'override',",
+        before: "body: init.body,",
+        path: "packages/assistant-engine/src/assistant/channels/runtime.ts",
+      },
+      {
+        after: "fetchImpl.call(undefined, new URL(String(request)), init)",
         before: "fetchImpl.call(undefined, request, init)",
-        path: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+        path:
+          "apps/web/src/lib/hosted-onboarding/linq-first-contact-admission.ts",
       },
       {
         after: "cache: \"reload\",",
@@ -1278,35 +1294,54 @@ describe("check-provider-request-boundaries", () => {
         path: "apps/web/src/lib/labs/junction.ts",
       },
       {
+        after: "const target = new URL(String(input));",
+        before: "const target = mapLinqSdkRequestUrl(input, apiRoot);",
+        path: "apps/web/src/lib/linq/api.ts",
+      },
+      {
+        after: "method,\n      redirect: \"follow\",\n      signal,",
+        before: "method,\n      redirect: \"error\",\n      signal,",
+        path: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+      },
+      {
+        after: "fetchImpl.call(undefined, new URL(String(request)), init)",
+        before: "fetchImpl.call(undefined, request, init)",
+        path:
+          "packages/assistant-engine/src/assistant-codex/openai-image-generation.ts",
+      },
+      {
         after: "this.fetchImpl(new URL(String(input)), {",
         before: "this.fetchImpl(input, {",
         path: "packages/device-syncd/src/providers/junction-client.ts",
       },
       {
-        after: "fetchImplementation(\n      new URL(String(input)),",
-        before: "fetchImplementation(\n      input,",
+        after:
+          "method: init?.method ?? request?.method ?? 'GET',\n        redirect: 'follow',",
+        before:
+          "method: init?.method ?? request?.method ?? 'GET',\n        redirect: 'error',",
         path: "packages/operator-config/src/elevenlabs-runtime.ts",
       },
       {
-        after:
-          "input.fetchImplementation.call(undefined, new URL(request), init)",
-        before: "input.fetchImplementation.call(undefined, request, init)",
+        after: "method: normalizeNullableString(init?.method) ?? 'POST',",
+        before: "method: normalizeNullableString(init?.method) ?? 'GET',",
         path: "packages/operator-config/src/linq-runtime.ts",
       },
       {
-        after: "fetch: fetchImpl,",
-        before: "fetch: createLobSdkFetch(input.fetchImpl),",
+        after:
+          "fetch: input.fetchImplementation && createDatabaseHealthLinqFetch(",
+        before: "fetch: createDatabaseHealthLinqFetch(",
+        path: "apps/cloudflare/src/database-health/monitor.ts",
+      },
+      {
+        after: "baseOptions.adapter = input.fetchImpl as LobAxiosAdapter;",
+        before:
+          "baseOptions.adapter = createLobFetchAdapter(input.fetchImpl, input.signal);",
         path: "apps/web/src/lib/physical-notes/lob-runtime.ts",
       },
       {
         after: "fetch: globalThis.fetch,",
         before: "fetch: sdkFetch,",
         path: "packages/device-syncd/src/providers/junction-client.ts",
-      },
-      {
-        after: "...init,\n        body: 'override',",
-        before: "...init,",
-        path: "packages/operator-config/src/elevenlabs-runtime.ts",
       },
     ] as const;
 
@@ -1316,6 +1351,107 @@ describe("check-provider-request-boundaries", () => {
         rawHttpViolations(
           replaceRequired(source, testCase.before, testCase.after),
           testCase.path,
+        ),
+        testCase.path,
+      ).toHaveLength(1);
+    }
+  });
+
+  it("rejects duplicate adapters, duplicate effects, and decoy SDK wiring", () => {
+    const relativePath = "apps/web/src/lib/connected-apps/composio.ts";
+    const source = readFileSync(relativePath, "utf8");
+    const duplicatedEffect = replaceRequired(
+      source,
+      [
+        "    const response = await fetchImpl(",
+        "      preserveRepeatedComposioListQueryParams(request),",
+        "      init,",
+        "    );",
+      ].join("\n"),
+      [
+        "    const response = await fetchImpl(",
+        "      preserveRepeatedComposioListQueryParams(request),",
+        "      init,",
+        "    );",
+        "    await fetchImpl(request, init);",
+      ].join("\n"),
+    );
+    expect(rawHttpViolations(duplicatedEffect, relativePath)).toHaveLength(2);
+
+    const duplicatedOwner = [
+      source,
+      "{",
+      "function createBoundedComposioFetch(fetchImpl: typeof fetch): typeof fetch {",
+      "  return fetchImpl;",
+      "}",
+      "}",
+    ].join("\n");
+    expect(rawHttpViolations(duplicatedOwner, relativePath)).toHaveLength(1);
+
+    const decoyWiring = [
+      replaceRequired(
+        source,
+        "fetch: createBoundedComposioFetch(fetchImpl),",
+        "fetch: fetchImpl,",
+      ),
+      "const composioWiringDecoy = { fetch: createBoundedComposioFetch(fetchImpl) };",
+    ].join("\n");
+    expect(rawHttpViolations(decoyWiring, relativePath)).toHaveLength(1);
+  });
+
+  it("requires the Resend override to pass one direct closed request init", () => {
+    const relativePath =
+      "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts";
+    const source = readFileSync(relativePath, "utf8");
+    const directInit = [
+      "      {",
+      "        body: options.body,",
+      "        headers: normalizeResendRequestHeaders(options.headers),",
+      "        method: options.method,",
+      "        redirect: \"error\",",
+      "        signal: this.requestSignal,",
+      "      },",
+    ].join("\n");
+    const unsafeInits = [
+      [
+        "      (() => {",
+        "        const requestInit: RequestInit = {",
+        "          body: options.body,",
+        "          headers: normalizeResendRequestHeaders(options.headers),",
+        "          method: options.method,",
+        "          redirect: \"error\",",
+        "          signal: this.requestSignal,",
+        "        };",
+        "        const forwarded = requestInit;",
+        "        forwarded.body = JSON.stringify({ override: true });",
+        "        return requestInit;",
+        "      })(),",
+      ].join("\n"),
+      [
+        "      (() => {",
+        "        const requestInit: RequestInit = {",
+        "          body: options.body,",
+        "          headers: normalizeResendRequestHeaders(options.headers),",
+        "          method: options.method,",
+        "          redirect: \"error\",",
+        "          signal: this.requestSignal,",
+        "        };",
+        "        const mutate = (value: RequestInit) => { value.method = \"GET\"; };",
+        "        mutate(requestInit);",
+        "        return requestInit;",
+        "      })(),",
+      ].join("\n"),
+      "      Object.assign({}, { body: options.body, headers: normalizeResendRequestHeaders(options.headers), method: options.method, redirect: \"error\", signal: this.requestSignal }),",
+      "      { ...options, headers: normalizeResendRequestHeaders(options.headers), redirect: \"error\", signal: this.requestSignal },",
+      "      { [\"body\"]: options.body, headers: normalizeResendRequestHeaders(options.headers), method: options.method, redirect: \"error\", signal: this.requestSignal },",
+      "      { body: options.body, body: options.body, headers: normalizeResendRequestHeaders(options.headers), method: options.method, redirect: \"error\", signal: this.requestSignal },",
+    ] as const;
+
+    for (const unsafeInit of unsafeInits) {
+      expect(
+        rawHttpViolations(
+          replaceRequired(source, directInit, unsafeInit),
+          relativePath,
         ),
       ).toHaveLength(1);
     }
@@ -1329,8 +1465,8 @@ describe("check-provider-request-boundaries", () => {
         path: "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts",
       },
       {
-        after: "requestInit.method = 'GET';",
-        before: "requestInit.method = options.method;",
+        after: "method: \"GET\",",
+        before: "method: options.method,",
         path: "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts",
       },
       {

@@ -496,7 +496,7 @@ export const exaResearchScoutStructuredOutputSchema = z
   })
   .strict();
 
-export interface ExaResearchScoutRequestBody {
+export interface ExaResearchScoutSearchPlan {
   category: typeof EXA_RESEARCH_SCOUT_CATEGORY;
   endPublishedDate: string;
   moderation: true;
@@ -570,14 +570,14 @@ export function buildResearchScoutQuery(
 
 export function buildExaResearchScoutRequest(
   input: ResearchScoutInput,
-): ExaResearchScoutRequestBody {
+): ExaResearchScoutSearchPlan {
   const parsed = researchScoutInputSchema.parse(input);
   return buildExaResearchScoutRequestForProfile(parsed);
 }
 
 export function buildExaResearchScoutBatchLaneRequest(
   input: ResearchScoutTagInput,
-): ExaResearchScoutRequestBody {
+): ExaResearchScoutSearchPlan {
   const parsed = researchScoutTagInputSchema.parse(input);
   return buildExaResearchScoutRequestForProfile(parsed);
 }
@@ -587,7 +587,7 @@ function buildExaResearchScoutRequestForProfile(input: {
   profile: ResearchScoutProfile | ResearchScoutTagProfile;
   since: string;
   until: string;
-}): ExaResearchScoutRequestBody {
+}): ExaResearchScoutSearchPlan {
   return buildExaResearchScoutRequestFromQuery({
     query: buildResearchScoutQuery(input.profile),
     since: input.since,
@@ -601,7 +601,7 @@ export function buildExaResearchScoutRequestFromQuery(input: {
   query: string;
   since: string;
   until: string;
-}): ExaResearchScoutRequestBody {
+}): ExaResearchScoutSearchPlan {
   const profile = parseResearchScoutQuery(input.query);
   const startPublishedDate = normalizeCanonicalUtcTimestamp(input.since);
   const endPublishedDate = normalizeCanonicalUtcTimestamp(input.until);

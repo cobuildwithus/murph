@@ -48,25 +48,35 @@ export const ELEVENLABS_TTS_OUTPUT_FORMAT = assistantVoiceMemoSpeechOutputFormat
 export const ELEVENLABS_MUSIC_MODEL_ID = assistantVoiceMemoMusicModelId
 export const ELEVENLABS_MUSIC_OUTPUT_FORMAT = assistantVoiceMemoMusicOutputFormat
 
-export interface ElevenLabsFetchResponse {
-  arrayBuffer(): Promise<ArrayBuffer>
+export type ElevenLabsFetchResult = Omit<
+  Pick<
+    Awaited<ReturnType<typeof fetch>>,
+    'arrayBuffer' | 'body' | 'headers' | 'ok' | 'status' | 'text'
+  >,
+  'body' | 'headers'
+> & {
   body?: ReadableStream<Uint8Array> | null
   headers?: ResponseHeadersLike | null
-  ok: boolean
-  status: number
-  text(): Promise<string>
 }
 
-export type ElevenLabsFetch = (
-  input: string,
-  init: {
-    body?: string
-    headers?: Record<string, string>
-    method: string
-    redirect: 'error'
-    signal?: AbortSignal
-  },
-) => Promise<ElevenLabsFetchResponse>
+export type ElevenLabsFetch = {
+  bivarianceHack(
+    input: Extract<Parameters<typeof fetch>[0], string>,
+    init: Omit<
+      Pick<
+        NonNullable<Parameters<typeof fetch>[1]>,
+        'body' | 'headers' | 'method' | 'redirect' | 'signal'
+      >,
+      'body' | 'headers' | 'method' | 'redirect' | 'signal'
+    > & {
+      body?: string
+      headers?: Record<string, string>
+      method: string
+      redirect: 'error'
+      signal?: AbortSignal
+    },
+  ): Promise<ElevenLabsFetchResult>
+}['bivarianceHack']
 
 export interface GenerateElevenLabsAudioResult {
   bytes: Uint8Array
@@ -552,7 +562,7 @@ class ElevenLabsResponseTooLargeError extends Error {
 }
 
 async function readElevenLabsErrorResponseText(
-  response: ElevenLabsFetchResponse,
+  response: ElevenLabsFetchResult,
   headers: ResponseHeadersLike | null | undefined = response.headers,
 ): Promise<string | null> {
   if (
@@ -625,7 +635,7 @@ function responseExceedsDeclaredByteLimit(
 }
 
 async function cancelElevenLabsResponseBody(
-  response: ElevenLabsFetchResponse,
+  response: ElevenLabsFetchResult,
 ): Promise<void> {
   await response.body?.cancel().catch(() => undefined)
 }

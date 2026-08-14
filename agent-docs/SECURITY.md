@@ -353,7 +353,16 @@ Last verified: 2026-08-12
   purpose-specific exceptions, not line- or provider-wide suppression; the
   source comments do not suppress a finding. The xAI, transfer URL,
   transfer-header, and streamed-R2 proofs are restricted to their audited owner
-  paths.
+  paths. An unavoidable SDK transport bridge is admitted only when its exact
+  path, provider, SDK or SDK-owner import, raw transport target, unique adapter
+  function, and unique SDK-construction function match the registry. The full
+  source spans of both functions are SHA-256 pinned, so a URL, init, response,
+  duplicate-effect, or constructor-wiring change fails until that exact bridge
+  is re-audited and the pins are deliberately updated. The Resend and Exa SDK
+  overrides are separate path-scoped exceptions whose URL and direct closed
+  request init are structurally proved; aliases, helper mutation,
+  `Object.assign`, spreads, computed properties, and duplicate properties do
+  not enter those exceptions.
   Register each newly verified provider SDK and host explicitly; the guard does
   not claim coverage for an unregistered provider or a provider endpoint whose
   dataflow has no registered host or provider identifier. The opt-in

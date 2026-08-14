@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -278,7 +279,7 @@ export const providerHttpExceptionRegistry = Object.freeze([
   },
   {
     description:
-      "A path-scoped official SDK fetch hook that forwards the SDK-owned URL and init while adding only fail-closed transport controls.",
+      "A path-scoped official SDK transport adapter whose audited implementation and SDK wiring are pinned exactly.",
     id: "official-sdk-fetch-hook",
   },
   {
@@ -2263,64 +2264,138 @@ function matchesRegisteredProviderHttpException(
 
 const officialSdkFetchHookApprovals = Object.freeze([
   {
-    functionName: "createJunctionLabsSdkFetch",
-    initKind: "junction-web",
-    moduleName: "@junction-api/sdk",
-    providerId: "junction",
-    relativePath: "apps/web/src/lib/labs/junction.ts",
-    transportPath: "input.fetchImpl.call",
-    urlParameterName: "request",
-    wiringName: "createJunctionLabsSdkFetch",
+    functionName: "createDatabaseHealthLinqFetch",
+    implementationSha256:
+      "d18dae9e8a7ba1e0df91be68a27f7de6b7b68c2de51542c016915e4541381c4d",
+    moduleName: "@linqapp/sdk",
+    providerId: "linq",
+    relativePath: "apps/cloudflare/src/database-health/monitor.ts",
+    transportPath: "fetchImplementation",
+    wiringFunctionName: "createDatabaseHealthLinqClient",
+    wiringImplementationSha256:
+      "78030dc6cae7e6ddba681fd53586224db8c66bbaa94eff2270c8635c673923d7",
   },
   {
-    functionName: "createLobSdkFetch",
-    initKind: "call-forward",
-    moduleName: "@lob/lob-typescript-sdk",
-    providerId: "lob",
-    relativePath: "apps/web/src/lib/physical-notes/lob-runtime.ts",
-    transportPath: "fetchImpl.call",
-    urlParameterName: "request",
-    wiringName: "createLobSdkFetch",
-  },
-  {
-    functionName: "createComposioSdkFetch",
-    initKind: "call-forward",
+    functionName: "createBoundedComposioFetch",
+    implementationSha256:
+      "34d29361fbc5bf27dc4d91b00da6bdae98b4d32f18fd43da3eed21abccf56c28",
     moduleName: "@composio/client",
     providerId: "composio",
     relativePath: "apps/web/src/lib/connected-apps/composio.ts",
-    transportPath: "fetchImpl.call",
-    urlParameterName: "request",
-    wiringName: "createComposioSdkFetch",
+    transportPath: "fetchImpl",
+    wiringFunctionName: "createComposioConnectedAppsClient",
+    wiringImplementationSha256:
+      "48e86be84700a2922eb1c06d954178c7138405d1e9185bff9c9a7036f3962276",
   },
   {
-    functionName: "sdkFetch",
-    initKind: "junction",
+    functionName: "createHostedFirstContactAdmissionOpenAiFetch",
+    implementationSha256:
+      "3961d54845bd37ca2638f9294bd1a063a15376c3a1e07117a650c2b380c27d27",
+    moduleName: "openai",
+    providerId: "openai",
+    relativePath:
+      "apps/web/src/lib/hosted-onboarding/linq-first-contact-admission.ts",
+    transportPath: "fetchImpl.call",
+    wiringFunctionName: "classifyHostedLinqFirstContactAdmission",
+    wiringImplementationSha256:
+      "c03d60638053bf2cb07fc2afb8b5b9c6753fad2c32078acad5c1b3c55fac4096",
+  },
+  {
+    functionName: "requestJunctionResource",
+    implementationSha256:
+      "6a19d0dd8cf5de40b16c918065d523a2389cbcf1c1f8e2e7b1b9ebba5be2755d",
     moduleName: "@junction-api/sdk",
+    providerId: "junction",
+    relativePath: "apps/web/src/lib/labs/junction.ts",
+    transportPath: "runtime.fetchImpl",
+    wiringFunctionName: "requestJunctionResource",
+    wiringImplementationSha256:
+      "6a19d0dd8cf5de40b16c918065d523a2389cbcf1c1f8e2e7b1b9ebba5be2755d",
+  },
+  {
+    functionName: "createBoundedLinqApiFetch",
+    implementationSha256:
+      "2ba9401aa75e438bd9ac8ff084ddecd5072c9eb2e801f2334537f6f071c43818",
+    moduleName: "@linqapp/sdk",
+    providerId: "linq",
+    relativePath: "apps/web/src/lib/linq/api.ts",
+    transportPath: "fetchImplementation.call",
+    wiringFunctionName: "createLinqApiClientWithState",
+    wiringImplementationSha256:
+      "a6621c48e90cce711fdb7f3c20b57c9822e411f7982e1bfd5006e855127c26f0",
+  },
+  {
+    functionName: "createLobFetchAdapter",
+    implementationSha256:
+      "df849b52e90d331b52e2e913b030dd85ece18652e1a8302971698f29bbfb48fe",
+    moduleName: "@lob/lob-typescript-sdk",
+    providerId: "lob",
+    relativePath: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+    transportPath: "fetchImpl",
+    wiringFunctionName: "createLobLettersApi",
+    wiringImplementationSha256:
+      "1b015ed2300bc58c6f45255a1de5db6a976d148cc6cc6604698c0cbb9a9a9260",
+  },
+  {
+    functionName: "createTelegramElevenLabsSdkFetchAdapter",
+    implementationSha256:
+      "00c46bb135d79635b9a71c5282042f8fa92f92226beab6f8d249fc0de63d950e",
+    moduleName: "@murphai/operator-config/elevenlabs-runtime",
+    providerId: "elevenlabs",
+    relativePath: "packages/assistant-engine/src/assistant/channels/runtime.ts",
+    transportPath: "fetchImplementation",
+    wiringFunctionName: "prepareTelegramVoiceMemoMessage",
+    wiringImplementationSha256:
+      "0e77b3d385280e9c07b3d1a3d9990031f3503dce9d13c32c85946e00a2d67342",
+  },
+  {
+    functionName: "createOpenAiImageSdkFetch",
+    implementationSha256:
+      "b0d6c3b84cf1868b281e9f264ec2269345fab23c22972329ecbcdd3cf8d0d3a0",
+    moduleName: "openai",
+    providerId: "openai",
+    relativePath:
+      "packages/assistant-engine/src/assistant-codex/openai-image-generation.ts",
+    transportPath: "fetchImpl.call",
+    wiringFunctionName: "requestOpenAiImage",
+    wiringImplementationSha256:
+      "af0552a002f890cd69cd0d32bebc04f176d651acf504f45b03398518006fc48f",
+  },
+  {
+    functionName: "requestSdkResource",
+    implementationSha256:
+      "6f53c31185895fd9706dd0cc60e8234ae6435ed89caf34be71aa8b10e1d646e8",
+    moduleName: "@junction-api/sdk/activity",
     providerId: "junction",
     relativePath: "packages/device-syncd/src/providers/junction-client.ts",
     transportPath: "this.fetchImpl",
-    urlParameterName: "input",
-    wiringName: "sdkFetch",
+    wiringFunctionName: "requestSdkResource",
+    wiringImplementationSha256:
+      "6f53c31185895fd9706dd0cc60e8234ae6435ed89caf34be71aa8b10e1d646e8",
   },
   {
     functionName: "createElevenLabsSdkFetch",
-    initKind: "elevenlabs",
+    implementationSha256:
+      "7cb128bcd93285b69daac64e5e85660d7fce775c940095c22f3efaf5d9930f7b",
     moduleName: "@elevenlabs/elevenlabs-js",
     providerId: "elevenlabs",
     relativePath: "packages/operator-config/src/elevenlabs-runtime.ts",
     transportPath: "fetchImplementation",
-    urlParameterName: "input",
-    wiringName: "createElevenLabsSdkFetch",
+    wiringFunctionName: "requestElevenLabsAudio",
+    wiringImplementationSha256:
+      "19d13521b2450550504a1bff4c5c13f3524280481ecc0bdf3fdecdb63f630c82",
   },
   {
     functionName: "createLinqSdkFetch",
-    initKind: "linq",
+    implementationSha256:
+      "09ec695997d73c393974076a5b6721b768f5d618c9751956422f45edaa9ad82b",
     moduleName: "@linqapp/sdk",
     providerId: "linq",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
     transportPath: "input.fetchImplementation.call",
-    urlParameterName: "request",
-    wiringName: "createLinqSdkFetch",
+    wiringFunctionName: "createLinqSdkClient",
+    wiringImplementationSha256:
+      "ad6858d90043a7253d5c37a66f4346479739a0ba8b32a2fc0a391134ad712b56",
   },
 ] as const);
 
@@ -2339,130 +2414,50 @@ function isOfficialSdkFetchHook(
   ) {
     return false;
   }
-  const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
-  const owner = findInnermostLocalFunction(
-    collectLocalFunctionRanges(input.analysis.sourceFile),
-    before,
+  const owner = findExactApprovedFunctionRange({
+    functionName: approval.functionName,
+    position: input.call.start ?? Number.MAX_SAFE_INTEGER,
+    sourceFile: input.analysis.sourceFile,
+  });
+  const wiringOwner = findExactApprovedFunctionRange({
+    functionName: approval.wiringFunctionName,
+    sourceFile: input.analysis.sourceFile,
+  });
+  return Boolean(
+    owner &&
+    hasExactSourceHash(input.contents, owner, approval.implementationSha256) &&
+    wiringOwner &&
+    hasExactSourceHash(
+      input.contents,
+      wiringOwner,
+      approval.wiringImplementationSha256,
+    ),
   );
-  if (
-    owner?.name !== approval.functionName ||
-    !isExactFunctionParameter(
-      input.analysis,
-      input.urlArgument,
-      before,
-      approval.urlParameterName,
-    ) ||
-    !hasExactSdkFetchWiring(
-      input.analysis.sourceFile,
-      approval.wiringName,
-    )
-  ) {
-    return false;
-  }
-  if (approval.initKind === "linq" || approval.initKind === "call-forward") {
-    return Boolean(
-      input.call.arguments.length === 3 &&
-      isIdentifier(input.call.arguments[0], { name: "undefined" }) &&
-      input.initArgument &&
-      input.initArgument.type !== "SpreadElement" &&
-      isExactFunctionParameter(
-        input.analysis,
-        input.initArgument,
-        before,
-        "init",
-      ),
-    );
-  }
-  return matchesForwardedSdkFetchInit({
-    analysis: input.analysis,
-    before,
-    initArgument: input.initArgument,
-    kind: approval.initKind,
-  });
 }
 
-function matchesForwardedSdkFetchInit(input: {
-  readonly analysis: ProviderHttpSourceAnalysis;
-  readonly before: number;
-  readonly initArgument: Node | null;
-  readonly kind: "elevenlabs" | "junction" | "junction-web";
-}): boolean {
-  if (!input.initArgument || input.initArgument.type === "SpreadElement") {
-    return false;
-  }
-  const init = unwrapExpression(input.initArgument);
-  if (!isObjectExpression(init)) {
-    return false;
-  }
-  let hasForwardedInit = false;
-  const properties = new Map<string, Node>();
-  for (const property of init.properties) {
-    if (isSpreadElement(property)) {
-      if (
-        hasForwardedInit ||
-        !isExactFunctionParameter(
-          input.analysis,
-          property.argument,
-          input.before,
-          "init",
-        )
-      ) {
-        return false;
-      }
-      hasForwardedInit = true;
-      continue;
-    }
-    if (!isObjectProperty(property) || property.computed) {
-      return false;
-    }
-    const name = readPropertyName(property.key);
-    if (!name || properties.has(name)) {
-      return false;
-    }
-    properties.set(name, property.value);
-  }
-  if (!hasForwardedInit) {
-    return false;
-  }
-  const redirect = properties.get("redirect");
-  if (!redirect || !isStringLiteral(redirect, { value: "error" })) {
-    return false;
-  }
-  if (input.kind === "elevenlabs") {
-    return properties.size === 1;
-  }
-  if (input.kind === "junction-web") {
-    const cache = properties.get("cache");
-    return properties.size === 2
-      && Boolean(cache && isStringLiteral(cache, { value: "no-store" }));
-  }
-  return properties.size === 2 &&
-    readMemberPath(properties.get("signal") ?? ({ type: "NullLiteral" } as Node))
-      ?.join(".") === "requestAbort.signal";
+function findExactApprovedFunctionRange(input: {
+  readonly functionName: string;
+  readonly position?: number;
+  readonly sourceFile: Node;
+}): LocalFunctionRange | null {
+  const matches = collectLocalFunctionRanges(input.sourceFile).filter(
+    (range) => range.name === input.functionName,
+  );
+  const owner = matches.length === 1 ? matches[0] ?? null : null;
+  return owner && input.position !== undefined &&
+      !(owner.start <= input.position && input.position <= owner.end)
+    ? null
+    : owner;
 }
 
-function hasExactSdkFetchWiring(sourceFile: Node, wiringName: string): boolean {
-  let matches = 0;
-  traverseFast(sourceFile, (node) => {
-    if (!isObjectProperty(node) || node.computed) {
-      return;
-    }
-    if (readPropertyName(node.key) !== "fetch") {
-      return;
-    }
-    const value = unwrapExpression(node.value);
-    if (isIdentifier(value, { name: wiringName })) {
-      matches += 1;
-      return;
-    }
-    if (
-      isCallExpression(value) &&
-      isIdentifier(unwrapExpression(value.callee), { name: wiringName })
-    ) {
-      matches += 1;
-    }
-  });
-  return matches === 1;
+function hasExactSourceHash(
+  contents: string,
+  range: LocalFunctionRange,
+  expectedSha256: string,
+): boolean {
+  return createHash("sha256")
+    .update(contents.slice(range.start, range.end))
+    .digest("hex") === expectedSha256;
 }
 
 function isResendSdkFetchRequestOverride(
@@ -2488,8 +2483,7 @@ function isResendSdkFetchRequestOverride(
   const initArgument = input.initArgument;
   if (
     !initArgument ||
-    initArgument.type === "SpreadElement" ||
-    !isIdentifier(unwrapExpression(initArgument), { name: "requestInit" })
+    initArgument.type === "SpreadElement"
   ) {
     return false;
   }
@@ -2553,82 +2547,29 @@ function isApprovedResendRequestUrl(
 function isApprovedResendRequestInit(
   input: RegisteredProviderHttpExceptionInput,
 ): boolean {
-  const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
-  const binding = resolveBinding(input.bindings, "requestInit", before);
-  if (!binding?.definitive || binding.typeAnnotation !== ": RequestInit") {
+  const initArgument = input.initArgument;
+  if (!initArgument || initArgument.type === "SpreadElement") {
     return false;
   }
-  const initializer = unwrapExpression(binding.initializer);
-  const properties = readClosedObjectProperties(initializer);
-  if (
-    !properties ||
-    properties.size !== 2 ||
-    !isStringLiteral(properties.get("redirect")?.value, { value: "error" }) ||
-    readMemberPath(properties.get("signal")?.value ?? ({ type: "NullLiteral" } as Node))
-      ?.join(".") !== "this.requestSignal"
-  ) {
-    return false;
-  }
-  const owner = findInnermostLocalFunction(
-    collectLocalFunctionRanges(input.analysis.sourceFile),
-    before,
-  );
-  if (!owner) {
-    return false;
-  }
-  const assignmentCounts = new Map<string, number>();
-  let unsafeUse = false;
-  traverseFast(input.analysis.sourceFile, (node) => {
-    const start = node.start ?? 0;
-    if (start < owner.start || start > owner.end) {
-      return;
-    }
-    if (isAssignmentExpression(node)) {
-      const leftPath = readMemberPath(node.left);
-      if (leftPath?.[0] !== "requestInit") {
-        return;
-      }
-      const propertyName = leftPath.length === 2 ? leftPath[1] : null;
-      if (!propertyName || node.operator !== "=") {
-        unsafeUse = true;
-        return;
-      }
-      const valid = propertyName === "body"
-        ? readMemberPath(node.right)?.join(".") === "options.body"
-        : propertyName === "method"
-          ? readMemberPath(node.right)?.join(".") === "options.method"
-          : propertyName === "headers"
-            ? isExactCallWithMemberArgument(
-                node.right,
-                "normalizeResendRequestHeaders",
-                "options.headers",
-              )
-            : false;
-      if (!valid) {
-        unsafeUse = true;
-        return;
-      }
-      assignmentCounts.set(
-        propertyName,
-        (assignmentCounts.get(propertyName) ?? 0) + 1,
-      );
-      return;
-    }
-    if (
-      (isCallExpression(node) || isOptionalCallExpression(node)) &&
-      node.start !== input.call.start &&
-      node.arguments.some(
-        (argument) =>
-          argument.type !== "ArgumentPlaceholder" &&
-          argument.type !== "SpreadElement" &&
-          isIdentifier(unwrapExpression(argument), { name: "requestInit" }),
-      )
-    ) {
-      unsafeUse = true;
-    }
-  });
-  return !unsafeUse && ["body", "headers", "method"].every(
-    (name) => assignmentCounts.get(name) === 1,
+  const properties = readClosedObjectProperties(unwrapExpression(initArgument));
+  return Boolean(
+    properties &&
+    properties.size === 5 &&
+    readMemberPath(properties.get("body")?.value ?? ({
+      type: "NullLiteral",
+    } as Node))?.join(".") === "options.body" &&
+    isExactCallWithMemberArgument(
+      properties.get("headers")?.value ?? ({ type: "NullLiteral" } as Node),
+      "normalizeResendRequestHeaders",
+      "options.headers",
+    ) &&
+    readMemberPath(properties.get("method")?.value ?? ({
+      type: "NullLiteral",
+    } as Node))?.join(".") === "options.method" &&
+    isStringLiteral(properties.get("redirect")?.value, { value: "error" }) &&
+    readMemberPath(properties.get("signal")?.value ?? ({
+      type: "NullLiteral",
+    } as Node))?.join(".") === "this.requestSignal",
   );
 }
 
@@ -4099,8 +4040,10 @@ function looksLikeStandardFetchDerivedBivariantType(
   typeText: string,
 ): boolean {
   const normalized = stripLeadingTypeAnnotation(typeText).replace(/\s+/gu, "");
-  return /^\{bivarianceHack\(input:Parameters<typeoffetch>\[0\],init\?:Parameters<typeoffetch>\[1\],?\):ReturnType<typeoffetch>;?\}\[(['"])bivarianceHack\1\]$/u
-    .test(normalized);
+  return normalized.startsWith("{bivarianceHack(") &&
+    /\}\[(['"])bivarianceHack\1\]$/u.test(normalized) &&
+    normalized.includes("Parameters<typeoffetch>[0]") &&
+    normalized.includes("Parameters<typeoffetch>[1]");
 }
 
 function looksLikeExactFetchFunctionType(typeText: string): boolean {
@@ -4350,8 +4293,14 @@ function isFetchLikeCallTarget(input: {
                 : looksLikeFetchFunctionType(parameter.typeAnnotation))
         ),
       );
-      if (typedFetch || !parameter.defaultExpression) {
-        return typedFetch;
+      const opaqueNamedFetch = Boolean(
+        !input.exact &&
+        /^fetch(?:er|Impl|Implementation)?$/u.test(expression.name) &&
+        parameter.typeAnnotation &&
+        typeTextIsOpaqueNamedReference(parameter.typeAnnotation),
+      );
+      if (typedFetch || opaqueNamedFetch || !parameter.defaultExpression) {
+        return typedFetch || opaqueNamedFetch;
       }
       const key = `${input.exact ? "exact-" : ""}fetch-parameter-default:${expression.name}:${parameter.scopeStart}`;
       if (input.resolving.has(key)) {
@@ -4392,6 +4341,14 @@ function isFetchLikeCallTarget(input: {
             ? looksLikeExactFetchFunctionType(variable.typeAnnotation)
             : looksLikeFetchFunctionType(variable.typeAnnotation))
         )
+      ) {
+        return true;
+      }
+      if (
+        !input.exact &&
+        /^fetch(?:er|Impl|Implementation)?$/u.test(expression.name) &&
+        variable.typeAnnotation &&
+        typeTextIsOpaqueNamedReference(variable.typeAnnotation)
       ) {
         return true;
       }
@@ -4559,11 +4516,18 @@ function isFetchLikeCallTarget(input: {
       : null;
     return Boolean(
       parameter?.typeAnnotation &&
-      typeTextHasFetchProperty(
-        parameter.typeAnnotation,
-        terminal,
-        fetchTypeNames,
-        input.exact,
+      (
+        typeTextHasFetchProperty(
+          parameter.typeAnnotation,
+          terminal,
+          fetchTypeNames,
+          input.exact,
+        ) ||
+        (
+          !input.exact &&
+          /^fetch(?:er|Impl|Implementation)?$/u.test(terminal) &&
+          typeTextIsOpaqueNamedReference(parameter.typeAnnotation)
+        )
       ),
     );
   }
@@ -4632,6 +4596,11 @@ function typeTextHasFetchProperty(
 
 function stripLeadingTypeAnnotation(typeText: string): string {
   return typeText.trim().replace(/^:\s*/u, "");
+}
+
+function typeTextIsOpaqueNamedReference(typeText: string): boolean {
+  return /^(?:[A-Z_$][A-Za-z0-9_$]*\.)*[A-Z_$][A-Za-z0-9_$]*(?:<[^{};]+>)?$/u
+    .test(stripLeadingTypeAnnotation(typeText).replace(/\s+/gu, ""));
 }
 
 function compareViolations(

@@ -53,9 +53,11 @@ Updated: 2026-08-14
 1. Risk: broad URL matching flags internal traffic or provider byte transfers.
    Mitigation: prove each allowed transport class with explicit fixtures and
    require narrow exception metadata.
-2. Risk: the guard is coupled to current migrated call-site syntax.
-   Mitigation: use semantic AST evidence and mutation-style fixtures for the
-   bypass classes rather than exact source-text snapshots.
+2. Risk: an unavoidable SDK transport adapter drifts beyond the exact reviewed
+   request and constructor shape.
+   Mitigation: pin the unique raw adapter and SDK-construction function source
+   spans, and require mutation fixtures for effects, wiring, duplicate owners,
+   and decoys before deliberately updating either digest.
 3. Risk: the guard lands before sibling SDK migrations and makes CI red.
    Mitigation: keep the PR active, rebase only when the sibling migrations are
    available, and require a clean current-base guard run before merge.
@@ -228,13 +230,13 @@ Updated: 2026-08-14
   resolves chronological effective values, derives `.call` provenance from its
   underlying target, and admits `.apply` only for immutable closed tuples.
 - Current `main` now contains the sibling official-SDK migrations. The guard
-  recognizes only exact, path-scoped SDK transport hooks whose SDK import,
-  constructor wiring, provider identity, URL parameter, forwarded init, and
-  fail-closed transport additions all match the registry. Composio, Lob,
-  Junction, Linq, ElevenLabs, Resend, and Exa approvals are operation-specific;
-  mutation fixtures prove that URL, init, cache/redirect, wiring, and tuple
-  changes fail closed. This does not create an SDK-import exemption or authorize
-  another handwritten provider operation.
+  recognizes only exact, path-scoped SDK transport hooks whose provider, import,
+  raw target, unique adapter implementation, and unique SDK-construction owner
+  match pinned audited source spans. Composio, Lob, Junction, Linq, ElevenLabs,
+  OpenAI, Resend, and Exa approvals are operation-specific; mutation fixtures
+  prove that URL, init, cache/redirect, duplicate effects or owners, decoy or
+  changed wiring, and mutable request shapes fail closed. This does not create
+  an SDK-import exemption or authorize another handwritten provider operation.
 
 ## Verification
 
@@ -247,9 +249,9 @@ Updated: 2026-08-14
 
 Current evidence:
 
-- Focused guard suite: 97 tests passed after the official-SDK hook and mutation
+- Focused guard suite: 99 tests passed after the official-SDK hook and mutation
   coverage follow-up.
-- Repository-tool suite: 35 files and 607 tests passed in the final local run.
+- Repository-tool suite: 35 files and 609 tests passed in the latest local run.
 - Tools and operator-config TypeScript no-emit checks: passed.
 - `pnpm provider-requests:guard`: passes in the integration workspace containing
   the current-base sibling SDK migrations and the exact registered SDK hooks.

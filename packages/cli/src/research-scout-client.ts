@@ -27,7 +27,7 @@ import {
   researchScoutInputSchema,
   researchScoutResultSchema,
   resolveResearchScoutProfileKind,
-  type ExaResearchScoutRequestBody,
+  type ExaResearchScoutSearchPlan,
   type ResearchScoutBatchInput,
   type ResearchScoutBatchResult,
   type ResearchScoutResult,
@@ -154,7 +154,7 @@ type ExaResearchPaperSearchOptions = Omit<
 }
 
 async function fetchExaResearchScoutResponse(
-  requestBody: ExaResearchScoutRequestBody,
+  requestBody: ExaResearchScoutSearchPlan,
   client: RunnerScopedExaClient,
 ): Promise<unknown> {
   const options = buildExaResearchScoutSearchOptions(requestBody)
@@ -177,7 +177,7 @@ async function fetchExaResearchScoutResponse(
 }
 
 function buildExaResearchScoutSearchOptions(
-  requestBody: ExaResearchScoutRequestBody,
+  requestBody: ExaResearchScoutSearchPlan,
 ): ExaResearchPaperSearchOptions {
   const outputSchema: DeepObjectOutputSchema = {
     type: requestBody.outputSchema.type,
@@ -276,9 +276,9 @@ class RunnerScopedExaClient extends Exa {
     let response: Response
     try {
       response = await this.fetchImpl(
-        `${DEFAULT_EXA_API_BASE_URL}${endpoint}`,
+        'https://api.exa.ai/search',
         {
-          method,
+          method: 'POST',
           headers: {
             accept: 'application/json',
             'content-type': 'application/json; charset=utf-8',

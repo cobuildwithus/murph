@@ -295,6 +295,7 @@ function createFetchStub(calls: ObservedFetchCall[]): typeof fetch {
           sent_at: null,
         },
       }), {
+        headers: { "content-type": "application/json" },
         status: 200,
       });
     }
