@@ -1577,7 +1577,7 @@ test("selects metric points by policy and exposes provenance warnings", () => {
   assert.equal(blankMetricKey.point, null);
 });
 
-test("uses shared causal order before synthetic times and preserves the legacy fallback", () => {
+test("reduces report sequence before the legacy fallback without input-order cycles", () => {
   const common = {
     effectiveDate: "2026-08-13",
     metricKey: "steps",
@@ -1601,8 +1601,33 @@ test("uses shared causal order before synthetic times and preserves the legacy f
     recordId: "evt_newer_report",
     value: 9_000,
   });
+  const legacy = metricPoint({
+    ...common,
+    context: {},
+    id: "metric-point:legacy-manual",
+    observedAt: "2026-08-13T17:00:00.000Z",
+    recordId: "evt_legacy_manual",
+    value: 8_500,
+  });
 
   assert.equal(selectMetricValue({ metricKey: "steps", points: [older, newer] }).value, 9_000);
+  for (const points of [
+    [newer, legacy, older],
+    [newer, older, legacy],
+    [legacy, newer, older],
+    [legacy, older, newer],
+    [older, newer, legacy],
+    [older, legacy, newer],
+  ]) {
+    assert.equal(selectMetricValue({ metricKey: "steps", points }).value, 8_500);
+    assert.equal(selectMetricSeries({
+      duplicatePolicy: "selection-policy",
+      grain: "day",
+      metricKey: "steps",
+      points,
+      statistic: "value",
+    }).rows[0]?.value, 8_500);
+  }
   assert.equal(selectMetricValue({
     metricKey: "steps",
     points: [

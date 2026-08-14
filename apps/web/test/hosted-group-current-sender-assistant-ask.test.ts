@@ -214,6 +214,31 @@ function createTelegramSourceWake() {
   });
 }
 
+function createEvidenceSourceWake(
+  kind: "linq-media" | "telegram-media" | "linq-long-caption",
+): CurrentSenderSourceWake {
+  if (kind === "telegram-media") {
+    const wake = createTelegramSourceWake();
+    wake.message.telegramMessage.text = null;
+    wake.message.telegramMessage.attachments = [{
+      fileId: "telegram_photo",
+      kind: "photo",
+    }];
+    return wake;
+  }
+  const wake = createSourceWake({
+    text: kind === "linq-long-caption" ? "x".repeat(1_201) : "placeholder",
+  });
+  if (kind === "linq-media") {
+    wake.message.linqMessage.parts = [{
+      attachmentId: "linq_photo",
+      mimeType: "image/png",
+      type: "media",
+    }];
+  }
+  return wake;
+}
+
 function activeContainerLookup(input: { where?: { memberId?: string } }) {
   return input.where?.memberId === GROUP_RUNTIME_MEMBER_ID
     ? { memberId: GROUP_RUNTIME_MEMBER_ID }
@@ -399,6 +424,49 @@ describe("hosted current-sender Assistant Ask authority", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "report_conflict" },
     });
+  });
+
+  it.each([
+    "linq-media",
+    "telegram-media",
+    "linq-long-caption",
+  ] as const)("admits a daily metric from %s while ask-only text policy stays closed", async (kind) => {
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      createEvidenceSourceWake(kind),
+    );
+    const dailyMetric = {
+      date: "2026-07-27",
+      metric: "steps",
+      unit: "count",
+      value: 9_000,
+    };
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toMatchObject({
+      mailboxWake: { expectedUserId: SENDER_MEMBER_ID },
+      result: { status: "accepted" },
+    });
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toMatchObject({
+      mailboxWake: null,
+      result: { status: "unavailable" },
+    });
+    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toMatchObject({
+      mailboxWake: null,
+      result: { status: "unavailable" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a daily metric report after health-data consent is revoked", async () => {

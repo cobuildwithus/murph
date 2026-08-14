@@ -168,6 +168,25 @@ describe("hosted member-reported daily metric import", () => {
       },
       vaultRoot,
     });
+    await upsertEvent({
+      payload: {
+        dayKey: "2026-08-13",
+        id: deterministicContractId(
+          ID_PREFIXES.event,
+          "legacy-manual-steps-before-reports",
+        ),
+        kind: "observation",
+        metric: "steps",
+        observationGrain: "summary",
+        occurredAt: "2026-08-13T15:00:00.000Z",
+        recordedAt: "2026-08-13T17:00:00.000Z",
+        source: "manual",
+        title: "Manual steps",
+        unit: "count",
+        value: 8_500,
+      },
+      vaultRoot,
+    });
 
     const olderReportId = "daily-metric:report:steps:older-0";
     const newerReportId = "daily-metric:report:steps:newer-8";

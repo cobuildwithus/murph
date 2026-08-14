@@ -113,3 +113,18 @@ Updated: 2026-08-14
   timezone directions and equal/unequal report timestamps. The retrospective is
   recorded at
   `https://github.com/cobuildwithus/murph/pull/1794#issuecomment-5292431858`.
+- ReviewGPT round 5 found that pairwise sequence comparison was non-transitive
+  when a same-day legacy Manual point lacked a sequence, and that the shared
+  sender-authority reader still imposed Assistant Ask's text requirement on
+  evidence-originated metric reports. Selection now reduces valid reports to
+  the greatest mailbox sequence inside the existing top date/source cohort,
+  then applies the unchanged legacy time/id fallback. The base authority reader
+  accepts textless and long-captioned messages while both Ask wrappers retain
+  their exact nonempty bounded-question policy.
+- Node 24 proofs cover all six permutations of the three-point ordering cycle,
+  general and series selection, mixed legacy/report projection and disk
+  rebuild, deep/REM Manual correction projection, captionless Linq and Telegram
+  evidence, long captions, and unchanged Ask rejection. The canonical diff
+  verifier passed all selected typechecks, package tests, Web tests/build, and
+  Cloudflare Node/Workers tests; it reported only the two pre-existing
+  workspace-boundary findings in untouched Web tests.
