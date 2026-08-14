@@ -1481,7 +1481,10 @@ describe('assistant skill assets', () => {
       'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
     )
     expect(compactCatalog).toContain(
-      'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
+      'Familiarity alone is not a reason to omit images. Omit exercise images only when the user explicitly asks for a response without them.',
+    )
+    expect(compactCatalog).toContain(
+      'at least one useful returned catalog image for every exercise that has one by default.',
     )
     expect(compactCatalog).toContain(
       'Construct source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`.',
