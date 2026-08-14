@@ -620,6 +620,11 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 - Cross-plane changes state safe deploy order, warm-old-bundle behavior,
   rollback floor, and whether coordinated deployment is required.
+- A producer that persists new fail-closed authority becomes a hard rollback
+  floor before its first such write when an older producer would ignore that
+  authority. A below-floor emergency rollback first disables and drains every
+  caller that can reach the old producer, and keeps that capability disabled
+  until a compatible producer is restored.
 - Schema and protocol evolution is additive-first. Compatibility stays
   legacy-facing, includes a removal condition, and is deleted after verified
   production drain.

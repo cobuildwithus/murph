@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
   linqProviderFetchAttemptCount: vi.fn(() => 1),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
+  persistAssistantPrivateCompletionContinuityAfterDelivery: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
@@ -110,6 +111,8 @@ vi.mock("@murphai/assistant-engine", async () => {
     markAssistantOutboxIntentMirrorTerminalById:
       mocks.markAssistantOutboxIntentMirrorTerminalById,
     normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+    persistAssistantPrivateCompletionContinuityAfterDelivery:
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
     readAssistantAutomationState: mocks.readAssistantAutomationState,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
     readAssistantOutboxIntentMirrorState:
@@ -221,6 +224,7 @@ import {
   HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
 } from "../src/hosted-runtime/provider-fetch.ts";
 import {
+  buildHostedRuntimeResolvedLinqRoute,
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
@@ -374,17 +378,28 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
 
 function buildClaimedLinqEngagementResult(request: {
   authorityCheckOnly: boolean;
+  directRecipientPhoneNumber?: string | null;
+  fromPhoneNumber?: string | null;
+  target?: string | null;
+  targetKind?: "explicit" | "participant" | "thread" | null;
 }) {
-  return request.authorityCheckOnly === true
-    ? {}
-    : { providerDispatchClaimed: true };
+  return {
+    ...(request.authorityCheckOnly === true
+      ? {}
+      : { providerDispatchClaimed: true }),
+    resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+  };
 }
 
 async function assertLinqEngagementWithExistingProviderClaim(request: {
   authorityCheckOnly: boolean;
+  directRecipientPhoneNumber?: string | null;
+  fromPhoneNumber?: string | null;
+  target?: string | null;
+  targetKind?: "explicit" | "participant" | "thread" | null;
 }) {
   if (request.authorityCheckOnly === true) {
-    return {};
+    return { resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) };
   }
   throw Object.assign(new Error("Hosted Linq provider dispatch is already started."), {
     code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
@@ -3958,6 +3973,81 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("schedules concrete reaction confirmation without blocking a preferred later reply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:01:00.000Z"));
+    const retainedReaction = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: ["mailbox_item_reaction"],
+      bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+      channel: "linq",
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "assistant-outbox:intent_reaction",
+        kind: "message-reaction",
+        reaction: "heart",
+        sentAt: "2026-04-08T00:00:30.000Z",
+        target: "linq_chat_1",
+        targetKind: "thread",
+        targetMessageId: "linq_message_1",
+      },
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
+      deliveryTransportIdempotent: false,
+      explicitTarget: null,
+      intentId: "intent_reaction",
+      lastError: {
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        message: "delivery confirmation is still pending",
+      },
+      message: "",
+      nextAttemptAt: "2026-04-08T00:02:00.000Z",
+      operation: { kind: "message-reaction", reaction: "heart" },
+      replyToMessageId: "linq_message_1",
+      status: "retryable",
+      threadId: "linq_chat_1",
+      turnId: "turn_reaction",
+    });
+    const laterReply = createPendingHostedDeliveryIntent({
+      bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:01:01.000Z",
+      deliveryIdempotencyKey: "assistant-outbox:intent_later_reply",
+      deliveryTransportIdempotent: true,
+      explicitTarget: null,
+      intentId: "intent_later_reply",
+      message: "later reply",
+      nextAttemptAt: "2026-04-08T00:01:01.000Z",
+      replyToMessageId: "linq_message_1",
+      threadId: "linq_chat_1",
+      turnId: "turn_reaction",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      retainedReaction,
+      laterReply,
+    ]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.intentId === laterReply.intentId,
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [laterReply.intentId],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      laterReply.intentId,
+    ]);
+
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      retainedReaction,
+    ]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date(),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:02:00.000Z");
+  });
+
   it("collects stale non-idempotent sending predecessors before later same-boundary replies", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
@@ -6510,6 +6600,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(events).toEqual([
       `authority:read:${idempotencyKey}`,
+      `authority:read:${idempotencyKey}`,
       "provider:capability",
       `authority:claim:${idempotencyKey}`,
       "provider:card",
@@ -8922,14 +9013,15 @@ describe("hosted runtime callbacks", () => {
           replyToMessageId: null,
           target,
         });
+        const persistedDelivery = createDelivery({
+          idempotencyKey,
+          messageLength: responseText.length,
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+          targetKind: "thread",
+        });
         return createDispatchResult({
-          delivery: createDelivery({
-            idempotencyKey,
-            messageLength: responseText.length,
-            providerMessageId: delivery.providerMessageId,
-            target: delivery.target,
-            targetKind: "thread",
-          }),
+          delivery: persistedDelivery,
           status: "sent",
         });
       },
@@ -8938,6 +9030,8 @@ describe("hosted runtime callbacks", () => {
       async () => undefined,
     );
     const providerFetch = vi.fn<typeof fetch>();
+    mocks.persistAssistantPrivateCompletionContinuityAfterDelivery
+      .mockRejectedValueOnce(new Error("Synthetic local continuity interruption."));
 
     await expect(drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
@@ -8979,6 +9073,32 @@ describe("hosted runtime callbacks", () => {
     expect(
       assertAssistantAskPrivateCompletionAuthority.mock.invocationCallOrder[0],
     ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
+    expect(
+      providerFetch.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery.mock
+        .invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+    ).toHaveBeenCalledWith({
+      intent: expect.objectContaining({
+        delivery: expect.objectContaining({
+          providerMessageId: "provider_private_telegram_123",
+        }),
+        intentId: storedIntent.intentId,
+        status: "sent",
+      }),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        level: "warn",
+        message: "Hosted private completion continuity persistence failed.",
+        phase: "outbox",
+      }),
+    );
   });
 
   it("pins private Telegram delivery against provider migration", async () => {
@@ -9288,6 +9408,9 @@ describe("hosted runtime callbacks", () => {
       .toEqual(["authority", "provider", "authority"]);
     expect(providerFetch).toHaveBeenCalledOnce();
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not re-home a missing private Linq thread", async () => {
@@ -9362,9 +9485,11 @@ describe("hosted runtime callbacks", () => {
     );
     const assertLinqRecentInboundEngagement = vi.fn(async (request: {
       authorityCheckOnly: boolean;
-    }) => request.authorityCheckOnly
-      ? {}
-      : { providerDispatchClaimed: true });
+      directRecipientPhoneNumber?: string | null;
+      fromPhoneNumber?: string | null;
+      target?: string | null;
+      targetKind?: "explicit" | "participant" | "thread" | null;
+    }) => buildClaimedLinqEngagementResult(request));
     const providerFetch = vi.fn<typeof fetch>(async (request) => {
       const url = String(request);
       if (url.endsWith(`/chats/${target}/messages`)) {
@@ -9495,6 +9620,9 @@ describe("hosted runtime callbacks", () => {
       expect(assertAssistantAskPrivateCompletionAuthority).not.toHaveBeenCalled();
       expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
       expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
+      expect(
+        mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+      ).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -10035,6 +10163,7 @@ describe("hosted runtime callbacks", () => {
 
   it("routes persisted Linq reaction intents without payload operations", async () => {
     const effect = createEffect({
+      answeredMailboxItemIds: ["mailbox_item_1"],
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
       message: "",
@@ -10046,24 +10175,47 @@ describe("hosted runtime callbacks", () => {
       reaction: "heart",
       targetMessageId: "linq_message_1",
     });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({
+      dependencies,
+      dispatchHooks,
+    }) => {
       const delivery = await dependencies.setLinqMessageReaction({
         reaction: "heart",
         target: "linq_chat_123",
         targetMessageId: "linq_message_1",
       });
-
+      const acceptedDelivery = {
+        channel: "linq" as const,
+        idempotencyKey: "assistant-outbox:intent_123",
+        kind: "message-reaction" as const,
+        reaction: delivery.reaction,
+        sentAt: "2026-04-08T00:01:00.000Z",
+        target: delivery.target,
+        targetKind: "thread" as const,
+        targetMessageId: delivery.targetMessageId,
+      };
+      const durableIntent = createPendingHostedDeliveryIntent({
+        answeredMailboxItemIds: ["mailbox_item_1"],
+        bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+        channel: "linq",
+        delivery: acceptedDelivery,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        explicitTarget: null,
+        intentId: effect.effectId,
+        message: "",
+        operation: { kind: "message-reaction", reaction: "heart" },
+        replyToMessageId: "linq_message_1",
+        status: "sending",
+      }) as AssistantOutboxIntent;
+      await dispatchHooks?.persistDeliveredIntent?.({
+        delivery: acceptedDelivery,
+        intent: durableIntent,
+        vault: HOSTED_WAKE.vaultRoot,
+      });
       return createDispatchResult({
-        delivery: {
-          channel: "linq",
-          idempotencyKey: "assistant-outbox:intent_123",
-          kind: "message-reaction",
-          reaction: delivery.reaction,
-          sentAt: "2026-04-08T00:01:00.000Z",
-          target: delivery.target,
-          targetKind: "thread",
-          targetMessageId: delivery.targetMessageId,
-        },
+        ...durableIntent,
+        delivery: acceptedDelivery,
         status: "sent",
       });
     });
@@ -10071,7 +10223,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
         OPENAI_API_KEY: "sk-runtime",
@@ -10081,6 +10235,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(mocks.setLinqMessageReaction).toHaveBeenCalledWith({
       reaction: "heart",
@@ -10098,6 +10253,237 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.any(String),
+        answeredMailboxItemIds: ["mailbox_item_1"],
+        attemptedAt: expect.any(String),
+        idempotencyKey: "assistant-outbox:intent_123",
+        intentId: effect.effectId,
+        providerMessageId: null,
+        providerTarget: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("keeps an accepted Linq reaction receipt retryable when exact-consume confirmation fails", async () => {
+    const effect = createEffect({
+      answeredMailboxItemIds: ["mailbox_item_retryable"],
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_retryable",
+      message: "",
+      replyToMessageId: "linq_message_retryable",
+      transportIdempotent: false,
+    });
+    mocks.setLinqMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      targetMessageId: "linq_message_retryable",
+    });
+    const recordDeliveryOutcome = vi.fn(async () => {
+      throw new Error("Web confirmation unavailable");
+    });
+    let confirmationError: unknown = null;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({
+      dependencies,
+      dispatchHooks,
+    }) => {
+      const delivery = await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_retryable",
+        targetMessageId: "linq_message_retryable",
+      });
+      const acceptedDelivery = {
+        channel: "linq" as const,
+        idempotencyKey: "assistant-outbox:intent_123",
+        kind: "message-reaction" as const,
+        reaction: delivery.reaction,
+        sentAt: "2026-04-08T00:01:00.000Z",
+        target: delivery.target,
+        targetKind: "thread" as const,
+        targetMessageId: delivery.targetMessageId,
+      };
+      const durableIntent = createPendingHostedDeliveryIntent({
+        answeredMailboxItemIds: ["mailbox_item_retryable"],
+        bindingDelivery: { kind: "thread", target: "linq_chat_retryable" },
+        channel: "linq",
+        delivery: acceptedDelivery,
+        deliveryIdempotencyKey: acceptedDelivery.idempotencyKey,
+        explicitTarget: null,
+        intentId: effect.effectId,
+        message: "",
+        operation: { kind: "message-reaction", reaction: "heart" },
+        replyToMessageId: "linq_message_retryable",
+        status: "sending",
+      }) as AssistantOutboxIntent;
+      try {
+        await dispatchHooks?.persistDeliveredIntent?.({
+          delivery: acceptedDelivery,
+          intent: durableIntent,
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+      } catch (error) {
+        confirmationError = error;
+        return createDispatchResult({
+          ...durableIntent,
+          lastError: {
+            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            message: "Accepted reaction exact-consume confirmation is pending.",
+          },
+          status: "retryable",
+        }, {
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "Accepted reaction exact-consume confirmation is pending.",
+        });
+      }
+
+      throw new Error("Expected exact-consume confirmation to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(confirmationError).toMatchObject({
+      code: "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      deliveryMayHaveSucceeded: true,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "retryable",
+        retryable: true,
+      }),
+    ]);
+    expect(mocks.setLinqMessageReaction).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.any(String),
+        answeredMailboxItemIds: ["mailbox_item_retryable"],
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("confirms a retained Linq reaction receipt after auto-reply is revoked without replaying provider or route authority", async () => {
+    const effect = createEffect({
+      answeredMailboxItemIds: ["mailbox_item_retry"],
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_retry",
+      message: "",
+      replyToMessageId: "linq_message_retry",
+      transportIdempotent: false,
+    });
+    const acceptedDelivery = {
+      channel: "linq" as const,
+      idempotencyKey: "assistant-outbox:intent_123",
+      kind: "message-reaction" as const,
+      reaction: "heart" as const,
+      sentAt: "2026-04-08T00:01:00.000Z",
+      target: "linq_chat_retry",
+      targetKind: "thread" as const,
+      targetMessageId: "linq_message_retry",
+    };
+    const storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: ["mailbox_item_retry"],
+      bindingDelivery: { kind: "thread", target: "linq_chat_retry" },
+      channel: "linq",
+      delivery: acceptedDelivery,
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      explicitTarget: null,
+      intentId: effect.effectId,
+      message: "",
+      operation: { kind: "message-reaction", reaction: "heart" },
+      replyToMessageId: "linq_message_retry",
+      status: "retryable",
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(storedIntent),
+    );
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set([effect.effectId]),
+    );
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
+    const assertRecentInbound = vi.fn(async () => {
+      throw new Error("route authority must not be re-entered");
+    });
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({
+      dependencies,
+      dispatchHooks,
+    }) => {
+      await expect(dispatchHooks?.preflightDispatchIntent?.({
+        intent: storedIntent,
+        now: new Date("2026-04-08T00:02:00.000Z"),
+        vault: HOSTED_WAKE.vaultRoot,
+      })).resolves.toEqual({ action: "continue" });
+      const resolved = await dispatchHooks?.resolveDeliveredIntent?.({
+        intent: storedIntent,
+        vault: HOSTED_WAKE.vaultRoot,
+      });
+      expect(dependencies.setLinqMessageReaction).toBeDefined();
+      return createDispatchResult({
+        ...storedIntent,
+        delivery: resolved,
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+    expect(assertRecentInbound).not.toHaveBeenCalled();
+    expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+    expect(mocks.findAssistantAutoReplyDeliveryIntentIds).not.toHaveBeenCalled();
+    expect(mocks.readAssistantAutomationState).not.toHaveBeenCalled();
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: acceptedDelivery.sentAt,
+        answeredMailboxItemIds: ["mailbox_item_retry"],
+        attemptedAt: acceptedDelivery.sentAt,
+        idempotencyKey: acceptedDelivery.idempotencyKey,
+        intentId: effect.effectId,
+        providerTarget: acceptedDelivery.target,
+        target: acceptedDelivery.target,
+        targetKind: "thread",
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("blocks routed Linq reactions when the final provider claim loses route authority", async () => {
@@ -10134,6 +10520,9 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     const assertRecentInbound = vi.fn()
+      .mockImplementationOnce(async (request) =>
+        buildClaimedLinqEngagementResult(request)
+      )
       .mockRejectedValueOnce(new Error("route revoked"));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.setLinqMessageReaction({
@@ -10159,10 +10548,10 @@ describe("hosted runtime callbacks", () => {
       wake,
     })).rejects.toThrow("route revoked");
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
     expect(assertRecentInbound.mock.calls.map(([request]) =>
       request.authorityCheckOnly
-    )).toEqual([false]);
+    )).toEqual([true, false]);
     expect(assertRecentInbound).toHaveBeenLastCalledWith(
       expect.objectContaining({ target: routeAuthority.threadId }),
       { signal: null },
@@ -10176,7 +10565,9 @@ describe("hosted runtime callbacks", () => {
       channel: "linq",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(async () => ({}));
+    const assertRecentInbound = vi.fn(async (request) => ({
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+    }));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.sendLinq({
         idempotencyKey: "assistant-outbox:intent_123",
@@ -10201,8 +10592,55 @@ describe("hosted runtime callbacks", () => {
       code: "ASSISTANT_LINQ_PROVIDER_DISPATCH_PROTOCOL_UNAVAILABLE",
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([true, false]);
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before capability or provider access when Web lacks the canonical-route protocol", async () => {
+    const assertRecentInbound = vi.fn(async () => ({}));
+    const persistAppCardTextFallback = vi.fn(async () => undefined);
+    const providerFetch = vi.fn<typeof fetch>();
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      providerFetch,
+    });
+
+    await expect(dependencies.sendLinq!({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      idempotencyKey: "assistant-outbox:legacy-web-card",
+      message: "Private nutrition summary",
+      persistAppCardTextFallback,
+      target: "linq_chat_legacy",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_RESOLVED_ROUTE_PROTOCOL_UNAVAILABLE",
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledOnce();
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityCheckOnly: true,
+        target: "linq_chat_legacy",
+        targetKind: "thread",
+      }),
+      { signal: null },
+    );
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(recordDeliveryOutcome).not.toHaveBeenCalled();
   });
 
   it("blocks changed Linq health at provider entry before any provider message request", async () => {
@@ -10222,9 +10660,16 @@ describe("hosted runtime callbacks", () => {
     }) as AssistantOutboxIntent;
     const assertRecentInbound = vi.fn(async (request: {
       authorityCheckOnly: boolean;
+      directRecipientPhoneNumber?: string | null;
+      fromPhoneNumber?: string | null;
+      target: string | null;
+      targetKind?: "explicit" | "participant" | "thread" | null;
     }) => request.authorityCheckOnly
-      ? {}
-      : { deliveryBlockCode: "chat_critical" as const });
+      ? { resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) }
+      : {
+          deliveryBlockCode: "chat_critical" as const,
+          resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+        });
     const providerFetch = vi.fn<typeof fetch>();
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
       async ({ dependencies, dispatchHooks }) => {
@@ -10259,13 +10704,134 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound.mock.calls.map(([request]) =>
       request.authorityCheckOnly
-    )).toEqual([false]);
+    )).toEqual([true, false]);
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
     expect(providerFetch).toHaveBeenCalledTimes(1);
     expect(providerFetch).toHaveBeenCalledWith(
       expect.stringMatching(/\/typing$/u),
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+
+  it("resolves an actorless scheduled private card through Web and sends one native app card", async () => {
+    const idempotencyKey = "assistant-outbox:scheduled-private-nutrition-card";
+    const resolvedRoute = buildHostedRuntimeResolvedLinqRoute({
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      target: "linq_chat_home",
+      targetKind: "thread",
+    }, {
+      conversationThreadId: "linq:member_123:phone_lookup_123:linq_chat_home",
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550002",
+      target: "linq_chat_home",
+      targetKind: "thread",
+      threadIsDirect: true,
+    });
+    const assertRecentInbound = vi.fn(async (request) => {
+      if (request.expectedResolvedRoute) {
+        expect(request.expectedResolvedRoute).toEqual(resolvedRoute);
+        expect(request.homeRouteFallbackAllowed).toBe(false);
+        expect(request.target).toBe(resolvedRoute.target);
+        expect(request.targetKind).toBe(resolvedRoute.targetKind);
+      } else {
+        expect(request).toMatchObject({
+          authorityCheckOnly: true,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: null,
+          homeRouteFallbackAllowed: true,
+          target: "linq_chat_stale_hint",
+          targetKind: "thread",
+        });
+      }
+      return {
+        ...(request.authorityCheckOnly
+          ? {}
+          : { providerDispatchClaimed: true }),
+        resolvedRoute,
+      };
+    });
+    const providerMessageBodies: Array<{
+      message?: {
+        parts?: Array<{ type?: string; value?: string }>;
+      };
+    }> = [];
+    const capabilityBodies: Array<{ address?: string; from?: string }> = [];
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        address?: string;
+        from?: string;
+        message?: {
+          parts?: Array<{ type?: string; value?: string }>;
+        };
+      };
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        capabilityBodies.push(body);
+        return new Response(JSON.stringify({
+          address: "+15550001",
+          available: true,
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      providerMessageBodies.push(body);
+      return new Response(JSON.stringify({ message: { id: "linq_card_1" } }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const persistAppCardTextFallback = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      providerFetch,
+    });
+    const sendLinq = dependencies.sendLinq!;
+
+    await expect(sendLinq({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      homeRouteFallbackAllowed: true,
+      idempotencyKey,
+      message: "Nutrition summary",
+      persistAppCardTextFallback,
+      target: "linq_chat_stale_hint",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      providerMessageId: "linq_card_1",
+      target: "linq_chat_home",
+    });
+
+    expect(assertRecentInbound.mock.calls.map(([request]) => ({
+      authorityCheckOnly: request.authorityCheckOnly,
+      hasExpectedRoute: Boolean(request.expectedResolvedRoute),
+    }))).toEqual([
+      { authorityCheckOnly: true, hasExpectedRoute: false },
+      { authorityCheckOnly: true, hasExpectedRoute: true },
+      { authorityCheckOnly: false, hasExpectedRoute: true },
+    ]);
+    expect(capabilityBodies).toEqual([{
+      address: "+15550001",
+      from: "+15550002",
+    }]);
+    expect(providerMessageBodies).toHaveLength(1);
+    expect(providerMessageBodies[0]?.message?.parts).toEqual([
+      expect.objectContaining({ type: "imessage_app" }),
+    ]);
+    expect(providerMessageBodies[0]?.message?.parts?.some((part) =>
+      part.type === "text" || typeof part.value === "string"
+    )).toBe(false);
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(recordDeliveryOutcome).toHaveBeenCalledOnce();
   });
 
   it("rechecks Linq authority after capability lookup before the card mutation", async () => {
@@ -10283,7 +10849,13 @@ describe("hosted runtime callbacks", () => {
       );
       return request.authorityCheckOnly || !authorityRevoked
         ? buildClaimedLinqEngagementResult(request)
-        : { deliveryBlockCode: "chat_opted_out" as const };
+        : {
+            deliveryBlockCode: "chat_opted_out" as const,
+            resolvedRoute: buildHostedRuntimeResolvedLinqRoute({
+              ...request,
+              target: null,
+            }),
+          };
     });
     const recordDeliveryOutcome = vi.fn(async () => undefined);
     const providerFetch = vi.fn<typeof fetch>(async (request) => {
@@ -10334,6 +10906,7 @@ describe("hosted runtime callbacks", () => {
     }
 
     expect(events).toEqual([
+      `authority:read:${idempotencyKey}`,
       `authority:read:${idempotencyKey}`,
       "provider:capability",
       `authority:claim:${idempotencyKey}`,
@@ -10425,6 +10998,7 @@ describe("hosted runtime callbacks", () => {
     await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(events).toEqual([
+      `authority:read:${idempotencyKey}`,
       `authority:read:${idempotencyKey}`,
       "provider:capability",
       `persist:${idempotencyKey}`,
@@ -10646,12 +11220,11 @@ describe("hosted runtime callbacks", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       component: "outbox",
-      errorCode: "syntax_error",
+      errorCode: "LINQ_API_REQUEST_FAILED",
       eventCode: "outbox.linq_app_card_fallback_error",
       level: "warn",
       phase: "outbox",
       redactedJson: {
-        errorName: "SyntaxError",
         fallbackKind: "text",
         reason: "capability_check_failed",
       },
@@ -10808,6 +11381,7 @@ describe("hosted runtime callbacks", () => {
       await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
       expect(events).toEqual([
         "authority:read:" + idempotencyKey,
+        "authority:read:" + idempotencyKey,
         "provider:capability",
         "persist:" + idempotencyKey,
         "authority:claim:" + idempotencyKey,
@@ -10949,11 +11523,20 @@ describe("hosted runtime callbacks", () => {
       expect(textStartedAt).toBeNull();
       expect(persistAppCardTextFallback).not.toHaveBeenCalled();
       expect(recordDeliveryOutcome).not.toHaveBeenCalled();
-      expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+      expect(assertRecentInbound).toHaveBeenCalledTimes(2);
       expect(assertRecentInbound).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
           authorityCheckOnly: true,
+          idempotencyKey,
+        }),
+        { signal: null },
+      );
+      expect(assertRecentInbound).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          authorityCheckOnly: true,
+          expectedResolvedRoute: expect.any(Object),
           idempotencyKey,
         }),
         { signal: null },
@@ -10972,9 +11555,9 @@ describe("hosted runtime callbacks", () => {
       expect(capabilityRequestCount).toBe(1);
       expect(providerFetch).toHaveBeenCalledTimes(2);
       expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
-      expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+      expect(assertRecentInbound).toHaveBeenCalledTimes(3);
       expect(assertRecentInbound).toHaveBeenNthCalledWith(
-        2,
+        3,
         expect.objectContaining({
           authorityCheckOnly: false,
           idempotencyKey,
@@ -10982,6 +11565,7 @@ describe("hosted runtime callbacks", () => {
         { signal: null },
       );
       expect(events).toEqual([
+        "authority:read:" + idempotencyKey,
         "authority:read:" + idempotencyKey,
         "provider:capability",
         "persist:" + idempotencyKey,
@@ -11097,6 +11681,7 @@ describe("hosted runtime callbacks", () => {
     await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(events).toEqual([
+      `authority:read:${idempotencyKey}`,
       `authority:read:${idempotencyKey}`,
       "provider:capability",
       `authority:claim:${idempotencyKey}`,
@@ -11376,10 +11961,16 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound.mock.calls.map(([request]) => ({
       authorityCheckOnly: request.authorityCheckOnly,
       idempotencyKey: request.idempotencyKey,
-    }))).toEqual([{
-      authorityCheckOnly: false,
-      idempotencyKey,
-    }]);
+    }))).toEqual([
+      {
+        authorityCheckOnly: true,
+        idempotencyKey,
+      },
+      {
+        authorityCheckOnly: false,
+        idempotencyKey,
+      },
+    ]);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
@@ -11511,7 +12102,10 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound.mock.calls
       .map(([request]) => request)
       .filter((request) => request.authorityCheckOnly === true)
-      .map((request) => request.idempotencyKey)).toEqual([]);
+      .map((request) => request.idempotencyKey)).toEqual([
+      "linq-voice-memo:intent_123",
+      "linq-voice-memo-transcript:assistant-outbox:intent_123",
+    ]);
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         answeredMailboxItemIds,
@@ -11636,16 +12230,16 @@ describe("hosted runtime callbacks", () => {
         return { applied: true, intent };
       },
     );
-    const assertRecentInbound = vi.fn(async (request: {
-      assistantAskFallback?: boolean | null;
-      authorityCheckOnly: boolean;
-    }) => {
+    const assertRecentInbound = vi.fn(async (request) => {
+      const base = {
+        resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+      };
       if (request.authorityCheckOnly) {
-        return {};
+        return base;
       }
       return request.assistantAskFallback === true
-        ? { providerDispatchClaimed: true }
-        : { assistantAskFallbackRequired: true };
+        ? { ...base, providerDispatchClaimed: true }
+        : { ...base, assistantAskFallbackRequired: true };
     });
     mocks.sendLinqMessage.mockResolvedValue({
       providerMessageId: "linq_message_safe_fallback",
@@ -11746,7 +12340,9 @@ describe("hosted runtime callbacks", () => {
       authorityCheckOnly: request.authorityCheckOnly,
     }))).toEqual([
       { assistantAskFallback: false, authorityCheckOnly: true },
+      { assistantAskFallback: false, authorityCheckOnly: true },
       { assistantAskFallback: false, authorityCheckOnly: false },
+      { assistantAskFallback: true, authorityCheckOnly: true },
       { assistantAskFallback: true, authorityCheckOnly: true },
       { assistantAskFallback: true, authorityCheckOnly: false },
     ]);
@@ -11799,12 +12395,8 @@ describe("hosted runtime callbacks", () => {
       updatedAt: "2026-04-08T00:00:00.000Z",
     }) as AssistantOutboxIntent;
     mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
-    const assertRecentInbound = vi.fn(async (request: {
-      assistantAskFallback?: boolean | null;
-      authorityCheckOnly: boolean;
-    }) => request.authorityCheckOnly
-      ? {}
-      : { providerDispatchClaimed: true });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request));
     mocks.sendLinqMessage.mockResolvedValue({
       providerMessageId: "linq_message_live_media",
       providerThreadId: "linq_chat_123",
@@ -11924,11 +12516,11 @@ describe("hosted runtime callbacks", () => {
       assistantAskFallback?: boolean | null;
       authorityCheckOnly: boolean;
     }) => {
-      expect(request.assistantAskCompletionExpiresAt).toBe(expiresAt);
+      if (request.assistantAskCompletionExpiresAt !== undefined) {
+        expect(request.assistantAskCompletionExpiresAt).toBe(expiresAt);
+      }
       expect(request.assistantAskFallback).toBe(true);
-      return request.authorityCheckOnly
-        ? {}
-        : { providerDispatchClaimed: true };
+      return buildClaimedLinqEngagementResult(request);
     });
     mocks.sendLinqMessage.mockResolvedValue({
       providerMessageId: "linq_message_retention_fallback",
@@ -12053,12 +12645,8 @@ describe("hosted runtime callbacks", () => {
         return { applied: true, intent };
       },
     );
-    const assertRecentInbound = vi.fn(async (request: {
-      assistantAskFallback?: boolean | null;
-      authorityCheckOnly: boolean;
-    }) => request.authorityCheckOnly
-      ? {}
-      : { providerDispatchClaimed: true });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
       async ({ dependencies, dispatchHooks }) => {
         await dispatchHooks?.preflightDispatchIntent?.({
@@ -12098,8 +12686,17 @@ describe("hosted runtime callbacks", () => {
         HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
       );
       expect(storedIntent.media).toEqual([]);
-      expect(assertRecentInbound).toHaveBeenCalledTimes(1);
-      expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+      expect(assertRecentInbound).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          assistantAskFallback: false,
+          authorityCheckOnly: true,
+        }),
+        { signal: null },
+      );
+      expect(assertRecentInbound).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({
           assistantAskFallback: false,
           authorityCheckOnly: true,
@@ -12276,7 +12873,14 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         authorityCheckOnly: false,
-        directRecipientPhoneNumber: null,
+        directRecipientPhoneNumber: "+15550100001",
+        expectedResolvedRoute: expect.objectContaining({
+          directRecipientPhoneNumber: "+15550100001",
+          fromPhoneNumber: "+15550100099",
+          target: "+15550100001",
+          targetKind: "participant",
+          threadIsDirect: true,
+        }),
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         target: "+15550100001",
@@ -12452,10 +13056,14 @@ describe("hosted runtime callbacks", () => {
     });
     const assertRecentInbound = vi.fn(async (request) => ({
       ...buildClaimedLinqEngagementResult(request),
-      targetOverride: {
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+        conversationThreadId: "conversation-current",
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
         target: "linq_chat_current",
         targetKind: "thread" as const,
-      },
+        threadIsDirect: true,
+      }),
     }));
     const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.sendLinqMessage
@@ -12535,7 +13143,7 @@ describe("hosted runtime callbacks", () => {
       request.target,
     ])).toEqual([
       [true, true, "linq_chat_stale"],
-      [false, true, "linq_chat_current"],
+      [false, false, "linq_chat_current"],
     ]);
     expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(2);
     expect(mocks.sendLinqMessage.mock.calls[0]?.[0]).toEqual(
@@ -12552,12 +13160,114 @@ describe("hosted runtime callbacks", () => {
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
+        fromPhoneNumber: "+15550100002",
         providerTarget: "linq_chat_current",
         providerThreadId: "linq_chat_recovered",
         target: "linq_chat_current",
         targetKind: "thread",
       }),
       expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
+    );
+  });
+
+  it("records current-home provider failures without replay-scoped line authority", async () => {
+    const staleWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_stale_failure_replay",
+      linqMessage: {
+        chatId: "linq_chat_stale_failure",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_stale_failure",
+        parts: [{ type: "text", value: "already consumed" }],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_stale_failure",
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:stale-failure",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "linq_chat_stale_failure",
+      },
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_stale_failure",
+      channel: "linq",
+      idempotencyKey: "assistant-outbox:intent_current_home_failure",
+      message: "Current home route reminder.",
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async (request) => ({
+      ...buildClaimedLinqEngagementResult(request),
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+        conversationThreadId: "conversation-current-failure",
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
+        target: "linq_chat_current_failure",
+        targetKind: "thread" as const,
+        threadIsDirect: true,
+      }),
+    }));
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockRejectedValueOnce(Object.assign(
+      new Error("provider rejected current route"),
+      { code: "LINQ_PROVIDER_FAILED" },
+    ));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent_current_home_failure",
+          message: "Current home route reminder.",
+          replyToMessageId: null,
+          target: "linq_chat_stale_failure",
+          targetKind: "thread",
+        });
+      } catch {
+        return createDispatchResult({ delivery: null, status: "failed" }, {
+          code: "LINQ_PROVIDER_FAILED",
+          message: "Provider send failed.",
+        });
+      }
+
+      throw new Error("Expected Linq send to fail.");
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: staleWake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromPhoneNumber: "+15550100002",
+        target: "linq_chat_current_failure",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedAt: expect.stringMatching(/Z$/u),
+        failureCode: "LINQ_PROVIDER_FAILED",
+        fromPhoneNumber: "+15550100002",
+        providerTarget: "linq_chat_current_failure",
+        target: "linq_chat_current_failure",
+      }),
+      expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
     );
   });
 
@@ -12614,7 +13324,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
-        authorityCheckOnly: false,
+        authorityCheckOnly: true,
         homeRouteFallbackAllowed: false,
         target: "linq_source_chat_a",
         targetKind: "explicit",
@@ -12677,6 +13387,15 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: async (request) => ({
+          ...(request.authorityCheckOnly
+            ? {}
+            : { providerDispatchClaimed: true }),
+          resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+            directRecipientPhoneNumber: null,
+            threadIsDirect: false,
+          }),
+        }),
         recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       forwardedEnv: {
@@ -13612,10 +14331,18 @@ describe("hosted runtime callbacks", () => {
       wake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledWith({
+    expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
-      directRecipientPhoneNumber: null,
-      fromPhoneNumber: null,
+      directRecipientPhoneNumber: "+15550001",
+      expectedResolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "linq_chat_other",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
+      fromPhoneNumber: "+15550002",
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
@@ -13737,15 +14464,15 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("marks post-success Linq reaction liveness aborts as possibly committed", async () => {
+  it("keeps an accepted Linq reaction receipt when liveness changes after the provider response", async () => {
     const effect = createEffect({
+      answeredMailboxItemIds: ["mailbox_item_liveness"],
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
       message: "",
       replyToMessageId: "linq_message_1",
       transportIdempotent: false,
     });
-    let capturedError: unknown = null;
     const assertLiveness = vi.fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("aborted after Linq reaction response"));
@@ -13754,31 +14481,25 @@ describe("hosted runtime callbacks", () => {
       targetMessageId: "linq_message_1",
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      try {
-        await dependencies.setLinqMessageReaction({
-          reaction: "heart",
-          target: "linq_chat_123",
-          targetMessageId: "linq_message_1",
-        });
-      } catch (error) {
-        capturedError = error;
-        return createDispatchResult(
-          {
-            intentId: "intent_123",
-            lastError: {
-              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-              message: "Ambiguous Linq reaction delivery.",
-            },
-            status: "abandoned",
-          },
-          {
-            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-            message: "Ambiguous Linq reaction delivery.",
-          },
-        );
-      }
+      const delivery = await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_123",
+        targetMessageId: "linq_message_1",
+      });
 
-      throw new Error("expected post-success Linq reaction liveness failure");
+      return createDispatchResult({
+        delivery: {
+          channel: "linq",
+          idempotencyKey: "assistant-outbox:intent_123",
+          kind: "message-reaction",
+          reaction: delivery.reaction,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: delivery.target,
+          targetKind: "thread",
+          targetMessageId: delivery.targetMessageId,
+        },
+        status: "sent",
+      });
     });
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
@@ -13794,15 +14515,12 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
-    expect(assertLiveness).toHaveBeenCalledTimes(2);
-    expect(capturedError).toMatchObject({
-      deliveryMayHaveSucceeded: true,
-      message: "aborted after Linq reaction response",
-    });
+    expect(assertLiveness).toHaveBeenCalledTimes(1);
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryStatus: "failed_ambiguous",
+        deliveryStatus: "sent",
         retryable: false,
       }),
     ]);
@@ -14130,10 +14848,18 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledWith({
+    expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550001",
-      fromPhoneNumber: null,
+      expectedResolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "linq_chat_current",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
+      fromPhoneNumber: "+15550002",
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -14145,7 +14871,7 @@ describe("hosted runtime callbacks", () => {
     });
     expect(assertRecentInbound.mock.calls.map(([request]) =>
       request.authorityCheckOnly
-    )).toEqual([false]);
+    )).toEqual([true, false]);
     expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
     expect(outcomes).toEqual([
@@ -14243,9 +14969,17 @@ describe("hosted runtime callbacks", () => {
     });
     await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
-    expect(assertRecentInbound).toHaveBeenCalledWith({
+    expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550000001",
+      expectedResolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550000001",
+        fromPhoneNumber: "+15559990000",
+        target: "linq_chat_a",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
       fromPhoneNumber: "+15559990000",
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
@@ -14267,10 +15001,13 @@ describe("hosted runtime callbacks", () => {
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
+        fromPhoneNumber: "+15559990000",
         idempotencyKey: "assistant-outbox:intent_123",
-        lineLookupKey: "hbidx:phone:v1:account_a",
       }),
       expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
     );
     expect(outcomes).toEqual([
       expect.objectContaining({
@@ -14363,7 +15100,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
     for (const [request] of assertRecentInbound.mock.calls) {
       expect(request).toMatchObject({
         answeredMailboxItemIds: [
@@ -14435,7 +15172,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
     for (const [request] of assertRecentInbound.mock.calls) {
       expect(request).toMatchObject({
         answeredMailboxItemIds,
@@ -14522,10 +15259,18 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledWith({
+    expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
-      directRecipientPhoneNumber: null,
-      fromPhoneNumber: null,
+      directRecipientPhoneNumber: "+15550001",
+      expectedResolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "linq_chat_other",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
+      fromPhoneNumber: "+15550002",
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -14620,10 +15365,18 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledWith({
+    expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550001",
-      fromPhoneNumber: null,
+      expectedResolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "linq_chat_current",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
+      fromPhoneNumber: "+15550002",
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -14969,11 +15722,13 @@ describe("hosted runtime callbacks", () => {
       read: vi.fn(),
       request: vi.fn(),
     };
-    const assertRecentInbound = vi.fn(async () => ({
-      targetOverride: {
+    const assertRecentInbound = vi.fn(async (request) => ({
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+        conversationThreadId: "conversation-new",
         target: "chat_new",
         targetKind: "thread" as const,
-      },
+        threadIsDirect: true,
+      }),
     }));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
       async ({ dependencies }) => {
@@ -15005,6 +15760,107 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalled();
+    expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      approvedThreadIsDirect: true,
+      label: "direct approval becomes a group thread",
+      resolvedRoute: {
+        conversationThreadId: "conversation_same",
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550100002",
+        target: "chat_same",
+        targetKind: "thread" as const,
+        threadIsDirect: false,
+      },
+    },
+    {
+      approvedThreadIsDirect: false,
+      label: "group approval becomes a direct thread",
+      resolvedRoute: {
+        conversationThreadId: "conversation_same",
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
+        target: "chat_same",
+        targetKind: "thread" as const,
+        threadIsDirect: true,
+      },
+    },
+    {
+      approvedThreadIsDirect: true,
+      label: "thread approval becomes a participant send",
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
+        target: "+15550100001",
+        targetKind: "participant" as const,
+        threadIsDirect: true,
+      },
+    },
+  ])("does not consume vault-file approval when $label", async ({
+    approvedThreadIsDirect,
+    resolvedRoute,
+  }) => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_same",
+      channel: "linq",
+      explicitTarget: "chat_same",
+      media: [vaultFile],
+      threadIsDirect: approvedThreadIsDirect,
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(),
+      request: vi.fn(),
+    };
+    const assertRecentInbound = vi.fn(async () => ({ resolvedRoute }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          media: [vaultFile],
+          message: "Attached.",
+          replyToMessageId: null,
+          target: "chat_same",
+          targetKind: "explicit",
+        });
+        throw new Error("Provider dispatch unexpectedly remained reachable.");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      retryable: false,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     expect(actionApprovalPort.consume).not.toHaveBeenCalled();
     expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
@@ -15174,9 +16030,13 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    const assertRecentInbound = vi.fn(async (request) =>
-      buildClaimedLinqEngagementResult(request)
-    );
+    const assertRecentInbound = vi.fn(async (request) => ({
+      ...buildClaimedLinqEngagementResult(request),
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+        directRecipientPhoneNumber: null,
+        threadIsDirect: false,
+      }),
+    }));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -15200,6 +16060,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
         recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       providerFetch,
@@ -15381,11 +16242,16 @@ describe("hosted runtime callbacks", () => {
     });
     const assertRecentInbound = vi.fn(async (request) => ({
       ...buildClaimedLinqEngagementResult(request),
-      targetOverride: {
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+        conversationThreadId: "conversation-current",
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
         target: "linq_chat_current",
         targetKind: "thread" as const,
-      },
+        threadIsDirect: true,
+      }),
     }));
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -15411,6 +16277,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -15432,12 +16299,24 @@ describe("hosted runtime callbacks", () => {
       request.target,
     ])).toEqual([
       [true, true, "linq_chat_stale"],
-      [false, true, "linq_chat_current"],
+      [false, false, "linq_chat_current"],
     ]);
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
       attachmentId: "attachment_voice_1",
       target: "linq_chat_current",
     }, expect.any(Object));
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromPhoneNumber: "+15550100002",
+        providerTarget: "linq_chat_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
+    );
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryChannel: "linq",
@@ -15510,10 +16389,10 @@ describe("hosted runtime callbacks", () => {
         signal: null,
       },
     );
-    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
     expect(assertRecentInbound.mock.calls.map(([request]) =>
       request.authorityCheckOnly
-    )).toEqual([false]);
+    )).toEqual([true, false]);
     expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(
         mocks.sendLinqVoiceMemoMessage.mock.invocationCallOrder[0] ?? 0,
@@ -15618,7 +16497,7 @@ describe("hosted runtime callbacks", () => {
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
-      fromPhoneNumber: null,
+      fromPhoneNumber: "+15550002",
       idempotencyKey: "assistant-outbox:intent_123",
       media: null,
       message: "hello from hosted",
@@ -15722,7 +16601,7 @@ describe("hosted runtime callbacks", () => {
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
-      fromPhoneNumber: null,
+      fromPhoneNumber: "+15550002",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       media: null,
       message: "hello from hosted",
@@ -16030,10 +16909,18 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledWith({
+    expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
-      directRecipientPhoneNumber: null,
-      fromPhoneNumber: null,
+      directRecipientPhoneNumber: "+15550001",
+      expectedResolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "linq_chat_current",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
+      fromPhoneNumber: "+15550002",
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",

@@ -3,10 +3,13 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  abandonHostedFamilyDraftForOwner: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
+  findHostedAccountGroupByOwner: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedFamilyDraftRecoveryStateForOwner: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
 }));
 
@@ -23,8 +26,11 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  abandonHostedFamilyDraftForOwner: mocks.abandonHostedFamilyDraftForOwner,
   createHostedFamilyBillingCheckout: mocks.createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
+  readHostedFamilyDraftRecoveryStateForOwner:
+    mocks.readHostedFamilyDraftRecoveryStateForOwner,
 }));
 
 type BillingFamilyCheckoutRouteModule =
@@ -37,6 +43,9 @@ beforeEach(async () => {
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({
     $transaction: vi.fn((callback) => callback({ label: "tx" })),
+    hostedAccountGroup: {
+      findUnique: mocks.findHostedAccountGroupByOwner,
+    },
   });
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: {
@@ -49,10 +58,19 @@ beforeEach(async () => {
     id: "hbag_family",
     ownerMemberId: "member_owner",
   });
+  mocks.findHostedAccountGroupByOwner.mockResolvedValue({ id: "hbag_family" });
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
+    {
+      checkoutAttemptId: "hbfca_existing",
+      groupId: "hbag_family",
+      state: "checkout_starting",
+    },
+  );
   mocks.createHostedFamilyBillingCheckout.mockResolvedValue({
     alreadyActive: false,
     url: "https://checkout.stripe.test/family",
   });
+  mocks.abandonHostedFamilyDraftForOwner.mockResolvedValue({ abandoned: true });
 
   billingFamilyCheckoutRoute = await import("../app/api/settings/billing/family/checkout/route");
 });
@@ -79,10 +97,12 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
     },
   });
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+    allowDirectPaidUpgrade: true,
     confirmedTrialConversion: undefined,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
+    requiredCheckoutAttemptId: undefined,
     seatCount: undefined,
   });
 });
@@ -101,12 +121,252 @@ test("forwards an explicit seat count and trial-conversion confirmation", async 
 
   expect(response.status).toBe(200);
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+    allowDirectPaidUpgrade: true,
     confirmedTrialConversion: true,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
+    requiredCheckoutAttemptId: undefined,
     seatCount: 3,
   });
+});
+
+test("rejects an invite return outside explicit invite recovery", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({ familyInviteReturnPath }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+});
+
+test("resolves a starting Checkout and abandons it before returning to the invite", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath,
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyActive: false,
+    url: familyInviteReturnPath,
+  });
+  expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
+    expect.objectContaining({
+      allowDirectPaidUpgrade: false,
+      confirmedTrialConversion: undefined,
+      groupId: "hbag_family",
+      requiredCheckoutAttemptId: "hbfca_existing",
+      seatCount: undefined,
+    }),
+  );
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(
+    mocks.createHostedFamilyBillingCheckout.mock.calls[0]?.[0],
+  ).not.toHaveProperty("familyInviteReturnPath");
+  expect(mocks.readHostedFamilyDraftRecoveryStateForOwner).toHaveBeenCalledWith({
+    ownerMemberId: "member_owner",
+    prisma: expect.any(Object),
+  });
+  expect(mocks.abandonHostedFamilyDraftForOwner).toHaveBeenCalledWith({
+    expectedDraftClaim: {
+      checkoutAttemptId: "hbfca_existing",
+      groupId: "hbag_family",
+    },
+    ownerMemberId: "member_owner",
+    prisma: expect.any(Object),
+  });
+  expect(
+    mocks.createHostedFamilyBillingCheckout.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.abandonHostedFamilyDraftForOwner.mock.invocationCallOrder[0] ?? 0,
+  );
+});
+
+test("requires an exact invite return before resolving a starting Checkout", async () => {
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({ abandonForInvite: true }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not abandon when Checkout becomes active during invite recovery", async () => {
+  mocks.createHostedFamilyBillingCheckout.mockResolvedValueOnce({
+    alreadyActive: false,
+    url: null,
+  });
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not create Checkout when the invite recovery state changed", async () => {
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValueOnce(
+    { state: "not_abandonable" },
+  );
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("returns the exact invite when prior cleanup committed before its response", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValueOnce(null);
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath,
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyActive: false,
+    url: familyInviteReturnPath,
+  });
+  expect(mocks.findHostedAccountGroupByOwner).not.toHaveBeenCalled();
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not recreate a draft when the starting Checkout disappears", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  mocks.findHostedAccountGroupByOwner.mockResolvedValueOnce(null);
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath,
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyActive: false,
+    url: familyInviteReturnPath,
+  });
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not consume a replacement group after invite recovery preflight", async () => {
+  mocks.findHostedAccountGroupByOwner.mockResolvedValueOnce({
+    id: "hbag_replacement",
+  });
+
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test.each([
+  "https://example.test/family/accept/invite_return_target",
+  "/family/accept/invite return target",
+])("rejects a non-canonical Family invite return %s", async (familyInviteReturnPath) => {
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath,
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
 });
 
 test("rejects cross-origin Family checkout before reading the session", async () => {

@@ -28,6 +28,27 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Vault-Share Delivery Contract Rollout
+
+Deploy the Cloudflare Worker and runner bundle first with
+`container_rollout=immediate`, and require managed-container smoke to report the
+exact new bundle fingerprint before deploying Web's required
+`sourceWorkspaceVersion` parser, absolute effect-deadline parser, and conditional
+replacement writer. The runner also marks only actual Web responses so a
+proxy-local response cannot release publication ownership early. Old Web
+ignores the additive runner request fields, so the first phase keeps projection
+working; the source-version fence and shared deadline become authoritative only
+after Web deploys. Do not deploy Web first: an older runner omits required
+delivery fields and its projection fails closed, retaining the existing
+device-sync continuation until a compatible runner handles it.
+
+After both deploys, checkpoint one device-sync update with an active share,
+confirm the replacement is readable through the ordinary group shared-data
+path, and confirm the managed runner fingerprint still matches the deployed
+bundle. Once Web requires the field, the compatible runner is the rollback
+floor. Roll back Web before the runner only if necessary; otherwise forward-fix
+the pair. Do not add a second retry owner or compatibility watermark.
+
 ## Generic Group-Email Cutover
 
 The newsletter deletion is a hard public-runtime and private-skill cutover.
@@ -281,6 +302,28 @@ Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
 cards can still fetch their immutable image.
 
+## Private Completion Continuity Rollout
+
+Deploy Web first, then deploy the Cloudflare Worker and runner bundle together
+with `container_rollout=immediate`. Only authenticated private-completion
+intents write the new strict outbox continuity fields; generic notifications
+remain compatible. An old runner cannot parse a retained new-format private
+intent, so the first such write is the rollback floor for that workspace.
+Forward-fix on this bundle or newer after the floor is crossed.
+
+Recent production evidence showed six total Assistant Ask completion mailbox
+items—an upper bound on private completions—and no matching private-completion
+or outbox-quarantine runtime-log events over 14 days. Recent successful
+protected deploy workflows completed in 8–13 minutes;
+immediate rollout makes that one workflow the expected compatibility window.
+Require managed-container smoke to report the new runner fingerprint, monitor
+`outbox.intent.quarantined` and strict outbox parse failures, then verify one
+same-channel private completion is delivered exactly once, never to the group,
+and is visible before the next ordinary direct turn, whether that consumer is
+an attended member turn, an exact-session scheduled occurrence, or an
+exact-session Assistant Ask continuation, and before a direct exact notification
+can append newer ordinary-session history.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an
@@ -492,6 +535,29 @@ container owns model execution and provider delivery.
 New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
+
+### Canonical Linq Send-Route Rollout
+
+Deploy Web first with the complete ephemeral `resolvedRoute` response while it
+continues returning the deprecated `threadIsDirect` and conditional
+`targetOverride` fields. The existing runtime ignores the additive route and
+continues using the legacy fields, so this short reader-first window preserves
+ordinary delivery. Then deploy Cloudflare and the runner bundle immediately
+with `container_rollout=immediate`; the new runtime requires `resolvedRoute`,
+uses it as the sole provider target/recipient/sender/directness source, and
+reasserts the exact value before capability lookup and provider dispatch.
+
+Do not deploy the new runtime before Web. It intentionally fails closed when
+the canonical route is absent. If rollback is required during the compatibility
+window, roll Cloudflare back first and Web second. Keep the legacy Web fields
+until a later independently reviewed cleanup after the old runtime is outside
+the rollback window; no database migration or persisted runtime-state floor is
+introduced by this protocol.
+
+After rollout, prove one authorized private scheduled native card, one ordinary
+direct reply, one group reply, and one private Assistant Ask continuation.
+Confirm no canonical-route protocol-unavailable or route-mismatch error appears
+for those controlled sends.
 
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
@@ -1403,6 +1469,20 @@ That command:
 The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
+
+The Junction scalar-timeseries continuation cutover is runner-only and requires
+`container_rollout=immediate`. The preceding production bundle could persist a
+canonical v1 `{v,a,i}` resource envelope in a hosted wake hint or local
+`device_job`; the compatible runner validates that exact envelope, projects
+only `a` into the existing scalar resource coordinate, and writes scalar
+successors. It does not restore phase or completed-resource state. Require
+managed-container smoke to report the compatible runner-bundle fingerprint
+before considering the fleet converged. Once any scalar successor has been
+written, that bundle is the rollback floor because the preceding runner cannot
+read the scalar shape. Keep the narrow v1 reader until separate aggregate proof
+shows no retained hosted wake hint or local device job can contain the envelope;
+without that proof, retain the reader rather than adding a migration or another
+state owner. Vercel/Web has no deployment ordering dependency for this cutover.
 
 The non-expiring Starter plan-usage schema was a bidirectional hard cut between
 Web and the runner bundle. Its production rollout is complete: compatible Web

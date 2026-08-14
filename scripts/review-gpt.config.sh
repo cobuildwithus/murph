@@ -80,7 +80,7 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
-review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-main}}}"
+review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-auto}}}"
 review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
 review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
 

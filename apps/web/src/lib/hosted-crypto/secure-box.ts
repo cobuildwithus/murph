@@ -11,7 +11,10 @@ import {
 } from "@murphai/runtime-state";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-import { getHostedDomainRootUnwrapCache } from "./domain-root-unwrap-cache";
+import {
+  getHostedDomainRootUnwrapCache,
+  type CachedUnwrappedHostedDomainRoot,
+} from "./domain-root-unwrap-cache";
 
 const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "hosted-member-private-field",
@@ -138,25 +141,16 @@ export async function sealHostedUserSecureBoxString(input: {
     userId: input.userId,
   });
   try {
-    const aad = buildHostedSecureBoxAad({
-      ...input.aad,
+    return await sealHostedUserSecureBoxStringWithRootKey({
+      aad: input.aad,
       domain,
       lane: input.lane,
+      rootKey,
+      rootKeyId: envelope.rootKeyId,
       scope: input.scope,
-      tenant: "murph-hosted",
       userId: input.userId,
+      value: input.value,
     });
-    return serializeHostedSecureBoxEnvelope(
-      await sealHostedSecureBox({
-        aad,
-        domain,
-        lane: input.lane,
-        plaintext: new TextEncoder().encode(input.value),
-        rootKey,
-        rootKeyId: envelope.rootKeyId,
-        scope: input.scope,
-      }),
-    );
   } finally {
     rootKey.fill(0);
   }
@@ -278,6 +272,113 @@ export async function openHostedUserSecureBoxString(input: {
   } finally {
     rootKey.fill(0);
   }
+}
+
+/**
+ * Seals a secure-box string only from an exact root already present in the
+ * request-scoped cache. This path never imports or invokes the provider-capable
+ * domain-root store and is therefore safe inside a database transaction after
+ * a matching pre-transaction warm.
+ */
+export async function sealHostedUserSecureBoxStringFromPreparedRoot(input: {
+  aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
+  lane: HostedCryptoLane;
+  preparedRoot: Promise<CachedUnwrappedHostedDomainRoot>;
+  preparedRootKeyId: string;
+  scope: string;
+  userId: string;
+  value: string | null | undefined;
+}): Promise<string | null> {
+  if (input.value === null || input.value === undefined) {
+    return null;
+  }
+  if (!WEB_SEAL_LANES.has(input.lane)) {
+    throw new Error(`Web is not allowed to encrypt hosted ${input.lane} values.`);
+  }
+  if (
+    typeof input.preparedRootKeyId !== "string"
+    || input.preparedRootKeyId.trim().length === 0
+  ) {
+    throw new Error("Hosted secure-box prepared root reference is missing.");
+  }
+  const testCodec = getHostedSecureBoxStringTestCodecForTests();
+  if (testCodec) {
+    return testCodec.encrypt({
+      aad: input.aad,
+      lane: input.lane,
+      scope: input.scope,
+      userId: input.userId,
+      value: input.value,
+    });
+  }
+
+  const domain = getHostedCryptoDomainForLane(input.lane);
+  const cachedRoot = getHostedDomainRootUnwrapCache()?.get(
+    createHostedSecureBoxRootReferenceKey({
+      domain,
+      rootKeyId: input.preparedRootKeyId,
+      userId: input.userId,
+    }),
+  );
+  if (!cachedRoot || cachedRoot !== input.preparedRoot) {
+    throw new Error(
+      "Hosted secure-box prepared root is not the exact scoped cache entry.",
+    );
+  }
+  const unwrapped = await input.preparedRoot;
+  if (
+    unwrapped.envelope.domain !== domain
+    || unwrapped.envelope.rootKeyId !== input.preparedRootKeyId
+    || unwrapped.envelope.userId !== input.userId
+  ) {
+    throw new Error("Hosted secure-box cached root does not match its prepared reference.");
+  }
+  const rootKey = Uint8Array.from(unwrapped.rootKey);
+  try {
+    return await sealHostedUserSecureBoxStringWithRootKey({
+      aad: input.aad,
+      domain,
+      lane: input.lane,
+      rootKey,
+      rootKeyId: input.preparedRootKeyId,
+      scope: input.scope,
+      userId: input.userId,
+      value: input.value,
+    });
+  } finally {
+    rootKey.fill(0);
+  }
+}
+
+async function sealHostedUserSecureBoxStringWithRootKey(input: {
+  aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
+  domain: HostedCryptoDomain;
+  lane: HostedCryptoLane;
+  rootKey: Uint8Array;
+  rootKeyId: string;
+  scope: string;
+  userId: string;
+  value: string;
+}): Promise<string> {
+  const aad = buildHostedSecureBoxAad({
+    ...input.aad,
+    domain: input.domain,
+    lane: input.lane,
+    scope: input.scope,
+    tenant: "murph-hosted",
+    userId: input.userId,
+  });
+  return serializeHostedSecureBoxEnvelope(
+    await sealHostedSecureBox({
+      aad,
+      domain: input.domain,
+      lane: input.lane,
+      plaintext: new TextEncoder().encode(input.value),
+      rootKey: input.rootKey,
+      rootKeyId: input.rootKeyId,
+      scope: input.scope,
+    }),
+  );
 }
 
 /**
@@ -456,46 +557,67 @@ export async function openHostedUserSecureBoxStrings(input: {
   );
 
   try {
-    return await Promise.all(parsedEntries.map(async (parsed) => {
-      if (!parsed) {
-        return null;
-      }
-      const root = rootsByKey.get(createHostedSecureBoxRootReferenceKey({
-        domain,
-        rootKeyId: parsed.envelope.rootKeyId,
-        userId: parsed.entry.userId,
-      }));
-      if (!root) {
-        throw new Error("Hosted secure-box root was not returned by the batch unwrap.");
-      }
-      const rootKey = Uint8Array.from(root.rootKey);
+    let firstObservedFailure: unknown;
+    let hasObservedFailure = false;
+    const settled = await Promise.allSettled(parsedEntries.map(async (parsed) => {
       try {
-        const aad = buildHostedSecureBoxAad({
-          ...parsed.entry.aad,
-          domain,
-          lane: input.lane,
-          scope: parsed.entry.scope,
-          tenant: "murph-hosted",
-          userId: parsed.entry.userId,
-        });
-        const plaintext = await openHostedSecureBox({
-          aad,
-          envelope: parsed.envelope,
-          expectedDomain: domain,
-          expectedLane: input.lane,
-          expectedRootKeyId: parsed.envelope.rootKeyId,
-          expectedScope: parsed.entry.scope,
-          rootKey,
-        });
-        try {
-          return new TextDecoder().decode(plaintext);
-        } finally {
-          plaintext.fill(0);
+        if (!parsed) {
+          return null;
         }
-      } finally {
-        rootKey.fill(0);
+        const root = rootsByKey.get(createHostedSecureBoxRootReferenceKey({
+          domain,
+          rootKeyId: parsed.envelope.rootKeyId,
+          userId: parsed.entry.userId,
+        }));
+        if (!root) {
+          throw new Error("Hosted secure-box root was not returned by the batch unwrap.");
+        }
+        const rootKey = Uint8Array.from(root.rootKey);
+        try {
+          const aad = buildHostedSecureBoxAad({
+            ...parsed.entry.aad,
+            domain,
+            lane: input.lane,
+            scope: parsed.entry.scope,
+            tenant: "murph-hosted",
+            userId: parsed.entry.userId,
+          });
+          const plaintext = await openHostedSecureBox({
+            aad,
+            envelope: parsed.envelope,
+            expectedDomain: domain,
+            expectedLane: input.lane,
+            expectedRootKeyId: parsed.envelope.rootKeyId,
+            expectedScope: parsed.entry.scope,
+            rootKey,
+          });
+          try {
+            return new TextDecoder().decode(plaintext);
+          } finally {
+            plaintext.fill(0);
+          }
+        } finally {
+          rootKey.fill(0);
+        }
+      } catch (error) {
+        if (!hasObservedFailure) {
+          firstObservedFailure = error;
+          hasObservedFailure = true;
+        }
+        throw error;
       }
     }));
+    if (hasObservedFailure) {
+      // Drain every started open before releasing root ownership or returning
+      // an authenticity failure to the caller.
+      throw firstObservedFailure;
+    }
+    return settled.map((result) => {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+      return result.value;
+    });
   } finally {
     for (const root of roots) {
       root.rootKey.fill(0);

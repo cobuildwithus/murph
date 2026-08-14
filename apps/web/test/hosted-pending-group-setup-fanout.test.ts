@@ -65,6 +65,7 @@ vi.mock("@/src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
 });
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
+  areHostedDomainRootProviderCallsDisabled: () => false,
   getHostedDomainRootUnwrapCache: () => mocks.domainRootCache,
 }));
 

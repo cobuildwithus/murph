@@ -1,23 +1,42 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Buffer } from "node:buffer";
 
+import { KeyManagementServiceClient, protos } from "@google-cloud/kms";
 import { getVercelOidcToken } from "@vercel/oidc";
+import {
+  IdentityPoolClient,
+  OAuth2Client,
+  type IdentityPoolClientOptions,
+} from "google-auth-library";
 
 const GCP_CLOUD_KMS_SCOPE = "https://www.googleapis.com/auth/cloudkms";
-const GCP_IAM_CREDENTIALS_SCOPE = "https://www.googleapis.com/auth/iam";
-const DEFAULT_KMS_API_ROOT = "https://cloudkms.googleapis.com/v1";
+const GCP_EXTERNAL_ACCOUNT_TYPE = "external_account";
+const GCP_SUBJECT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt";
+const DEFAULT_KMS_API_ENDPOINT = "cloudkms.googleapis.com";
+const DEFAULT_KMS_API_PORT = 443;
+const DEFAULT_STS_TOKEN_URI = "https://sts.googleapis.com/v1/token";
+const DEFAULT_IAM_CREDENTIALS_API_ROOT = "https://iamcredentials.googleapis.com/v1";
 const LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
 const LOCAL_KMS_CIPHERTEXT_PREFIX = "local-kms-v1:";
 const LOCAL_KMS_IV_BYTES = 12;
 const LOCAL_KMS_KEY_BYTES = 32;
-const DEFAULT_STS_TOKEN_URI = "https://sts.googleapis.com/v1/token";
-const DEFAULT_IAM_CREDENTIALS_API_ROOT = "https://iamcredentials.googleapis.com/v1";
+const GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES = 64 * 1024;
+const GCP_KMS_MAX_CIPHERTEXT_BYTES = 66 * 1024;
+const GCP_KMS_MAX_MESSAGE_BYTES = 64 * 1024;
+const GCP_KMS_MAX_SIGNATURE_BYTES = 16 * 1024;
+const GCP_KMS_MAC_BYTES = 32;
+const GCP_TOKEN_MAX_BYTES = 16 * 1024;
+const GCP_PROJECT_NUMBER_PATTERN = /^[1-9][0-9]{5,29}$/u;
+const GCP_WORKLOAD_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{2,30}[a-z0-9])$/u;
+const GCP_RESERVED_WORKLOAD_ID_PREFIX = "gcp-";
+const GCP_SERVICE_ACCOUNT_EMAIL_PATTERN =
+  /^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$/u;
 const GCP_KMS_CRYPTO_KEY_NAME_PATTERN =
-  /^projects\/[A-Za-z0-9][A-Za-z0-9._:-]*\/locations\/[A-Za-z0-9_-]+\/keyRings\/[A-Za-z0-9_-]+\/cryptoKeys\/[A-Za-z0-9_-]+$/u;
+  /^projects\/([a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{5,29})\/locations\/[a-z][a-z0-9-]{0,62}\/keyRings\/[A-Za-z0-9_-]{1,63}\/cryptoKeys\/[A-Za-z0-9_-]{1,63}$/u;
 const GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN =
-  /^(projects\/[A-Za-z0-9][A-Za-z0-9._:-]*\/locations\/[A-Za-z0-9_-]+\/keyRings\/[A-Za-z0-9_-]+\/cryptoKeys\/[A-Za-z0-9_-]+)\/cryptoKeyVersions\/[1-9][0-9]*$/u;
-// One deadline owns the complete token + KMS operation. Callers may abort
-// earlier. Provider failures are fail-closed and are never retried here.
-export const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
+  /^(projects\/(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{5,29})\/locations\/[a-z][a-z0-9-]{0,62}\/keyRings\/[A-Za-z0-9_-]{1,63}\/cryptoKeys\/[A-Za-z0-9_-]{1,63})\/cryptoKeyVersions\/([1-9][0-9]*)$/u;
+const COMPACT_JWT_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const GOOGLE_RPC_STATUS_REASONS = new Set([
   "ABORTED",
   "ALREADY_EXISTS",
@@ -36,6 +55,31 @@ const GOOGLE_RPC_STATUS_REASONS = new Set([
   "UNIMPLEMENTED",
   "UNKNOWN",
 ]);
+const GRPC_STATUS_REASONS = new Map<number, string>([
+  [1, "CANCELLED"],
+  [2, "UNKNOWN"],
+  [3, "INVALID_ARGUMENT"],
+  [4, "DEADLINE_EXCEEDED"],
+  [5, "NOT_FOUND"],
+  [6, "ALREADY_EXISTS"],
+  [7, "PERMISSION_DENIED"],
+  [8, "RESOURCE_EXHAUSTED"],
+  [9, "FAILED_PRECONDITION"],
+  [10, "ABORTED"],
+  [11, "OUT_OF_RANGE"],
+  [12, "UNIMPLEMENTED"],
+  [13, "INTERNAL"],
+  [14, "UNAVAILABLE"],
+  [15, "DATA_LOSS"],
+  [16, "UNAUTHENTICATED"],
+]);
+
+// One deadline owns subject-token acquisition, Google authentication, and the
+// KMS RPC. Provider failures are fail-closed and are never retried here.
+export const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
+
+type OwnedBytes = Uint8Array<ArrayBuffer>;
+type HostedGcpKmsOperation = "asymmetricSign" | "decrypt" | "encrypt" | "macSign";
 
 export interface HostedGcpKmsClient {
   asymmetricSign(input: GcpKmsAsymmetricSignInput): Promise<{
@@ -76,72 +120,203 @@ export interface GcpKmsMacSignInput {
   signal?: AbortSignal;
 }
 
-interface HostedGcpKmsJsonClientConfig {
-  accessTokenProvider: HostedGcpAccessTokenProvider;
-  apiRoot?: string | null;
+export interface HostedGcpKmsSdkCallOptions {
+  retry: false;
+  signal: AbortSignal;
+  timeoutMs: number;
 }
 
-interface HostedGcpAccessTokenProvider {
-  getAccessToken(signal?: AbortSignal): Promise<string>;
+export interface HostedGcpKmsSdkEncryptRequest {
+  additionalAuthenticatedData: Uint8Array;
+  additionalAuthenticatedDataCrc32c: number;
+  name: string;
+  plaintext: Uint8Array;
+  plaintextCrc32c: number;
 }
 
-interface GcpEncryptResponse {
-  ciphertext?: string;
-  name?: string;
+export interface HostedGcpKmsSdkEncryptResponse {
+  ciphertext: Uint8Array | null;
+  ciphertextCrc32c: number | null;
+  name: string | null;
+  verifiedAdditionalAuthenticatedDataCrc32c: boolean | null;
+  verifiedPlaintextCrc32c: boolean | null;
 }
 
-interface GcpDecryptResponse {
-  plaintext?: string;
+export interface HostedGcpKmsSdkDecryptRequest {
+  additionalAuthenticatedData: Uint8Array;
+  additionalAuthenticatedDataCrc32c: number;
+  ciphertext: Uint8Array;
+  ciphertextCrc32c: number;
+  name: string;
 }
 
-interface GcpAsymmetricSignResponse {
-  name?: string;
-  signature?: string;
+export interface HostedGcpKmsSdkDecryptResponse {
+  plaintext: Uint8Array | null;
+  plaintextCrc32c: number | null;
+  usedPrimary: boolean | null;
 }
 
-interface GcpMacSignResponse {
-  mac?: string;
-  name?: string;
+export interface HostedGcpKmsSdkAsymmetricSignRequest {
+  digest: Uint8Array;
+  digestCrc32c: number;
+  name: string;
 }
 
-interface StsTokenExchangeResponse {
-  access_token?: string;
-  expires_in?: number;
-  token_type?: string;
+export interface HostedGcpKmsSdkAsymmetricSignResponse {
+  name: string | null;
+  signature: Uint8Array | null;
+  signatureCrc32c: number | null;
+  verifiedDigestCrc32c: boolean | null;
 }
 
-interface IamGenerateAccessTokenResponse {
-  accessToken?: string;
-  expireTime?: string;
+export interface HostedGcpKmsSdkMacSignRequest {
+  data: Uint8Array;
+  dataCrc32c: number;
+  name: string;
 }
 
-interface GoogleCloudErrorBody {
-  error?: {
-    code?: number;
-    message?: string;
-    status?: string;
-  } | string;
+export interface HostedGcpKmsSdkMacSignResponse {
+  mac: Uint8Array | null;
+  macCrc32c: number | null;
+  name: string | null;
+  verifiedDataCrc32c: boolean | null;
 }
 
-class GoogleCloudApiError extends Error {
-  readonly code = "GOOGLE_CLOUD_API_ERROR";
-  readonly googleCloudOperation: string;
-  readonly googleCloudReason: string;
-  readonly status: number;
+export interface HostedGcpKmsSdkTransport {
+  asymmetricSign(
+    request: HostedGcpKmsSdkAsymmetricSignRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkAsymmetricSignResponse>;
+  decrypt(
+    request: HostedGcpKmsSdkDecryptRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkDecryptResponse>;
+  encrypt(
+    request: HostedGcpKmsSdkEncryptRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkEncryptResponse>;
+  macSign(
+    request: HostedGcpKmsSdkMacSignRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkMacSignResponse>;
+}
 
-  constructor(input: { operation: string; reason: string; status: number }) {
-    super(`Google Cloud ${input.operation} failed (${input.status}): ${input.reason}`);
-    this.name = "GoogleCloudApiError";
-    this.googleCloudOperation = input.operation;
-    this.googleCloudReason = input.reason;
+export interface HostedGcpKmsStaticCredentialConfiguration {
+  accessToken: string;
+  kind: "static-access-token";
+}
+
+export interface HostedGcpKmsWorkloadIdentityCredentialConfiguration {
+  audience: string;
+  getSubjectToken(signal?: AbortSignal): Promise<string>;
+  kind: "workload-identity";
+  scopes: readonly string[];
+  serviceAccountImpersonationUrl: string;
+  subjectTokenType: string;
+  tokenUrl: string;
+}
+
+export type HostedGcpKmsCredentialConfiguration =
+  | HostedGcpKmsStaticCredentialConfiguration
+  | HostedGcpKmsWorkloadIdentityCredentialConfiguration;
+
+export interface HostedGcpKmsSdkClientConfiguration {
+  apiEndpoint: string;
+  credentials: HostedGcpKmsCredentialConfiguration;
+  fallback: boolean;
+  port: number;
+  scopes: readonly string[];
+}
+
+export interface HostedGcpKmsClientDependencies {
+  createSdkTransport(config: HostedGcpKmsSdkClientConfiguration): HostedGcpKmsSdkTransport;
+}
+
+export class HostedGcpKmsProviderError extends Error {
+  readonly code = "HOSTED_GCP_KMS_PROVIDER_ERROR";
+  readonly operation: HostedGcpKmsOperation;
+  readonly providerReason: string;
+  readonly retryable = false;
+  readonly status: number | null;
+
+  constructor(input: {
+    operation: HostedGcpKmsOperation;
+    providerReason: string;
+    status: number | null;
+  }) {
+    super(`Google Cloud KMS ${input.operation} failed (${input.providerReason}).`);
+    this.name = "HostedGcpKmsProviderError";
+    this.operation = input.operation;
+    this.providerReason = input.providerReason;
     this.status = input.status;
+  }
+
+  toJSON(): Record<string, boolean | number | string | null> {
+    return {
+      code: this.code,
+      name: this.name,
+      operation: this.operation,
+      providerReason: this.providerReason,
+      retryable: this.retryable,
+      status: this.status,
+    };
   }
 }
 
+export class HostedGcpKmsIntegrityError extends Error {
+  readonly check: string;
+  readonly code = "HOSTED_GCP_KMS_INTEGRITY_ERROR";
+  readonly operation: HostedGcpKmsOperation;
+
+  constructor(input: { check: string; operation: HostedGcpKmsOperation }) {
+    super(`Google Cloud KMS ${input.operation} integrity verification failed (${input.check}).`);
+    this.name = "HostedGcpKmsIntegrityError";
+    this.check = input.check;
+    this.operation = input.operation;
+  }
+
+  toJSON(): Record<string, string> {
+    return {
+      check: this.check,
+      code: this.code,
+      name: this.name,
+      operation: this.operation,
+    };
+  }
+}
+
+interface HostedGcpKmsOperationContext {
+  callerSignal: AbortSignal | undefined;
+  deadlineAtMs: number;
+  deadlineSignal: AbortSignal;
+  signal: AbortSignal;
+}
+
+interface HostedGcpAuthRefreshContext {
+  deadlineAtMs: number;
+  signal: AbortSignal;
+}
+
+interface CancellablePromise<T> extends Promise<T> {
+  cancel(): void;
+}
+
+interface HostedGcpKmsEndpointConfiguration {
+  apiEndpoint: string;
+  fallback: boolean;
+  port: number;
+}
+
+const hostedGcpAuthRefreshContext = new AsyncLocalStorage<HostedGcpAuthRefreshContext>();
+const defaultHostedGcpKmsDependencies: HostedGcpKmsClientDependencies = {
+  createSdkTransport: createOfficialGcpKmsSdkTransport,
+};
+
 export function createHostedGcpKmsClientFromEnv(
   source: NodeJS.ProcessEnv = process.env,
+  dependencies: HostedGcpKmsClientDependencies = defaultHostedGcpKmsDependencies,
 ): HostedGcpKmsClient {
-  const apiRoot = readOptionalEnv(source, "HOSTED_CRYPTO_GCP_KMS_API_ROOT");
+  const apiRoot = readOptionalExactEnv(source, "HOSTED_CRYPTO_GCP_KMS_API_ROOT");
   const localKmsEnabled =
     apiRoot === LOCAL_KMS_API_ROOT
     || readOptionalEnv(source, "HOSTED_CRYPTO_LOCAL_KMS") === "1";
@@ -153,60 +328,411 @@ export function createHostedGcpKmsClientFromEnv(
 
     return new HostedLocalGcpKmsClient({
       authoritySignPrivateJwk: parseLocalP256PrivateJwk(
-        readRequiredEnv(source, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
+        readRequiredExactEnv(source, "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK"),
         "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
       ),
       wrapKey: decodeFixedBase64Key(
-        readRequiredEnv(source, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
+        readRequiredExactEnv(source, "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY"),
         "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
       ),
     });
   }
 
   assertHostedGcpEndpointOverridesAllowed(source);
+  assertGoogleSdkLoggingDisabled(source);
 
-  return new HostedGcpKmsJsonClient({
-    accessTokenProvider: createHostedGcpAccessTokenProviderFromEnv(source),
-    apiRoot,
-  });
+  const endpoint = readHostedGcpKmsEndpointConfiguration(apiRoot);
+  const config: HostedGcpKmsSdkClientConfiguration = {
+    apiEndpoint: endpoint.apiEndpoint,
+    credentials: readHostedGcpKmsCredentialConfiguration(source),
+    fallback: endpoint.fallback,
+    port: endpoint.port,
+    scopes: [GCP_CLOUD_KMS_SCOPE],
+  };
+  return new HostedGcpKmsSdkClient(dependencies.createSdkTransport(config));
 }
 
-class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
-  constructor(
-    private readonly config: {
-      authoritySignPrivateJwk: JsonWebKey;
-      wrapKey: Uint8Array;
-    },
-  ) {}
+class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
+  constructor(private readonly transport: HostedGcpKmsSdkTransport) {}
 
   async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
-    const keyName = requireKmsCryptoKeyName(input.keyName, "Local KMS Encrypt keyName");
-    const iv = crypto.getRandomValues(new Uint8Array(LOCAL_KMS_IV_BYTES));
-    const key = await this.importWrapKey(["encrypt"]);
-    const ciphertext = new Uint8Array(
-      await crypto.subtle.encrypt(
-        {
-          additionalData: toArrayBuffer(
-            localKmsAad({
-              additionalAuthenticatedData: input.additionalAuthenticatedData,
-              keyName,
-            }),
-          ),
-          iv,
-          name: "AES-GCM",
-        },
-        key,
-        toArrayBuffer(input.plaintext),
-      ),
+    throwIfCallerAborted(input.signal);
+    const keyName = requireKmsCryptoKeyName(input.keyName, "GCP KMS Encrypt keyName");
+    const plaintext = copyBoundedBytes(
+      input.plaintext,
+      GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+      "GCP KMS Encrypt plaintext",
     );
+    let additionalAuthenticatedData: OwnedBytes | null = null;
+    let responseCiphertext: OwnedBytes | null = null;
 
-    return {
-      ciphertext: `${LOCAL_KMS_CIPHERTEXT_PREFIX}${encodeBase64(concatBytes(iv, ciphertext))}`,
-      keyName,
-    };
+    try {
+      additionalAuthenticatedData = encodeBoundedUtf8(
+        input.additionalAuthenticatedData,
+        GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+        "GCP KMS Encrypt additionalAuthenticatedData",
+      );
+      if (
+        plaintext.byteLength + additionalAuthenticatedData.byteLength
+        > GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES
+      ) {
+        throw new TypeError(
+          "GCP KMS Encrypt plaintext and additionalAuthenticatedData exceed 65536 bytes.",
+        );
+      }
+
+      const request: HostedGcpKmsSdkEncryptRequest = {
+        additionalAuthenticatedData,
+        additionalAuthenticatedDataCrc32c: crc32c(additionalAuthenticatedData),
+        name: keyName,
+        plaintext,
+        plaintextCrc32c: crc32c(plaintext),
+      };
+      const response = await this.callProvider("encrypt", input.signal, (options) =>
+        this.transport.encrypt(request, options));
+      responseCiphertext = claimResponseBytes(
+        response.ciphertext,
+        GCP_KMS_MAX_CIPHERTEXT_BYTES,
+        false,
+        "GCP KMS Encrypt ciphertext",
+        "encrypt",
+      );
+
+      requireVerifiedFlag(
+        response.verifiedPlaintextCrc32c,
+        "encrypt",
+        "verified_plaintext_crc32c",
+      );
+      requireVerifiedFlag(
+        response.verifiedAdditionalAuthenticatedDataCrc32c,
+        "encrypt",
+        "verified_additional_authenticated_data_crc32c",
+      );
+      const responseKeyVersionName = requireResponseKmsCryptoKeyVersionName(
+        response.name,
+        "encrypt",
+      );
+      if (cryptoKeyParentName(responseKeyVersionName) !== keyName) {
+        throw new HostedGcpKmsIntegrityError({
+          check: "response_key_version_binding",
+          operation: "encrypt",
+        });
+      }
+      requireMatchingCrc32c(
+        responseCiphertext,
+        response.ciphertextCrc32c,
+        "encrypt",
+        "ciphertext_crc32c",
+      );
+
+      return {
+        ciphertext: encodeBase64(responseCiphertext),
+        keyName,
+      };
+    } finally {
+      plaintext.fill(0);
+      additionalAuthenticatedData?.fill(0);
+      responseCiphertext?.fill(0);
+    }
   }
 
   async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
+    throwIfCallerAborted(input.signal);
+    const keyName = normalizeKmsCryptoKeyName(input.keyName, "GCP KMS Decrypt keyName");
+    const ciphertext = decodeBoundedBase64(
+      input.ciphertext,
+      GCP_KMS_MAX_CIPHERTEXT_BYTES,
+      "GCP KMS Decrypt ciphertext",
+    );
+    let additionalAuthenticatedData: OwnedBytes | null = null;
+    let responsePlaintext: OwnedBytes | null = null;
+
+    try {
+      additionalAuthenticatedData = encodeBoundedUtf8(
+        input.additionalAuthenticatedData,
+        GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+        "GCP KMS Decrypt additionalAuthenticatedData",
+      );
+      const request: HostedGcpKmsSdkDecryptRequest = {
+        additionalAuthenticatedData,
+        additionalAuthenticatedDataCrc32c: crc32c(additionalAuthenticatedData),
+        ciphertext,
+        ciphertextCrc32c: crc32c(ciphertext),
+        name: keyName,
+      };
+      const response = await this.callProvider("decrypt", input.signal, (options) =>
+        this.transport.decrypt(request, options));
+      responsePlaintext = claimResponseBytes(
+        response.plaintext,
+        GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+        true,
+        "GCP KMS Decrypt plaintext",
+        "decrypt",
+      );
+      requireMatchingCrc32c(
+        responsePlaintext,
+        response.plaintextCrc32c,
+        "decrypt",
+        "plaintext_crc32c",
+      );
+      return { plaintext: new Uint8Array(responsePlaintext) };
+    } finally {
+      ciphertext.fill(0);
+      additionalAuthenticatedData?.fill(0);
+      responsePlaintext?.fill(0);
+    }
+  }
+
+  async asymmetricSign(
+    input: GcpKmsAsymmetricSignInput,
+  ): Promise<{ keyVersionName: string; signature: string }> {
+    throwIfCallerAborted(input.signal);
+    const keyVersionName = requireKmsCryptoKeyVersionName(
+      input.keyVersionName,
+      "GCP KMS Sign keyVersionName",
+    );
+    const message = copyBoundedBytes(
+      input.message,
+      GCP_KMS_MAX_MESSAGE_BYTES,
+      "GCP KMS Sign message",
+    );
+    let digest: OwnedBytes | null = null;
+    let responseSignature: OwnedBytes | null = null;
+
+    try {
+      digest = new Uint8Array(await crypto.subtle.digest("SHA-256", message));
+      const request: HostedGcpKmsSdkAsymmetricSignRequest = {
+        digest,
+        digestCrc32c: crc32c(digest),
+        name: keyVersionName,
+      };
+      const response = await this.callProvider("asymmetricSign", input.signal, (options) =>
+        this.transport.asymmetricSign(request, options));
+      responseSignature = claimResponseBytes(
+        response.signature,
+        GCP_KMS_MAX_SIGNATURE_BYTES,
+        false,
+        "GCP KMS Sign signature",
+        "asymmetricSign",
+      );
+
+      requireVerifiedFlag(
+        response.verifiedDigestCrc32c,
+        "asymmetricSign",
+        "verified_digest_crc32c",
+      );
+      const responseKeyVersionName = requireResponseKmsCryptoKeyVersionName(
+        response.name,
+        "asymmetricSign",
+      );
+      if (responseKeyVersionName !== keyVersionName) {
+        throw new HostedGcpKmsIntegrityError({
+          check: "response_key_version_binding",
+          operation: "asymmetricSign",
+        });
+      }
+      requireMatchingCrc32c(
+        responseSignature,
+        response.signatureCrc32c,
+        "asymmetricSign",
+        "signature_crc32c",
+      );
+      return {
+        keyVersionName,
+        signature: encodeBase64(responseSignature),
+      };
+    } finally {
+      message.fill(0);
+      digest?.fill(0);
+      responseSignature?.fill(0);
+    }
+  }
+
+  async macSign(
+    input: GcpKmsMacSignInput,
+  ): Promise<{ keyVersionName: string; mac: Uint8Array }> {
+    throwIfCallerAborted(input.signal);
+    const keyVersionName = requireKmsCryptoKeyVersionName(
+      input.keyVersionName,
+      "GCP KMS MAC keyVersionName",
+    );
+    const data = copyBoundedBytes(
+      input.data,
+      GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+      "GCP KMS MAC data",
+    );
+    let responseMac: OwnedBytes | null = null;
+
+    try {
+      const request: HostedGcpKmsSdkMacSignRequest = {
+        data,
+        dataCrc32c: crc32c(data),
+        name: keyVersionName,
+      };
+      const response = await this.callProvider("macSign", input.signal, (options) =>
+        this.transport.macSign(request, options));
+      responseMac = claimResponseBytes(
+        response.mac,
+        GCP_KMS_MAC_BYTES,
+        false,
+        "GCP KMS MAC value",
+        "macSign",
+      );
+      if (responseMac.byteLength !== GCP_KMS_MAC_BYTES) {
+        throw new HostedGcpKmsIntegrityError({
+          check: "mac_length",
+          operation: "macSign",
+        });
+      }
+      requireVerifiedFlag(
+        response.verifiedDataCrc32c,
+        "macSign",
+        "verified_data_crc32c",
+      );
+      const responseKeyVersionName = requireResponseKmsCryptoKeyVersionName(
+        response.name,
+        "macSign",
+      );
+      if (responseKeyVersionName !== keyVersionName) {
+        throw new HostedGcpKmsIntegrityError({
+          check: "response_key_version_binding",
+          operation: "macSign",
+        });
+      }
+      requireMatchingCrc32c(
+        responseMac,
+        response.macCrc32c,
+        "macSign",
+        "mac_crc32c",
+      );
+      return {
+        keyVersionName,
+        mac: new Uint8Array(responseMac),
+      };
+    } finally {
+      data.fill(0);
+      responseMac?.fill(0);
+    }
+  }
+
+  private async callProvider<TResponse>(
+    operation: HostedGcpKmsOperation,
+    callerSignal: AbortSignal | undefined,
+    invoke: (options: HostedGcpKmsSdkCallOptions) => Promise<TResponse>,
+  ): Promise<TResponse> {
+    const context = createOperationContext(callerSignal);
+    throwIfOperationAborted(context);
+    const options: HostedGcpKmsSdkCallOptions = {
+      retry: false,
+      signal: context.signal,
+      timeoutMs: remainingOperationTimeoutMs(context),
+    };
+    try {
+      const response = await invoke(options);
+      throwIfOperationAborted(context);
+      return response;
+    } catch (error) {
+      if (context.callerSignal?.aborted) {
+        throw createCallerAbortError();
+      }
+      if (context.deadlineSignal.aborted || isTimeoutError(error)) {
+        throw createOperationTimeoutError();
+      }
+      throw createProviderError(operation, error);
+    }
+  }
+}
+
+class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
+  private readonly authoritySignKey: Promise<CryptoKey>;
+  private readonly localKeys: Promise<{ mac: CryptoKey; wrap: CryptoKey }>;
+
+  constructor(config: { authoritySignPrivateJwk: JsonWebKey; wrapKey: OwnedBytes }) {
+    const authoritySignPrivateJwk = config.authoritySignPrivateJwk;
+    this.authoritySignKey = crypto.subtle.importKey(
+      "jwk",
+      authoritySignPrivateJwk,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    ).finally(() => {
+      delete authoritySignPrivateJwk.d;
+      delete authoritySignPrivateJwk.x;
+      delete authoritySignPrivateJwk.y;
+    });
+
+    const wrapMaterial = new Uint8Array(config.wrapKey);
+    const macMaterial = new Uint8Array(config.wrapKey);
+    config.wrapKey.fill(0);
+    const wrapKey = crypto.subtle.importKey(
+      "raw",
+      wrapMaterial,
+      "AES-GCM",
+      false,
+      ["decrypt", "encrypt"],
+    ).finally(() => wrapMaterial.fill(0));
+    const macKey = crypto.subtle.importKey(
+      "raw",
+      macMaterial,
+      { hash: "SHA-256", name: "HMAC" },
+      false,
+      ["sign"],
+    ).finally(() => macMaterial.fill(0));
+    this.localKeys = Promise.all([wrapKey, macKey]).then(([wrap, mac]) => ({ mac, wrap }));
+  }
+
+  async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
+    throwIfCallerAborted(input.signal);
+    const keyName = requireKmsCryptoKeyName(input.keyName, "Local KMS Encrypt keyName");
+    const plaintext = copyBoundedBytes(
+      input.plaintext,
+      GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+      "Local KMS Encrypt plaintext",
+    );
+    let aad: OwnedBytes | null = null;
+    let ciphertext: OwnedBytes | null = null;
+    let iv: OwnedBytes | null = null;
+    let packed: OwnedBytes | null = null;
+
+    try {
+      aad = localKmsAad({
+        additionalAuthenticatedData: input.additionalAuthenticatedData,
+        keyName,
+      });
+      if (plaintext.byteLength + aad.byteLength > GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES) {
+        throw new TypeError(
+          "Local KMS Encrypt plaintext and additionalAuthenticatedData exceed 65536 bytes.",
+        );
+      }
+      const { wrap } = await this.localKeys;
+      throwIfCallerAborted(input.signal);
+      iv = crypto.getRandomValues(new Uint8Array(LOCAL_KMS_IV_BYTES));
+      ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+        {
+          additionalData: aad,
+          iv,
+          name: "AES-GCM",
+        },
+        wrap,
+        plaintext,
+      ));
+      throwIfCallerAborted(input.signal);
+      packed = concatBytes(iv, ciphertext);
+      return {
+        ciphertext: `${LOCAL_KMS_CIPHERTEXT_PREFIX}${encodeBase64(packed)}`,
+        keyName,
+      };
+    } finally {
+      plaintext.fill(0);
+      aad?.fill(0);
+      ciphertext?.fill(0);
+      iv?.fill(0);
+      packed?.fill(0);
+    }
+  }
+
+  async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
+    throwIfCallerAborted(input.signal);
     const keyName = normalizeKmsCryptoKeyName(input.keyName, "Local KMS Decrypt keyName");
     if (!input.ciphertext.startsWith(LOCAL_KMS_CIPHERTEXT_PREFIX)) {
       throw new Error(
@@ -214,320 +740,360 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
       );
     }
 
-    const packed = decodeBase64(input.ciphertext.slice(LOCAL_KMS_CIPHERTEXT_PREFIX.length));
-    if (packed.byteLength <= LOCAL_KMS_IV_BYTES) {
-      throw new Error(
-        "Local KMS ciphertext is malformed.",
-      );
-    }
+    const packed = decodeBoundedBase64(
+      input.ciphertext.slice(LOCAL_KMS_CIPHERTEXT_PREFIX.length),
+      GCP_KMS_MAX_CIPHERTEXT_BYTES,
+      "Local KMS ciphertext",
+    );
+    let aad: OwnedBytes | null = null;
+    let ciphertext: OwnedBytes | null = null;
+    let iv: OwnedBytes | null = null;
+    let plaintext: OwnedBytes | null = null;
 
-    const iv = packed.slice(0, LOCAL_KMS_IV_BYTES);
-    const ciphertext = packed.slice(LOCAL_KMS_IV_BYTES);
-    const key = await this.importWrapKey(["decrypt"]);
-    let plaintext: ArrayBuffer;
     try {
-      plaintext = await crypto.subtle.decrypt(
+      if (packed.byteLength <= LOCAL_KMS_IV_BYTES) {
+        throw new TypeError("Local KMS ciphertext is malformed.");
+      }
+      iv = packed.slice(0, LOCAL_KMS_IV_BYTES);
+      ciphertext = packed.slice(LOCAL_KMS_IV_BYTES);
+      aad = localKmsAad({
+        additionalAuthenticatedData: input.additionalAuthenticatedData,
+        keyName,
+      });
+      const { wrap } = await this.localKeys;
+      throwIfCallerAborted(input.signal);
+      plaintext = new Uint8Array(await crypto.subtle.decrypt(
         {
-          additionalData: toArrayBuffer(
-            localKmsAad({
-              additionalAuthenticatedData: input.additionalAuthenticatedData,
-              keyName,
-            }),
-          ),
+          additionalData: aad,
           iv,
           name: "AES-GCM",
         },
-        key,
-        toArrayBuffer(ciphertext),
-      );
-    } catch (error) {
-      if (
-        error instanceof DOMException
-        && (error.name === "DataError" || error.name === "OperationError")
-      ) {
-        throw new Error(
-          "Local KMS ciphertext could not be authenticated.",
-          { cause: error },
-        );
-      }
-      throw error;
+        wrap,
+        ciphertext,
+      ));
+      throwIfCallerAborted(input.signal);
+      return { plaintext: new Uint8Array(plaintext) };
+    } finally {
+      packed.fill(0);
+      aad?.fill(0);
+      ciphertext?.fill(0);
+      iv?.fill(0);
+      plaintext?.fill(0);
     }
-
-    return { plaintext: new Uint8Array(plaintext) };
   }
 
   async asymmetricSign(
     input: GcpKmsAsymmetricSignInput,
   ): Promise<{ keyVersionName: string; signature: string }> {
-    const keyVersionName = requireKmsResourceName(
+    throwIfCallerAborted(input.signal);
+    const keyVersionName = requireKmsCryptoKeyVersionName(
       input.keyVersionName,
       "Local KMS Sign keyVersionName",
     );
-    const key = await crypto.subtle.importKey(
-      "jwk",
-      this.config.authoritySignPrivateJwk,
-      { name: "ECDSA", namedCurve: "P-256" },
-      false,
-      ["sign"],
+    const message = copyBoundedBytes(
+      input.message,
+      GCP_KMS_MAX_MESSAGE_BYTES,
+      "Local KMS Sign message",
     );
-    const signature = new Uint8Array(
-      await crypto.subtle.sign(
+    let signature: OwnedBytes | null = null;
+
+    try {
+      const key = await this.authoritySignKey;
+      throwIfCallerAborted(input.signal);
+      signature = new Uint8Array(await crypto.subtle.sign(
         { hash: "SHA-256", name: "ECDSA" },
         key,
-        toArrayBuffer(input.message),
-      ),
-    );
-
-    return {
-      keyVersionName,
-      signature: encodeBase64(signature),
-    };
+        message,
+      ));
+      throwIfCallerAborted(input.signal);
+      return {
+        keyVersionName,
+        signature: encodeBase64(signature),
+      };
+    } finally {
+      message.fill(0);
+      signature?.fill(0);
+    }
   }
 
   async macSign(
     input: GcpKmsMacSignInput,
   ): Promise<{ keyVersionName: string; mac: Uint8Array }> {
-    input.signal?.throwIfAborted();
-    const keyVersionName = requireKmsResourceName(
+    throwIfCallerAborted(input.signal);
+    const keyVersionName = requireKmsCryptoKeyVersionName(
       input.keyVersionName,
       "Local KMS MAC keyVersionName",
     );
-    const key = await crypto.subtle.importKey(
-      "raw",
-      toArrayBuffer(this.config.wrapKey),
-      { hash: "SHA-256", name: "HMAC" },
-      false,
-      ["sign"],
+    const data = copyBoundedBytes(
+      input.data,
+      GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+      "Local KMS MAC data",
     );
-    const mac = new Uint8Array(
-      await crypto.subtle.sign(
-        "HMAC",
-        key,
-        toArrayBuffer(localKmsMacInput({
-          data: input.data,
-          keyVersionName,
-        })),
-      ),
-    );
-    return { keyVersionName, mac };
-  }
+    let macInput: OwnedBytes | null = null;
+    let mac: OwnedBytes | null = null;
 
-  private importWrapKey(keyUsages: KeyUsage[]): Promise<CryptoKey> {
-    return crypto.subtle.importKey(
-      "raw",
-      toArrayBuffer(this.config.wrapKey),
-      "AES-GCM",
-      false,
-      keyUsages,
-    );
+    try {
+      const keys = await this.localKeys;
+      throwIfCallerAborted(input.signal);
+      macInput = localKmsMacInput({ data, keyVersionName });
+      mac = new Uint8Array(await crypto.subtle.sign("HMAC", keys.mac, macInput));
+      throwIfCallerAborted(input.signal);
+      return {
+        keyVersionName,
+        mac: new Uint8Array(mac),
+      };
+    } finally {
+      data.fill(0);
+      macInput?.fill(0);
+      mac?.fill(0);
+    }
   }
 }
 
-class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
-  private readonly accessTokenProvider: HostedGcpAccessTokenProvider;
-  private readonly apiRoot: string;
+class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
+  constructor(private readonly client: KeyManagementServiceClient) {}
 
-  constructor(config: HostedGcpKmsJsonClientConfig) {
-    this.accessTokenProvider = config.accessTokenProvider;
-    this.apiRoot = readOptionalString(config.apiRoot) ?? DEFAULT_KMS_API_ROOT;
-  }
-
-  async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
-    const keyName = requireKmsCryptoKeyName(input.keyName, "GCP KMS Encrypt keyName");
-    const response = await this.call<GcpEncryptResponse>({
-      body: {
-        additionalAuthenticatedData: encodeBase64(utf8(input.additionalAuthenticatedData)),
-        plaintext: encodeBase64(input.plaintext),
-      },
-      operation: "cloudkms/encrypt",
-      resource: `${keyName}:encrypt`,
-      signal: input.signal,
-    });
-    const responseKeyName = requireKmsCryptoKeyVersionParentName(
-      response.name,
-      "GCP KMS Encrypt name",
+  async encrypt(
+    request: HostedGcpKmsSdkEncryptRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkEncryptResponse> {
+    const sdkRequest: protos.google.cloud.kms.v1.IEncryptRequest = {
+      additionalAuthenticatedData: request.additionalAuthenticatedData,
+      additionalAuthenticatedDataCrc32c: { value: request.additionalAuthenticatedDataCrc32c },
+      name: request.name,
+      plaintext: request.plaintext,
+      plaintextCrc32c: { value: request.plaintextCrc32c },
+    };
+    const response = await this.callUnary<protos.google.cloud.kms.v1.IEncryptResponse>(
+      "encrypt",
+      sdkRequest,
+      options,
     );
-    if (responseKeyName !== keyName) {
-      throw new Error(
-        "GCP KMS Encrypt response key version did not match the requested CryptoKey.",
-      );
-    }
     return {
-      ciphertext: requireNonEmptyString(response.ciphertext, "GCP KMS Encrypt ciphertext"),
-      keyName,
+      ciphertext: normalizeSdkBytes(response.ciphertext),
+      ciphertextCrc32c: normalizeSdkCrc32c(response.ciphertextCrc32c),
+      name: normalizeSdkString(response.name),
+      verifiedAdditionalAuthenticatedDataCrc32c:
+        normalizeSdkBoolean(response.verifiedAdditionalAuthenticatedDataCrc32c),
+      verifiedPlaintextCrc32c: normalizeSdkBoolean(response.verifiedPlaintextCrc32c),
     };
   }
 
-  async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
-    const keyName = normalizeKmsCryptoKeyName(input.keyName, "GCP KMS Decrypt keyName");
-    const response = await this.call<GcpDecryptResponse>({
-      body: {
-        additionalAuthenticatedData: encodeBase64(utf8(input.additionalAuthenticatedData)),
-        ciphertext: requireNonEmptyString(input.ciphertext, "GCP KMS Decrypt ciphertext"),
-      },
-      operation: "cloudkms/decrypt",
-      resource: `${keyName}:decrypt`,
-      signal: input.signal,
-    });
+  async decrypt(
+    request: HostedGcpKmsSdkDecryptRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkDecryptResponse> {
+    const sdkRequest: protos.google.cloud.kms.v1.IDecryptRequest = {
+      additionalAuthenticatedData: request.additionalAuthenticatedData,
+      additionalAuthenticatedDataCrc32c: { value: request.additionalAuthenticatedDataCrc32c },
+      ciphertext: request.ciphertext,
+      ciphertextCrc32c: { value: request.ciphertextCrc32c },
+      name: request.name,
+    };
+    const response = await this.callUnary<protos.google.cloud.kms.v1.IDecryptResponse>(
+      "decrypt",
+      sdkRequest,
+      options,
+    );
     return {
-      plaintext: decodeBase64(
-        requireNonEmptyString(response.plaintext, "GCP KMS Decrypt plaintext"),
-      ),
+      plaintext: normalizeSdkBytes(response.plaintext),
+      plaintextCrc32c: normalizeSdkCrc32c(response.plaintextCrc32c),
+      usedPrimary: normalizeSdkBoolean(response.usedPrimary),
     };
   }
 
   async asymmetricSign(
-    input: GcpKmsAsymmetricSignInput,
-  ): Promise<{ keyVersionName: string; signature: string }> {
-    const digest = await sha256(input.message);
-    const response = await this.call<GcpAsymmetricSignResponse>({
-      body: {
-        digest: { sha256: encodeBase64(digest) },
-      },
-      operation: "cloudkms/asymmetricSign",
-      resource: `${requireKmsResourceName(
-        input.keyVersionName,
-        "GCP KMS Sign keyVersionName",
-      )}:asymmetricSign`,
-      signal: input.signal,
-    });
+    request: HostedGcpKmsSdkAsymmetricSignRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkAsymmetricSignResponse> {
+    const sdkRequest: protos.google.cloud.kms.v1.IAsymmetricSignRequest = {
+      digest: { sha256: request.digest },
+      digestCrc32c: { value: request.digestCrc32c },
+      name: request.name,
+    };
+    const response = await this.callUnary<protos.google.cloud.kms.v1.IAsymmetricSignResponse>(
+      "asymmetricSign",
+      sdkRequest,
+      options,
+    );
     return {
-      keyVersionName: requireNonEmptyString(
-        response.name ?? input.keyVersionName,
-        "GCP KMS Sign name",
-      ),
-      signature: requireNonEmptyString(response.signature, "GCP KMS Sign signature"),
+      name: normalizeSdkString(response.name),
+      signature: normalizeSdkBytes(response.signature),
+      signatureCrc32c: normalizeSdkCrc32c(response.signatureCrc32c),
+      verifiedDigestCrc32c: normalizeSdkBoolean(response.verifiedDigestCrc32c),
     };
   }
 
   async macSign(
-    input: GcpKmsMacSignInput,
-  ): Promise<{ keyVersionName: string; mac: Uint8Array }> {
-    const keyVersionName = requireKmsResourceName(
-      input.keyVersionName,
-      "GCP KMS MAC keyVersionName",
+    request: HostedGcpKmsSdkMacSignRequest,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<HostedGcpKmsSdkMacSignResponse> {
+    const sdkRequest: protos.google.cloud.kms.v1.IMacSignRequest = {
+      data: request.data,
+      dataCrc32c: { value: request.dataCrc32c },
+      name: request.name,
+    };
+    const response = await this.callUnary<protos.google.cloud.kms.v1.IMacSignResponse>(
+      "macSign",
+      sdkRequest,
+      options,
     );
-    const response = await this.call<GcpMacSignResponse>({
-      body: {
-        data: encodeBase64(input.data),
-      },
-      operation: "cloudkms/macSign",
-      resource: `${keyVersionName}:macSign`,
-      signal: input.signal,
-    });
-    const responseName = requireNonEmptyString(response.name, "GCP KMS MAC name");
-    if (responseName !== keyVersionName) {
-      throw new Error("GCP KMS MAC response key version did not match the request.");
-    }
-    const mac = decodeBase64(requireNonEmptyString(response.mac, "GCP KMS MAC value"));
-    if (mac.byteLength !== 32) {
-      throw new Error("GCP KMS MAC value must be exactly 32 bytes.");
-    }
-    return { keyVersionName, mac };
+    return {
+      mac: normalizeSdkBytes(response.mac),
+      macCrc32c: normalizeSdkCrc32c(response.macCrc32c),
+      name: normalizeSdkString(response.name),
+      verifiedDataCrc32c: normalizeSdkBoolean(response.verifiedDataCrc32c),
+    };
   }
 
-  private async call<TResponse>(input: {
-    body: Record<string, unknown>;
-    operation: string;
-    resource: string;
-    signal?: AbortSignal;
-  }): Promise<TResponse> {
-    const deadline = AbortSignal.timeout(HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
-    const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
-    signal.throwIfAborted();
-    const token = await this.accessTokenProvider.getAccessToken(signal);
-    const response = await fetch(`${this.apiRoot}/${input.resource}`, {
-      body: JSON.stringify(input.body),
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-      signal,
-    });
-    return parseGoogleJsonResponse<TResponse>(response, input.operation);
+  private async callUnary<TResponse>(
+    method: HostedGcpKmsOperation,
+    request: object,
+    options: HostedGcpKmsSdkCallOptions,
+  ): Promise<TResponse> {
+    await waitForAbortablePromise(this.client.initialize(), options.signal);
+    const invoke = this.client.innerApiCalls[method];
+    if (typeof invoke !== "function") {
+      throw new TypeError(`Google Cloud KMS SDK method ${method} is unavailable.`);
+    }
+    const name = Reflect.get(request, "name");
+    if (typeof name !== "string" || name.length === 0) {
+      throw new TypeError(`Google Cloud KMS SDK method ${method} requires a resource name.`);
+    }
+    const call = requireCancellablePromise<[TResponse, unknown, unknown]>(
+      Reflect.apply(invoke, this.client.innerApiCalls, [
+        request,
+        {
+          otherArgs: {
+            headers: { "x-goog-request-params": `name=${encodeURIComponent(name)}` },
+          },
+          retry: null,
+          timeout: options.timeoutMs,
+        },
+      ]),
+      method,
+    );
+    const [response] = await waitForAbortablePromise(call, options.signal);
+    return response;
   }
 }
 
-function localKmsAad(input: {
-  additionalAuthenticatedData: string;
-  keyName: string;
-}): Uint8Array {
-  return utf8(
-    JSON.stringify({
-      additionalAuthenticatedData: input.additionalAuthenticatedData,
-      keyName: input.keyName,
-      schema: "murph.hosted-local-kms.v1",
-    }),
-  );
-}
-
-function localKmsMacInput(input: {
-  data: Uint8Array;
-  keyVersionName: string;
-}): Uint8Array {
-  return concatBytes(
-    utf8(`${input.keyVersionName}\u0000murph.hosted-local-kms.mac.v1\u0000`),
-    input.data,
-  );
-}
-
-function parseLocalP256PrivateJwk(value: string, label: string): JsonWebKey {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (error) {
-    throw new TypeError(
-      `${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+class HostedGcpIdentityPoolClient extends IdentityPoolClient {
+  override getAccessToken(): ReturnType<IdentityPoolClient["getAccessToken"]> {
+    if (hostedGcpAuthRefreshContext.getStore()) {
+      return super.getAccessToken();
+    }
+    return hostedGcpAuthRefreshContext.run(
+      createAuthRefreshContext(),
+      () => super.getAccessToken(),
     );
   }
+}
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError(`${label} must be a P-256 EC private JWK.`);
-  }
-
-  const jwk = parsed as JsonWebKey;
-  if (
-    jwk.kty !== "EC"
-    || jwk.crv !== "P-256"
-    || typeof jwk.x !== "string"
-    || typeof jwk.y !== "string"
-    || typeof jwk.d !== "string"
-    || jwk.x.length === 0
-    || jwk.y.length === 0
-    || jwk.d.length === 0
-  ) {
-    throw new TypeError(`${label} must be a P-256 EC private JWK.`);
-  }
-
-  return {
-    crv: "P-256",
-    d: jwk.d,
-    kty: "EC",
-    x: jwk.x,
-    y: jwk.y,
+function createOfficialGcpKmsSdkTransport(
+  config: HostedGcpKmsSdkClientConfiguration,
+): HostedGcpKmsSdkTransport {
+  const authClient = createOfficialGoogleAuthClient(config.credentials);
+  configureOfficialGoogleAuthTransport(authClient);
+  const clientOptions: NonNullable<ConstructorParameters<typeof KeyManagementServiceClient>[0]> = {
+    apiEndpoint: config.apiEndpoint,
+    authClient,
+    fallback: config.fallback,
+    port: config.port,
+    scopes: Array.from(config.scopes),
+    universeDomain: "googleapis.com",
   };
+  return new OfficialHostedGcpKmsSdkTransport(
+    new KeyManagementServiceClient(clientOptions),
+  );
 }
 
-function decodeFixedBase64Key(value: string, label: string): Uint8Array {
-  const decoded = decodeBase64(value);
-  if (decoded.byteLength !== LOCAL_KMS_KEY_BYTES) {
-    throw new TypeError(`${label} must decode to exactly ${LOCAL_KMS_KEY_BYTES} bytes.`);
+function createOfficialGoogleAuthClient(
+  credentials: HostedGcpKmsCredentialConfiguration,
+): IdentityPoolClient | OAuth2Client {
+  if (credentials.kind === "static-access-token") {
+    const client = new OAuth2Client({
+      forceRefreshOnFailure: false,
+      transporterOptions: {
+        retry: false,
+        timeout: HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+      },
+    });
+    client.setCredentials({
+      access_token: credentials.accessToken,
+      expiry_date: Number.MAX_SAFE_INTEGER,
+      token_type: "Bearer",
+    });
+    return client;
   }
-  return decoded;
+
+  const options: IdentityPoolClientOptions = {
+    audience: credentials.audience,
+    forceRefreshOnFailure: false,
+    scopes: Array.from(credentials.scopes),
+    service_account_impersonation: { token_lifetime_seconds: 3600 },
+    service_account_impersonation_url: credentials.serviceAccountImpersonationUrl,
+    subject_token_supplier: {
+      getSubjectToken: async (context) => {
+        if (
+          context.audience !== credentials.audience
+          || context.subjectTokenType !== credentials.subjectTokenType
+        ) {
+          throw new TypeError("GCP Workload Identity subject-token binding is invalid.");
+        }
+        return credentials.getSubjectToken(hostedGcpAuthRefreshContext.getStore()?.signal);
+      },
+    },
+    subject_token_type: credentials.subjectTokenType,
+    token_url: credentials.tokenUrl,
+    transporterOptions: {
+      retry: false,
+      timeout: HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+    },
+    type: GCP_EXTERNAL_ACCOUNT_TYPE,
+  };
+  return new HostedGcpIdentityPoolClient(options);
 }
 
-function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const out = new Uint8Array(left.byteLength + right.byteLength);
-  out.set(left, 0);
-  out.set(right, left.byteLength);
-  return out;
+function configureOfficialGoogleAuthTransport(
+  authClient: IdentityPoolClient | OAuth2Client,
+): void {
+  addBoundedGoogleAuthTransportInterceptor(authClient.transporter);
+  if (authClient instanceof IdentityPoolClient) {
+    const stsCredential = Reflect.get(authClient, "stsCredential");
+    if (!isRecord(stsCredential)) {
+      throw new TypeError("Google Workload Identity STS transport is unavailable.");
+    }
+    const stsTransport = Reflect.get(stsCredential, "transporter");
+    if (!isGoogleAuthTransport(stsTransport)) {
+      throw new TypeError("Google Workload Identity STS transport is unavailable.");
+    }
+    addBoundedGoogleAuthTransportInterceptor(stsTransport);
+  }
 }
 
-function createHostedGcpAccessTokenProviderFromEnv(
+function addBoundedGoogleAuthTransportInterceptor(
+  transport: OAuth2Client["transporter"],
+): void {
+  transport.interceptors.request.add({
+    resolved: async (request) => {
+      request.retry = false;
+      request.retryConfig = { retry: 0 };
+      const context = hostedGcpAuthRefreshContext.getStore();
+      if (!context) {
+        throw new TypeError("Google authentication request started outside its bounded lifecycle.");
+      }
+      request.signal = context.signal;
+      request.timeout = remainingAuthRefreshTimeoutMs(context);
+      return request;
+    },
+  });
+}
+
+function readHostedGcpKmsCredentialConfiguration(
   source: NodeJS.ProcessEnv,
-): HostedGcpAccessTokenProvider {
-  const staticAccessToken = readOptionalEnv(source, "HOSTED_CRYPTO_GCP_ACCESS_TOKEN");
+): HostedGcpKmsCredentialConfiguration {
+  const staticAccessToken = readOptionalExactEnv(source, "HOSTED_CRYPTO_GCP_ACCESS_TOKEN");
   if (staticAccessToken) {
     if (isHostedCryptoProductionEnvironment(source)) {
       throw new TypeError(
@@ -539,19 +1105,101 @@ function createHostedGcpAccessTokenProviderFromEnv(
         "HOSTED_CRYPTO_GCP_ACCESS_TOKEN requires HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV=1.",
       );
     }
-    return new StaticHostedGcpAccessTokenProvider(staticAccessToken);
+    return {
+      accessToken: requireOpaqueCredential(staticAccessToken, "HOSTED_CRYPTO_GCP_ACCESS_TOKEN"),
+      kind: "static-access-token",
+    };
   }
-  return new VercelOidcGcpWorkloadIdentityAccessTokenProvider({
-    iamCredentialsApiRoot: readOptionalEnv(source, "HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT"),
-    projectNumber: readRequiredEnv(source, "HOSTED_CRYPTO_GCP_PROJECT_NUMBER"),
-    serviceAccountEmail: readRequiredEnv(source, "HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL"),
-    stsTokenUri: readOptionalEnv(source, "HOSTED_CRYPTO_GCP_STS_TOKEN_URI"),
-    workloadIdentityPoolId: readRequiredEnv(source, "HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID"),
-    workloadIdentityProviderId: readRequiredEnv(
-      source,
-      "HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID",
-    ),
-  });
+
+  const projectNumber = requirePattern(
+    readRequiredExactEnv(source, "HOSTED_CRYPTO_GCP_PROJECT_NUMBER"),
+    GCP_PROJECT_NUMBER_PATTERN,
+    "HOSTED_CRYPTO_GCP_PROJECT_NUMBER",
+  );
+  const workloadIdentityPoolId = requireWorkloadIdentityId(
+    readRequiredExactEnv(source, "HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID"),
+    "HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID",
+  );
+  const workloadIdentityProviderId = requireWorkloadIdentityId(
+    readRequiredExactEnv(source, "HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID"),
+    "HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID",
+  );
+  const serviceAccountEmail = requirePattern(
+    readRequiredExactEnv(source, "HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL"),
+    GCP_SERVICE_ACCOUNT_EMAIL_PATTERN,
+    "HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL",
+  );
+  const tokenUrl = readExactHttpsUrl(
+    readOptionalExactEnv(source, "HOSTED_CRYPTO_GCP_STS_TOKEN_URI") ?? DEFAULT_STS_TOKEN_URI,
+    "/v1/token",
+    "HOSTED_CRYPTO_GCP_STS_TOKEN_URI",
+  ).toString();
+  const iamCredentialsApiRoot = readExactHttpsUrl(
+    readOptionalExactEnv(source, "HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT")
+      ?? DEFAULT_IAM_CREDENTIALS_API_ROOT,
+    "/v1",
+    "HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT",
+  ).toString().replace(/\/$/u, "");
+  const audience =
+    `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/`
+    + `${workloadIdentityPoolId}/providers/${workloadIdentityProviderId}`;
+
+  return {
+    audience,
+    getSubjectToken: async (signal?: AbortSignal) => {
+      const timeoutSignal = AbortSignal.timeout(HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
+      const combinedSignal = signal
+        ? AbortSignal.any([signal, timeoutSignal])
+        : timeoutSignal;
+      try {
+        const token = await waitForAbortablePromise(getVercelOidcToken(), combinedSignal);
+        if (signal?.aborted) {
+          throw createCallerAbortError();
+        }
+        if (timeoutSignal.aborted) {
+          throw createOperationTimeoutError();
+        }
+        return requireCompactJwt(token, "Vercel OIDC subject token");
+      } catch (error) {
+        if (signal?.aborted) {
+          throw createCallerAbortError();
+        }
+        if (timeoutSignal.aborted) {
+          throw createOperationTimeoutError();
+        }
+        throw error;
+      }
+    },
+    kind: "workload-identity",
+    scopes: [GCP_CLOUD_KMS_SCOPE],
+    serviceAccountImpersonationUrl:
+      `${iamCredentialsApiRoot}/projects/-/serviceAccounts/`
+      + `${encodeURIComponent(serviceAccountEmail)}:generateAccessToken`,
+    subjectTokenType: GCP_SUBJECT_TOKEN_TYPE,
+    tokenUrl,
+  };
+}
+
+function readHostedGcpKmsEndpointConfiguration(
+  configuredApiRoot: string | null,
+): HostedGcpKmsEndpointConfiguration {
+  if (!configuredApiRoot) {
+    return {
+      apiEndpoint: DEFAULT_KMS_API_ENDPOINT,
+      fallback: false,
+      port: DEFAULT_KMS_API_PORT,
+    };
+  }
+  const url = readExactHttpsUrl(
+    configuredApiRoot,
+    "/v1",
+    "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
+  );
+  return {
+    apiEndpoint: url.hostname,
+    fallback: true,
+    port: url.port ? requirePort(url.port, "HOSTED_CRYPTO_GCP_KMS_API_ROOT") : 443,
+  };
 }
 
 function isHostedCryptoProductionEnvironment(source: NodeJS.ProcessEnv): boolean {
@@ -566,179 +1214,345 @@ function assertHostedGcpEndpointOverridesAllowed(source: NodeJS.ProcessEnv): voi
   if (!isHostedCryptoProductionEnvironment(source)) {
     return;
   }
-
   const overrideKeys = [
     "HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT",
     "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
     "HOSTED_CRYPTO_GCP_STS_TOKEN_URI",
   ] as const;
-  const configured = overrideKeys.find((key) => readOptionalEnv(source, key) !== null);
+  const configured = overrideKeys.find((key) => readOptionalExactEnv(source, key) !== null);
   if (configured) {
     throw new TypeError(`${configured} is not allowed in production.`);
   }
 }
 
-class StaticHostedGcpAccessTokenProvider implements HostedGcpAccessTokenProvider {
-  constructor(private readonly accessToken: string) {}
-
-  async getAccessToken(): Promise<string> {
-    return this.accessToken;
+function assertGoogleSdkLoggingDisabled(source: NodeJS.ProcessEnv): void {
+  if (
+    hasConfiguredEnvValue(source, "GOOGLE_SDK_NODE_LOGGING")
+    || hasConfiguredEnvValue(process.env, "GOOGLE_SDK_NODE_LOGGING")
+  ) {
+    throw new TypeError(
+      "GOOGLE_SDK_NODE_LOGGING must be unset for hosted crypto Google clients.",
+    );
   }
 }
 
-class VercelOidcGcpWorkloadIdentityAccessTokenProvider implements HostedGcpAccessTokenProvider {
-  private readonly audience: string;
-  private readonly iamCredentialsApiRoot: string;
-  private readonly serviceAccountEmail: string;
-  private readonly stsTokenUri: string;
-  private cachedAccessToken: { expiresAtMs: number; token: string } | null = null;
+function createOperationContext(
+  callerSignal: AbortSignal | undefined,
+): HostedGcpKmsOperationContext {
+  const deadlineSignal = AbortSignal.timeout(HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
+  return {
+    callerSignal,
+    deadlineAtMs: Date.now() + HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+    deadlineSignal,
+    signal: callerSignal
+      ? AbortSignal.any([callerSignal, deadlineSignal])
+      : deadlineSignal,
+  };
+}
 
-  constructor(input: {
-    iamCredentialsApiRoot?: string | null;
-    projectNumber: string;
-    serviceAccountEmail: string;
-    stsTokenUri?: string | null;
-    workloadIdentityPoolId: string;
-    workloadIdentityProviderId: string;
-  }) {
-    this.audience = `//iam.googleapis.com/projects/${requireNonEmptyString(
-      input.projectNumber,
-      "GCP project number",
-    )}/locations/global/workloadIdentityPools/${requireNonEmptyString(
-      input.workloadIdentityPoolId,
-      "GCP workload identity pool id",
-    )}/providers/${requireNonEmptyString(
-      input.workloadIdentityProviderId,
-      "GCP workload identity provider id",
-    )}`;
-    this.iamCredentialsApiRoot =
-      readOptionalString(input.iamCredentialsApiRoot) ?? DEFAULT_IAM_CREDENTIALS_API_ROOT;
-    this.serviceAccountEmail = requireNonEmptyString(
-      input.serviceAccountEmail,
-      "GCP service account email",
-    );
-    this.stsTokenUri = readOptionalString(input.stsTokenUri) ?? DEFAULT_STS_TOKEN_URI;
+function createAuthRefreshContext(): HostedGcpAuthRefreshContext {
+  const signal = AbortSignal.timeout(HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
+  return {
+    deadlineAtMs: Date.now() + HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+    signal,
+  };
+}
+
+function remainingAuthRefreshTimeoutMs(context: HostedGcpAuthRefreshContext): number {
+  const remaining = context.deadlineAtMs - Date.now();
+  if (remaining <= 0 || context.signal.aborted) {
+    throw createOperationTimeoutError();
   }
+  return Math.max(1, remaining);
+}
 
-  async getAccessToken(signal?: AbortSignal): Promise<string> {
-    const nowMs = Date.now();
-    if (this.cachedAccessToken && this.cachedAccessToken.expiresAtMs - 60_000 > nowMs) {
-      return this.cachedAccessToken.token;
+function remainingOperationTimeoutMs(context: HostedGcpKmsOperationContext): number {
+  const remaining = context.deadlineAtMs - Date.now();
+  if (remaining <= 0 || context.deadlineSignal.aborted) {
+    throw createOperationTimeoutError();
+  }
+  return Math.max(1, remaining);
+}
+
+function throwIfOperationAborted(context: HostedGcpKmsOperationContext): void {
+  if (context.callerSignal?.aborted) {
+    throw createCallerAbortError();
+  }
+  if (context.deadlineSignal.aborted) {
+    throw createOperationTimeoutError();
+  }
+}
+
+function throwIfCallerAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw createCallerAbortError();
+  }
+}
+
+function createCallerAbortError(): DOMException {
+  return new DOMException("Google Cloud KMS operation was aborted by the caller.", "AbortError");
+}
+
+function createOperationTimeoutError(): DOMException {
+  return new DOMException("Google Cloud KMS operation exceeded its deadline.", "TimeoutError");
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "TimeoutError") {
+    return true;
+  }
+  if (!isRecord(error)) {
+    return false;
+  }
+  return error.code === 4
+    || error.code === "DEADLINE_EXCEEDED"
+    || error.status === "DEADLINE_EXCEEDED";
+}
+
+function createProviderError(
+  operation: HostedGcpKmsOperation,
+  error: unknown,
+): HostedGcpKmsProviderError {
+  const status = readProviderHttpStatus(error);
+  return new HostedGcpKmsProviderError({
+    operation,
+    providerReason: readProviderReason(error, status),
+    status,
+  });
+}
+
+function readProviderReason(error: unknown, status: number | null): string {
+  if (!isRecord(error)) {
+    return status === null ? "UNKNOWN" : `http_${status}`;
+  }
+  if (typeof error.code === "number") {
+    const reason = GRPC_STATUS_REASONS.get(error.code);
+    if (reason) {
+      return reason;
     }
-    const subjectToken = await getVercelOidcToken();
-    const federatedToken = await this.exchangeSubjectToken(subjectToken, signal);
-    const accessToken = await this.generateServiceAccountAccessToken(federatedToken, signal);
-    this.cachedAccessToken = accessToken;
-    return accessToken.token;
+  }
+  for (const candidate of [error.code, error.status]) {
+    if (typeof candidate === "string") {
+      const normalized = candidate.trim().toUpperCase();
+      if (GOOGLE_RPC_STATUS_REASONS.has(normalized)) {
+        return normalized;
+      }
+    }
+  }
+  return status === null ? "UNKNOWN" : `http_${status}`;
+}
+
+function readProviderHttpStatus(error: unknown): number | null {
+  if (!isRecord(error)) {
+    return null;
+  }
+  const directStatus = normalizeHttpStatus(error.status);
+  if (directStatus !== null) {
+    return directStatus;
+  }
+  if (isRecord(error.response)) {
+    return normalizeHttpStatus(error.response.status);
+  }
+  return null;
+}
+
+function normalizeHttpStatus(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isInteger(value)
+    && value >= 100
+    && value <= 599
+    ? value
+    : null;
+}
+
+async function waitForAbortablePromise<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) {
+    cancelPromise(promise);
+    throw new DOMException("Google operation was aborted.", "AbortError");
   }
 
-  private async exchangeSubjectToken(
-    subjectToken: string,
-    signal?: AbortSignal,
-  ): Promise<string> {
-    const response = await fetch(this.stsTokenUri, {
-      body: new URLSearchParams({
-        audience: this.audience,
-        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-        requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
-        scope: GCP_IAM_CREDENTIALS_SCOPE,
-        subject_token: subjectToken,
-        subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
-      }),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      method: "POST",
-      signal,
-    });
-    const parsed = await parseGoogleJsonResponse<StsTokenExchangeResponse>(
-      response,
-      "sts/token",
-    );
-    return requireNonEmptyString(parsed.access_token, "GCP STS access_token");
-  }
-
-  private async generateServiceAccountAccessToken(
-    federatedAccessToken: string,
-    signal?: AbortSignal,
-  ): Promise<{ expiresAtMs: number; token: string }> {
-    const response = await fetch(
-      `${this.iamCredentialsApiRoot}/projects/-/serviceAccounts/${encodeURIComponent(
-        this.serviceAccountEmail,
-      )}:generateAccessToken`,
-      {
-        body: JSON.stringify({
-          lifetime: "3600s",
-          scope: [GCP_CLOUD_KMS_SCOPE],
-        }),
-        headers: {
-          Authorization: `Bearer ${federatedAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-        signal,
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      cancelPromise(promise);
+      reject(new DOMException("Google operation was aborted.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        reject(error);
       },
     );
-    const parsed = await parseGoogleJsonResponse<IamGenerateAccessTokenResponse>(
-      response,
-      "iamcredentials/generateAccessToken",
-    );
-    const token = requireNonEmptyString(parsed.accessToken, "GCP IAM accessToken");
-    const expireTimeMs = parsed.expireTime ? Date.parse(parsed.expireTime) : NaN;
-    return {
-      expiresAtMs: Number.isFinite(expireTimeMs) ? expireTimeMs : Date.now() + 3600 * 1000,
-      token,
-    };
+  });
+}
+
+function cancelPromise<T>(promise: Promise<T>): void {
+  if ("cancel" in promise && typeof promise.cancel === "function") {
+    promise.cancel();
   }
 }
 
-async function parseGoogleJsonResponse<TResponse>(
-  response: Response,
-  label: string,
-): Promise<TResponse> {
-  const text = await response.text();
-  let parsed: unknown = {};
-  if (text.length > 0) {
-    try {
-      parsed = JSON.parse(text);
-    } catch (error) {
-      if (!response.ok) {
-        throw new GoogleCloudApiError({
-          operation: label,
-          reason: `http_${response.status}`,
-          status: response.status,
-        });
-      }
-      throw error;
-    }
+function requireCancellablePromise<T>(
+  value: unknown,
+  operation: HostedGcpKmsOperation,
+): CancellablePromise<T> {
+  if (!isCancellablePromise<T>(value)) {
+    throw new TypeError(`Google Cloud KMS SDK method ${operation} is not cancellable.`);
   }
-  if (!response.ok) {
-    throw new GoogleCloudApiError({
-      operation: label,
-      reason: getGoogleCloudErrorReason(parsed, response),
-      status: response.status,
+  return value;
+}
+
+function isCancellablePromise<T>(value: unknown): value is CancellablePromise<T> {
+  return isRecord(value)
+    && typeof value.then === "function"
+    && typeof value.cancel === "function";
+}
+
+function requireVerifiedFlag(
+  value: boolean | null,
+  operation: HostedGcpKmsOperation,
+  check: string,
+): void {
+  if (value !== true) {
+    throw new HostedGcpKmsIntegrityError({ check, operation });
+  }
+}
+
+function requireMatchingCrc32c(
+  value: Uint8Array,
+  reportedCrc32c: number | null,
+  operation: HostedGcpKmsOperation,
+  check: string,
+): void {
+  if (reportedCrc32c === null || reportedCrc32c !== crc32c(value)) {
+    throw new HostedGcpKmsIntegrityError({ check, operation });
+  }
+}
+
+function crc32c(value: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of value) {
+    crc = CRC32C_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const CRC32C_TABLE = createCrc32cTable();
+
+function createCrc32cTable(): Uint32Array {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) === 1
+        ? 0x82f63b78 ^ (value >>> 1)
+        : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+function normalizeSdkBytes(value: Uint8Array | string | null | undefined): Uint8Array | null {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (
+    typeof value !== "string"
+    || value.length > Math.ceil(GCP_KMS_MAX_CIPHERTEXT_BYTES / 3) * 4
+    || !BASE64_PATTERN.test(value)
+  ) {
+    return null;
+  }
+  const decoded = new Uint8Array(Buffer.from(value, "base64"));
+  if (encodeBase64(decoded) !== value) {
+    decoded.fill(0);
+    return null;
+  }
+  return decoded;
+}
+
+function normalizeSdkCrc32c(value: unknown): number | null {
+  if (isRecord(value) && "value" in value) {
+    return normalizeSdkCrc32c(value.value);
+  }
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 && value <= 0xffffffff
+      ? value
+      : null;
+  }
+  if (typeof value === "bigint") {
+    return value >= 0n && value <= 0xffffffffn ? Number(value) : null;
+  }
+  if (typeof value === "string" && /^[0-9]{1,10}$/u.test(value)) {
+    const parsed = Number(value);
+    return parsed <= 0xffffffff ? parsed : null;
+  }
+  if (
+    isRecord(value)
+    && typeof value.low === "number"
+    && typeof value.high === "number"
+    && value.high === 0
+  ) {
+    return value.low >>> 0;
+  }
+  return null;
+}
+
+function normalizeSdkString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeSdkBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function claimResponseBytes(
+  value: Uint8Array | null,
+  maxBytes: number,
+  allowEmpty: boolean,
+  label: string,
+  operation: HostedGcpKmsOperation,
+): OwnedBytes {
+  if (!(value instanceof Uint8Array)) {
+    throw new HostedGcpKmsIntegrityError({
+      check: `${label.replaceAll(" ", "_").toLowerCase()}_missing`,
+      operation,
     });
   }
-  return parsed as TResponse;
-}
-
-function getGoogleCloudErrorReason(parsed: unknown, response: Response): string {
-  const error = (parsed as GoogleCloudErrorBody).error;
-
-  if (error && typeof error === "object") {
-    const status = typeof error.status === "string" ? error.status.trim().toUpperCase() : null;
-    if (status && GOOGLE_RPC_STATUS_REASONS.has(status)) {
-      return status;
+  try {
+    if ((!allowEmpty && value.byteLength === 0) || value.byteLength > maxBytes) {
+      throw new HostedGcpKmsIntegrityError({
+        check: `${label.replaceAll(" ", "_").toLowerCase()}_size`,
+        operation,
+      });
     }
-
-    if (typeof error.code === "number" && Number.isFinite(error.code)) {
-      return `google_error_${error.code}`;
-    }
+    return new Uint8Array(value);
+  } finally {
+    value.fill(0);
   }
-
-  return `http_${response.status}`;
-}
-
-async function sha256(value: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(value)));
 }
 
 export function normalizeGcpKmsCryptoKeyName(value: string): string {
@@ -746,79 +1560,290 @@ export function normalizeGcpKmsCryptoKeyName(value: string): string {
 }
 
 function normalizeKmsCryptoKeyName(value: string, label: string): string {
-  const trimmed = requireNonEmptyString(value, label);
+  const trimmed = requireExactString(value, label);
   if (GCP_KMS_CRYPTO_KEY_NAME_PATTERN.test(trimmed)) {
     return trimmed;
   }
   const versionMatch = GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.exec(trimmed);
-  if (versionMatch) {
-    return versionMatch[1]!;
+  if (versionMatch?.[1]) {
+    return versionMatch[1];
   }
-  throw new TypeError(
-    `${label} must be a CryptoKey or CryptoKeyVersion resource name.`,
-  );
+  throw new TypeError(`${label} must be an exact CryptoKey or CryptoKeyVersion resource name.`);
 }
 
-function requireKmsCryptoKeyName(value: string, label: string): string {
-  const trimmed = requireNonEmptyString(value, label);
-  if (!GCP_KMS_CRYPTO_KEY_NAME_PATTERN.test(trimmed)) {
-    throw new TypeError(`${label} must be a CryptoKey resource name.`);
+function requireKmsCryptoKeyName(value: unknown, label: string): string {
+  const exact = requireExactString(value, label);
+  if (!GCP_KMS_CRYPTO_KEY_NAME_PATTERN.test(exact)) {
+    throw new TypeError(`${label} must be an exact CryptoKey resource name.`);
   }
-  return trimmed;
+  return exact;
 }
 
-function requireKmsCryptoKeyVersionParentName(value: unknown, label: string): string {
-  const trimmed = requireNonEmptyString(value, label);
-  const versionMatch = GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.exec(trimmed);
-  if (!versionMatch) {
-    throw new TypeError(`${label} must be a CryptoKeyVersion resource name.`);
+function requireKmsCryptoKeyVersionName(value: unknown, label: string): string {
+  const exact = requireExactString(value, label);
+  if (!GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.test(exact)) {
+    throw new TypeError(`${label} must be an exact CryptoKeyVersion resource name.`);
   }
-  return versionMatch[1]!;
+  return exact;
 }
 
-function requireKmsResourceName(value: string, label: string): string {
-  const trimmed = requireNonEmptyString(value, label).trim();
-  if (!trimmed.startsWith("projects/")) {
-    throw new TypeError(`${label} must be a full Google Cloud KMS resource name.`);
+function requireResponseKmsCryptoKeyVersionName(
+  value: unknown,
+  operation: HostedGcpKmsOperation,
+): string {
+  try {
+    return requireKmsCryptoKeyVersionName(value, "GCP KMS response name");
+  } catch {
+    throw new HostedGcpKmsIntegrityError({
+      check: "response_key_version_name",
+      operation,
+    });
   }
-  return trimmed;
 }
 
-function readRequiredEnv(source: NodeJS.ProcessEnv, key: string): string {
-  const value = readOptionalEnv(source, key);
+function cryptoKeyParentName(versionName: string): string {
+  const match = GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.exec(versionName);
+  if (!match?.[1]) {
+    throw new TypeError("GCP KMS CryptoKeyVersion resource name is invalid.");
+  }
+  return match[1];
+}
+
+function readRequiredExactEnv(source: NodeJS.ProcessEnv, key: string): string {
+  const value = readOptionalExactEnv(source, key);
   if (!value) {
     throw new TypeError(`${key} must be configured for hosted crypto GCP KMS.`);
   }
   return value;
 }
 
-function readOptionalEnv(source: NodeJS.ProcessEnv, key: string): string | null {
-  return readOptionalString(source[key]);
+function readOptionalExactEnv(source: NodeJS.ProcessEnv, key: string): string | null {
+  const value = source[key];
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  return requireExactString(value, key);
 }
 
-function readOptionalString(value: unknown): string | null {
+function hasConfiguredEnvValue(source: NodeJS.ProcessEnv, key: string): boolean {
+  const value = source[key];
+  return typeof value === "string" && value.length > 0;
+}
+
+function readOptionalEnv(source: NodeJS.ProcessEnv, key: string): string | null {
+  const value = source[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function requireNonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+function requireExactString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0 || value !== value.trim()) {
+    throw new TypeError(`${label} must be a non-empty exact string without surrounding whitespace.`);
   }
-  return value.trim();
+  return value;
 }
 
-function utf8(value: string): Uint8Array {
+function requirePattern(value: string, pattern: RegExp, label: string): string {
+  const exact = requireExactString(value, label);
+  if (!pattern.test(exact)) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return exact;
+}
+
+function requireWorkloadIdentityId(value: string, label: string): string {
+  const id = requirePattern(value, GCP_WORKLOAD_ID_PATTERN, label);
+  if (id.startsWith(GCP_RESERVED_WORKLOAD_ID_PREFIX)) {
+    throw new TypeError(`${label} uses a reserved Google prefix.`);
+  }
+  return id;
+}
+
+function requireOpaqueCredential(value: string, label: string): string {
+  const exact = requireExactString(value, label);
+  if (Buffer.byteLength(exact, "utf8") > GCP_TOKEN_MAX_BYTES || /[\u0000-\u0020\u007f]/u.test(exact)) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return exact;
+}
+
+function requireCompactJwt(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  const exact = requireOpaqueCredential(value, label);
+  if (!COMPACT_JWT_PATTERN.test(exact)) {
+    throw new TypeError(`${label} must be a compact JWT.`);
+  }
+  return exact;
+}
+
+function readExactHttpsUrl(value: string, pathname: string, label: string): URL {
+  const exact = requireExactString(value, label);
+  let url: URL;
+  try {
+    url = new URL(exact);
+  } catch {
+    throw new TypeError(`${label} must be an exact HTTPS URL.`);
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username.length > 0
+    || url.password.length > 0
+    || url.hostname.length === 0
+    || url.pathname !== pathname
+    || url.search.length > 0
+    || url.hash.length > 0
+  ) {
+    throw new TypeError(`${label} must be an exact HTTPS URL with path ${pathname}.`);
+  }
+  return url;
+}
+
+function requirePort(value: string, label: string): number {
+  if (!/^[0-9]{1,5}$/u.test(value)) {
+    throw new TypeError(`${label} port is invalid.`);
+  }
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new TypeError(`${label} port is invalid.`);
+  }
+  return port;
+}
+
+function encodeBoundedUtf8(value: unknown, maxBytes: number, label: string): OwnedBytes {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  if (Buffer.byteLength(value, "utf8") > maxBytes) {
+    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+  }
   return new TextEncoder().encode(value);
+}
+
+function copyBoundedBytes(value: unknown, maxBytes: number, label: string): OwnedBytes {
+  if (!(value instanceof Uint8Array)) {
+    throw new TypeError(`${label} must be bytes.`);
+  }
+  if (value.byteLength > maxBytes) {
+    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+  }
+  return new Uint8Array(value);
 }
 
 function encodeBase64(value: Uint8Array): string {
   return Buffer.from(value).toString("base64");
 }
 
-function decodeBase64(value: string): Uint8Array {
-  return new Uint8Array(Buffer.from(value, "base64"));
+function decodeBoundedBase64(value: unknown, maxBytes: number, label: string): OwnedBytes {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be canonical base64.`);
+  }
+  if (value.length > Math.ceil(maxBytes / 3) * 4) {
+    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+  }
+  if (!BASE64_PATTERN.test(value)) {
+    throw new TypeError(`${label} must be canonical base64.`);
+  }
+  const decoded = new Uint8Array(Buffer.from(value, "base64"));
+  if (decoded.byteLength === 0 || decoded.byteLength > maxBytes) {
+    decoded.fill(0);
+    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+  }
+  if (encodeBase64(decoded) !== value) {
+    decoded.fill(0);
+    throw new TypeError(`${label} must be canonical base64.`);
+  }
+  return decoded;
 }
 
-function toArrayBuffer(value: Uint8Array): ArrayBuffer {
-  return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
+function parseLocalP256PrivateJwk(value: string, label: string): JsonWebKey {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new TypeError(`${label} must be valid P-256 EC private JWK JSON.`);
+  }
+  if (!isRecord(parsed)) {
+    throw new TypeError(`${label} must be a P-256 EC private JWK.`);
+  }
+  if (
+    parsed.kty !== "EC"
+    || parsed.crv !== "P-256"
+    || typeof parsed.x !== "string"
+    || typeof parsed.y !== "string"
+    || typeof parsed.d !== "string"
+    || parsed.x.length === 0
+    || parsed.y.length === 0
+    || parsed.d.length === 0
+  ) {
+    throw new TypeError(`${label} must be a P-256 EC private JWK.`);
+  }
+  return {
+    crv: "P-256",
+    d: parsed.d,
+    kty: "EC",
+    x: parsed.x,
+    y: parsed.y,
+  };
+}
+
+function decodeFixedBase64Key(value: string, label: string): OwnedBytes {
+  const decoded = decodeBoundedBase64(value, LOCAL_KMS_KEY_BYTES, label);
+  if (decoded.byteLength !== LOCAL_KMS_KEY_BYTES) {
+    decoded.fill(0);
+    throw new TypeError(`${label} must decode to exactly ${LOCAL_KMS_KEY_BYTES} bytes.`);
+  }
+  return decoded;
+}
+
+function localKmsAad(input: {
+  additionalAuthenticatedData: string;
+  keyName: string;
+}): OwnedBytes {
+  return encodeBoundedUtf8(
+    JSON.stringify({
+      additionalAuthenticatedData: input.additionalAuthenticatedData,
+      keyName: input.keyName,
+      schema: "murph.hosted-local-kms.v1",
+    }),
+    GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
+    "Local KMS additionalAuthenticatedData",
+  );
+}
+
+function localKmsMacInput(input: {
+  data: Uint8Array;
+  keyVersionName: string;
+}): OwnedBytes {
+  const domain = new TextEncoder().encode(
+    `${input.keyVersionName}\u0000murph.hosted-local-kms.mac.v1\u0000`,
+  );
+  try {
+    return concatBytes(domain, input.data);
+  } finally {
+    domain.fill(0);
+  }
+}
+
+function concatBytes(left: Uint8Array, right: Uint8Array): OwnedBytes {
+  const out = new Uint8Array(left.byteLength + right.byteLength);
+  out.set(left, 0);
+  out.set(right, left.byteLength);
+  return out;
+}
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isGoogleAuthTransport(value: unknown): value is OAuth2Client["transporter"] {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const interceptors = Reflect.get(value, "interceptors");
+  if (!isRecord(interceptors)) {
+    return false;
+  }
+  const request = Reflect.get(interceptors, "request");
+  return isRecord(request) && typeof Reflect.get(request, "add") === "function";
 }

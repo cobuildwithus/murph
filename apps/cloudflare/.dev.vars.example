@@ -45,7 +45,6 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # HOSTED_VENICE_TERRA_MODEL=zai-org-glm-4.7
 # HOSTED_VENICE_SOL_MODEL=qwen3-vl-235b-a22b
 # MURPH_DATA_API_KEY=replace-with-random-data-api-key
-# AGENTMAIL_API_KEY=...
 # TELEGRAM_BOT_TOKEN=...
 
 # Optional hosted email bridge settings for Cloudflare Email Routing + Email Sending.

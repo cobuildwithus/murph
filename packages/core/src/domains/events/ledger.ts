@@ -88,6 +88,18 @@ export interface FindEventByExternalRefInput {
   facet?: string;
 }
 
+export interface FindEventsByRawRefsInput {
+  vaultRoot: string;
+  rawRefs: readonly string[];
+  system?: string;
+  resourceType?: string;
+}
+
+export interface EventRawRefMatch {
+  attachment: EventRecord;
+  latest: EventRecord;
+}
+
 export interface UpsertEventResult {
   eventId: string;
   ledgerFile: string;
@@ -276,6 +288,16 @@ export function buildPublicEventImportRecord(
   return buildEventRecord(payload, fallbackTimeZone);
 }
 
+// Import decisions are produced by trusted domain owners after their own
+// evidence validation. Unlike generic public JSONL payloads, a verified workout
+// CSV decision may preserve an activity session whose duration is unknown.
+export function buildEventImportDecisionRecord(
+  payload: JsonObject,
+  fallbackTimeZone?: string,
+): EventRecord {
+  return buildEventRecord(payload, fallbackTimeZone);
+}
+
 export function toEventLedgerFile(occurredAt: string): string {
   return toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,
@@ -377,6 +399,89 @@ export async function findEventByExternalRef(
   }
 
   return latest.record;
+}
+
+function rawRefMatches(record: EventRecord, rawRef: string, input: FindEventsByRawRefsInput): boolean {
+  return collectEventRawReferencePaths(record).includes(rawRef)
+    && (input.system === undefined || record.externalRef?.system === input.system)
+    && (input.resourceType === undefined || record.externalRef?.resourceType === input.resourceType);
+}
+
+export async function findEventsByRawRefs(
+  input: FindEventsByRawRefsInput,
+): Promise<EventRawRefMatch[][]> {
+  if (input.rawRefs.length > 100) {
+    throw new TypeError("Event raw-reference lookup is limited to 100 references.");
+  }
+  if (input.rawRefs.length === 0) {
+    return [];
+  }
+
+  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const refIndexesByRawRef = new Map<string, number[]>();
+  const attachmentsByRefIndex = input.rawRefs.map(
+    () => new Map<string, MatchedEventRecord>(),
+  );
+  input.rawRefs.forEach((rawRef, index) => {
+    const indexes = refIndexesByRawRef.get(rawRef) ?? [];
+    indexes.push(index);
+    refIndexesByRawRef.set(rawRef, indexes);
+  });
+
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      for (const rawRef of collectEventRawReferencePaths(record)) {
+        for (const refIndex of refIndexesByRawRef.get(rawRef) ?? []) {
+          if (rawRefMatches(record, rawRef, input)) {
+            const attachments = attachmentsByRefIndex[refIndex];
+            const entry = { relativePath, record };
+            const prior = attachments?.get(record.id);
+            if (attachments && (!prior || compareEventSpineEntries(entry, prior) < 0)) {
+              attachments.set(record.id, entry);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const candidateIds = new Set(
+    attachmentsByRefIndex.flatMap((attachments) => [...attachments.keys()]),
+  );
+  if (candidateIds.size === 0) {
+    return input.rawRefs.map(() => []);
+  }
+
+  const latestByCandidateId = new Map<string, MatchedEventRecord>();
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      if (!candidateIds.has(record.id)) {
+        continue;
+      }
+      const entry = { relativePath, record };
+      const latest = latestByCandidateId.get(record.id);
+      if (!latest || compareEventSpineEntries(latest, entry) < 0) {
+        latestByCandidateId.set(record.id, entry);
+      }
+    }
+  }
+
+  return input.rawRefs.map((_rawRef, refIndex) =>
+    [...(attachmentsByRefIndex[refIndex] ?? new Map<string, MatchedEventRecord>())]
+      .map(([candidateId, attachment]) => {
+        const latest = latestByCandidateId.get(candidateId);
+        return latest
+          ? { attachment: attachment.record, latest: latest.record }
+          : undefined;
+      })
+      .filter((match): match is EventRawRefMatch => match !== undefined)
+      .sort((left, right) => left.latest.id.localeCompare(right.latest.id)));
 }
 
 function flattenMatchedEventRecords(

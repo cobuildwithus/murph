@@ -121,6 +121,12 @@ default destination for every goal or the definition of activation.
   purchased capacity as `usage`, present one-time contribution in a bottom
   drawer on phones and a centered dialog on larger screens, and leave payment
   confirmation to Stripe.
+- Starting a Family plan and joining someone else's Family are distinct choices.
+  Settings must say that starting creates a plan the member owns and pays for,
+  while joining uses the other owner's invite. A never-paid owner-only draft
+  must not strand a later invite: remove an inert draft as part of successful
+  acceptance, and give a member with a live Checkout one clear Settings action
+  to expire and abandon that exact unpaid setup before trying the invite again.
 - Wearable-provider authorization uses that exception narrowly. A provider
   callback completes automatically only for the browser that can prove it
   started the connection for the signed-in member; that proof-bound return is
@@ -176,8 +182,11 @@ default destination for every goal or the definition of activation.
 
 - Telegram and iMessage are product UI surfaces, not plain-text transports.
   When an owned workflow supports a card, table, image sequence, or other
-  structured presentation, Murph should use it instead of rebuilding the same
-  answer as a long message.
+  structured presentation that can carry the complete answer, Murph must use
+  it instead of rebuilding the same answer as one or more long messages. A
+  complete routine, training plan, or schedule must not degrade to long plain
+  text while a suitable owned presentation is available. A request to repeat
+  or improve that answer keeps the same owned presentation when it still fits.
 - Telegram Rich Messages support headings, paragraphs, lists, quotations,
   bordered or striped tables, expandable details, collages, slideshows, and
   embedded media. Murph authors semantic cards through its tools; the Telegram

@@ -665,42 +665,53 @@ async function deriveHostedAddressBookPhoneTokens(input: {
     if (!keyVersionName) {
       throw new Error("Address-book MAC key version is unavailable.");
     }
-    const memberSeed = (
-      await input.crypto.kms.macSign({
-        data: utf8([
-          HOSTED_ADDRESS_BOOK_MEMBER_SEED_DOMAIN,
-          input.crypto.environment,
-          String(version),
-          input.memberId,
-        ].join("\u0000")),
+    const memberSeedInput = utf8([
+      HOSTED_ADDRESS_BOOK_MEMBER_SEED_DOMAIN,
+      input.crypto.environment,
+      String(version),
+      input.memberId,
+    ].join("\u0000"));
+    let memberSeed: Uint8Array | null = null;
+    let memberSeedBuffer: ArrayBuffer | null = null;
+    try {
+      memberSeed = (await input.crypto.kms.macSign({
+        data: memberSeedInput,
         keyVersionName,
         signal: input.signal,
-      })
-    ).mac;
-    try {
+      })).mac;
+      memberSeedBuffer = toArrayBuffer(memberSeed);
       const hmacKey = await crypto.subtle.importKey(
         "raw",
-        toArrayBuffer(memberSeed),
+        memberSeedBuffer,
         { hash: "SHA-256", name: "HMAC" },
         false,
         ["sign"],
       );
       result.set(version, await Promise.all(input.phoneNumbers.map(async (phoneNumber) => {
-        const token = new Uint8Array(await crypto.subtle.sign(
-          "HMAC",
-          hmacKey,
-          toArrayBuffer(utf8(
-            `${HOSTED_ADDRESS_BOOK_PHONE_TOKEN_DOMAIN}\u0000${phoneNumber}`,
-          )),
-        ));
+        const phoneTokenInput = utf8(
+          `${HOSTED_ADDRESS_BOOK_PHONE_TOKEN_DOMAIN}\u0000${phoneNumber}`,
+        );
+        const phoneTokenInputBuffer = toArrayBuffer(phoneTokenInput);
+        let token: Uint8Array | null = null;
         try {
+          token = new Uint8Array(await crypto.subtle.sign(
+            "HMAC",
+            hmacKey,
+            phoneTokenInputBuffer,
+          ));
           return Buffer.from(token).toString("base64url");
         } finally {
-          token.fill(0);
+          phoneTokenInput.fill(0);
+          new Uint8Array(phoneTokenInputBuffer).fill(0);
+          token?.fill(0);
         }
       })));
     } finally {
-      memberSeed.fill(0);
+      memberSeedInput.fill(0);
+      memberSeed?.fill(0);
+      if (memberSeedBuffer) {
+        new Uint8Array(memberSeedBuffer).fill(0);
+      }
     }
   }
   return result;

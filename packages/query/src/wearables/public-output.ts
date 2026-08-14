@@ -25,12 +25,17 @@ import {
   ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
+  isActivitySummaryMetricCandidate,
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
 } from "./types.ts";
 
 export function projectWearableActivityDayPublicSources(day: WearableActivityDay): WearableActivityDay {
   const steps = projectWearableResolvedMetricPublicSources(day.steps);
+  const activityMinutes = projectWearableResolvedMetricPublicSources(day.activityMinutes);
+  const lowActivityMinutes = projectWearableResolvedMetricPublicSources(day.lowActivityMinutes);
+  const mediumActivityMinutes = projectWearableResolvedMetricPublicSources(day.mediumActivityMinutes);
+  const highActivityMinutes = projectWearableResolvedMetricPublicSources(day.highActivityMinutes);
   const activeCalories = projectWearableResolvedMetricPublicSources(day.activeCalories);
   const totalCalories = projectWearableResolvedMetricPublicSources(day.totalCalories);
   const distanceKm = projectWearableResolvedMetricPublicSources(day.distanceKm);
@@ -42,11 +47,18 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
   const dayStrain = projectWearableResolvedMetricPublicSources(day.dayStrain);
   const workoutStrain = projectWearableResolvedMetricPublicSources(day.workoutStrain);
   const maxHeartRate = projectWearableResolvedMetricPublicSources(day.maxHeartRate);
+  const averageHeartRate = projectWearableResolvedMetricPublicSources(day.averageHeartRate);
+  const walkingAverageHeartRate = projectWearableResolvedMetricPublicSources(day.walkingAverageHeartRate);
+  const lowestHeartRate = projectWearableResolvedMetricPublicSources(day.lowestHeartRate);
   const percentRecorded = projectWearableResolvedMetricPublicSources(day.percentRecorded);
   const sessionMinutes = projectWearableResolvedMetricPublicSources(day.sessionMinutes);
   const sessionCount = projectWearableResolvedMetricPublicSources(day.sessionCount);
   const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
     ["steps", steps],
+    ["activityMinutes", activityMinutes],
+    ["lowActivityMinutes", lowActivityMinutes],
+    ["mediumActivityMinutes", mediumActivityMinutes],
+    ["highActivityMinutes", highActivityMinutes],
     ["activeCalories", activeCalories],
     ["totalCalories", totalCalories],
     ["distanceKm", distanceKm],
@@ -58,6 +70,9 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     ["dayStrain", dayStrain],
     ["workoutStrain", workoutStrain],
     ["maxHeartRate", maxHeartRate],
+    ["averageHeartRate", averageHeartRate],
+    ["walkingAverageHeartRate", walkingAverageHeartRate],
+    ["lowestHeartRate", lowestHeartRate],
     ["percentRecorded", percentRecorded],
     ["sessionMinutes", sessionMinutes],
     ["sessionCount", sessionCount],
@@ -72,13 +87,19 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     ...day,
     activityScore,
     activeCalories,
+    activityMinutes,
     altitudeChangeMeters,
+    averageHeartRate,
     dayStrain,
     distanceKm,
     estimatedVo2Max,
     floorsClimbed,
     heartRateZones: (day.heartRateZones ?? []).map((zone) => ({ ...zone })),
+    highActivityMinutes,
+    lowActivityMinutes,
+    lowestHeartRate,
     maxHeartRate,
+    mediumActivityMinutes,
     notes: projectSummaryNotes({
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,
@@ -98,6 +119,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     summaryConfidence,
     totalCalories,
     totalElevationGainMeters,
+    walkingAverageHeartRate,
     workoutStrain,
   };
 }
@@ -265,16 +287,24 @@ export function projectWearableRecoveryDayPublicSources(day: WearableRecoveryDay
 export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateDay): WearableBodyStateDay {
   const weightKg = projectWearableResolvedMetricPublicSources(day.weightKg);
   const bodyFatPercentage = projectWearableResolvedMetricPublicSources(day.bodyFatPercentage);
+  const bodyWaterPercentage = projectWearableResolvedMetricPublicSources(day.bodyWaterPercentage);
+  const boneMassPercentage = projectWearableResolvedMetricPublicSources(day.boneMassPercentage);
   const bmi = projectWearableResolvedMetricPublicSources(day.bmi);
   const leanBodyMassKg = projectWearableResolvedMetricPublicSources(day.leanBodyMassKg);
+  const muscleMassPercentage = projectWearableResolvedMetricPublicSources(day.muscleMassPercentage);
   const temperature = projectWearableResolvedMetricPublicSources(day.temperature);
+  const visceralFatIndex = projectWearableResolvedMetricPublicSources(day.visceralFatIndex);
   const waistCircumference = projectWearableResolvedMetricPublicSources(day.waistCircumference);
   const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
     ["weightKg", weightKg],
     ["bodyFatPercentage", bodyFatPercentage],
+    ["bodyWaterPercentage", bodyWaterPercentage],
+    ["boneMassPercentage", boneMassPercentage],
     ["bmi", bmi],
     ["leanBodyMassKg", leanBodyMassKg],
+    ["muscleMassPercentage", muscleMassPercentage],
     ["temperature", temperature],
+    ["visceralFatIndex", visceralFatIndex],
     ["waistCircumference", waistCircumference],
   ];
   const summaryConfidence = rebuildPublicSummaryConfidence(
@@ -287,6 +317,8 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
     ...day,
     bmi,
     bodyFatPercentage,
+    bodyWaterPercentage,
+    boneMassPercentage,
     notes: projectSummaryNotes({
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,
@@ -299,8 +331,10 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
       }),
     }),
     leanBodyMassKg,
+    muscleMassPercentage,
     summaryConfidence,
     temperature,
+    visceralFatIndex,
     waistCircumference,
     weightKg,
   };
@@ -380,7 +414,9 @@ function projectWearableMetricCandidateTitle(
   metric: string,
   candidate: WearableMetricCandidate,
 ): string | null {
-  const activityMetric = [...ACTIVITY_METRIC_KEYS].find((key) => key === metric);
+  const activityMetric = isActivitySummaryMetricCandidate(candidate)
+    ? [...ACTIVITY_METRIC_KEYS].find((key) => key === metric)
+    : undefined;
   if (activityMetric && !isActivitySessionOwnedCandidate(candidate)) {
     return `${formatProviderName(resolvePublicSourceProvider(candidate))} ${formatMetricLabel(activityMetric)}`;
   }

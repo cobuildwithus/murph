@@ -34,9 +34,63 @@ Current providers:
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
-- Junction fetches the sparse `note` timeseries by default. Oura note tags become
-  completed intervention events for Personal Patterns. Free-text note values are
-  dropped before raw snapshot and compact evidence retention.
+- Junction fetches the sparse `note` timeseries by default. Normalized tags from
+  every admitted Junction source persist as neutral canonical notes. Personal
+  Patterns currently derives an action factor only from the exact Oura `sauna`
+  tag; other-source, symptom, context, outcome, and custom tags remain neutral.
+  Free-text note values are dropped before raw snapshot and compact evidence
+  retention. Note-history coverage version 2 reopens sources completed under
+  the legacy intervention normalizer for one bounded semantic reimport, then
+  records terminal source coverage again. The admitted resource-job payload
+  freezes that generation across durable continuations and retries. Persisted
+  unversioned work remains v1 after an upgrade and cannot certify or downgrade
+  v2 coverage.
+- Junction's product-default labels include `steps`, `distance`,
+  `calories_active`, `heartrate`, and `weight`. Production configuration sets
+  the exhaustive 48-resource registry explicitly, and omitting the list at the
+  programmatic runtime seam resolves to that same registry. An explicit empty
+  list disables all timeseries; an explicit non-empty list remains exact and
+  rejects unknown names instead of substituting defaults.
+- Opted-in `steps` and `distance` use provider/source-partitioned UTC-day aggregates.
+  Opted-in `calories_active` and `heartrate` use provider/source-partitioned UTC-hour
+  features. These identities match the complete closed-day import boundary instead
+  of treating provider-local day or session fragments as complete facts. The four dense resources retain the bounded
+  dense-timeseries fetch window and never persist raw sample arrays or full provider
+  snapshots. Opted-in `weight` uses sparse canonical measurements with compact
+  per-reading evidence and the existing long summary-history backfill window.
+- Twelve additional sparse Junction timeseries are code-owned opt-ins: BMI,
+  carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
+  inhaler usage, insulin injections, lean body mass, peak expiratory flow,
+  sleep-apnea alerts, and waist circumference. The contract default remains off,
+  while the production provider assembly enables this exact audited resource set;
+  member overlays and environment variables cannot widen or narrow it. Enabled resources use the same
+  extended-history horizon as summaries, fetched in bounded 30-day windows;
+  dense/default timeseries retain their one-day windows. `fat` remains the
+  public resource name while the client requests Junction's `body_fat` path.
+- `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
+  that same code-owned production set. ECG voltage uses one-day grouped windows capped at
+  100,000 admitted samples and 64 recordings, then reduces each recording to one
+  clinically neutral feature record before a sync snapshot exists. Workout stream
+  uses the ordinary workout index only to admit at most 32 stable workouts per
+  one-day window, then reads Junction's dedicated per-workout stream endpoint
+  serially and caps each stream at 100,000 points. The exact production assembly has
+  48 production timeseries resources: 13 wide and 35 dense, including 34 ordinary
+  dense resources plus `workout_stream`. A full-job continuation owns one resource
+  and one closed UTC day. An ordinary collection permits at most three sequential
+  pages with one attempt and an eight-second timeout per page, limiting provider
+  wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
+  hour; daily aggregates remain day-atomic. Workout streams use the same bounded
+  three-page index and carry only at-most-32 completed workout identities between
+  serial stream reads. Each reduced unit is imported before the scalar resource
+  and window coordinate advance. A deployed v1 resource envelope is accepted
+  only as read-only upgrade input and its validated active resource is immediately
+  rewritten as a scalar successor. Pagination remains in memory, and no provider
+  row, vendor page cursor, waveform sample, or workout point enters job state. This
+  adds no control-database collection path, pooled transaction, or vault persistence.
+- Successful Junction resource/webhook jobs preserve the full-sync completion
+  watermark. They still complete and clear their own failures, while only a
+  terminal reconcile or backfill whose window ends at the current closed-day
+  horizon can prove the configured collection ran.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
@@ -98,6 +152,31 @@ such as workouts or body measurements do not become failed-export signals.
 that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
+
+Junction timeseries use one exhaustive static history policy. Dense daily
+aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
+max, heart-rate recovery, body and basal temperatures, sleep-breathing
+disturbance, caffeine, water, and mindfulness use the summary-history window,
+180 days by default. The existing source-scoped sparse-history jobs fetch one
+day at a time, serialize per account, and record terminal coverage in compact
+connection metadata; they do not add another queue or lifecycle. Blood pressure
+keeps exact per-reading completion, and note history keeps complete-fetch
+semantics. All extended timeseries completion shares one fixed-width,
+source-by-resource matrix in an existing blood-pressure or note metadata slot;
+legacy values still read, and unsupported route identities fail before history
+egress rather than advancing an unretainable checkpoint. Every date-mode
+timeseries fetch preserves one complete provider
+calendar date during both migration and normal reconcile; a provider-bearing
+date with any row rejected by the canonical aggregate parser retries only that
+date on the existing bounded ladder. Historical-pull status is re-read before
+coverage, with supported connect-route aliases canonicalized on both sides:
+matching pulled state takes precedence, success permits terminal empty history,
+nonterminal state waits, and explicit failure remains uncovered. Explicit
+`not_pulled` is no obligation only without a pulled entry, while unavailable
+status requires canonical history evidence. Delayed work derives
+the live reconcile boundary after every completed segment and continues until
+no middle gap remains. An explicit timeseries backfill override still governs
+every timeseries resource.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero
@@ -177,6 +256,12 @@ against the disconnectable Junction `whoop_v2` source.
 
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
 The configured-provider assembly composes a lightweight hosted-runtime config schema from `packages/device-syncd/src/config/serializable-provider-configs.ts` into the full registry in `packages/device-syncd/src/config/provider-manifests.ts`. Serialization fields and secret exclusions therefore have one boot-safe owner, while descriptors, provider-owned jobs, and runtime adapters stay outside the hosted runner's static boot closure. Hosted web and runner startup can read provider config without importing the provider implementation graph.
+Junction timeseries membership, defaults, opt-in admission, history mode, fetch
+width, and storage mode are compile-time projections of
+`packages/contracts/src/junction-resources.ts`; importer and scheduler code add only
+the shape-specific canonicalization and execution they own. An explicit
+`timeseriesResources` list is exact: blocked or unknown names never expand to
+defaults.
 
 Provider request failures emit a shared, metadata-only diagnostic shape. Logs and hosted runtime apply payloads may include endpoint kind, method, auth placement, body/query field names and counts, upstream status, response shape, and a sanitized provider error code/description. They must not include provider tokens, client secrets, auth codes, raw request bodies, raw response bodies, raw provider paths, query values, or provider account identifiers. New provider transports should use the shared provider diagnostics helpers instead of adding provider-specific ad hoc logging.
 

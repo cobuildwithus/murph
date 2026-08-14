@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 200,
+  "item": {
+    "id": "workout-sets-follow-saved-routine",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout sets follow your saved routine",
+    "summary": "When you report several completed sets in an alternating routine, Murph now checks the saved plan for today's exercise before recording them.",
+    "details": "Each confirmed set is logged separately with the current standard. If the saved routine cannot identify one target, Murph asks before changing workout history.",
+    "relevanceTags": ["assistant", "workouts", "reliability", "experiments"],
+    "sourcePullRequests": [1790]
+  }
+}

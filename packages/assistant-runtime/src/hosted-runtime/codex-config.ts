@@ -10,6 +10,7 @@ import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
+  buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -161,6 +162,18 @@ export interface HostedCodexRuntimeEnvironmentResult {
   runtimeEnv: Record<string, string>;
 }
 
+export function projectHostedRuntimeProcessEnvironment(
+  input: Pick<HostedCodexRuntimeEnvironmentInput, "runtimeEnv">,
+): Record<string, string> {
+  const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
+  runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
+  Object.assign(runtimeEnv, {
+    [HOSTED_RUNTIME_PROCESS_ENV]: "1",
+    [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
+  });
+  return runtimeEnv;
+}
+
 export async function prepareHostedCodexRuntimeEnvironment(
   input: HostedCodexRuntimeEnvironmentInput,
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
@@ -225,14 +238,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
     );
   }
 
-  const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
-  runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
+  const runtimeEnv = projectHostedRuntimeProcessEnvironment(input);
   const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
-    [HOSTED_RUNTIME_PROCESS_ENV]: "1",
-    [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
     ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
     HOSTED_ASSISTANT_REASONING_EFFORT:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT)
@@ -619,6 +629,7 @@ export function buildHostedCodexConfigToml(input: {
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
+    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",

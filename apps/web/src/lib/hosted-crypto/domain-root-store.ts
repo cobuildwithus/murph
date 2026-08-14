@@ -24,7 +24,11 @@ import {
 } from "@murphai/runtime-state";
 
 import { getPrisma } from "../prisma";
-import { getHostedDomainRootUnwrapCache } from "./domain-root-unwrap-cache";
+import {
+  areHostedDomainRootProviderCallsDisabled,
+  getHostedDomainRootUnwrapCache,
+  type CachedUnwrappedHostedDomainRoot,
+} from "./domain-root-unwrap-cache";
 import { getHostedWebCryptoConfig, selectActiveHostedCloudflareAutomationRecipient } from "./env";
 
 type HostedCryptoTx = Prisma.TransactionClient;
@@ -98,6 +102,179 @@ export interface UnwrappedHostedDomainRootReference
 export type PreparedHostedCryptoDomainRootCandidates =
   ReadonlyMap<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>;
 
+export interface PreparedHostedDomainRootForWeb {
+  readonly domain: HostedCryptoDomain;
+  readonly rootKeyId: string;
+  readonly userId: string;
+}
+
+interface PreparedHostedDomainRootForWebDetails {
+  preparedCandidates: PreparedHostedCryptoDomainRootCandidates;
+  reason: string;
+  root: Promise<CachedUnwrappedHostedDomainRoot>;
+}
+
+const preparedHostedDomainRootsForWeb = new WeakMap<
+  PreparedHostedDomainRootForWeb,
+  PreparedHostedDomainRootForWebDetails
+>();
+
+export class HostedDomainRootPreparationMismatchError extends Error {
+  readonly code = "HOSTED_DOMAIN_ROOT_PREPARATION_MISMATCH";
+
+  constructor() {
+    super("Hosted domain root preparation is stale.");
+    this.name = "HostedDomainRootPreparationMismatchError";
+  }
+}
+
+/**
+ * Provider-capable preparation for one Web-readable domain root. A missing
+ * root is signed and prewarmed as an ephemeral candidate; an existing root is
+ * unwrapped directly. The returned token contains crypto identity only.
+ */
+export async function prepareHostedDomainRootForWeb(input: {
+  domain: HostedCryptoDomain;
+  prepareMissing?: boolean;
+  prisma?: HostedCryptoClient;
+  reason: string;
+  reusableCandidates?: PreparedHostedCryptoDomainRootCandidates;
+  signal?: AbortSignal;
+  userId: string;
+}): Promise<PreparedHostedDomainRootForWeb> {
+  if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
+    throw new Error(
+      `Web is not allowed to prepare hosted ${input.domain} domain roots.`,
+    );
+  }
+  const cache = getHostedDomainRootUnwrapCache();
+  if (!cache) {
+    throw new Error(
+      "Hosted domain-root preparation requires a request-scoped unwrap cache.",
+    );
+  }
+  const preparedCandidates = input.prepareMissing === false
+    ? new Map<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>()
+    : await prepareHostedCryptoDomainRootCandidates({
+        domains: [input.domain],
+        prisma: input.prisma,
+        ...(input.reusableCandidates
+          ? { reusableCandidates: input.reusableCandidates }
+          : {}),
+        userId: input.userId,
+      });
+  const candidate = preparedCandidates.get(input.domain);
+  let rootKeyId: string;
+  if (candidate) {
+    await prewarmPreparedHostedCryptoDomainRootForWeb({
+      domain: input.domain,
+      prepared: preparedCandidates,
+      signal: input.signal,
+      userId: input.userId,
+    });
+    rootKeyId = candidate.rootKeyId;
+  } else {
+    const unwrapped = await unwrapHostedDomainRootForWeb({
+      domain: input.domain,
+      prisma: input.prisma,
+      retainFailureInScopedCache: true,
+      signal: input.signal,
+      userId: input.userId,
+    });
+    try {
+      rootKeyId = unwrapped.envelope.rootKeyId;
+    } finally {
+      unwrapped.rootKey.fill(0);
+    }
+  }
+
+  const root = cache.get(
+    createHostedDomainRootReferenceKey({
+      domain: input.domain,
+      rootKeyId,
+      userId: input.userId,
+    }),
+  );
+  if (!root) {
+    throw new Error(
+      "Hosted domain-root preparation was not retained in the scoped cache.",
+    );
+  }
+  const cached = await root;
+  if (
+    cached.envelope.domain !== input.domain
+    || cached.envelope.rootKeyId !== rootKeyId
+    || cached.envelope.userId !== input.userId
+  ) {
+    throw new Error(
+      "Hosted domain-root prepared cache entry does not match its identity.",
+    );
+  }
+
+  const prepared = Object.freeze({
+    domain: input.domain,
+    rootKeyId,
+    userId: input.userId,
+  });
+  preparedHostedDomainRootsForWeb.set(prepared, {
+    preparedCandidates,
+    reason: input.reason,
+    root,
+  });
+  return prepared;
+}
+
+export function readPreparedHostedDomainRootForWebLocal(
+  prepared: PreparedHostedDomainRootForWeb,
+): {
+  root: Promise<CachedUnwrappedHostedDomainRoot>;
+  rootKeyId: string;
+} {
+  const details = preparedHostedDomainRootsForWeb.get(prepared);
+  const root = getHostedDomainRootUnwrapCache()?.get(
+    createHostedDomainRootReferenceKey(prepared),
+  );
+  if (!details || !root || root !== details.root) {
+    throw new TypeError(
+      "Hosted domain root is not the exact prepared scoped cache entry.",
+    );
+  }
+  return {
+    root,
+    rootKeyId: prepared.rootKeyId,
+  };
+}
+
+/**
+ * Database-only commit/revalidation for a prepared root. It inserts the
+ * prepared candidate or reads the existing winner under the canonical root
+ * lock, then requires exact root identity.
+ */
+export async function revalidatePreparedHostedDomainRootForWebTx(input: {
+  prepared: PreparedHostedDomainRootForWeb;
+  tx: HostedCryptoTx;
+}): Promise<{
+  root: Promise<CachedUnwrappedHostedDomainRoot>;
+  rootKeyId: string;
+}> {
+  const local = readPreparedHostedDomainRootForWebLocal(input.prepared);
+  const details = preparedHostedDomainRootsForWeb.get(input.prepared);
+  if (!details) {
+    throw new TypeError("Hosted domain root preparation is missing.");
+  }
+  const active = await provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+    candidate: details.preparedCandidates.get(input.prepared.domain),
+    domain: input.prepared.domain,
+    reason: details.reason,
+    tx: input.tx,
+    userId: input.prepared.userId,
+  });
+  if (active.rootKeyId !== input.prepared.rootKeyId) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+  return local;
+}
+
 /**
  * Seeds the request-scoped unwrap cache from a prepared envelope that has not
  * been inserted yet. This lets a caller seal values and warm a later
@@ -165,6 +342,9 @@ async function unwrapWithScopedCache(
 
   let pending = cache.get(cacheKey);
   if (!pending) {
+    if (areHostedDomainRootProviderCallsDisabled()) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
     pending = compute();
     cache.set(cacheKey, pending);
     if (!retainFailureInScopedCache) {
@@ -187,11 +367,15 @@ async function unwrapWithScopedCache(
  * GCP KMS round trips, so the candidates are built here, before any transaction
  * or advisory lock is taken. Candidates are ephemeral: one that loses the
  * insert race is discarded, and a root key that was never persisted decrypts
- * nothing and is referenced by nothing.
+ * nothing and is referenced by nothing. A caller retrying after its transaction
+ * rolled back may reuse its prior candidates so the scoped unwrap cache stays
+ * bound to the same ephemeral roots.
  */
 export async function prepareHostedCryptoDomainRootCandidates(input: {
   domains?: readonly HostedCryptoDomain[];
+  maxConcurrency?: number;
   prisma?: HostedCryptoClient;
+  reusableCandidates?: PreparedHostedCryptoDomainRootCandidates;
   userId: string;
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   const prisma = input.prisma ?? getPrisma();
@@ -205,31 +389,66 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (missing.length === 0) {
     return new Map();
   }
+  const preparedEntries: Array<readonly [
+    HostedCryptoDomain,
+    HostedDomainRootKeyEnvelopeV1,
+  ]> = [];
+  const pending = missing.flatMap((domain, index) => {
+    const reusable = input.reusableCandidates?.get(domain);
+    if (!reusable) {
+      return [{ domain, index }];
+    }
+    if (reusable.domain !== domain || reusable.userId !== input.userId) {
+      throw new TypeError(
+        "Reusable hosted domain root candidate does not match the requested user/domain.",
+      );
+    }
+    preparedEntries[index] = [domain, reusable];
+    return [];
+  });
+  if (pending.length === 0) {
+    return new Map(preparedEntries);
+  }
+  const maxConcurrency = input.maxConcurrency ?? missing.length;
+  if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency <= 0) {
+    throw new TypeError("Hosted domain-root preparation concurrency must be a positive integer.");
+  }
   let firstError: unknown;
   let hasError = false;
-  const settled = await Promise.allSettled(missing.map(async (domain) => {
-    try {
-      return [
-        domain,
-        await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
-      ] as const;
-    } catch (error) {
-      if (!hasError) {
-        firstError = error;
-        hasError = true;
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(maxConcurrency, pending.length) },
+    async () => {
+      while (!hasError) {
+        const pendingEntry = pending[nextIndex];
+        nextIndex += 1;
+        if (!pendingEntry) {
+          return;
+        }
+        const { domain, index } = pendingEntry;
+        try {
+          preparedEntries[index] = [
+            domain,
+            await createSignedHostedDomainRootEnvelope({
+              domain,
+              userId: input.userId,
+            }),
+          ];
+        } catch (error) {
+          if (!hasError) {
+            firstError = error;
+            hasError = true;
+          }
+          return;
+        }
       }
-      throw error;
-    }
-  }));
+    },
+  );
+  await Promise.all(workers);
   if (hasError) {
     throw firstError;
   }
-  return new Map(settled.map((result) => {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
-    return result.value;
-  }));
+  return new Map(preparedEntries);
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -796,10 +1015,16 @@ async function createSignedHostedDomainRootEnvelope(input: {
       userId: input.userId,
       wraps,
     };
-    const signature = await config.gcpKms.asymmetricSign({
-      keyVersionName: config.authoritySignKeyVersionName,
-      message: buildHostedDomainRootEnvelopeSigningPayload(body),
-    });
+    const signingPayload = buildHostedDomainRootEnvelopeSigningPayload(body);
+    let signature: Awaited<ReturnType<typeof config.gcpKms.asymmetricSign>>;
+    try {
+      signature = await config.gcpKms.asymmetricSign({
+        keyVersionName: config.authoritySignKeyVersionName,
+        message: signingPayload,
+      });
+    } finally {
+      signingPayload.fill(0);
+    }
     return attachHostedDomainRootEnvelopeSignature({
       body,
       keyVersionName: signature.keyVersionName,
@@ -1069,7 +1294,9 @@ async function readActiveHostedDomainRootEnvelopeRecordOrThrow(input: {
     userId: input.userId,
   });
   if (!row) {
-    throw new Error(`Hosted ${input.domain} domain root envelope is not provisioned.`);
+    throw new HostedDomainRootEnvelopeUnavailableError({
+      domain: input.domain,
+    });
   }
   return {
     envelope: await parseAssertAndVerifyEnvelope(row, input),

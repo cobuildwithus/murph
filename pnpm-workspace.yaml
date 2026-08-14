@@ -15,6 +15,7 @@ minimumReleaseAge: 1440
 overrides:
   '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
   '@coinbase/cdp-sdk@1.48.3>axios': 1.17.0
+  '@lob/lob-typescript-sdk@1.4.0>axios': 1.18.0
   '@hono/node-server@1.19.13>hono': 4.12.25
   '@hono/node-server@1.19.14>hono': 4.12.25
   '@metamask/sdk-communication-layer@0.33.1>uuid': 11.1.1

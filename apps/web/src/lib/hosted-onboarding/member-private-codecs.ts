@@ -12,6 +12,8 @@ import {
   decryptHostedWebNullableFields,
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
+  encryptHostedWebNullableStringFromPreparedRoot,
+  type PreparedHostedWebEncryptionRoot,
   type HostedWebEncryptionPrismaClient,
 } from "../hosted-web/encryption";
 import { normalizeNullableString } from "./shared";
@@ -73,6 +75,7 @@ export interface HostedMemberBillingPrivateState {
 export async function buildHostedMemberIdentityPrivateColumns(input: {
   memberId: string;
   phoneNumber: string | null;
+  preparedRoot?: PreparedHostedWebEncryptionRoot;
   prisma?: HostedWebEncryptionPrismaClient;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
@@ -81,12 +84,19 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
   signupPhoneNumber: string | null;
 }) {
   const encryptPrivateField = (field: string, value: string | null | undefined) =>
-    encryptHostedWebNullableString({
-      field,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      value,
-    });
+    input.preparedRoot
+      ? encryptHostedWebNullableStringFromPreparedRoot({
+          field,
+          memberId: input.memberId,
+          prepared: input.preparedRoot,
+          value,
+        })
+      : encryptHostedWebNullableString({
+          field,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          value,
+        });
 
   const phoneNumberEncrypted = await encryptPrivateField(
     HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
@@ -180,17 +190,25 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
   pendingLinqChatId: string | null;
   pendingLinqParticipantContact?: string | null;
   pendingLinqRecipientPhone: string | null;
+  preparedRoot?: PreparedHostedWebEncryptionRoot;
   prisma?: HostedWebEncryptionPrismaClient;
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }) {
   const encryptPrivateField = (field: string, value: string | null | undefined) =>
-    encryptHostedWebNullableString({
-      field,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      value,
-    });
+    input.preparedRoot
+      ? encryptHostedWebNullableStringFromPreparedRoot({
+          field,
+          memberId: input.memberId,
+          prepared: input.preparedRoot,
+          value,
+        })
+      : encryptHostedWebNullableString({
+          field,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          value,
+        });
 
   const linqChatIdEncrypted = await encryptPrivateField(
     HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,

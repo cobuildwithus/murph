@@ -22,6 +22,7 @@ export type {
 export * from './assistant/group-challenge-scorecard.js'
 export * from './assistant/group-challenge-scorecard-schema.js'
 export * from './assistant/provider-start-critical-path.js'
+export * from './assistant/private-completion-continuity.js'
 export {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -35,6 +36,7 @@ export type {
 } from './assistant/group-room-model.js'
 export * from './assistant/hosted-image-completion.js'
 export type {
+  AssistantAutomationTimingVerificationIssue,
   AssistantGroupParticipantDisplayName,
   AssistantGroupParticipantDisplayNameSource,
   AssistantGeneratedImageCapturePersistenceMetadata,

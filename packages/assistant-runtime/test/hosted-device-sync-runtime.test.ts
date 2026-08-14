@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { beforeEach, describe, test, vi } from "vitest";
 import { initializeVault, updateVaultSummary } from "@murphai/core";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import {
@@ -18,7 +19,12 @@ import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/co
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
-import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
@@ -30,6 +36,7 @@ import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   HostedExecutionDeviceSyncDirtyStateResponse,
   HostedExecutionDeviceSyncDirtyPendingResponse,
+  HostedExecutionDeviceSyncStagedDirtyAck,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeConnectionStatus,
   HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
@@ -42,8 +49,11 @@ import {
   requireHostedRuntimeDeviceSyncStore,
 } from "../src/device-sync-service.ts";
 import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState,
+  resolveHostedDeviceSyncSchedulerAccountId,
+  resolveHostedDeviceSyncWakeRecovery,
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../src/hosted-device-sync-runtime.ts";
@@ -246,6 +256,20 @@ function buildDeviceSyncWake(input: {
   };
 }
 
+function buildDirtyDeviceSyncWake(
+  connectionId: string,
+  occurredAt: string,
+  provider = "demo",
+) {
+  return buildDeviceSyncWake({
+    connectionId,
+    hint: { reason: "dirty" },
+    occurredAt,
+    provider,
+    reason: "webhook_hint",
+  });
+}
+
 function buildRuntimeSnapshot(input: {
   capabilities?: HostedExecutionDeviceSyncRuntimeSnapshotResponse["capabilities"];
   connectedAt?: string;
@@ -346,6 +370,31 @@ function buildEmptyRuntimeSnapshot(): HostedExecutionDeviceSyncRuntimeSnapshotRe
     connections: [],
     generatedAt: "2026-04-04T09:10:00.000Z",
     userId: "member_123",
+  };
+}
+
+function buildRuntimeSnapshotPage(input: {
+  count: number;
+  nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotResponse["nextCursor"];
+  startIndex: number;
+  userId?: string;
+}): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  const connections = Array.from({ length: input.count }, (_, offset) => {
+    const index = input.startIndex + offset;
+    const updatedAt = new Date(Date.parse("2026-04-07T12:00:00.000Z") - index * 1_000)
+      .toISOString();
+    return buildRuntimeSnapshot({
+      connectionId: `hosted_conn_${String(index).padStart(3, "0")}`,
+      externalAccountId: `external_${index}`,
+      hostedUpdatedAt: updatedAt,
+    }).connections[0]!;
+  });
+
+  return {
+    connections,
+    generatedAt: "2026-04-07T12:01:00.000Z",
+    ...(input.nextCursor === undefined ? {} : { nextCursor: input.nextCursor }),
+    userId: input.userId ?? "member_123",
   };
 }
 
@@ -500,6 +549,24 @@ function setAccountUpdatedAtForTesting(
   }
 }
 
+function setJobMaxAttemptsForTesting(
+  service: DeviceSyncService,
+  jobId: string,
+  maxAttempts: number,
+): void {
+  const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+
+  try {
+    database.prepare(`
+      update device_job
+      set max_attempts = ?
+      where id = ?
+    `).run(maxAttempts, jobId);
+  } finally {
+    database.close();
+  }
+}
+
 function clearAccountCredentialForTesting(service: DeviceSyncService, accountId: string): void {
   const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
   const now = "2026-04-06T10:00:00.000Z";
@@ -533,7 +600,229 @@ function clearAccountCredentialForTesting(service: DeviceSyncService, accountId:
 }
 
 describe("hosted device-sync runtime", () => {
-  test("reconciliation sends oversized legitimate updates as sequential bounded batches", async () => {
+  test("credential hydration follows stable bounded cursors sequentially", async () => {
+    const firstCursor = {
+      createdAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - 31_000).toISOString(),
+      id: "hosted_conn_031",
+    };
+    const pages = [
+      buildRuntimeSnapshotPage({
+        count: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+        nextCursor: firstCursor,
+        startIndex: 0,
+      }),
+      buildRuntimeSnapshotPage({
+        count: 2,
+        nextCursor: null,
+        startIndex: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      }),
+    ];
+    const fetchSnapshot = vi.fn(async (
+      _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+    ) => pages.shift()!);
+    const deviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot,
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+      deviceSyncPort,
+      includeCredentialMaterial: true,
+    });
+
+    assert.equal(snapshot.connections.length, 34);
+    assert.deepEqual(
+      snapshot.connections.map((entry) => entry.connection.id),
+      Array.from({ length: 34 }, (_, index) =>
+        `hosted_conn_${String(index).padStart(3, "0")}`
+      ),
+    );
+    assert.deepEqual(fetchSnapshot.mock.calls, [
+      [{
+        includeCredentialMaterial: true,
+      }],
+      [{
+        cursor: firstCursor,
+        includeCredentialMaterial: true,
+        limit: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      }],
+    ]);
+  });
+
+  test("credential hydration fails closed at the total authority bound", async () => {
+    const pageSizes = [32, 32, 32, 4];
+    let startIndex = 0;
+    const pages = pageSizes.map((count, pageIndex) => {
+      const page = buildRuntimeSnapshotPage({
+        count,
+        nextCursor: {
+          createdAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - startIndex * 1_000)
+            .toISOString(),
+          id: `cursor_${pageIndex}`,
+        },
+        startIndex,
+      });
+      startIndex += count;
+      return page;
+    });
+    const fetchSnapshot = vi.fn(async (
+      _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+    ) => pages.shift()!);
+    const deviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot,
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort,
+        includeCredentialMaterial: true,
+      }),
+      new RegExp(
+        `${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound`,
+        "u",
+      ),
+    );
+    assert.equal(fetchSnapshot.mock.calls.length, 4);
+    assert.deepEqual(
+      fetchSnapshot.mock.calls.map(([request]) => request?.limit),
+      [undefined, 32, 32, 4],
+    );
+  });
+
+  test("credential hydration accepts a bounded legacy first page", async () => {
+    const legacyPageWithoutCursor = buildRuntimeSnapshotPage({
+      count: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 2,
+      startIndex: 0,
+    });
+    const legacyPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => legacyPageWithoutCursor),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+      deviceSyncPort: legacyPort,
+      includeCredentialMaterial: true,
+    });
+
+    assert.equal(snapshot.connections.length, 34);
+    assert.deepEqual(legacyPort.fetchSnapshot.mock.calls, [[{
+      includeCredentialMaterial: true,
+    }]]);
+  });
+
+  test("credential hydration rejects an oversized legacy page", async () => {
+    const legacyPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => buildRuntimeSnapshotPage({
+        count: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT + 1,
+        startIndex: 0,
+      })),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: legacyPort,
+        includeCredentialMaterial: true,
+      }),
+      new RegExp(
+        `${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound`,
+        "u",
+      ),
+    );
+  });
+
+  test("credential hydration rejects missing, repeated, and cross-member cursors", async () => {
+    const firstCursor = {
+      createdAt: "2026-04-07T12:00:00.000Z",
+      id: "hosted_conn_000",
+    };
+    const cursorPages = [
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: firstCursor, startIndex: 0 }),
+      buildRuntimeSnapshotPage({ count: 1, startIndex: 1 }),
+    ];
+    const missingCursorPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => cursorPages.shift()!),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: missingCursorPort,
+        includeCredentialMaterial: true,
+      }),
+      /omitted its continuation cursor after pagination began/u,
+    );
+
+    const cursor = {
+      createdAt: "2026-04-07T12:00:00.000Z",
+      id: "hosted_conn_000",
+    };
+    const memberPages = [
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 0 }),
+      buildRuntimeSnapshotPage({
+        count: 1,
+        nextCursor: null,
+        startIndex: 1,
+        userId: "member_other",
+      }),
+    ];
+    const memberPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => memberPages.shift()!),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: memberPort,
+        includeCredentialMaterial: true,
+      }),
+      /changed member authority/u,
+    );
+
+    const repeatedCursorPages = [
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 0 }),
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 1 }),
+    ];
+    const repeatedCursorPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => repeatedCursorPages.shift()!),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: repeatedCursorPort,
+        includeCredentialMaterial: true,
+      }),
+      /repeated a cursor/u,
+    );
+  });
+
+  test("reconciliation sends source-heavy oversized updates as sequential count-bounded batches", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -543,6 +832,10 @@ describe("hosted device-sync runtime", () => {
 
     try {
       const store = getStore(service);
+      const readNextJobWakeAtForAccount = vi.spyOn(
+        store,
+        "readNextJobWakeAtForAccount",
+      );
       const updateCount = HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT + 1;
       const localToHostedAccountIds = new Map<string, string>();
       const hostedToLocalAccountIds = new Map<string, string>();
@@ -565,6 +858,22 @@ describe("hosted device-sync runtime", () => {
         localToHostedAccountIds.set(account.id, hostedConnectionId);
         hostedToLocalAccountIds.set(hostedConnectionId, account.id);
         observedTokenVersions.set(hostedConnectionId, null);
+        for (let sourceIndex = 0; sourceIndex < 64; sourceIndex += 1) {
+          store.upsertConnectionSource({
+            connectionId: account.id,
+            displayName: null,
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastSeenAt: "2026-04-06T10:05:00.000Z",
+            resourceAvailabilitySummary: {
+              activity: true,
+              heartrate: true,
+            },
+            sourceInstanceKey:
+              `source_${String(index).padStart(3, "0")}_${String(sourceIndex).padStart(2, "0")}_${"x".repeat(80)}`,
+            sourceProviderSlug: `source_${sourceIndex}`,
+            status: "connected",
+          });
+        }
       }
 
       let activeApplyCalls = 0;
@@ -602,7 +911,12 @@ describe("hosted device-sync runtime", () => {
           observedTokenVersions,
           pendingDirtyAcks: [],
           pendingDirtyPayloadJobs: [],
-          snapshot: buildEmptyRuntimeSnapshot(),
+          snapshot: {
+            ...buildEmptyRuntimeSnapshot(),
+            capabilities: {
+              connectionSourceApply: true,
+            },
+          },
         },
         wake: buildCronWake("2026-04-06T09:10:00.000Z"),
       });
@@ -614,6 +928,17 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(appliedRequests[1]?.updates.length, 1);
       assert.equal(maxActiveApplyCalls, 1);
+      assert.equal(readNextJobWakeAtForAccount.mock.calls.length, 0);
+      assert.equal(
+        appliedRequests[0]?.updates.every((update) => update.sources?.length === 64),
+        true,
+      );
+      assert.ok(
+        new TextEncoder().encode(JSON.stringify({
+          updates: appliedRequests[0]?.updates,
+          userId: "member_123",
+        })).byteLength > HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
+      );
       assert.deepEqual(
         appliedRequests.flatMap((request) => request.updates.map((update) => update.connectionId)),
         Array.from({ length: updateCount }, (_, index) => `hosted_conn_${index}`),
@@ -2958,7 +3283,11 @@ describe("hosted device-sync runtime", () => {
     await mkdir(vaultRoot, { recursive: true });
 
     const service = createDeviceSyncServiceForVault(vaultRoot);
-    const pendingRequests: Array<{ limit?: number | null }> = [];
+    const pendingRequests: Array<{
+      connectionId?: string | null;
+      limit?: number | null;
+      stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[];
+    }> = [];
 
     try {
       const begin = await service.startConnection({
@@ -3050,6 +3379,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.deepEqual(pendingRequests, [
         {
+          connectionId: "hosted_conn_dirty_wake",
           limit: 10,
           stagedDirtyAcks: [
             {
@@ -3396,7 +3726,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("device-sync dirty pending fetch processes multiple ackable states in one bounded pass", async () => {
+  test("device-sync dirty pending fetch processes only the selected connection", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -3504,20 +3834,13 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      assert.deepEqual(state.pendingDirtyAcks, [
-        {
-          connectionId: "hosted_conn_dirty_batch_1",
-          nextWakeAt: "2026-04-04T10:01:00.000Z",
-          processedRevision: "51",
-        },
-        {
-          connectionId: "hosted_conn_dirty_batch_2",
-          nextWakeAt: "2026-04-04T10:01:00.000Z",
-          processedRevision: "52",
-        },
-      ]);
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_conn_dirty_batch_1",
+        nextWakeAt: "2026-04-04T10:01:00.000Z",
+        processedRevision: "51",
+      }]);
       assert.equal(readJobsForAccount(service, firstConnected.account.id).length, 1);
-      assert.equal(readJobsForAccount(service, secondConnected.account.id).length, 1);
+      assert.equal(readJobsForAccount(service, secondConnected.account.id).length, 0);
       assert.deepEqual(
         state.pendingDirtyPayloadJobs.map(({ connectionId, dirtyPayloadId }) => ({
           connectionId,
@@ -3526,14 +3849,649 @@ describe("hosted device-sync runtime", () => {
         [{
           connectionId: "hosted_conn_dirty_batch_1",
           dirtyPayloadId: "dsp_payload_batch_1",
-        }, {
-          connectionId: "hosted_conn_dirty_batch_2",
-          dirtyPayloadId: "dsp_payload_batch_2",
         }],
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
+    }
+  });
+
+  test("maximum dirty responses admit one retained-owner page with one scoped pending read", async () => {
+    const baseProvider = createFakeProvider();
+    const stravaProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Strava",
+        provider: "strava",
+      },
+    };
+    const connectionId = "hosted_strava_max_dirty_page";
+    const unrelatedConnectionId = "hosted_strava_unrelated_dirty_page";
+    const buildResources = (prefix: string, indexes: readonly number[]) =>
+      indexes.map((index) => ({
+        count: 1,
+        dirtyPayloadId: `${prefix}_${index}`,
+        jobKind: "resource" as const,
+        payload: {
+          eventType: "activity.create",
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          resourceId: `${prefix}-activity-${index}`,
+          resourceType: "activity",
+        },
+        resource: "activity",
+        resourceCategory: "activity",
+        sourceProviderSlug: "strava",
+        windowEnd: null,
+        windowStart: null,
+      }));
+    const pendingIndexes = new Set(Array.from({ length: 500 }, (_, index) => index));
+    const unrelatedResources = buildResources(
+      "dsp_unrelated",
+      Array.from({ length: 500 }, (_, index) => index),
+    );
+    const processedIds = new Set<string>();
+
+    for (let pass = 0; pass < 5; pass += 1) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        `hosted-device-sync-runtime-max-dirty-page-${pass}-`,
+      );
+      await mkdir(vaultRoot, { recursive: true });
+      const service = createDeviceSyncServiceForVault(vaultRoot, [stravaProvider]);
+
+      try {
+        const snapshot = buildRuntimeSnapshot({
+          connectionId,
+          externalAccountId: "strava-max-dirty-page",
+          provider: "strava",
+        });
+        const store = getStore(service);
+        const listPendingJobsForAccount = vi.spyOn(store, "listPendingJobsForAccount");
+        const wake = buildDirtyDeviceSyncWake(
+          connectionId,
+          `2026-04-04T10:0${pass}:00.000Z`,
+          "strava",
+        );
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: {
+            ...createNoDirtyStateDeviceSyncPortMethods(),
+            async applyUpdates() {
+              throw new Error("applyUpdates should not be called during sync");
+            },
+            async createConnectLink() {
+              throw new Error("createConnectLink should not be called during sync");
+            },
+            async fetchDirtyStates(input = {}) {
+              assert.equal(input.connectionId, connectionId);
+              return {
+                hasMore: false,
+                items: [
+                  buildDirtyState({
+                    connectionId,
+                    dirtyRevision: "500",
+                    dirtyResources: buildResources("dsp_selected", [...pendingIndexes]),
+                    eventCount: String(pendingIndexes.size),
+                    provider: "strava",
+                  }),
+                  buildDirtyState({
+                    connectionId: unrelatedConnectionId,
+                    dirtyRevision: "500",
+                    dirtyResources: unrelatedResources,
+                    eventCount: "500",
+                    provider: "strava",
+                  }),
+                ],
+                nextWakeAt: "2026-04-04T10:10:00.000Z",
+                userId: "member_123",
+              };
+            },
+            async fetchSnapshot() {
+              return snapshot;
+            },
+          },
+          wake,
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+        const localAccountId = state.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(localAccountId);
+
+        assert.equal(state.pendingDirtyPayloadJobs.length, 100);
+        assert.equal(readJobsForAccount(service, localAccountId).length, 100);
+        assert.equal(state.dirtyWorkRemaining, pass < 4);
+        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+
+        assert.equal(await service.drainWorker(100, localAccountId), 100);
+        promoteHostedCompletedDirtyPayloadAcks({ service, state });
+        assert.equal(state.pendingDirtyPayloadJobs.length, 0);
+        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+        const [ack] = state.pendingDirtyAcks;
+        assert.ok(ack);
+        assert.equal(ack.processedDirtyPayloadIds?.length, 100);
+        assert.equal(ack.processedRevision, pass === 4 ? "500" : "0");
+        for (const id of ack.processedDirtyPayloadIds ?? []) {
+          assert.equal(processedIds.has(id), false);
+          processedIds.add(id);
+          pendingIndexes.delete(Number(id.slice("dsp_selected_".length)));
+        }
+
+        const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+        assert.equal(listPendingJobsForAccount.mock.calls.length, 2);
+        assert.equal(recovery?.wake.hint?.jobs?.length ?? 0, 0);
+        assert.equal(
+          recovery?.wake.hint?.reason ?? null,
+          pass < 4 ? "retained_dirty_remainder" : null,
+        );
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    }
+
+    assert.equal(processedIds.size, 500);
+    assert.equal(pendingIndexes.size, 0);
+  });
+
+  test("a cold-restored full dirty page relinks every retained job before completion", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-relink-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-relink-restored-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const baseProvider = createFakeProvider();
+    const stravaProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Strava",
+        provider: "strava",
+      },
+    };
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const connectionId = "hosted_strava_dirty_relink";
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "strava-dirty-relink",
+      provider: "strava",
+    });
+    const dirtyResources = Array.from({ length: 100 }, (_, index) => ({
+      count: 1,
+      dirtyPayloadId: `dsp_dirty_relink_${index}`,
+      jobKind: "resource" as const,
+      payload: {
+        eventType: "activity.create",
+        occurredAt: "2026-04-04T10:00:00.000Z",
+        resourceId: `strava-dirty-relink-activity-${index}`,
+        resourceType: "activity",
+      },
+      resource: "activity",
+      resourceCategory: "activity",
+      sourceProviderSlug: "strava",
+      windowEnd: null,
+      windowStart: null,
+    }));
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "100",
+      dirtyResources,
+      eventCount: "100",
+      provider: "strava",
+    });
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during sync");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during sync");
+      },
+      async fetchDirtyStates(input = {}) {
+        assert.equal(input.connectionId, connectionId);
+        return {
+          hasMore: false,
+          items: [dirtyState],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+    const initialWake = buildDirtyDeviceSyncWake(
+      connectionId,
+      "2026-04-04T10:00:00.000Z",
+      "strava",
+    );
+    let firstClosed = false;
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake: initialWake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(firstAccountId);
+      const firstJobs = readJobsForAccount(firstService, firstAccountId);
+      assert.equal(firstJobs.length, 100);
+      const firstJobIds = new Set(firstJobs.map((job) => job.id));
+      assert.equal(firstState.pendingDirtyPayloadJobs.length, 100);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: initialWake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.wake.hint?.jobs?.length, 100);
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+
+      const restoredStore = getStore(restoredService);
+      const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
+      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
+      assert.equal(restoredJobs.length, 100);
+      assert.equal(restoredState.pendingDirtyPayloadJobs.length, 100);
+      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      assert.equal(enqueueJob.mock.calls.length, 100);
+      assert.equal(
+        new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
+        100,
+      );
+      assert.ok(restoredJobs.every((job) => !firstJobIds.has(job.id)));
+      assert.equal(await restoredService.drainWorker(100, restoredAccountId), 100);
+
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.equal(restoredState.pendingDirtyPayloadJobs.length, 0);
+      assert.deepEqual(
+        new Set(restoredState.pendingDirtyAcks[0]?.processedDirtyPayloadIds),
+        new Set(dirtyResources.map((resource) => resource.dirtyPayloadId)),
+      );
+      assert.equal(readJobsForAccount(restoredService, restoredAccountId).length, 100);
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("cold dirty admission relinks retained identities and bounds only new jobs", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-mixed-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-mixed-restored-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const baseProvider = createFakeProvider();
+    const stravaProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Strava",
+        provider: "strava",
+      },
+    };
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const connectionId = "hosted_strava_dirty_mixed";
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "strava-dirty-mixed",
+      provider: "strava",
+    });
+    const buildResource = (index: number, dirtyPayloadId = `dsp_dirty_mixed_${index}`) => ({
+      count: 1,
+      dirtyPayloadId,
+      jobKind: "resource" as const,
+      payload: {
+        eventType: "activity.create",
+        occurredAt: "2026-04-04T10:00:00.000Z",
+        resourceId: `strava-dirty-mixed-activity-${index}`,
+        resourceType: "activity",
+      },
+      resource: "activity",
+      resourceCategory: "activity",
+      sourceProviderSlug: "strava",
+      windowEnd: null,
+      windowStart: null,
+    });
+    const retainedResources = Array.from({ length: 60 }, (_, index) => buildResource(index));
+    const restoredResources = [
+      ...retainedResources,
+      buildResource(0, "dsp_dirty_mixed_alias"),
+      ...Array.from({ length: 40 }, (_, index) => buildResource(index + 60)),
+      buildResource(100),
+    ];
+    let currentDirtyResources = retainedResources;
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during sync");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during sync");
+      },
+      async fetchDirtyStates(input = {}) {
+        assert.equal(input.connectionId, connectionId);
+        return {
+          hasMore: false,
+          items: [buildDirtyState({
+            connectionId,
+            dirtyRevision: "101",
+            dirtyResources: currentDirtyResources,
+            eventCount: String(currentDirtyResources.length),
+            provider: "strava",
+          })],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+    const initialWake = buildDirtyDeviceSyncWake(
+      connectionId,
+      "2026-04-04T10:00:00.000Z",
+      "strava",
+    );
+    let firstClosed = false;
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake: initialWake,
+      });
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: initialWake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.wake.hint?.jobs?.length, 60);
+      const retainedHints = recovery.wake.hint?.jobs ?? [];
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+      currentDirtyResources = restoredResources;
+
+      const restoredStore = getStore(restoredService);
+      const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
+      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
+      assert.equal(restoredJobs.length, 100);
+      assert.equal(restoredState.pendingDirtyPayloadJobs.length, 101);
+      assert.equal(restoredState.dirtyWorkRemaining, true);
+      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      assert.equal(enqueueJob.mock.calls.length, 100);
+      assert.equal(
+        new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
+        100,
+      );
+      for (const hint of retainedHints) {
+        const restored = restoredJobs.find((job) => job.dedupeKey === hint.dedupeKey);
+        assert.equal(restored?.availableAt, hint.availableAt);
+        assert.equal(restored?.maxAttempts, hint.maxAttempts);
+      }
+      const relinkedJobIds = restoredState.pendingDirtyPayloadJobs
+        .filter((pending) =>
+          pending.dirtyPayloadId === "dsp_dirty_mixed_0"
+          || pending.dirtyPayloadId === "dsp_dirty_mixed_alias"
+        )
+        .map((pending) => pending.jobId);
+      assert.deepEqual(new Set(relinkedJobIds).size, 1);
+
+      assert.equal(await restoredService.drainWorker(100, restoredAccountId), 100);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.deepEqual(
+        new Set(restoredState.pendingDirtyAcks[0]?.processedDirtyPayloadIds),
+        new Set(restoredResources.slice(0, -1).map((resource) => resource.dirtyPayloadId)),
+      );
+      assert.equal(
+        restoredState.pendingDirtyAcks[0]?.processedDirtyPayloadIds?.includes(
+          "dsp_dirty_mixed_100",
+        ),
+        false,
+      );
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("expired final-attempt dirty work preserves identity without re-execution", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-04T10:00:00.000Z"));
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-expired-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-expired-restored-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const executeJob = vi.fn(async () => ({}));
+    const provider = createFakeProvider({
+      jobExecutor: { executeJob },
+    });
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [provider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [provider],
+    );
+    const connectionId = "hosted_dirty_expired_final_attempt";
+    const originalWake = buildDirtyDeviceSyncWake(
+      connectionId,
+      "2026-04-04T10:00:00.000Z",
+    );
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "dirty-expired-final-attempt",
+    });
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "1",
+      dirtyResources: [{
+        count: 1,
+        dirtyPayloadId: "dsp_dirty_expired_final_attempt",
+        jobKind: "resource",
+        payload: {
+          resourceId: "dirty-expired-final-attempt",
+          resourceType: "activity",
+        },
+        resource: "activity",
+        resourceCategory: "activity",
+        sourceProviderSlug: "demo",
+        windowEnd: null,
+        windowStart: null,
+      }],
+    });
+    let dirtyVisible = true;
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during sync");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during sync");
+      },
+      async fetchDirtyStates() {
+        return {
+          hasMore: false,
+          items: dirtyVisible ? [dirtyState] : [],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+    let firstClosed = false;
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake: originalWake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(firstAccountId);
+      const [firstJob] = readJobsForAccount(firstService, firstAccountId);
+      assert.ok(firstJob);
+      setJobMaxAttemptsForTesting(firstService, firstJob.id, 1);
+      const firstStore = getStore(firstService);
+      assert.equal(
+        firstStore.claimDueJob(
+          "dirty-expired-first-worker",
+          "2026-04-04T10:00:00.000Z",
+          60_000,
+          firstAccountId,
+        )?.id,
+        firstJob.id,
+      );
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: originalWake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.wake.hint?.jobs?.[0]?.maxAttempts, 1);
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+      dirtyVisible = false;
+
+      const restoredInitialState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredInitialState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const restoredStore = getStore(restoredService);
+      const [retainedJob] = readJobsForAccount(restoredService, restoredAccountId);
+      assert.ok(retainedJob);
+      assert.equal(
+        restoredStore.claimDueJob(
+          "dirty-expired-restored-worker",
+          "2026-04-04T10:01:00.000Z",
+          60_000,
+          restoredAccountId,
+        )?.id,
+        retainedJob.id,
+      );
+
+      dirtyVisible = true;
+      vi.setSystemTime(new Date("2026-04-04T10:02:01.000Z"));
+      const replacementState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: buildDirtyDeviceSyncWake(
+          connectionId,
+          "2026-04-04T10:02:01.000Z",
+        ),
+      });
+      const [retained] = replacementState.pendingDirtyPayloadJobs;
+      assert.ok(retained);
+      assert.equal(retained.jobId, retainedJob.id);
+      assert.equal(readJobsForAccount(restoredService, restoredAccountId).length, 1);
+
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: replacementState,
+      });
+      assert.equal(
+        replacementState.pendingDirtyAcks[0]?.processedDirtyPayloadIds,
+        undefined,
+      );
+      assert.equal(executeJob.mock.calls.length, 0);
+
+      assert.equal(await restoredService.drainWorker(1, restoredAccountId), 0);
+      const terminal = restoredStore.getJobById(retainedJob.id);
+      assert.equal(terminal?.status, "dead");
+      assert.equal(terminal?.attempts, 1);
+      assert.equal(terminal?.maxAttempts, 1);
+      assert.equal(executeJob.mock.calls.length, 0);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: replacementState,
+      });
+      assert.deepEqual(
+        replacementState.pendingDirtyAcks[0]?.processedDirtyPayloadIds,
+        ["dsp_dirty_expired_final_attempt"],
+      );
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+      vi.useRealTimers();
     }
   });
 
@@ -3675,7 +4633,12 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDeviceSyncWake({
+          connectionId,
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          provider: "strava",
+          reason: "webhook_hint",
+        }),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -3733,7 +4696,12 @@ describe("hosted device-sync runtime", () => {
 
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake: buildCronWake("2026-04-04T10:00:01.000Z"),
+        wake: buildDeviceSyncWake({
+          connectionId,
+          occurredAt: "2026-04-04T10:00:01.000Z",
+          provider: "strava",
+          reason: "webhook_hint",
+        }),
         secret: DEVICE_SYNC_SECRET,
         service: restoredService,
       });
@@ -3882,6 +4850,170 @@ describe("hosted device-sync runtime", () => {
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
+    }
+  });
+
+  test("dirty payload ownership transfers to a worker-created child at checkpoint", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-child-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-dirty-child-restored-",
+    );
+    const baseProvider = createFakeProvider();
+    const childPayload = {
+      eventType: "activity.update",
+      occurredAt: "2026-04-04T10:01:00.000Z",
+      resourceId: "activity-child",
+      resourceType: "activity",
+    };
+    const stravaProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Strava",
+        provider: "strava",
+      },
+      jobExecutor: {
+        async executeJob(_context, job) {
+          assert.equal(job.payload.resourceId, "activity-parent");
+          return {
+            scheduledJobs: [{
+              availableAt: "2026-04-04T10:05:00.000Z",
+              dedupeKey: "worker-created-child",
+              kind: "resource",
+              maxAttempts: 7,
+              payload: childPayload,
+              priority: 77,
+            }],
+          };
+        },
+      },
+    };
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const connectionId = "hosted_dirty_child";
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "strava-dirty-child",
+      provider: "strava",
+    });
+    const initialWake = buildDirtyDeviceSyncWake(
+      connectionId,
+      "2026-04-04T10:00:00.000Z",
+      "strava",
+    );
+    let firstClosed = false;
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates(input = {}) {
+            assert.equal(input.connectionId, connectionId);
+            return {
+              hasMore: false,
+              items: [buildDirtyState({
+                connectionId,
+                dirtyRevision: "12",
+                dirtyResources: [{
+                  count: 1,
+                  dirtyPayloadId: "dsp_dirty_child",
+                  jobKind: "resource",
+                  payload: {
+                    eventType: "activity.create",
+                    occurredAt: "2026-04-04T10:00:00.000Z",
+                    resourceId: "activity-parent",
+                    resourceType: "activity",
+                  },
+                  resource: "activity",
+                  resourceCategory: "activity",
+                  sourceProviderSlug: "strava",
+                  windowEnd: null,
+                  windowStart: null,
+                }],
+                provider: "strava",
+              })],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake: initialWake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(firstAccountId);
+      assert.equal(await firstService.drainWorker(1, firstAccountId), 1);
+      promoteHostedCompletedDirtyPayloadAcks({ service: firstService, state: firstState });
+      assert.deepEqual(firstState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_dirty_child"],
+        processedRevision: "12",
+      }]);
+      assert.deepEqual(firstState.pendingDirtyPayloadJobs, []);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: initialWake,
+      });
+      assert.ok(recovery);
+      assert.deepEqual(recovery.wake.hint?.jobs, [{
+        availableAt: "2026-04-04T10:05:00.000Z",
+        dedupeKey: "worker-created-child",
+        kind: "resource",
+        maxAttempts: 7,
+        payload: childPayload,
+        priority: 77,
+      }]);
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        skipDirtyPendingFetch: true,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const [restoredChild] = readJobsForAccount(restoredService, restoredAccountId);
+      assert.ok(restoredChild);
+      assert.equal(readJobsForAccount(restoredService, restoredAccountId).length, 1);
+      assert.equal(restoredChild.availableAt, "2026-04-04T10:05:00.000Z");
+      assert.equal(restoredChild.dedupeKey, "worker-created-child");
+      assert.equal(restoredChild.kind, "resource");
+      assert.equal(restoredChild.maxAttempts, 7);
+      assert.deepEqual(JSON.parse(restoredChild.payloadJson), childPayload);
+      assert.equal(restoredChild.priority, 77);
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
     }
   });
 
@@ -4131,7 +5263,12 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDeviceSyncWake({
+          connectionId,
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          provider: "junction",
+          reason: "webhook_hint",
+        }),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -4274,7 +5411,11 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        wake: buildCronWake("2026-04-04T10:01:00.000Z"),
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_skipped",
+          occurredAt: "2026-04-04T10:01:00.000Z",
+          reason: "webhook_hint",
+        }),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -4570,7 +5711,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("runtime timer wakes pull pending dirty state without a mailbox wake", async () => {
+  test("runtime timer wakes do not admit Web-owned dirty state", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -4644,27 +5785,18 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_dirty_reconcile",
+          "2026-04-04T10:00:00.000Z",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
 
-      assert.deepEqual(pendingRequests, [
-        {
-          limit: 10,
-        },
-      ]);
-      assert.deepEqual(state.pendingDirtyAcks, [{
-        connectionId: "hosted_conn_dirty_pending",
-        nextWakeAt: "2026-04-04T10:00:01.000Z",
-        processedRevision: "7",
-      }]);
+      assert.deepEqual(pendingRequests, []);
+      assert.deepEqual(state.pendingDirtyAcks, []);
       const jobs = readJobsForAccount(service, connected.account.id);
-      assert.equal(jobs.length, 1);
-      assert.equal(
-        jobs[0]?.dedupeKey,
-        "hosted-dirty:demo:resource:garmin:summary:sleep:7ae8a0d6ecadc9aa74304031:2026-04-03T00:00:00.000Z:2026-04-04T00:00:00.000Z",
-      );
+      assert.equal(jobs.length, 0);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4730,7 +5862,10 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_dirty_reconcile",
+          "2026-04-04T10:00:00.000Z",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -4820,13 +5955,17 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_dirty_supported",
+          "2026-04-04T10:00:00.000Z",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
 
       assert.deepEqual(pendingRequests, [
         {
+          connectionId: "hosted_conn_dirty_supported",
           limit: 10,
         },
       ]);
@@ -4836,11 +5975,7 @@ describe("hosted device-sync runtime", () => {
         processedRevision: "9",
       }]);
       assert.equal(readJobsForAccount(service, connected.account.id).length, 1);
-      assert.equal(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.length, 1);
-      assert.equal(
-        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
-        "dirty_state.connection_missing",
-      );
+      assert.equal(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.length, 0);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4904,7 +6039,11 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_junction_dirty",
+          "2026-04-04T10:00:00.000Z",
+          "junction",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -4982,7 +6121,11 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_junction_dirty_terminal",
+          "2026-04-04T10:00:00.000Z",
+          "junction",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -5069,7 +6212,10 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_dirty_provider_mismatch",
+          "2026-04-04T10:00:00.000Z",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -5168,7 +6314,10 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_dirty_reauth",
+          "2026-04-04T10:00:00.000Z",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -5257,7 +6406,10 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          "hosted_conn_dirty_disconnected",
+          "2026-04-04T10:00:00.000Z",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -5402,7 +6554,11 @@ describe("hosted device-sync runtime", () => {
               return snapshot;
             },
           },
-          wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+          wake: buildDirtyDeviceSyncWake(
+            connectionId,
+            "2026-04-04T10:00:00.000Z",
+            "junction",
+          ),
           secret: DEVICE_SYNC_SECRET,
           service,
         });
@@ -5538,7 +6694,11 @@ describe("hosted device-sync runtime", () => {
     try {
       const firstState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake: buildCronWake("2026-07-10T02:31:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          connectionId,
+          "2026-07-10T02:31:00.000Z",
+          "junction",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -5549,7 +6709,11 @@ describe("hosted device-sync runtime", () => {
 
       const replayState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake: buildCronWake("2026-07-10T03:00:00.000Z"),
+        wake: buildDirtyDeviceSyncWake(
+          connectionId,
+          "2026-07-10T03:00:00.000Z",
+          "junction",
+        ),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -6315,7 +7479,13 @@ describe("hosted device-sync runtime", () => {
       });
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake: buildCronWake("2026-07-27T04:02:00.000Z"),
+        wake: buildDeviceSyncWake({
+          connectionId,
+          expectedConnectedAt: "2026-07-27T04:00:00.000Z",
+          occurredAt: "2026-07-27T04:02:00.000Z",
+          provider: "junction",
+          reason: "webhook_hint",
+        }),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -6355,7 +7525,11 @@ describe("hosted device-sync runtime", () => {
           assert.equal(job.kind, "delete");
           assert.equal(context.account.provider, "oura");
           importedJobIds.push(job.id);
-          return {};
+          throw deviceSyncError({
+            code: "OURA_RETRYABLE_TEST",
+            message: "Retry after reconnect.",
+            retryable: true,
+          });
         },
       },
     };
@@ -6420,7 +7594,14 @@ describe("hosted device-sync runtime", () => {
 
       const epochAState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake: buildCronWake("2026-07-27T04:02:00.000Z"),
+        wake: buildDeviceSyncWake({
+          connectionId,
+          expectedConnectedAt: connected.account.connectedAt,
+          hint: { reason: "dirty" },
+          occurredAt: "2026-07-27T04:02:00.000Z",
+          provider: "oura",
+          reason: "webhook_hint",
+        }),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -6451,7 +7632,14 @@ describe("hosted device-sync runtime", () => {
       });
       const epochBState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        wake: buildCronWake("2026-07-27T05:02:00.000Z"),
+        wake: buildDeviceSyncWake({
+          connectionId,
+          expectedConnectedAt: "2026-07-27T05:00:00.000Z",
+          hint: { reason: "dirty" },
+          occurredAt: "2026-07-27T05:02:00.000Z",
+          provider: "oura",
+          reason: "webhook_hint",
+        }),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -6474,7 +7662,12 @@ describe("hosted device-sync runtime", () => {
       assert.deepEqual(epochBState.pendingDirtyAcks, [{
         connectionId,
         nextWakeAt: null,
-        processedDirtyPayloadIds: [dirtyPayloadId],
+        processedRevision: "11",
+      }]);
+      assert.deepEqual(epochBState.pendingDirtyPayloadJobs, [{
+        connectionId,
+        dirtyPayloadId,
+        jobId: epochADelete.id,
         processedRevision: "11",
       }]);
     } finally {
@@ -8371,6 +9564,539 @@ describe("hosted device-sync runtime", () => {
 
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
+    }
+  });
+
+  test("reconciliation keeps local continuation clocks out of canonical cadence publication", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-schedule-owner-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+    const localJobWakeAt = "2026-04-04T12:15:00.000Z";
+    const providerReconcileAt = "2026-04-04T14:00:00.000Z";
+    const appliedRequests: ApplyUpdatesRequest[] = [];
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+        appliedRequests.push(input);
+        return {
+          appliedAt: "2026-04-04T09:11:01.000Z",
+          updates: input.updates.map((update) => ({
+            connection: null,
+            connectionId: update.connectionId,
+            status: "updated",
+            tokenUpdate: "unchanged",
+            writeUpdate: "applied",
+          })),
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during reconciliation");
+      },
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({
+          connectionId: "hosted_conn_schedule_owner",
+          externalAccountId: "demo-schedule-owner",
+          hostedUpdatedAt: "2026-04-04T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-04T13:00:00.000Z",
+          },
+        });
+      },
+    };
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T09:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(
+        "hosted_conn_schedule_owner",
+      );
+      assert.ok(localAccountId);
+
+      getStore(service).patchAccount(localAccountId, {
+        nextReconcileAt: providerReconcileAt,
+      });
+      getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: localJobWakeAt,
+        dedupeKey: "queued-continuation",
+        kind: "resource",
+        payload: {},
+        priority: 30,
+        provider: "demo",
+      });
+
+      assert.equal(service.getNextWakeAt(), localJobWakeAt);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T09:11:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      const request = requireApplyUpdatesRequest(appliedRequests[0] ?? null);
+      assert.equal(request.updates.length, 1);
+      assert.deepEqual(request.updates[0]?.localState, {
+        nextReconcileAt: providerReconcileAt,
+      });
+
+      getStore(service).patchAccount(localAccountId, {
+        displayName: "Local cadence owner",
+      });
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deferNextReconcileAtForLocalAccountId: localAccountId,
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T09:12:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(appliedRequests[1], {
+        occurredAt: "2026-04-04T09:12:00.000Z",
+        updates: [{
+          connection: {
+            displayName: "Local cadence owner",
+          },
+          connectionId: "hosted_conn_schedule_owner",
+          observedConnectedAt: "2026-04-04T09:00:00.000Z",
+          observedUpdatedAt: "2026-04-04T09:05:00.000Z",
+        }],
+      });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("rebuilds a real Strava scheduler retry from manifest-shaped durable fields", async () => {
+    const occurredAt = "2026-04-04T09:10:00.000Z";
+    const retryAt = "2026-04-04T09:10:15.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(occurredAt));
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-exact-recovery-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-exact-recovery-restored-",
+    );
+    const [stravaProvider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      strava: {
+        clientId: "strava-client-id",
+        clientSecret: "strava-client-secret",
+        reconcileDays: 7,
+        fetchImpl: async () => {
+          throw new Error("Strava network access is not expected in scheduler recovery proof.");
+        },
+      },
+    });
+    assert.ok(stravaProvider);
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [stravaProvider],
+    );
+    const connectionId = "hosted_conn_exact_recovery";
+    const wake = buildDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:exact-recovery",
+      hint: { nextReconcileAt: occurredAt },
+      occurredAt,
+      provider: "strava",
+      reason: "reconcile_due",
+    });
+    const appliedRequests: ApplyUpdatesRequest[] = [];
+    const createPort = (): HostedRuntimeDeviceSyncPort => ({
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(input) {
+        appliedRequests.push(input);
+        return {
+          appliedAt: occurredAt,
+          updates: [],
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called");
+      },
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({
+          connectionId,
+          externalAccountId: "strava-exact-recovery",
+          hostedUpdatedAt: occurredAt,
+          localState: {
+            nextReconcileAt: occurredAt,
+          },
+          provider: "strava",
+        });
+      },
+    });
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createPort(),
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(firstAccountId);
+      const firstStore = getStore(firstService);
+      await firstService.runSchedulerOnce(firstAccountId);
+      const [scheduled] = readJobsForAccount(firstService, firstAccountId);
+      assert.ok(scheduled);
+      assert.equal(JSON.parse(scheduled.payloadJson).windowKind, "reconcile");
+      const claimed = firstStore.claimDueJob("worker_exact_recovery", occurredAt, 60_000);
+      assert.ok(claimed);
+      assert.equal(claimed.attempts, 1);
+      assert.equal(firstStore.failJobIfOwned(
+        claimed.id,
+        "worker_exact_recovery",
+        occurredAt,
+        "PROVIDER_RETRYABLE",
+        "retryable",
+        retryAt,
+        true,
+      ), true);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.retryAt, retryAt);
+      assert.equal(recovery.wake.hint?.jobs?.length, 1);
+      const [retainedJob] = recovery.wake.hint?.jobs ?? [];
+      assert.equal(retainedJob?.availableAt, retryAt);
+      assert.equal(retainedJob?.dedupeKey, scheduled.dedupeKey);
+      assert.equal(retainedJob?.kind, "reconcile");
+      assert.equal(retainedJob?.maxAttempts, 4);
+      assert.equal(retainedJob?.priority, 25);
+      assert.deepEqual(retainedJob?.payload, {
+        windowEnd: occurredAt,
+        windowStart: "2026-03-28T09:10:00.000Z",
+      });
+      assert.equal("windowKind" in (retainedJob?.payload ?? {}), false);
+      assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
+
+      firstStore.completeJob(claimed.id, retryAt);
+      const completionFence = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake,
+      });
+      assert.ok(completionFence);
+      assert.deepEqual(completionFence.wake.hint?.jobs, []);
+      assert.equal(completionFence.wake.hint?.reason, "retained_completion_fence");
+      const scheduledNextReconcileAt = firstStore.getAccountById(
+        firstAccountId,
+      )?.nextReconcileAt ?? null;
+      assert.notEqual(scheduledNextReconcileAt, occurredAt);
+      assert.equal(
+        completionFence.wake.hint?.nextReconcileAt,
+        scheduledNextReconcileAt,
+      );
+      assert.deepEqual(
+        parseHostedExecutionWake(completionFence.wake),
+        completionFence.wake,
+      );
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deferNextReconcileAtForLocalAccountId: firstAccountId,
+        deviceSyncPort: createPort(),
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        state: firstState,
+        wake,
+      });
+      assert.equal(
+        appliedRequests.at(-1)?.updates.some(
+          (update) => update.localState?.nextReconcileAt !== undefined,
+        ),
+        false,
+      );
+
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createPort(),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const [restoredJob] = readJobsForAccount(restoredService, restoredAccountId);
+      assert.ok(restoredJob);
+      assert.equal(restoredJob.availableAt, retryAt);
+      assert.equal(restoredJob.dedupeKey, scheduled.dedupeKey);
+      assert.equal(restoredJob.kind, "reconcile");
+      assert.equal(restoredJob.maxAttempts, 4);
+      assert.deepEqual(JSON.parse(restoredJob.payloadJson), {
+        windowEnd: occurredAt,
+        windowStart: "2026-03-28T09:10:00.000Z",
+      });
+
+      const restoredStore = getStore(restoredService);
+      restoredStore.completeJob(restoredJob.id, retryAt);
+      const restoredFence = resolveHostedDeviceSyncWakeRecovery({
+        service: restoredService,
+        state: restoredState,
+        wake: recovery.wake,
+      });
+      assert.ok(restoredFence);
+      assert.equal(restoredFence.wake.hint?.reason, "retained_completion_fence");
+      assert.equal(
+        restoredFence.wake.hint?.nextReconcileAt,
+        scheduledNextReconcileAt,
+      );
+      const finalState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createPort(),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: restoredFence.wake,
+      });
+      assert.equal(resolveHostedDeviceSyncWakeRecovery({
+        service: restoredService,
+        state: finalState,
+        wake: restoredFence.wake,
+      }), null);
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createPort(),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        state: finalState,
+        wake: restoredFence.wake,
+      });
+      assert.equal(
+        appliedRequests.at(-1)?.updates.some(
+          (update) => update.localState?.nextReconcileAt === scheduledNextReconcileAt,
+        ),
+        true,
+      );
+
+    } finally {
+      vi.useRealTimers();
+      closeHostedRuntimeDeviceSyncService(firstService);
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("admits provider cadence only for a connection wake without retained jobs", () => {
+    const state = {
+      hostedToLocalAccountIds: new Map([["hosted_conn_scheduler", "local_scheduler"]]),
+      localToHostedAccountIds: new Map([["local_scheduler", "hosted_conn_scheduler"]]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: null,
+    } satisfies HostedDeviceSyncRuntimeSyncState;
+    const occurredAt = "2026-04-04T09:10:00.000Z";
+
+    assert.equal(resolveHostedDeviceSyncSchedulerAccountId({
+      state,
+      wake: buildCronWake(occurredAt),
+    }), null);
+    assert.equal(resolveHostedDeviceSyncSchedulerAccountId({
+      state,
+      wake: buildDeviceSyncWake({
+        connectionId: "hosted_conn_scheduler",
+        occurredAt,
+        reason: "reconcile_due",
+      }),
+    }), "local_scheduler");
+    assert.equal(resolveHostedDeviceSyncSchedulerAccountId({
+      state,
+      wake: buildDeviceSyncWake({
+        connectionId: "hosted_conn_scheduler",
+        hint: {
+          jobs: [{ dedupeKey: "retained", kind: "reconcile" }],
+        },
+        occurredAt,
+        reason: "reconcile_due",
+      }),
+    }), null);
+    assert.equal(resolveHostedDeviceSyncSchedulerAccountId({
+      state,
+      wake: buildDeviceSyncWake({
+        connectionId: "hosted_conn_scheduler",
+        hint: {
+          jobs: [],
+          reason: "retained_completion_fence",
+        },
+        occurredAt,
+        reason: "reconcile_due",
+      }),
+    }), null);
+  });
+
+  test("retains a Junction worker child with its changed cursor and dedupe authority", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-junction-child-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-junction-child-restored-",
+    );
+    const [junctionProvider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected in child recovery proof.");
+        },
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(junctionProvider);
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [junctionProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [junctionProvider],
+    );
+    const occurredAt = "2026-04-04T09:10:00.000Z";
+    const retryAt = "2026-04-04T09:12:00.000Z";
+    const connectionId = "hosted_conn_junction_child";
+    const wake = buildDeviceSyncWake({
+      connectionId,
+      hint: {
+        jobs: [{
+          availableAt: occurredAt,
+          dedupeKey: "junction-seed-window",
+          kind: "backfill",
+          payload: {
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-03-01T00:00:00.000Z",
+          },
+        }],
+      },
+      occurredAt,
+      provider: "junction",
+      reason: "reconcile_due",
+    });
+    const createPort = (): HostedRuntimeDeviceSyncPort => ({
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called");
+      },
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({
+          connectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          externalAccountId: "junction-child-recovery",
+          hostedUpdatedAt: occurredAt,
+          localState: { nextReconcileAt: "2026-04-04T15:00:00.000Z" },
+          provider: "junction",
+        });
+      },
+    });
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createPort(),
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(firstAccountId);
+      const firstStore = getStore(firstService);
+      const account = firstStore.getAccountById(firstAccountId);
+      assert.ok(account);
+      const parent = firstStore.claimDueJob("worker_junction_child", occurredAt, 60_000);
+      assert.ok(parent);
+      assert.equal(firstStore.completeJobsMarkSyncSucceededAndEnqueueJobs({
+        accountId: firstAccountId,
+        completedAt: occurredAt,
+        disconnectGeneration: account.disconnectGeneration,
+        jobIds: [parent.id],
+        jobs: [{
+          availableAt: retryAt,
+          dedupeKey: "junction-child-window-cursor",
+          kind: "backfill",
+          maxAttempts: 3,
+          payload: {
+            sourceProviderSlug: "garmin",
+            timeseriesCursor: "2026-02-15T00:00:00.000Z",
+            windowEnd: "2026-03-15T00:00:00.000Z",
+            windowStart: "2026-02-01T00:00:00.000Z",
+          },
+          priority: 50,
+        }],
+        provider: "junction",
+        syncSucceededAt: occurredAt,
+        syncSuccessOptions: {},
+        workerId: "worker_junction_child",
+      }), true);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake,
+      });
+      assert.ok(recovery);
+      assert.deepEqual(recovery.wake.hint?.jobs, [{
+        availableAt: retryAt,
+        dedupeKey: "junction-child-window-cursor",
+        kind: "backfill",
+        maxAttempts: 3,
+        payload: {
+          sourceProviderSlug: "garmin",
+          timeseriesCursor: "2026-02-15T00:00:00.000Z",
+          windowEnd: "2026-03-15T00:00:00.000Z",
+          windowStart: "2026-02-01T00:00:00.000Z",
+        },
+        priority: 50,
+      }]);
+      assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
+
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createPort(),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      const [restoredChild] = readJobsForAccount(restoredService, restoredAccountId);
+      assert.equal(restoredChild?.dedupeKey, "junction-child-window-cursor");
+      assert.equal(restoredChild?.availableAt, retryAt);
+      assert.equal(restoredChild?.maxAttempts, 3);
+      assert.deepEqual(JSON.parse(restoredChild?.payloadJson ?? "{}"), {
+        sourceProviderSlug: "garmin",
+        timeseriesCursor: "2026-02-15T00:00:00.000Z",
+        windowEnd: "2026-03-15T00:00:00.000Z",
+        windowStart: "2026-02-01T00:00:00.000Z",
+      });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(firstService);
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
     }
   });
 
