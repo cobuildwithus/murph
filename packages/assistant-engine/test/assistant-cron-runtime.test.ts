@@ -218,8 +218,8 @@ import {
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import {
-  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
-} from '../src/assistant/store/persistence.ts'
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+} from '../src/assistant/shared.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import type { AssistantChannelDependencies } from '../src/assistant/channels/types.ts'
@@ -4247,10 +4247,10 @@ describe('assistant cron runtime orchestration', () => {
         'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
-        ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+        ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
       )
       expect(notificationInput.instructions).toContain(
-        'treat reply evidence as incomplete rather than unanswered',
+        'Do not apply a silence-based cadence question or skip when it is present',
       )
       expect(notificationInput.instructions).not.toContain('carry-forward grace')
       if (occurrenceIndex === 0) {

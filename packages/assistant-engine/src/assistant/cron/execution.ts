@@ -89,14 +89,15 @@ import type {
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
-import { errorMessage, normalizeNullableString } from '../shared.js'
+import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+  errorMessage,
+  normalizeNullableString,
+} from '../shared.js'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from '../store/paths.js'
-import {
-  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
-} from '../store/persistence.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import {
   buildAssistantCronHostedDeliveryIdempotency,
@@ -1817,7 +1818,7 @@ export const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS = [
   '- Otherwise find the most recent reminder from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
   '- If there is no such reminder for this revision, send the current reminder normally.',
   '- If a relevant human reply followed that reminder, use it when composing the current reminder.',
-  `- A history item with the exact text \`${ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT}\` proves only that a human message occurred where its content later expired. If it follows the reminder, treat reply evidence as incomplete rather than unanswered: continue the current cue unless retained conversation or another authoritative owner proves an explicit pause, change, or valid skip condition.`,
+  `- A history item with the exact text \`${ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT}\` means the cold-reconstructed conversation is incomplete because an existing retention, count, or byte bound omitted committed details. It is not a human reply and does not prove silence. Do not apply a silence-based cadence question or skip when it is present: continue the current cue unless retained conversation or another authoritative owner proves an explicit pause, change, or valid skip condition.`,
   '- If no relevant human reply followed and that reminder already asked whether to keep, change, or pause these interruptions, return `skip`.',
   '- Otherwise send the current concise cue and ask one natural question about whether to keep, change, or pause these interruptions.',
   '- This question administers reminder cadence only. Do not ask whether the action was completed, infer failure or refusal from silence, increase frequency, or manufacture novelty when the same concise cue still fits.',

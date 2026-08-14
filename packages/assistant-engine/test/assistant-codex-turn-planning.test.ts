@@ -137,7 +137,6 @@ import {
   buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
 } from '../src/assistant/response-media.js'
 import {
-  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
   pruneAssistantTranscriptRetention,
   replaceTranscriptEntries,
 } from '../src/assistant/store/persistence.js'
@@ -151,6 +150,9 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.js'
+import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+} from '../src/assistant/shared.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
@@ -5181,7 +5183,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('preserves a privacy-safe human chronology marker after transcript text retention', async () => {
+  it('marks cold conversation history incomplete after transcript text retention', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5256,11 +5258,11 @@ describe('assistant Codex turn planning', () => {
 
       await expect(buildPlan(answeredSession)).resolves.toMatchObject({
         conversationHistoryMessages: [
-          { content: cadenceQuestion, role: 'assistant' },
           {
-            content: ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
-            role: 'user',
+            content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+            role: 'assistant',
           },
+          { content: cadenceQuestion, role: 'assistant' },
         ],
       })
       await expect(buildPlan(unansweredSession)).resolves.toMatchObject({
@@ -5268,6 +5270,70 @@ describe('assistant Codex turn planning', () => {
           { content: cadenceQuestion, role: 'assistant' },
         ],
       })
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('marks cold conversation history incomplete when the message-count bound omits details', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-bounded-history-',
+    ))
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const buildPlan = async (session: AssistantSession) =>
+      resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-02-01',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+    try {
+      const countBoundSession = {
+        ...createSession({ turnCount: 1 }),
+        conversationId: 'session-count-bounded-history',
+        sessionId: 'session-count-bounded-history',
+      }
+      await appendAssistantTranscriptEntries(
+        vault,
+        countBoundSession.sessionId,
+        Array.from({ length: 30 }, (_, index) => ({
+          kind: 'assistant' as const,
+          text: `Committed message ${index + 1}`,
+        })),
+      )
+
+      const countBoundPlan = await buildPlan(countBoundSession)
+      expect(countBoundPlan.conversationHistoryMessages).toHaveLength(24)
+      expect(countBoundPlan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        ...Array.from({ length: 23 }, (_, index) => ({
+          content: `Committed message ${index + 8}`,
+          role: 'assistant' as const,
+        })),
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -5374,7 +5440,10 @@ describe('assistant Codex turn planning', () => {
 
       const history = plan.conversationHistoryMessages ?? []
       expect(history).toHaveLength(3)
-      expect(history[0]?.content).toEqual(expect.stringMatching(/^message-2:/u))
+      expect(history[0]?.content).toBe(
+        ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+      )
+      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-3:/u))
       expect(history[2]?.content).toEqual(expect.stringMatching(/^message-4:/u))
       let totalBytes = 0
       for (const message of history) {
@@ -5436,13 +5505,17 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.conversationHistoryMessages).toEqual([
         {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        {
           content: expect.stringMatching(
             /^\[This response included an image attachment\.\]/u,
           ),
           role: 'assistant',
         },
       ])
-      const content = plan.conversationHistoryMessages?.[0]?.content
+      const content = plan.conversationHistoryMessages?.[1]?.content
       const contentBytes =
         typeof content === 'string' ? Buffer.byteLength(content, 'utf8') : 0
       expect(contentBytes).toBeLessThanOrEqual(4_000)

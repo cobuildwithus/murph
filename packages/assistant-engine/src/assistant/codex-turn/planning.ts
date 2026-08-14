@@ -63,7 +63,7 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
-  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+  ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT,
 } from '../store/persistence.js'
 import {
   readAssistantGeneratedImageDeliveryTranscriptMarker,
@@ -108,6 +108,7 @@ import type {
 } from '../providers/types.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
   assistantConversationHistoryUtf8Bytes,
   limitAssistantConversationHistoryTextBytes,
   normalizeNullableString,
@@ -1155,16 +1156,20 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   }
 
   type TranscriptHistoryCandidate = {
+    contentIncomplete: boolean
     message: AssistantProviderConversationMessage
     userPromptKey: string | null
   }
 
+  let historyIncomplete =
+    entries.length >= ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
     if (
       entry.kind === 'status' &&
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
     ) {
       return [{
+        contentIncomplete: false,
         message: {
           content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
           role: 'assistant',
@@ -1177,6 +1182,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
         readAssistantGeneratedImageDeliveryTranscriptMarker(entry.text)
       return generatedImage
         ? [{
+            contentIncomplete: false,
             message: {
               content: renderAssistantGeneratedImageDeliveryHistoryText(
                 generatedImage,
@@ -1191,21 +1197,22 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
       return []
     }
     if (entry.kind === 'user' && entry.textRetiredAt !== undefined) {
-      return [{
-        message: {
-          content: ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
-          role: 'user',
-        },
-        userPromptKey: null,
-      }]
+      historyIncomplete = true
+      return []
     }
     const rawContent = normalizeNullableString(entry.text)
+    const contentIncomplete = Boolean(
+      rawContent &&
+      assistantConversationHistoryUtf8Bytes(rawContent) >
+        ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES
+    )
     const content = limitAssistantConversationHistoryTextBytes(
       rawContent,
       ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES,
     )
     return content
       ? [{
+          contentIncomplete,
           message: {
             content,
             role: entry.kind,
@@ -1241,8 +1248,12 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     break
   }
 
+  historyIncomplete ||= messages.some(({ contentIncomplete }) =>
+    contentIncomplete)
+
   return limitAssistantConversationHistoryMessages(
     messages.map(({ message }) => message),
+    historyIncomplete,
   )
 }
 
@@ -1269,7 +1280,11 @@ function shouldDropTrailingCurrentUserPrompt(input: {
 
 function limitAssistantConversationHistoryMessages(
   messages: readonly AssistantProviderConversationMessage[],
+  historyIncomplete: boolean,
 ): AssistantProviderConversationMessage[] {
+  let incomplete =
+    historyIncomplete ||
+    messages.length > ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT
   const countLimited = messages.slice(-ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT)
   const retained: AssistantProviderConversationMessage[] = []
   let retainedBytes = 0
@@ -1286,13 +1301,38 @@ function limitAssistantConversationHistoryMessages(
       retainedBytes + messageBytes >
       ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES
     ) {
+      incomplete = true
       break
     }
     retained.push(message)
     retainedBytes += messageBytes
   }
 
-  return retained.reverse()
+  retained.reverse()
+  if (!incomplete) {
+    return retained
+  }
+
+  const marker: AssistantProviderConversationMessage = {
+    content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+    role: 'assistant',
+  }
+  const markerBytes = assistantConversationHistoryUtf8Bytes(
+    ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+  )
+  while (
+    retained.length >= ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT ||
+    retainedBytes + markerBytes >
+      ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES
+  ) {
+    const removed = retained.shift()
+    if (!removed || typeof removed.content !== 'string') {
+      continue
+    }
+    retainedBytes -= assistantConversationHistoryUtf8Bytes(removed.content)
+  }
+
+  return [marker, ...retained]
 }
 
 async function measureRoutePlanningAsync<TResult>(
