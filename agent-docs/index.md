@@ -7,6 +7,13 @@ Last verified: 2026-08-13
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Local setup and assistant delivery no longer own an operational email provider:
+setup manages Telegram, the local inbox runtime retains Telegram and Linq, and
+generic email remains confined to hosted ingress and injected hosted delivery.
+This ownership split is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `agent-docs/operations/verification-and-runtime.md`,
+and `agent-docs/references/testing-ci-map.md`.
+
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
 connection-specific retry work and Web dirty rows retain dirty resource/deletion

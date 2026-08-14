@@ -1776,7 +1776,7 @@ function buildAssistantSharedAutomationActionText(
     : "";
   const routeGuidance = hostedRuntime
     ? `A save always binds to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}. A patch retargets only when ${code("retargetToCurrentConversation: true")} is explicit. The tool accepts no arbitrary route locator; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
-    : `Pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
+    : `Local automation delivery supports Telegram or Linq, not email. If the user requests email delivery, explain that limitation and offer Telegram or Linq before asking for any routing details. For a supported route, pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
   return `${actionGuidance} ${strictScheduleGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.`}
@@ -1797,7 +1797,7 @@ function buildAssistantSharedAutomationPreferenceText(
     : "A preserve automation continues its resolved conversation.";
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
-    : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
+    : "Before asking the user to repeat Telegram or Linq routing details for a supported local automation route, inspect saved local self-targets. If the needed supported route is not already saved, ask for the missing details explicitly instead of guessing.";
   const outdoorLocationPreference = conversationScope === "group"
     ? "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record."
     : `When the user gives a city or region for this purpose, also save that coarse location once with ${code(

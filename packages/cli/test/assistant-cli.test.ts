@@ -663,7 +663,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant self-target commands reject unsupported channels and invalid email recipients',
+  'assistant delivery commands reject removed local email channels',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-self-target-guard-'))
     const homeRoot = path.join(parent, 'home')
@@ -687,7 +687,7 @@ test.sequential(
     assert.equal(unsupportedChannel.ok, false)
     if (!unsupportedChannel.ok) {
       assert.match(unsupportedChannel.error.message ?? '', /telegram/u)
-      assert.match(unsupportedChannel.error.message ?? '', /email/u)
+      assert.doesNotMatch(unsupportedChannel.error.message ?? '', /email/u)
     }
 
     const invalidEmail = await runCli([
@@ -704,7 +704,11 @@ test.sequential(
     })
     assert.equal(invalidEmail.ok, false)
     if (!invalidEmail.ok) {
-      assert.match(invalidEmail.error.message ?? '', /single recipient email address/u)
+      assert.match(invalidEmail.error.message ?? '', /telegram/u)
+      assert.doesNotMatch(
+        invalidEmail.error.message ?? '',
+        /single recipient email address/u,
+      )
     }
 
     const invalidDirectEmail = await runCli([
@@ -724,7 +728,8 @@ test.sequential(
     })
     assert.equal(invalidDirectEmail.ok, false)
     if (!invalidDirectEmail.ok) {
-      assert.match(
+      assert.match(invalidDirectEmail.error.message ?? '', /telegram/u)
+      assert.doesNotMatch(
         invalidDirectEmail.error.message ?? '',
         /single recipient email address/u,
       )
