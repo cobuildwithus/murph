@@ -8,7 +8,7 @@ import {
   MessageCircle,
   RefreshCw,
 } from "lucide-react";
-import type { BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
+import type { BrowserVaultCoreCapableQueryClient } from "@murphai/query/browser-replica-client";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
@@ -49,7 +49,7 @@ export type TrainingRefreshKind = "initial" | "handoff";
 
 type TrainingRefreshBaseline =
   | {
-      client: BrowserVaultQueryClient;
+      client: BrowserVaultCoreCapableQueryClient;
       kind: "initial";
     }
   | {
@@ -59,7 +59,7 @@ type TrainingRefreshBaseline =
 
 function isTrainingRefreshComplete(
   baseline: TrainingRefreshBaseline,
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
 ): boolean {
   return baseline.kind === "initial"
     ? client !== baseline.client

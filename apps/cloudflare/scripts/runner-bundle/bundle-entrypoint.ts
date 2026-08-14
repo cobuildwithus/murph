@@ -269,13 +269,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // on 2026-08-13, so ratchet the total to the larger cross-platform measurement
 // and retain the established 32KB allowance.
 //
-// Bounded Junction timeseries fidelity extends the existing provider,
-// importer, and hosted-runtime outputs without adding a forbidden boot input.
-// Exact merged-main Linux CI assembly measured 10,283,234B on 2026-08-14, so
-// ratchet only the total baseline and retain the established 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_283_234 + 32_768;
+// Generation-10 Browser Vault projection adds the replica builder to lazy
+// runner output. A dedicated Query server facade keeps that graph off startup;
+// exact macOS assembly measured an 8,065,357B static closure and 10,325,065B
+// total after the merged AgentMail removal on 2026-08-14. Ratchet those
+// measurements while retaining the existing cross-platform tolerances and
+// forbidden-startup-input guards.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_325_065 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

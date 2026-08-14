@@ -13,6 +13,9 @@ import { beforeEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   useBrowserVault: vi.fn(),
+  useBrowserVaultLabsSelector: vi.fn(),
+  useBrowserVaultMetricKeyDemand: vi.fn(() => true),
+  useBrowserVaultMetricsSelector: vi.fn(),
   useBrowserVaultSelector: vi.fn(),
 }));
 
@@ -38,6 +41,9 @@ vi.mock("next/link", () => ({
 vi.mock("@/src/lib/browser-vault/context", () => ({
   BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
   useBrowserVault: mocks.useBrowserVault,
+  useBrowserVaultLabsSelector: mocks.useBrowserVaultLabsSelector,
+  useBrowserVaultMetricKeyDemand: mocks.useBrowserVaultMetricKeyDemand,
+  useBrowserVaultMetricsSelector: mocks.useBrowserVaultMetricsSelector,
   useBrowserVaultSelector: mocks.useBrowserVaultSelector,
 }));
 
@@ -69,6 +75,8 @@ beforeEach(() => {
     status: "ready",
   });
   mocks.useBrowserVaultSelector.mockReturnValue([]);
+  mocks.useBrowserVaultLabsSelector.mockReturnValue([]);
+  mocks.useBrowserVaultMetricsSelector.mockReturnValue([]);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {},
@@ -230,7 +238,7 @@ test("BiomarkersPage asks signed-out visitors to sign in before offering lab syn
 
 test("Biomarker result route binds server auth and metric params to private history", async () => {
   const client = createBrowserVaultQueryClient(createBiomarkerRouteReplica());
-  mocks.useBrowserVaultSelector.mockImplementation(
+  mocks.useBrowserVaultLabsSelector.mockImplementation(
     (selector: (value: typeof client) => unknown) => selector(client),
   );
 

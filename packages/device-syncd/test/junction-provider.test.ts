@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
+import { JunctionError } from "@junction-api/sdk";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import {
   importDeviceProviderSnapshot,
@@ -8076,6 +8077,105 @@ test("Junction optional user lookup cancels unread 404 response bodies", async (
 
   assert.equal(await client.resolveUser("missing-client-user"), null);
   assert.equal(bodyCancelled, true);
+});
+
+test("Junction first-time SDK connection survives minified SDK error names", async () => {
+  const originalName = Object.getOwnPropertyDescriptor(JunctionError, "name");
+  const requests: Array<{ method: string; pathname: string }> = [];
+  Object.defineProperty(JunctionError, "name", {
+    configurable: true,
+    value: "r",
+  });
+
+  try {
+    const provider = createJunctionProvider(async (input, init) => {
+      const pathname = new URL(readUrl(input)).pathname;
+      requests.push({
+        method: String(init?.method ?? "GET"),
+        pathname: pathname.startsWith("/v2/user/resolve/")
+          ? "/v2/user/resolve/:clientUserId"
+          : pathname,
+      });
+
+      if (pathname.startsWith("/v2/user/resolve/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (pathname === "/v2/user") {
+        return createJsonResponse({ user_id: "junction-user-1" });
+      }
+      if (pathname === "/v2/user/junction-user-1/sign_in_token") {
+        return createJsonResponse({ sign_in_token: "junction-sign-in-token" });
+      }
+      throw new Error(`Unexpected request: ${pathname}`);
+    });
+    const handler = requireValue(
+      provider.sdkConnectionHandler,
+      "Junction provider should expose an SDK connection handler.",
+    );
+
+    const connection = await handler.ensureConnection({
+      ownerId: "owner-internal-id-123",
+      now: "2026-08-14T00:00:00.000Z",
+    });
+    const token = await handler.createSignInToken({
+      externalAccountId: connection.externalAccountId,
+    });
+
+    assert.equal(connection.externalAccountId, "junction-user-1");
+    assert.equal(token.signInToken, "junction-sign-in-token");
+    assert.equal(token.environment, "sandbox");
+    assert.deepEqual(requests, [
+      { method: "GET", pathname: "/v2/user/resolve/:clientUserId" },
+      { method: "POST", pathname: "/v2/user" },
+      { method: "POST", pathname: "/v2/user/junction-user-1/sign_in_token" },
+    ]);
+  } finally {
+    if (originalName) {
+      Object.defineProperty(JunctionError, "name", originalName);
+    }
+  }
+});
+
+test("Junction optional user lookup keeps caller cancellation ahead of a minified 404", async () => {
+  const originalName = Object.getOwnPropertyDescriptor(JunctionError, "name");
+  const abortController = new AbortController();
+  const abortReason = new Error("foreground yield");
+  let bodyCancelled = false;
+  let requests = 0;
+  Object.defineProperty(JunctionError, "name", {
+    configurable: true,
+    value: "r",
+  });
+
+  try {
+    const client = new JunctionClient({
+      apiKey: "sk_us_test_123",
+      environment: "sandbox",
+      region: "us",
+      fetchImpl: async () => {
+        requests += 1;
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel() {
+            bodyCancelled = true;
+            abortController.abort(abortReason);
+          },
+        }), { status: 404 });
+      },
+    });
+
+    await assert.rejects(
+      () => client.resolveUser("missing-client-user", {
+        signal: abortController.signal,
+      }),
+      (error) => error === abortReason,
+    );
+    assert.equal(requests, 1);
+    assert.equal(bodyCancelled, true);
+  } finally {
+    if (originalName) {
+      Object.defineProperty(JunctionError, "name", originalName);
+    }
+  }
 });
 
 test("Junction client deregisters provider connections by normalized provider slug", async () => {

@@ -89,17 +89,21 @@ Targets and actual results must remain distinct:
 - planned targets come from the verified workout format;
 - completed actuals come from the verified canonical workout event;
 - a target is never evidence that a set was completed;
-- an exact value the member explicitly assigns to every set of one exercise in
-  the current active workout is member-stated actual intent for a later
-  unqualified free-form completion in the same direct conversation; an
-  explicit result overrides it, while a range, AMRAP, conflict, ambiguous
-  exercise, or unavailable establishing message requires clarification;
+- one exact repetition count the member explicitly assigns to every set of one
+  exercise in the current active workout is member-stated actual repetitions
+  for a later unqualified free-form completion in the same direct conversation;
+  only repetitions carry forward under this exception, while every other actual
+  field must be stated with that completion or already exist on that exact
+  canonical set; an explicit repetition result overrides the earlier count,
+  while a range, AMRAP, conflict, ambiguous exercise, or unavailable
+  establishing message requires clarification;
 - pending planned sets become skipped only when the workout is explicitly finished;
 - additional actual sets beyond the format are included with no target.
 
-This narrow same-conversation rule does not create a card-level “complete at
-target” shortcut and does not authorize copying a saved-format target, prior
-workout value, or assistant suggestion into an actual set.
+This narrow same-conversation repetition rule does not create a card-level
+“complete at target” shortcut and does not authorize copying a saved-format
+target, prior workout value, assistant suggestion, or non-repetition
+prescription into an actual set.
 
 An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
 

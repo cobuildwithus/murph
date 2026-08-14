@@ -117,10 +117,11 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import type {
-  HostedExecutionAssistantAskRequestedWake,
-  HostedBrowserVaultReplicaRef,
-  HostedExecutionBundleRef,
+import {
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  type HostedExecutionAssistantAskRequestedWake,
+  type HostedBrowserVaultReplicaRef,
+  type HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -134,6 +135,7 @@ import {
 import {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
+  isHostedWorkspaceSnapshotV2Ref,
   readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
@@ -374,6 +376,7 @@ import {
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
+  writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   recordHostedMaterializedArtifactPaths,
@@ -422,6 +425,7 @@ import {
   type HostedRuntimePlatform,
   type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
+  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 import type {
   HostedAssistantRuntimeResolvedConfig,
@@ -7573,7 +7577,12 @@ describe("hosted workspace runtime entrypoint", () => {
     },
     {
       dedupeKey: "aask_done_private_synthetic",
-      label: "private Assistant Ask completion",
+      label: "legacy private Assistant Ask completion",
+      preCheckpointSafe: true,
+    },
+    {
+      dedupeKey: "aask_private_synthetic",
+      label: "current private Assistant Ask completion",
       preCheckpointSafe: true,
     },
     {
@@ -7703,7 +7712,12 @@ describe("hosted workspace runtime entrypoint", () => {
     },
     {
       dedupeKey: `aask_done_${"b".repeat(64)}`,
-      label: "private Assistant Ask completion",
+      label: "legacy private Assistant Ask completion",
+      privateCompletion: true,
+    },
+    {
+      dedupeKey: `aask_private_${"b".repeat(64)}`,
+      label: "current private Assistant Ask completion",
       privateCompletion: true,
     },
   ].flatMap((completion) =>
@@ -7955,7 +7969,7 @@ describe("hosted workspace runtime entrypoint", () => {
                             action: "prepare",
                             disclosure: {
                               permissionText:
-                                "One-time private owner-only answer.",
+                                HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
                             },
                             question: "What is my shoulder-safe workout?",
                             status: "ready",
@@ -8155,7 +8169,7 @@ describe("hosted workspace runtime entrypoint", () => {
             events.filter((event) =>
               event === `authority.private:${completion.dedupeKey}`
             ).length,
-            1,
+            2,
             events.join(","),
           );
           assert.ok(
@@ -10631,8 +10645,20 @@ describe("hosted workspace runtime entrypoint", () => {
   });
 
   test("system mailbox device-sync preserves one canonical schedule event and one durable mailbox item through bounded at-least-once provider replay and quiescence", async () => {
-    const warmVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-device-sync-closed-loop-warm-"));
-    const coldVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-device-sync-closed-loop-cold-"));
+    const warmWorkspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-device-sync-closed-loop-warm-"),
+    );
+    const coldWorkspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-device-sync-closed-loop-cold-"),
+    );
+    const warmVaultRoot = path.join(warmWorkspaceRoot, "durable", "vault");
+    const coldVaultRoot = path.join(coldWorkspaceRoot, "durable", "vault");
+    await Promise.all([
+      mkdir(path.join(warmWorkspaceRoot, "durable", "home"), { recursive: true }),
+      mkdir(path.join(warmWorkspaceRoot, "scratch"), { recursive: true }),
+      mkdir(path.join(coldWorkspaceRoot, "durable", "home"), { recursive: true }),
+      mkdir(path.join(coldWorkspaceRoot, "scratch"), { recursive: true }),
+    ]);
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -10640,6 +10666,17 @@ describe("hosted workspace runtime entrypoint", () => {
     const cadencePublications: string[] = [];
     const observedMailboxItemIds = new Set<string>();
     const observedScheduleEventIds = new Set<string>();
+    const capturedSnapshotFiles = new Map<
+      string,
+      ReadonlyMap<string, Uint8Array>
+    >();
+    const completedSnapshotIds = new Set<string>();
+    const restoredSnapshotRefByAttempt = new Map<
+      string,
+      HostedWorkspaceSnapshotV2Ref
+    >();
+    const deviceSyncStatePresentWhenSnapshotBuilt = new Map<string, boolean>();
+    const deviceSyncStatePresentAtRestoreByAttempt = new Map<string, boolean>();
     const dueAt = TEST_NOW;
     const connectedAt = "2026-04-26T12:00:00.000Z";
     const nextRecoveryBucketAt = "2026-04-27T00:05:00.000Z";
@@ -10653,6 +10690,8 @@ describe("hosted workspace runtime entrypoint", () => {
       "GET /developer/v2/cycle",
       "GET /developer/v2/activity/workout",
     ] as const;
+    const machineLocalDeviceSyncStateSuffix =
+      ".runtime/operations/device-sync/state.sqlite";
     const deviceItem = createMailboxItem({
       createdAt: "2026-04-27T00:00:30.000Z",
       dedupeKey: scheduleEventId,
@@ -10748,34 +10787,170 @@ describe("hosted workspace runtime entrypoint", () => {
         };
       },
     };
+    const completeWorkspaceCheckpoint = async (
+      request: HostedWorkspaceCheckpointRequest,
+    ): Promise<HostedWorkspaceCheckpointResponse> => {
+      checkpointAttempt += 1;
+      checkpointRequests.push(request);
+      events.push(`checkpoint.attempt:${activeAttemptId}:${checkpointAttempt}`);
+      if (failRecordCheckpoint && checkpointAttempt === 2) {
+        events.push(`checkpoint.fail:${activeAttemptId}:${checkpointAttempt}`);
+        throw new Error("synthetic checkpoint transport fault");
+      }
+      const checkpointedAt = new Date().toISOString();
+      currentWorkspace = createWorkspaceState({
+        checkpointedAt,
+        inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+        nextWakeAt: request.nextWakeAt ?? null,
+        nextWakeReason: request.nextWakeReason ?? null,
+        redactedStatus: request.redactedStatus ?? null,
+        snapshotRef: request.snapshotRef,
+        updatedAt: checkpointedAt,
+        version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+      });
+      events.push(`checkpoint.commit:${activeAttemptId}:${currentWorkspace.version}`);
+      return {
+        checkpointed: true,
+        workspace: currentWorkspace,
+      };
+    };
     const workspacePort: HostedRuntimeWorkspacePort = {
       async checkpoint(request) {
-        checkpointAttempt += 1;
-        checkpointRequests.push(request);
-        events.push(`checkpoint.attempt:${activeAttemptId}:${checkpointAttempt}`);
-        if (failRecordCheckpoint && checkpointAttempt === 2) {
-          events.push(`checkpoint.fail:${activeAttemptId}:${checkpointAttempt}`);
-          throw new Error("synthetic checkpoint transport fault");
-        }
-        assert.ok(currentWorkspace);
-        currentWorkspace = createWorkspaceState({
-          inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
-          nextWakeAt: request.nextWakeAt ?? null,
-          nextWakeReason: request.nextWakeReason ?? null,
-          redactedStatus: request.redactedStatus ?? null,
-          snapshotRef: request.snapshotRef,
-          version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
-        });
-        events.push(`checkpoint.commit:${activeAttemptId}:${currentWorkspace.version}`);
-        return {
-          checkpointed: true,
-          workspace: currentWorkspace,
-        };
+        return await completeWorkspaceCheckpoint(request);
       },
       async read() {
         return {
           fetchedAt: new Date().toISOString(),
           workspace: currentWorkspace,
+        };
+      },
+    };
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      async buildEncryptedSnapshot(input) {
+        const snapshotFiles = new Map<string, Uint8Array>();
+        for (const entry of input.archiveEntries) {
+          if (entry.kind === "file") {
+            snapshotFiles.set(
+              entry.archivePath,
+              new Uint8Array(await readFile(entry.absolutePath)),
+            );
+          }
+        }
+        capturedSnapshotFiles.set(input.aad.snapshotId, snapshotFiles);
+        deviceSyncStatePresentWhenSnapshotBuilt.set(
+          input.aad.snapshotId,
+          await access(path.join(
+            input.durableRoot,
+            "vault",
+            machineLocalDeviceSyncStateSuffix,
+          )).then(
+            () => true,
+            () => false,
+          ),
+        );
+        await mkdir(input.outputDir, { recursive: true });
+        const temporaryDirectoryPath = await mkdtemp(
+          path.join(input.outputDir, "device-sync-closed-loop-snapshot-"),
+        );
+        const encryptedFilePath = path.join(temporaryDirectoryPath, "snapshot.enc");
+        const encryptedBytes = new TextEncoder().encode(
+          `synthetic-encrypted-snapshot:${input.aad.snapshotId}`,
+        );
+        await writeFile(encryptedFilePath, encryptedBytes);
+        const manifestBytes = new TextEncoder().encode(JSON.stringify(
+          [...snapshotFiles].map(([archivePath, bytes]) => ({
+            archivePath,
+            byteLength: bytes.byteLength,
+          })),
+        ));
+        return {
+          compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+          encryptedByteSize: encryptedBytes.byteLength,
+          encryptedFilePath,
+          encryptedObjectSha256: sha256HostedBundleHex(encryptedBytes),
+          fileCount: snapshotFiles.size,
+          plaintextArchiveSha256: sha256HostedBundleHex(manifestBytes),
+          temporaryDirectoryPath,
+          totalPlainBytes: [...snapshotFiles.values()].reduce(
+            (total, bytes) => total + bytes.byteLength,
+            0,
+          ),
+        };
+      },
+    };
+    const workspaceSnapshotPort: HostedRuntimeWorkspaceSnapshotPort = {
+      async abortSnapshotSession(input) {
+        capturedSnapshotFiles.delete(input.snapshotId);
+        deviceSyncStatePresentWhenSnapshotBuilt.delete(input.snapshotId);
+      },
+      async completeSnapshotSession(input) {
+        const checkpoint = await completeWorkspaceCheckpoint(input.checkpointRequest);
+        completedSnapshotIds.add(input.ref.snapshotId);
+        return {
+          checkpoint,
+          snapshotRef: input.ref,
+        };
+      },
+      async putSnapshotObjectDirect(input) {
+        await access(input.sourceFilePath);
+        return {
+          snapshotDirectR2PresignElapsedMs: 0,
+          snapshotDirectR2PutElapsedMs: 0,
+        };
+      },
+      async restoreWorkspaceSnapshot(input) {
+        assert.equal(completedSnapshotIds.has(input.ref.snapshotId), true);
+        const snapshotFiles = capturedSnapshotFiles.get(input.ref.snapshotId);
+        assert.ok(snapshotFiles);
+        assert.equal(restoredSnapshotRefByAttempt.has(activeAttemptId), false);
+        restoredSnapshotRefByAttempt.set(activeAttemptId, input.ref);
+        await rm(input.durableRoot, { force: true, recursive: true });
+        await mkdir(input.durableRoot, { mode: 0o700, recursive: true });
+        const resolvedDurableRoot = path.resolve(input.durableRoot);
+        for (const [archivePath, bytes] of snapshotFiles) {
+          const destination = path.resolve(input.durableRoot, archivePath);
+          assert.ok(destination.startsWith(`${resolvedDurableRoot}${path.sep}`));
+          await mkdir(path.dirname(destination), { recursive: true });
+          await writeFile(destination, bytes);
+        }
+        const restoredDeviceSyncStatePath = path.join(
+          input.durableRoot,
+          "vault",
+          machineLocalDeviceSyncStateSuffix,
+        );
+        const deviceSyncStatePresent = await access(restoredDeviceSyncStatePath).then(
+          () => true,
+          () => false,
+        );
+        deviceSyncStatePresentAtRestoreByAttempt.set(
+          activeAttemptId,
+          deviceSyncStatePresent,
+        );
+      },
+      async startSnapshotSession() {
+        snapshotOrdinal += 1;
+        const snapshotId = `snapshot-device-sync-closed-loop-${snapshotOrdinal}`;
+        const objectKey =
+          `users/${TEST_USER_ID}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+        return {
+          encryption: {
+            aad: buildHostedWorkspaceSnapshotV2Aad({
+              objectKey,
+              snapshotId,
+              userId: TEST_USER_ID,
+            }),
+            dataKeyBase64: Buffer.alloc(32).toString("base64"),
+            ivBase64: Buffer.alloc(12).toString("base64"),
+            rootKeyId: "synthetic-device-sync-closed-loop-root-key",
+            scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+            wrappedDataKey: Buffer.from("synthetic-wrapped-data-key").toString("base64"),
+          },
+          limits: {
+            maxSinglePartEncryptedBytes: 64 * 1024 * 1024,
+            warnEncryptedBytes: 64 * 1024 * 1024,
+          },
+          objectKey,
+          snapshotId,
         };
       },
     };
@@ -10785,41 +10960,66 @@ describe("hosted workspace runtime entrypoint", () => {
       events,
       mailboxPort: createMailboxPort({ events, items: [] }),
       workspacePort,
+      workspaceSnapshotPort,
     });
+    const createProductionBridge = (input: {
+      attemptId: string;
+      vaultRoot: string;
+    }) => {
+      const runtimeJobInput = createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: input.attemptId,
+          processingMode: "system_mailbox",
+          workspace: currentWorkspace,
+          workspaceVersion: currentWorkspace?.version ?? "0",
+        },
+        resolvedConfig: createDeviceSyncResolvedConfig(),
+      });
+      const runtime = runtimeJobInput.runtime;
+      assert.ok(runtime);
+      const bridgeOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+        decodeMailboxPayload: {
+          async decode() {
+            throw new Error(
+              "Closed-loop wake is already imported into the durable system lane.",
+            );
+          },
+        },
+        platform,
+        readCurrentLease: () => ({
+          attemptId: runtimeJobInput.request.attemptId,
+          leaseGeneration: runtimeJobInput.request.leaseGeneration,
+          providerEgressToken: runtimeJobInput.request.providerEgressToken ?? null,
+          userId: runtimeJobInput.request.userId,
+          workspaceVersion:
+            currentWorkspace?.version ?? runtimeJobInput.request.workspaceVersion,
+        }),
+        request: runtimeJobInput.request,
+        runtime,
+        snapshotArchiveBuilder,
+        snapshotDiagnosticsHashSecret: "f".repeat(64),
+        vaultRoot: input.vaultRoot,
+        async waitForBackgroundAssistantWork() {},
+      });
+      return { bridgeOptions, runtimeJobInput };
+    };
     const runSystemPass = async (input: {
       attemptId: string;
       vaultRoot: string;
     }) => {
       activeAttemptId = input.attemptId;
-      return await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: input.attemptId,
-            processingMode: "system_mailbox",
-            workspaceVersion: currentWorkspace?.version ?? "0",
-          },
-          resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
-          async createCheckpointSnapshot() {
-            snapshotOrdinal += 1;
-            const snapshot = await createVaultSnapshotBundle({
-              key: `users/bundles/member-synthetic/device-sync-closed-loop-${snapshotOrdinal}.bundle.json`,
-              vaultRoot: input.vaultRoot,
-            });
-            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
-            return { snapshotRef: snapshot.snapshotRef };
-          },
-          async importItem() {
-            throw new Error("Closed-loop wake is already imported into the durable system lane.");
-          },
-          platform,
-          async runAssistantPhase() {
-            throw new Error("System mailbox device-sync must not enter assistant phase.");
-          },
-          vaultRoot: input.vaultRoot,
+      const { bridgeOptions, runtimeJobInput } = createProductionBridge(input);
+      return await runHostedWorkspaceRuntimeJobInProcess(runtimeJobInput, {
+        ...bridgeOptions,
+        async importItem() {
+          throw new Error(
+            "Closed-loop wake is already imported into the durable system lane.",
+          );
         },
-      );
+        async runAssistantPhase() {
+          throw new Error("System mailbox device-sync must not enter assistant phase.");
+        },
+      });
     };
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -10872,15 +11072,47 @@ describe("hosted workspace runtime entrypoint", () => {
       const importState = createEmptyHostedMailboxImportState();
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(warmVaultRoot, importState);
-      const initialSnapshot = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/device-sync-closed-loop-initial.bundle.json",
-        vaultRoot: warmVaultRoot,
-      });
-      artifactBytesByHash.set(initialSnapshot.hash, initialSnapshot.bytes);
       currentWorkspace = createWorkspaceState({
-        snapshotRef: initialSnapshot.snapshotRef,
         version: "0",
       });
+      activeAttemptId = "attempt_device_sync_closed_loop_seed_committed_input";
+      const { bridgeOptions: committedInputBridge } = createProductionBridge({
+        attemptId: activeAttemptId,
+        vaultRoot: warmVaultRoot,
+      });
+      const committedInputSnapshot = await committedInputBridge.createCheckpointSnapshot({
+        expectedWorkspaceVersion: "0",
+        reason: "idle_shutdown",
+      });
+      const committedInputSnapshotRef = committedInputSnapshot.snapshotRef;
+      assert.ok(isHostedWorkspaceSnapshotV2Ref(committedInputSnapshotRef));
+      assert.ok(currentWorkspace);
+      assert.equal(currentWorkspace.version, "1");
+      assert.deepEqual(currentWorkspace.snapshotRef, committedInputSnapshotRef);
+      assert.equal(
+        deviceSyncStatePresentWhenSnapshotBuilt.get(
+          committedInputSnapshotRef.snapshotId,
+        ),
+        false,
+      );
+      assert.equal(
+        [...(capturedSnapshotFiles.get(committedInputSnapshotRef.snapshotId)?.keys()
+          ?? [])].some((archivePath) =>
+            archivePath.endsWith("/hosted-system-mailbox.json")
+          ),
+        true,
+      );
+      checkpointAttempt = 0;
+      checkpointRequests.length = 0;
+      events.length = 0;
+      assert.equal(
+        await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({
+          vaultRoot: warmVaultRoot,
+          workspace: currentWorkspace,
+        }),
+        true,
+      );
+
       const committedInputState = await readHostedSystemMailboxState(warmVaultRoot);
       assert.equal(committedInputState.pending.length, 1);
       const committedInputItem = committedInputState.pending[0];
@@ -10906,72 +11138,101 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(checkpointAttempt, 2);
-      assert.equal(
-        events.filter((event) => event.startsWith(
-          "checkpoint.attempt:attempt_device_sync_closed_loop_initial:",
-        )).length,
-        2,
+      assert.equal(checkpointRequests.length, 2);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.reason),
+        ["canonical_runtime_commit", "idle_shutdown"],
+      );
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["1", "2"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "1");
+      assert.equal(currentWorkspace.version, "2");
       const initialProviderRequestClasses = providerRequestClasses.slice();
-      assert.equal(initialProviderRequestClasses.length, 4);
-      assert.deepEqual(
-        initialProviderRequestClasses,
-        expectedWhoopRequestClasses,
-      );
+      assert.deepEqual(initialProviderRequestClasses, expectedWhoopRequestClasses);
       assert.deepEqual(cadencePublications, []);
       assert.equal(canonicalNextReconcileAt, dueAt);
+      const firstCheckpointAttemptIndex = events.indexOf(
+        "checkpoint.attempt:attempt_device_sync_closed_loop_initial:1",
+      );
       const lostRecordCheckpointIndex = events.indexOf(
         "checkpoint.fail:attempt_device_sync_closed_loop_initial:2",
       );
+      assert.notEqual(firstCheckpointAttemptIndex, -1);
       assert.notEqual(lostRecordCheckpointIndex, -1);
-      const initialAttemptEventTrace = events
-        .slice(0, lostRecordCheckpointIndex + 1)
-        .map((event) => {
-          if (event.startsWith("artifact.get:")) {
-            return "artifact.get";
-          }
-          if (event.startsWith("artifact.put:")) {
-            return "artifact.put";
-          }
-          return event;
-        });
-      assert.deepEqual(initialAttemptEventTrace, [
-        "artifact.get",
-        "mailbox.fetch",
-        ...expectedWhoopRequestClasses.map(
-          (requestClass) => `provider.request:${requestClass}`,
-        ),
-        "artifact.put",
-        "artifact.put",
-        "artifact.put",
-        "artifact.put",
-        "checkpoint.attempt:attempt_device_sync_closed_loop_initial:1",
-        "checkpoint.commit:attempt_device_sync_closed_loop_initial:1",
-        "checkpoint.attempt:attempt_device_sync_closed_loop_initial:2",
-        "checkpoint.fail:attempt_device_sync_closed_loop_initial:2",
-      ]);
-      assert.equal(checkpointRequests.length, 2);
+      assert.ok(firstCheckpointAttemptIndex < lostRecordCheckpointIndex);
+      assert.equal(
+        events.slice(0, firstCheckpointAttemptIndex).filter((event) =>
+          event.startsWith("provider.request:")
+        ).length,
+        4,
+      );
+      assert.equal(
+        events.slice(0, firstCheckpointAttemptIndex).filter((event) =>
+          event.startsWith("artifact.put:")
+        ).length,
+        4,
+      );
+      assert.equal(
+        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:3"),
+        -1,
+      );
       const durablePostPullCheckpoint = checkpointRequests[0];
       assert.ok(durablePostPullCheckpoint);
-      assert.deepEqual(
-        currentWorkspace.snapshotRef,
-        durablePostPullCheckpoint.snapshotRef,
+      assert.deepEqual(currentWorkspace.snapshotRef, durablePostPullCheckpoint.snapshotRef);
+      assert.deepEqual(currentWorkspace.snapshotRef, committedInputSnapshotRef);
+      const failedPostPullCheckpoint = checkpointRequests[1];
+      assert.ok(failedPostPullCheckpoint);
+      const failedPostPullSnapshotRef = failedPostPullCheckpoint.snapshotRef;
+      assert.ok(isHostedWorkspaceSnapshotV2Ref(failedPostPullSnapshotRef));
+      assert.equal(
+        completedSnapshotIds.has(failedPostPullSnapshotRef.snapshotId),
+        false,
+      );
+      assert.equal(
+        deviceSyncStatePresentWhenSnapshotBuilt.get(
+          failedPostPullSnapshotRef.snapshotId,
+        ),
+        true,
+      );
+      const durablePostPullArchivePaths = [
+        ...(capturedSnapshotFiles.get(failedPostPullSnapshotRef.snapshotId)?.keys()
+          ?? []),
+      ];
+      assert.equal(
+        durablePostPullArchivePaths.some((archivePath) =>
+          archivePath.endsWith(machineLocalDeviceSyncStateSuffix)
+        ),
+        false,
+      );
+      assert.equal(
+        durablePostPullArchivePaths.some((archivePath) =>
+          archivePath.endsWith("/hosted-system-mailbox.json")
+        ),
+        true,
       );
 
-      await removeTempRoot(warmVaultRoot);
+      await removeTempRoot(warmWorkspaceRoot);
       vi.setSystemTime(new Date(nextRecoveryBucketAt));
       failRecordCheckpoint = false;
+      const recoveryAttemptId =
+        "attempt_device_sync_closed_loop_next_bucket_signal";
       const recovered = await runSystemPass({
-        attemptId: "attempt_device_sync_closed_loop_next_bucket_signal",
+        attemptId: recoveryAttemptId,
         vaultRoot: coldVaultRoot,
       });
 
-      assert.equal(checkpointRequests[2]?.expectedWorkspaceVersion, "1");
+      assert.deepEqual(
+        restoredSnapshotRefByAttempt.get(recoveryAttemptId),
+        committedInputSnapshotRef,
+      );
+      assert.equal(
+        deviceSyncStatePresentAtRestoreByAttempt.get(recoveryAttemptId),
+        false,
+      );
       assert.equal(providerRequestClasses.length, 8);
       const replayedProviderRequestClasses = providerRequestClasses.slice(4);
-      assert.equal(replayedProviderRequestClasses.length, 4);
       assert.deepEqual(
         [...replayedProviderRequestClasses].sort(),
         [...initialProviderRequestClasses].sort(),
@@ -10980,31 +11241,22 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(canonicalNextReconcileAt, dueAt);
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "4");
+      assert.equal(currentWorkspace.version, "5");
       assert.equal(checkpointAttempt, 5);
       assert.equal(checkpointRequests.length, 5);
-      assert.equal(
-        events.filter((event) => event.startsWith(
-          "checkpoint.attempt:attempt_device_sync_closed_loop_next_bucket_signal:",
-        )).length,
-        3,
-      );
       assert.deepEqual(
         checkpointRequests.slice(2, 5).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["1", "2", "3"],
+        ["2", "3", "4"],
       );
-      assert.deepEqual(
-        events.filter((event) => event.startsWith(
-          "checkpoint.commit:attempt_device_sync_closed_loop_next_bucket_signal:",
-        )),
-        [
-          "checkpoint.commit:attempt_device_sync_closed_loop_next_bucket_signal:2",
-          "checkpoint.commit:attempt_device_sync_closed_loop_next_bucket_signal:3",
-          "checkpoint.commit:attempt_device_sync_closed_loop_next_bucket_signal:4",
-        ],
+      const recoveryCheckpointCommitIndexes = events.flatMap((event, index) =>
+        event.startsWith(`checkpoint.commit:${recoveryAttemptId}:`) ? [index] : []
       );
+      assert.equal(recoveryCheckpointCommitIndexes.length, 3);
+      const durableRecoveryCompletionCheckpointIndex =
+        recoveryCheckpointCommitIndexes[recoveryCheckpointCommitIndexes.length - 1];
+      assert.notEqual(durableRecoveryCompletionCheckpointIndex, undefined);
       const retainedCompletionFence = await readHostedSystemMailboxState(coldVaultRoot);
       assert.equal(retainedCompletionFence.pending.length, 1);
       const retainedItem = retainedCompletionFence.pending[0];
@@ -11019,10 +11271,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }
       assert.equal(retainedItem.wake.eventId, scheduleEventId);
       observedScheduleEventIds.add(retainedItem.wake.eventId);
-      assert.equal(
-        retainedItem.wake.hint?.reason,
-        "retained_completion_fence",
-      );
+      assert.equal(retainedItem.wake.hint?.reason, "retained_completion_fence");
       assert.deepEqual(retainedItem.wake.hint?.jobs, []);
       assert.equal(
         retainedItem.wake.hint?.nextReconcileAt,
@@ -11030,17 +11279,6 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const completionFenceAt = retainedItem.nextAttemptAt;
       assert.equal(completionFenceAt, "2026-04-27T00:05:30.000Z");
-      const recoveryCheckpointCommitIndexes = events.flatMap((event, index) =>
-        event.startsWith(
-          "checkpoint.commit:attempt_device_sync_closed_loop_next_bucket_signal:",
-        )
-          ? [index]
-          : []
-      );
-      assert.equal(recoveryCheckpointCommitIndexes.length, 3);
-      const durableRecoveryCompletionCheckpointIndex =
-        recoveryCheckpointCommitIndexes[recoveryCheckpointCommitIndexes.length - 1];
-      assert.notEqual(durableRecoveryCompletionCheckpointIndex, undefined);
 
       vi.setSystemTime(new Date(completionFenceAt));
       const providerRequestsBeforeCompletion = providerRequestClasses.length;
@@ -11069,25 +11307,10 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests.slice(5, 7).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["4", "5"],
-      );
-      assert.equal(
-        events.filter((event) => event.startsWith(
-          "checkpoint.attempt:attempt_device_sync_closed_loop_completion_fence:",
-        )).length,
-        2,
-      );
-      assert.deepEqual(
-        events.filter((event) => event.startsWith(
-          "checkpoint.commit:attempt_device_sync_closed_loop_completion_fence:",
-        )),
-        [
-          "checkpoint.commit:attempt_device_sync_closed_loop_completion_fence:5",
-          "checkpoint.commit:attempt_device_sync_closed_loop_completion_fence:6",
-        ],
+        ["5", "6"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "6");
+      assert.equal(currentWorkspace.version, "7");
 
       const checkpointAttemptsAfterSettlement = checkpointAttempt;
       assert.equal(checkpointAttemptsAfterSettlement, 7);
@@ -11113,21 +11336,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "6");
-      assert.equal(
-        events.filter((event) => event.startsWith(
-          `checkpoint.attempt:${convergenceAttemptId}:`,
-        )).length,
-        1,
-      );
-      assert.deepEqual(
-        events.filter((event) => event.startsWith(
-          `checkpoint.commit:${convergenceAttemptId}:`,
-        )),
-        [`checkpoint.commit:${convergenceAttemptId}:7`],
-      );
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "7");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "8");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -11144,14 +11355,8 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(quiescent.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
-      assert.equal(
-        events.filter((event) => event.startsWith(
-          `checkpoint.attempt:${quiescentAttemptId}:`,
-        )).length,
-        0,
-      );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "8");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
@@ -11166,9 +11371,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);
       assert.equal(
-        checkpointRequests.filter((request) =>
+        checkpointRequests.some((request) =>
           request.nextWakeReason === "device-sync.reconcile"
-        ).length > 0,
+        ),
         true,
       );
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
@@ -11185,8 +11390,8 @@ describe("hosted workspace runtime entrypoint", () => {
         );
       }
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
-      await removeTempRoot(warmVaultRoot);
-      await removeTempRoot(coldVaultRoot);
+      await removeTempRoot(warmWorkspaceRoot);
+      await removeTempRoot(coldWorkspaceRoot);
     }
   });
 
@@ -26120,6 +26325,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let activeProjectionDeliveries = 0;
     let assistantPhaseCalls = 0;
     let checkpointEffectCalls = 0;
+    const checkpointEffectProjectionOutcomes: string[] = [];
     let checkpointCount = 0;
     let conversationAssistantPhaseEvent: string | null = null;
     let peakActiveProjectionDeliveries = 0;
@@ -26279,8 +26485,13 @@ describe("hosted workspace runtime entrypoint", () => {
               secondConversationAssistantStarted.resolve();
             }
             const afterDurableCheckpoint = Object.assign(
-              async () => {
+              async (context?: {
+                vaultShareProjectionResult?: { outcome: string };
+              }) => {
                 checkpointEffectCalls += 1;
+                checkpointEffectProjectionOutcomes.push(
+                  context?.vaultShareProjectionResult?.outcome ?? "missing",
+                );
                 events.push("device-sync.dirty-ack");
                 assert.deepEqual(projectionKinds.slice(-3), [
                   "sleep-times.v0",
@@ -26290,6 +26501,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 assert.equal(activeProjectionDeliveries, 0);
               },
               {
+                requiresVaultShareProjectionResult: true,
                 vaultShareProjectionFailureWake: {
                   nextWakeAt: TEST_NOW,
                   nextWakeReason: "device-sync.reconcile" as const,
@@ -26439,6 +26651,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "time-zone.v0",
       ]);
       assert.equal(checkpointEffectCalls, 1);
+      assert.deepEqual(checkpointEffectProjectionOutcomes, ["delivered"]);
       assert.ok(
         events.lastIndexOf("vault-share.deliver:done")
           < requireEventIndex(events, "device-sync.dirty-ack"),
@@ -37088,9 +37301,13 @@ function createPrivateCurrentSenderAssistantAskRequestedWake(input: {
         sessionId: "session_group_private_completion",
       },
       question: "What is my shoulder-safe workout?",
+      resultDestination: {
+        channel: "linq",
+        kind: "requester_direct",
+      },
       target: {
         groupRuntimeMemberId: "member_group_runtime",
-        kind: "group_sender_private",
+        kind: "current_sender_personal",
         permissionDigest: "f".repeat(64),
       },
     },

@@ -1,3 +1,4 @@
+import { HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
@@ -359,13 +360,15 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const explicitObservationGrain = readString(entity.attributes.observationGrain);
   const observationGrain = explicitObservationGrain ?? inferWearableObservationGrain(entity);
   const effectiveDate = resolveObservationEffectiveDate(entity, observationGrain);
+  const qualifiers = readQualifiers(entity.attributes.qualifiers);
 
   return [scalarMetricPoint({
     confidence: eventConfidence(entity),
     context: {
       measurementMethodKey: eventMeasurementMethodKey(entity),
       observationGrain: observationGrain ?? undefined,
-      qualifiers: readQualifiers(entity.attributes.qualifiers),
+      causalSeq: readReportedDailyMetricCausalSeq(entity, qualifiers) ?? undefined,
+      qualifiers,
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
     },
     grain: isDayGrainObservation(observationGrain) ? "day" : undefined,
@@ -381,6 +384,22 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     unit,
     value,
   })];
+}
+
+function readReportedDailyMetricCausalSeq(
+  entity: CanonicalEntity,
+  qualifiers: Record<string, string | number | boolean> | undefined,
+): string | null {
+  const externalRef = readRecord(entity.attributes.externalRef);
+  if (
+    readString(entity.attributes.source) !== "manual"
+    || readString(externalRef?.system) !== "manual"
+    || readString(externalRef?.resourceType) !== "daily-metric-report"
+  ) {
+    return null;
+  }
+  const causalSeq = qualifiers?.[HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER];
+  return typeof causalSeq === "string" ? causalSeq : null;
 }
 
 function resolveObservationMetric(entity: CanonicalEntity): string | null {

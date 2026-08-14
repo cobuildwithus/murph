@@ -40,7 +40,8 @@ The live ownership split is:
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
-  exact phone-call-result, usage-referral-reward, and `aask_done_*` private
+  exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
+  current `aask_private_*` private
   Assistant Ask notification families may also run queue-only through their
   causal outbox intent after fresh conversation work has priority; generic
   notifications remain excluded. Non-idempotent provider work still waits for
@@ -118,7 +119,8 @@ for Linq input with link parts, attachment-bearing non-email input, and direct r
 run local runtime work until idle or budget
 while dirty and before the idle floor, service fresh foreground input, the
   exact safe Assistant Ask shapes, and only replay-safe phone-call-result,
-  usage-referral-reward, or `aask_done_*` private Assistant Ask notifications
+  usage-referral-reward, legacy `aask_done_*`, or current `aask_private_*`
+  private Assistant Ask notifications
   without publishing a snapshot; other wakes do not shorten the floor
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
@@ -840,6 +842,20 @@ publishing partial or corrupt state.
 
 ### Assistant Ask Read Side Lane
 
+For a current group speaker asking Murph to consult their own personal Murph,
+the resident model infers from ordinary conversation whether the answer belongs
+in the room or in the speaker's direct thread. It still supplies only the exact
+accepted-message reference. If that audience is genuinely ambiguous, Web keeps
+one ten-minute pointer for that group runtime and exact sender; Murph asks a
+normal clarification with no prescribed reply form, and the speaker's later
+natural answer resolves the pending original through its own exact message
+reference. The pointer copies no question text and is removed by bounded hourly
+expiry cleanup or account deletion. A group-bound request sends a deterministic
+advance notice before Web admits any personal read; notice failure blocks the
+request. A private request sends no group notice. Web remains the identity and
+route authority, reloads the exact source, and prevents a replay from changing
+the already-fixed result destination.
+
 `murph.group(action="ask")` is admitted only from a fresh authenticated private
 input. The runtime calls `assistantAskPort.request`; the signed
 `POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
@@ -892,7 +908,8 @@ cancellation, or mailbox-budget exhaustion stops the drain.
 The same bounded pass admits only
 `assistant.notification.requested:phone-call-result:*` and
 `assistant.notification.requested:usage-referral-reward:*`, plus exact private
-Assistant Ask completions under `aask_done_*`. Import eligibility does not grant
+Assistant Ask completions under legacy `aask_done_*` or current
+`aask_private_*`. Import eligibility does not grant
 dispatch authority: the foreground-causal system-mailbox selector must match the
 exact dedupe-key family again, then collect only the outbox intent returned by
 that mailbox execution. Its persisted `sending` transition precedes provider
@@ -1025,22 +1042,97 @@ the request identity. Exact retries reuse that mailbox item, a changed question
 for the same grant conflicts, and another current grant in the same invocation
 is independent.
 
-The one-time `group_sender` adapter instead derives the target and fixed
-self-only permission from one exact authenticated current-sender group input.
-Every request requires fresh exact-message authority and grants no standing
-access.
+The one-time current-sender adapter exposes internal group actions with one
+opaque `message_ref` and no member, question, or route argument. Trusted
+group-turn state requires that ref to name an accepted input in the current
+turn, so independent simultaneous requests can each be submitted. The resident
+group model infers whether the answer belongs in the room or in the speaker's
+direct thread from ordinary conversation. If that is genuinely ambiguous, it
+registers the exact request and asks a concise natural clarification; the same
+speaker's later natural answer resumes it by that answer's exact ref. Members
+never need a command or exact reply form.
 
-Prepare revalidates the same authority immediately before private context is
-read and returns the exact immutable permission to the runtime. The personal
-read-only child proposes one candidate under that permission. There is no
-incoming model reviewer. One separate fresh one-shot outgoing reviewer has no
-personal workspace, history, application tools, network, or delivery route and
-receives only the permission, question, and candidate. It returns only `allow`
-or `deny`; it cannot rewrite or redact. Invalid output, refusal, timeout, provider
-failure, or ambiguity fails closed, and denied candidate bytes do not enter a
-Murph mailbox, vault, assistant state, operational log, or error.
+Web reloads each exact source and is the sole identity, route, and admission
+owner. It derives the sender, locks every canonical and bounded legacy request
+alias, prevents replay from changing the already-fixed result destination, and appends at
+most one request. A private request must already have a current same-channel
+direct route. A group-bound request must first deliver the deterministic room
+notice; notice failure prevents the Web call. Missing private routing returns
+immediate concise recovery guidance without enqueuing personal work. The
+mailbox item persists one `current_sender_personal` read target, a separate
+`origin_context` or same-channel `requester_direct` result destination, and the
+self-only permission text before the personal runtime starts. The request id is
+derived from the exact source, not the destination, so replay cannot change the
+stored choice. The clarification pointer copies no question text, expires after
+ten minutes through the bounded hourly retention owner, and is also removed by
+account deletion. Current-sender clarification and continuation transitions use
+the existing stateful dynamic-tool chain in provider request order, so an
+earlier clarification settles before a later continuation may begin its notice
+or Web effect; independent new exact-ref requests remain concurrent.
 
-On an allow, the completion control path revalidates the group, personal
+At accepted App Server request intake, strict parsing precedes one turn-local
+decision claim per exact accepted ref in App Server request arrival order. The
+claim happens before dynamic-tool lane selection or the pre-tool hook, so a
+later immediate `new` request cannot overtake an earlier serialized
+clarification or continuation. A different same-ref clarification, group,
+private, new, or continuation decision fails before a notice, Web admission,
+or clarification write. Exact repeated group decisions share one in-flight
+notice; notice failure retains the group claim for the invocation rather than
+allowing a private switch. Different exact refs remain independently concurrent.
+The claim is invocation-local only. Web's canonical exact-source request
+identity remains the durable replay and destination fence across invocations
+and restarts.
+
+Prepare reloads the same source and revalidates membership, group routing,
+permission, fixed result destination, and any required private route immediately before
+private context is read. The personal read-only child proposes one candidate
+under that immutable permission. There is no incoming model reviewer. One fresh
+one-shot outgoing reviewer has no personal workspace, history, application
+tools, network, audience choice, or delivery route. It receives only the fixed
+permission, question, and candidate and returns only `allow` or `deny`; it
+cannot rewrite or redact. Invalid output, refusal, timeout, provider failure, or
+ambiguity fails closed, and denied candidate bytes do not enter a Murph mailbox,
+vault, assistant state, operational log, or error.
+
+Completion cannot change result destination. `origin_context` uses the existing
+authorized group completion. If a valid answered group completion was already
+persisted when the current sender loses personal runtime access, provider-entry
+authority returns the existing fixed-fallback signal and the outbox substitutes
+the non-disclosing terminal before provider dispatch. Malformed envelopes and
+destination mismatches remain authority failures. `requester_direct` uses the
+existing same-channel private notification with exact reviewed text and a
+separate deterministic delivery identity. It cannot occupy the canonical group
+completion/fallback identity. If that direct route disappears after admission or at provider entry,
+or if the request expires before prepare, Web persists a fresh non-disclosing
+`cannot_answer` completion to the already-authorized originating group; the
+private answer never falls back. Replay, restart, and concurrent prepare or
+completion observe the persisted terminal result. Provider-entry replay checks
+that fallback before live-route authorization, so route recovery cannot revive
+the superseded private effect after a lost authority response. When the private
+effect committed first but its detached-control response was lost, expired
+control replay re-hands that effect and leaves any fallback conversion to its
+provider-entry owner rather than creating a competing terminal. A detached
+runner must requeue rather than consume a terminal or unavailable response that
+has no persisted completion.
+
+New callers identify the strict protocol with the single
+`currentSenderProtocol: "v3"` body field. During Web-first rollout, Web rejects
+deployed unmarked old `ask_current_sender` bodies because those runtimes cannot
+prove that the required exact-room notice preceded the personal read. That
+optional group consultation fails closed until the runtime is recycled. Web
+continues to accept unmarked old `message_current_sender` bodies for private
+delivery, whose authority has no room-notice prerequisite, and drains
+already-accepted `group_sender` or `group_sender_private` mailbox work. It
+reloads the exact source and preserves the old private call's meaning. New work
+writes only the unified current-sender target and separate result destination.
+The undeployed dual URL marker, model-authored destination dialect, and
+intermediate request-id alias are rejected rather than preserved. Remove the
+old action parsing and legacy request-id lookup eleven minutes after all old runners are
+recycled: the existing ten-minute request TTL plus a one-minute queue margin.
+
+
+For `consented_member` requests, on an allow the completion control path
+revalidates the group, personal
 runtime, membership generation, grant generation, permission digest, origin,
 expiry, and active fences again. It appends one deterministic
 `assistant.ask.completed` item to the bound group runtime. The trusted `origin`
@@ -2103,22 +2195,26 @@ that is already due is suppressed from generic runtime-timer projection and can
 be admitted only by its connection mailbox wake.
 
 The executable WHOOP regression fixes one canonical schedule-event identity and
-one durable mailbox-item identity. Its initial trace restores the committed
-artifact, fetches the mailbox item, issues sleep, recovery, cycle, and workout
-reads, writes four artifacts, commits checkpoint 1, and injects the only failure
-at checkpoint 2 record/completion persistence. Cold restore from checkpoint 1 in
-the next five-minute bucket lacks the machine-local SQLite execution record and
-replays those same four method/path classes exactly once, for eight requests
-total. That 00:05 recovery pass makes three successful checkpoint attempts and
-advances the workspace from version 1 through version 4. Its retained
-completion-fence wake is due at 00:05:30 and carries the 06:05 provider cadence.
-The completion pass makes no third provider pull, makes two successful
-checkpoints through version 6, and publishes 06:05 only after the durable
+one durable mailbox-item identity. The fixture commits the clean input workspace
+through the production v2 checkpoint bridge. Its initial incident pass then
+fetches the mailbox item, issues sleep, recovery, cycle, and workout reads, writes
+four artifacts, and creates the machine-local SQLite execution record. The
+production v2 post-pull archive plan observes the live SQLite store, omits it from
+the archive, and retains the durable system-mailbox state. The only injected
+failure rejects that snapshot checkpoint, so the clean input ref remains the last
+committed snapshot. In the next five-minute bucket, the production v2 restore
+dispatch restores that exact ref without the SQLite execution record,
+reconstructs the pending obligation from durable mailbox authority, and replays
+those same four method/path classes exactly once,
+for eight requests total. That 00:05 recovery pass makes three successful
+checkpoints. Its retained completion-fence wake is due at 00:05:30 and carries
+the 06:05 provider cadence. The completion pass makes no third provider pull,
+makes two successful checkpoints, and publishes 06:05 only after the durable
 recovery/completion checkpoint. The 00:10 pass returns idle with no wake and
-makes one bounded post-publication convergence checkpoint through version 7;
-the 00:15 pass is fully quiescent. The full proof observes eight checkpoint
-attempts, seven commits, one injected failure, and no provider work after the
-single replay.
+makes one bounded post-publication convergence checkpoint; the 00:15 pass is
+fully quiescent. Within the measured incident window, the proof observes eight
+checkpoint attempts, seven commits, one injected failure, and no provider work
+after the single replay.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

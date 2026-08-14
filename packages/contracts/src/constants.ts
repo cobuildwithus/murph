@@ -128,6 +128,8 @@ export const EVENT_SOURCES = Object.freeze(["manual", "import", "device", "deriv
 
 export const OBSERVATION_GRAINS = Object.freeze(["sample", "summary", "derived_fact"] as const);
 
+export const HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER = "hosted-mailbox-causal-seq";
+
 export const EXPERIMENT_PHASES = Object.freeze(["start", "checkpoint", "stop"] as const);
 
 export const SAMPLE_STREAMS = Object.freeze([

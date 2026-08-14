@@ -840,12 +840,14 @@ export class JunctionClient {
         timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
       });
       let capturedResponse: JunctionSdkResponseCapture | null = null;
+      let observedOptionalNotFound = false;
       const sdkFetch: typeof fetch = async (input, init) => {
         const response = await this.fetchImpl(input, {
           ...init,
           signal: requestAbort.signal,
         });
         if (options.optional404 && response.status === 404) {
+          observedOptionalNotFound = true;
           await response.body?.cancel().catch(() => undefined);
           return new Response(null, {
             headers: response.headers,
@@ -909,6 +911,11 @@ export class JunctionClient {
           && isProviderTimeoutError(providerError, requestAbort.signal)
         ) {
           break;
+        }
+
+        if (observedOptionalNotFound) {
+          throwIfProviderRequestAborted(requestAbort.signal);
+          return null as T;
         }
 
         const sdkFailure = readJunctionSdkHttpFailure(error)
