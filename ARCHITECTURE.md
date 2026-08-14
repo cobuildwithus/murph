@@ -53,6 +53,15 @@ the dedicated system-mailbox lane likewise offers before acknowledging imported
 dirty state. Conversation work still preempts the offer. Group reads query the
 current Web-owned snapshot on demand, so publication adds no per-group wake,
 cache invalidation, fanout, or second projection owner.
+
+A group participant's explicit dated daily-metric report uses that same owner
+split. The model submits the exact accepted-message ref, never a member id. Web
+reopens the accepted group input, resolves its current canonical sender, and
+appends one deterministic encrypted mailbox wake to that sender's personal
+runtime. The runtime stores a canonical `manual` daily observation beside, not
+over, wearable evidence and reuses the system-mailbox post-checkpoint projection
+opportunity to replace any already-granted group snapshots. There is no Web
+health-value table, override row, correction join, or projection-specific queue.
 The runtime resolves active Web-owned scopes without touching the vault, then
 materializes every selected record while the invocation still owns the restored
 vault path. Scope resolution receives the invocation's abort signal, so a

@@ -26120,6 +26120,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let activeProjectionDeliveries = 0;
     let assistantPhaseCalls = 0;
     let checkpointEffectCalls = 0;
+    const checkpointEffectProjectionOutcomes: string[] = [];
     let checkpointCount = 0;
     let conversationAssistantPhaseEvent: string | null = null;
     let peakActiveProjectionDeliveries = 0;
@@ -26279,8 +26280,13 @@ describe("hosted workspace runtime entrypoint", () => {
               secondConversationAssistantStarted.resolve();
             }
             const afterDurableCheckpoint = Object.assign(
-              async () => {
+              async (context?: {
+                vaultShareProjectionResult?: { outcome: string };
+              }) => {
                 checkpointEffectCalls += 1;
+                checkpointEffectProjectionOutcomes.push(
+                  context?.vaultShareProjectionResult?.outcome ?? "missing",
+                );
                 events.push("device-sync.dirty-ack");
                 assert.deepEqual(projectionKinds.slice(-3), [
                   "sleep-times.v0",
@@ -26290,6 +26296,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 assert.equal(activeProjectionDeliveries, 0);
               },
               {
+                requiresVaultShareProjectionResult: true,
                 vaultShareProjectionFailureWake: {
                   nextWakeAt: TEST_NOW,
                   nextWakeReason: "device-sync.reconcile" as const,
@@ -26439,6 +26446,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "time-zone.v0",
       ]);
       assert.equal(checkpointEffectCalls, 1);
+      assert.deepEqual(checkpointEffectProjectionOutcomes, ["delivered"]);
       assert.ok(
         events.lastIndexOf("vault-share.deliver:done")
           < requireEventIndex(events, "device-sync.dirty-ack"),
