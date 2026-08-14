@@ -57,6 +57,7 @@ import {
 } from "./hosted-http.ts";
 
 const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
+const WORKSPACE_SNAPSHOT_PRESIGN_PUT_MAX_ATTEMPTS = 2;
 const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS = 2_000;
 const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_MAX_BYTES = 16 * 1024;
 const WORKSPACE_SNAPSHOT_R2_ERROR_BODY_READ_TIMEOUT_MS = 1_000;
@@ -799,27 +800,47 @@ async function presignWorkspaceSnapshotPut(input: {
       input.workspaceCheckpointBridge,
       "Hosted workspace snapshot presign PUT",
     );
-  const payload = await fetchHostedJson({
-    body: {
-      encryptedByteSize: input.encryptedByteSize,
-      encryptedObjectSha256: input.encryptedObjectSha256,
-      objectKey: input.objectKey,
-      snapshotId: input.snapshotId,
-    },
-    description: "Hosted workspace snapshot presign PUT",
-    exposeResponseBodyInError: false,
-    fetchImpl: input.fetchImpl,
-    headers,
-    redactedLogPath: "/workspace-snapshots/REDACTED/presign-put",
-    method: "POST",
-    signal: input.signal ?? null,
-    timeoutMs: input.timeoutMs,
-    url: new URL(
-      `/workspace-snapshots/${encodeURIComponent(input.snapshotId)}/presign-put`,
-      `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
-    ),
-  });
-  return parseHostedWorkspaceSnapshotPresignedPutPayload(payload);
+  const body = {
+    encryptedByteSize: input.encryptedByteSize,
+    encryptedObjectSha256: input.encryptedObjectSha256,
+    objectKey: input.objectKey,
+    snapshotId: input.snapshotId,
+  };
+  const url = new URL(
+    `/workspace-snapshots/${encodeURIComponent(input.snapshotId)}/presign-put`,
+    `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+  );
+  // A lost response is replay-safe only for this exact session-bound request:
+  // the server revalidates the same write fence and monotonically records its
+  // bounded R2 PUT-drain deadline before returning another presign.
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    assertHostedWorkspaceSnapshotOperationLive(input.signal);
+    try {
+      const payload = await fetchHostedJson({
+        body,
+        description: "Hosted workspace snapshot presign PUT",
+        exposeResponseBodyInError: false,
+        fetchImpl: input.fetchImpl,
+        headers,
+        redactedLogPath: "/workspace-snapshots/REDACTED/presign-put",
+        method: "POST",
+        signal: input.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        url,
+      });
+      return parseHostedWorkspaceSnapshotPresignedPutPayload(payload);
+    } catch (error) {
+      assertHostedWorkspaceSnapshotOperationLive(input.signal);
+      if (
+        attempt >= WORKSPACE_SNAPSHOT_PRESIGN_PUT_MAX_ATTEMPTS
+        || !isRetryableHostedRuntimeReplaySafeReadTransportError(error)
+      ) {
+        throw error;
+      }
+    }
+  }
 }
 
 function assertHostedWorkspaceSnapshotOperationLive(
