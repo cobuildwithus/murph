@@ -26,6 +26,28 @@ describe("Telegram rich content card", () => {
     );
   });
 
+  it("ignores formatting whitespace inside structural containers", () => {
+    const card = telegramRichContentResponseCardV1Schema.parse({
+      kind: "telegram_rich_content",
+      version: 1,
+      html: `
+        <h2>Plan</h2>
+        <ul>
+          <li>First</li>
+          <li>Second</li>
+        </ul>
+        <table>
+          <tr><th>Day</th><th>Time</th></tr>
+          <tr><td>Monday</td><td>20 min</td></tr>
+        </table>
+      `,
+    });
+
+    expect(renderTelegramRichContentResponseCardTextV1(card)).toBe(
+      "Plan\n\n• First\n• Second\n\nDay | Time\nMonday | 20 min",
+    );
+  });
+
   it.each([
     ["unknown tag", "<h2>Guide</h2><script>Bad</script>"],
     ["remote image", '<h2>Guide</h2><img src="https://example.test/a.png">'],
@@ -79,5 +101,4 @@ describe("Telegram rich content card", () => {
 
     expect(parseHtml(`<h2>${"x".repeat(4_097)}</h2>`).success).toBe(false);
   });
-
 });
