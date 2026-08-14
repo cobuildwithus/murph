@@ -257,7 +257,8 @@ proves why deletion, reordering, an existing owner, or derivation from an
 existing source of truth cannot preserve the requirement. If a serious defect
 cannot be corrected inside the existing ownership boundary without that
 machinery, return `RETROSPECTIVE_REQUIRED`; do not prescribe another
-compensating patch.
+compensating patch. Findings caused by one mechanism must share one root-cause
+correction instead of accumulating guards.
 
 # Change-shape anomaly
 
@@ -383,6 +384,10 @@ For each finding provide:
    merge
 4. the production-faithful scenario or end-to-end path that validates it
 5. the smallest safe correction and focused validation it needs
+6. `Complexity disposition:` followed by what the correction deletes, combines,
+   reorders, derives, reuses, adds, or changes outside production; when it adds
+   a production concept, branch, state, or owner, include the evidence that
+   rules out deletion, combination, reordering, derivation, and reuse
 
 For a Complexity Collapse, also state the expected net deletion, concepts or
 owners removed, and invariants the smaller shape preserves.
