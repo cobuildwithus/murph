@@ -413,6 +413,12 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       return current
     }
     const baseIntent = current ?? input.sending
+    if (
+      input.deliveryMayHaveSucceeded &&
+      carriesPersistedDeliveryCompletionCheckpoint(baseIntent)
+    ) {
+      return baseIntent
+    }
     const stableLinqPartialDelivery = linqPartialDelivery
       ? preserveAssistantOutboxAcceptedMediaDeliveryOrder({
           delivery: linqPartialDelivery,
@@ -423,9 +429,6 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       carriesNonConfirmableLinqRichLinkCheckpoint(baseIntent)
     const retainLinqReactionConfirmation =
       hasConcreteLinqMessageReactionReceipt(baseIntent)
-    const preserveDeliveryCompletionCheckpoint =
-      input.deliveryMayHaveSucceeded &&
-      carriesPersistedDeliveryCompletionCheckpoint(baseIntent)
     const attemptCount = baseIntent.attemptCount
     const failedAt = input.failedAt.toISOString()
     const retryExhausted = retryRequested &&
@@ -463,9 +466,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
             ? input.deliveryTransportIdempotent
             : (current?.deliveryTransportIdempotent ??
                 input.sending.deliveryTransportIdempotent),
-        updatedAt: preserveDeliveryCompletionCheckpoint
-          ? baseIntent.updatedAt
-          : failedAt,
+        updatedAt: failedAt,
         nextAttemptAt,
         status: abandonedDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
         lastError: deliveryError,

@@ -3231,20 +3231,20 @@ describe('assistant outbox runtime', () => {
 
     expect(interrupted.intent).toMatchObject({
       deliveryConfirmationPending: true,
-      status: 'retryable',
+      nextAttemptAt: null,
+      status: 'sending',
       updatedAt: completedAt,
     })
     expect(interrupted.intent.delivery?.sentAt).toBe(acceptedMediaAt)
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
-    const retryAt = interrupted.intent.nextAttemptAt
-    if (!retryAt) {
-      throw new Error('Expected the hook failure to schedule recovery.')
-    }
-    vi.setSystemTime(new Date(retryAt))
+    const staleRecoveryAt = new Date(
+      Date.parse(completedAt) + 10 * 60 * 1_000,
+    ).toISOString()
+    vi.setSystemTime(new Date(staleRecoveryAt))
 
     const recovered = await dispatchAssistantOutboxIntent({
       intentId: seeded.intentId,
-      now: new Date(retryAt),
+      now: new Date(staleRecoveryAt),
       vault: vaultRoot,
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
@@ -3283,6 +3283,72 @@ describe('assistant outbox runtime', () => {
         }),
       }),
     )
+  })
+
+  it('does not resend a non-idempotent delivery after its persistence hook fails', async () => {
+    vi.useFakeTimers()
+    const completedAt = '2026-04-08T04:03:00.000Z'
+    const hookFailedAt = '2026-04-08T04:04:00.000Z'
+    vi.setSystemTime(new Date(completedAt))
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-non-idempotent-checkpoint-hook-',
+    )
+    const seeded = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T04:00:00.000Z',
+      message: 'Non-idempotent checkpoint recovery reminder',
+      sessionId: 'session-non-idempotent-checkpoint-hook',
+      turnId: 'turn-non-idempotent-checkpoint-hook',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageId: 'provider-non-idempotent-checkpoint-hook',
+        sentAt: completedAt,
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const interrupted = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        persistDeliveredIntent: async () => {
+          vi.setSystemTime(new Date(hookFailedAt))
+          throw new Error('non-idempotent post-persistence hook failed')
+        },
+      },
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date(completedAt),
+      vault: vaultRoot,
+    })
+
+    expect(interrupted.intent).toMatchObject({
+      deliveryConfirmationPending: false,
+      deliveryTransportIdempotent: false,
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: completedAt,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    const staleRecoveryAt = new Date(
+      Date.parse(completedAt) + 10 * 60 * 1_000,
+    ).toISOString()
+    vi.setSystemTime(new Date(staleRecoveryAt))
+    const recovered = await dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date(staleRecoveryAt),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(recovered.intent).toMatchObject({
+      sentAt: completedAt,
+      status: 'sent',
+      updatedAt: completedAt,
+    })
   })
 
   it('delivers immediately, reuses sent dedupe hits, and supports queue-only mode', async () => {
