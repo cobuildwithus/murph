@@ -3490,6 +3490,89 @@ test.each(
   },
 )
 
+test.each([
+  {
+    channel: 'linq' as const,
+    clarification:
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+    code: 'local_at_gap',
+  },
+  {
+    channel: 'linq' as const,
+    clarification:
+      'For reminder "Fold reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+    code: 'local_at_fold',
+  },
+  {
+    channel: 'telegram' as const,
+    clarification:
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+    code: 'local_at_gap',
+  },
+  {
+    channel: 'telegram' as const,
+    clarification:
+      'For reminder "Fold reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+    code: 'local_at_fold',
+  },
+])(
+  'sendAssistantNotificationLocal composes $channel $code clarification with parsed scheduled text',
+  async ({ channel, clarification }) => {
+    const providerAuthoredResponse = JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Need a replacement local time.',
+      text: 'That time does not exist.',
+    })
+    const runtimeResponse = `${providerAuthoredResponse}\n\n${clarification}`
+    const providerResult = createProviderResult({
+      providerAuthoredResponse,
+      response: runtimeResponse,
+      transcriptResponse: runtimeResponse,
+    })
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: `turn-${channel}-scheduled-local-time-clarification`,
+      })
+
+    const result = await sendAssistantNotificationLocal({
+      channel,
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryTarget: `direct-${channel}-scheduled-local-time-clarification`,
+      instructions: 'Create the requested local-time reminder or ask for correction.',
+      scheduledInvocationAuthority: {
+        automationId: 'scheduled-local-time-clarification',
+        occurrenceAt: '2026-03-01T14:00:00.000-05:00',
+      },
+      threadIsDirect: true,
+      vault: `/vaults/${channel}-scheduled-local-time-clarification`,
+    })
+
+    const expectedText = `That time does not exist.\n\n${clarification}`
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Need a replacement local time.',
+        text: expectedText,
+      },
+      response: expectedText,
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      channel,
+      message: expectedText,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantTranscriptText: expectedText }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'privateSummary',
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'send_message',
+    )
+  },
+)
+
 test.each(['linq', 'telegram', 'email'] as const)(
   'sendAssistantNotificationLocal rejects a $channel skip after cardless recovery',
   async (channel) => {

@@ -176,6 +176,16 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
+type AssistantNotificationSendDecision = Extract<
+  AssistantNotificationDecision,
+  { kind: 'send_message' }
+>
+
+interface AssistantNotificationPresentation {
+  responseText: string
+  transcriptText: string
+}
+
 export type AssistantNotificationTurnPolicy =
   | {
       kind: 'maintenance-exact-skip'
@@ -692,18 +702,13 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
-        const responseText = runtimeOwnsFinalPresentation
-          ? normalizeRequiredText(
-              providerResult.response,
-              'runtime-owned notification response',
-            )
-          : normalizeRequiredText(decision.text, 'notification response')
-        const transcriptText = runtimeOwnsFinalPresentation
-          ? normalizeRequiredText(
-              providerResult.transcriptResponse ?? responseText,
-              'runtime-owned notification transcript',
-            )
-          : responseText
+        const { responseText, transcriptText } =
+          resolveAssistantNotificationPresentation({
+            decision,
+            providerAuthoredResponse,
+            providerResult,
+            runtimeOwnsFinalPresentation,
+          })
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -914,6 +919,62 @@ export async function sendAssistantNotificationLocal(
       }
     },
   })
+}
+
+function resolveAssistantNotificationPresentation(input: {
+  decision: AssistantNotificationSendDecision
+  providerAuthoredResponse: string
+  providerResult: {
+    response: string
+    responseCard?: AssistantResponseCard | null
+    transcriptResponse?: string | null
+  }
+  runtimeOwnsFinalPresentation: boolean
+}): AssistantNotificationPresentation {
+  if (!input.runtimeOwnsFinalPresentation) {
+    const responseText = normalizeRequiredText(
+      input.decision.text,
+      'notification response',
+    )
+    return { responseText, transcriptText: responseText }
+  }
+
+  const authoredResponse = input.providerAuthoredResponse
+  const runtimeResponse = input.providerResult.response
+  const hasAppendOnlyRuntimePresentation =
+    (input.providerResult.responseCard === null ||
+      input.providerResult.responseCard === undefined) &&
+    authoredResponse.length > 0 &&
+    runtimeResponse !== authoredResponse &&
+    runtimeResponse.startsWith(authoredResponse)
+  if (hasAppendOnlyRuntimePresentation) {
+    const responseText = normalizeRequiredText(
+      `${input.decision.text}${runtimeResponse.slice(authoredResponse.length)}`,
+      'runtime-extended notification response',
+    )
+    const runtimeTranscript = input.providerResult.transcriptResponse
+    const transcriptText =
+      typeof runtimeTranscript === 'string' &&
+        runtimeTranscript.startsWith(authoredResponse)
+        ? normalizeRequiredText(
+            `${input.decision.text}${runtimeTranscript.slice(authoredResponse.length)}`,
+            'runtime-extended notification transcript',
+          )
+        : responseText
+    return { responseText, transcriptText }
+  }
+
+  const responseText = normalizeRequiredText(
+    runtimeResponse,
+    'runtime-owned notification response',
+  )
+  return {
+    responseText,
+    transcriptText: normalizeRequiredText(
+      input.providerResult.transcriptResponse ?? responseText,
+      'runtime-owned notification transcript',
+    ),
+  }
 }
 
 async function sendAssistantExactTextNotificationLocal(input: {

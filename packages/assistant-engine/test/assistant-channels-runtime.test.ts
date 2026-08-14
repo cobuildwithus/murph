@@ -2973,7 +2973,7 @@ describe('assistant channels runtime seam', () => {
       },
       operation: 'create_chat',
     },
-  ])('rejects oversized final Linq text before private media work for $operation', async ({
+  ])('rejects more than 100 final Linq parts before private media work for $operation', async ({
     input,
     operation,
   }) => {
@@ -2982,16 +2982,17 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendLinqMessage({
       ...input,
-      media: [{
-        alt: 'x'.repeat(9_998),
+      message: 'x'.repeat(600_001),
+      media: Array.from({ length: 40 }, (_, index) => ({
+        alt: null,
         contentType: 'image/png',
-        filename: 'oversized.png',
+        filename: `oversized-${index}.png`,
         kind: 'vault_image',
-        ref: 'raw/captures/oversized.png',
-        sha256: 'a'.repeat(64),
+        ref: `raw/captures/oversized-${index}.png`,
+        sha256: index.toString(16).padStart(64, '0'),
         sizeBytes: bytes.byteLength,
         source: 'gpt-image-2',
-      }],
+      })),
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
       loadVaultImage,
@@ -2999,10 +3000,12 @@ describe('assistant channels runtime seam', () => {
       code: 'LINQ_INVALID_INPUT',
       context: {
         operation,
-        requestAttachmentMediaPartCount: 1,
-        requestMediaPartCount: 1,
-        requestMessageLength: 10_001,
+        requestAttachmentMediaPartCount: 40,
+        requestMediaPartCount: 40,
+        requestMessageLength: 600_001,
+        requestMessagePartCount: 101,
         requestPublicUrlMediaPartCount: 0,
+        requestTextPartCount: 61,
         retryable: false,
       },
       deliveryMayHaveSucceeded: false,
