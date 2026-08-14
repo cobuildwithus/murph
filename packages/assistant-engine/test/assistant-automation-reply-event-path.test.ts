@@ -21,6 +21,8 @@ import {
 } from '../src/assistant/automation/reply.ts'
 import {
   maintainAssistantAutoReplyRouteStateAtPaths,
+  readAssistantAutoReplyRouteState,
+  resolveAssistantAutoReplyOutboxExactRoute,
 } from '../src/assistant/automation/cross-session-route-state.ts'
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
@@ -122,6 +124,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
   vi.clearAllMocks()
   await Promise.all(tempRoots.splice(0).map((root) =>
     rm(root, { force: true, recursive: true }),
@@ -1251,6 +1254,8 @@ describe('assistant auto-reply event-first path', () => {
       terminalRetry: true,
     },
   ])('binds an accepted generated image $label', async ({ terminalRetry }) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime('2030-08-07T21:09:00.000Z')
     const vault = await createTempVault()
     const media = {
       alt: 'Generated image',
@@ -1375,7 +1380,7 @@ describe('assistant auto-reply event-first path', () => {
 
         linkAttemptCount += 1
         linkIdempotencyKeys.push(idempotencyKey)
-        if (linkAttemptCount <= 3) {
+        if (linkAttemptCount <= (terminalRetry ? 3 : 6)) {
           return new Response(JSON.stringify({
             error: 'rich-link endpoint temporarily unavailable',
           }), {
@@ -1423,6 +1428,10 @@ describe('assistant auto-reply event-first path', () => {
     if (!persistedPartial) {
       throw new Error('expected persisted retryable generated-image delivery')
     }
+    const firstAcceptedAt = persistedPartial.delivery?.sentAt
+    if (!firstAcceptedAt) {
+      throw new Error('expected accepted generated-image delivery time')
+    }
     expect(persistedPartial.delivery).toMatchObject({
       providerMessageEffects: [{
         carriesIntentMedia: true,
@@ -1452,6 +1461,7 @@ describe('assistant auto-reply event-first path', () => {
       Date.parse(nextAttemptAt) - 1_000,
     ).toISOString()
     if (terminalRetry) {
+      vi.setSystemTime(nextAttemptAt)
       const terminal = await dispatchAssistantOutboxIntent({
         dependencies: { sendLinq },
         intentId: intent.intentId,
@@ -1507,13 +1517,74 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.resolveAssistantSession).toHaveBeenCalled()
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     if (!terminalRetry) {
-      const recovered = await dispatchAssistantOutboxIntent({
+      const route = resolveAssistantAutoReplyOutboxExactRoute(persistedPartial)
+      if (!route) {
+        throw new Error('expected exact Linq route for accepted media delivery')
+      }
+      const consumedReceipt = createConsumedCrossSessionReceipt({
+        intentId: intent.intentId,
+        updatedAt: replyOccurredAt,
+      })
+      replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+        consumedReceipt,
+      ])
+      await completeAutoReplyRouteMigration(vault)
+      expect(await readAssistantAutoReplyRouteState({
+        routeDigest: route.digest,
+        vault,
+      })).toEqual({
+        kind: 'ready',
+        settledThrough: {
+          intentId: intent.intentId,
+          sentAt: firstAcceptedAt,
+        },
+      })
+
+      const repeatedPartialAt = new Date(
+        Date.parse(firstAcceptedAt) + 30_000,
+      ).toISOString()
+      vi.setSystemTime(repeatedPartialAt)
+      const repeatedPartial = await dispatchAssistantOutboxIntent({
         dependencies: { sendLinq },
         intentId: intent.intentId,
         now: new Date(nextAttemptAt),
         vault,
       })
+      expect(repeatedPartial.intent.status).toBe('retryable')
+      expect(repeatedPartial.intent.updatedAt).toBe(repeatedPartialAt)
+      expect(repeatedPartial.intent.delivery?.sentAt).toBe(firstAcceptedAt)
+      const repeatedNextAttemptAt = repeatedPartial.intent.nextAttemptAt
+      if (!repeatedNextAttemptAt) {
+        throw new Error('expected repeated generated-image retry wake time')
+      }
+      replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+        repeatedPartial.intent,
+        otherDelivery,
+      ])
+      await completeAutoReplyRouteMigration(vault)
+      expect(await readAssistantAutoReplyRouteState({
+        routeDigest: route.digest,
+        vault,
+      })).toEqual({
+        kind: 'ready',
+        settledThrough: {
+          intentId: intent.intentId,
+          sentAt: firstAcceptedAt,
+        },
+      })
+
+      const successfulDeliveryAt = repeatedNextAttemptAt
+      vi.setSystemTime(successfulDeliveryAt)
+      const recovered = await dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq },
+        intentId: intent.intentId,
+        now: new Date(repeatedNextAttemptAt),
+        vault,
+      })
       expect(recovered.intent.status).toBe('sent')
+      expect(recovered.intent.sentAt).toBe(successfulDeliveryAt)
+      expect(recovered.intent.updatedAt).toBe(successfulDeliveryAt)
+      expect(recovered.intent.delivery?.sentAt).toBe(firstAcceptedAt)
       expect(recovered.intent.delivery).toMatchObject({
         providerMessageEffects: [
           {
@@ -1531,17 +1602,93 @@ describe('assistant auto-reply event-first path', () => {
           'linq-msg-retryable-generated-image-link',
         ],
       })
+
+      replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+        recovered.intent,
+        otherDelivery,
+      ])
+      await completeAutoReplyRouteMigration(vault)
+      expect(await readAssistantAutoReplyRouteState({
+        routeDigest: route.digest,
+        vault,
+      })).toEqual({
+        kind: 'ready',
+        settledThrough: {
+          intentId: intent.intentId,
+          sentAt: firstAcceptedAt,
+        },
+      })
+
+      replyEventPathMocks.sendAssistantMessage.mockClear()
+      await processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context: createReplyContext(createLinqGroupCandidate({
+          inputId: 'ain_21212121212121212121212121212121',
+          messageId: 'linq-msg-unanchored-after-link-retry',
+          occurredAt: new Date(
+            Date.parse(successfulDeliveryAt) + 10_000,
+          ).toISOString(),
+          text: 'A later unanchored follow-up.',
+        })),
+        enabledChannels: ['linq'],
+        inboxServices: createInboxServices(),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault,
+      })
+      const unanchoredRetryInput = readSentInput()
+      expect(unanchoredRetryInput).not.toHaveProperty('turnContext')
+      expect(unanchoredRetryInput.receiptMetadata ?? {}).not.toHaveProperty(
+        AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+      )
+
+      const newDeliveryAt = new Date(
+        Date.parse(successfulDeliveryAt) + 20_000,
+      ).toISOString()
+      const newDelivery = createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-new-after-retryable-generated-avatar',
+        message: 'genuinely new context after the completed retry',
+        providerMessageId: 'linq-msg-new-after-generated-image-retry',
+        sentAt: newDeliveryAt,
+        sessionId: 'session-new-after-retryable-generated-avatar',
+        target: 'thread-1',
+      })
+      replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+        recovered.intent,
+        newDelivery,
+      ])
+      replyEventPathMocks.sendAssistantMessage.mockClear()
+      await processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context: createReplyContext(createLinqGroupCandidate({
+          inputId: 'ain_22222222222222222222222222222223',
+          messageId: 'linq-msg-unanchored-after-new-delivery',
+          occurredAt: new Date(
+            Date.parse(newDeliveryAt) + 10_000,
+          ).toISOString(),
+          text: 'What about the new update?',
+        })),
+        enabledChannels: ['linq'],
+        inboxServices: createInboxServices(),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault,
+      })
+      expect(readSentInput().turnContext).toContain(
+        'genuinely new context after the completed retry',
+      )
     }
     expect(acceptedPrimaryIds).toEqual(
       new Set(['linq-msg-retryable-generated-image-primary']),
     )
     expect(primaryAcceptanceCount).toBe(1)
-    expect(primaryIdempotencyKeys).toHaveLength(2)
+    expect(primaryIdempotencyKeys).toHaveLength(terminalRetry ? 2 : 3)
     expect(new Set(primaryIdempotencyKeys).size).toBe(1)
-    expect(linkIdempotencyKeys).toHaveLength(terminalRetry ? 3 : 4)
+    expect(linkIdempotencyKeys).toHaveLength(terminalRetry ? 3 : 7)
     expect(new Set(linkIdempotencyKeys).size).toBe(1)
-    expect(attachmentCount).toBe(2)
-    expect(loadVaultImage).toHaveBeenCalledTimes(2)
+    expect(attachmentCount).toBe(terminalRetry ? 2 : 3)
+    expect(loadVaultImage).toHaveBeenCalledTimes(terminalRetry ? 2 : 3)
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 

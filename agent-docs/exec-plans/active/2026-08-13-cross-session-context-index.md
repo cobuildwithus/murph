@@ -161,6 +161,14 @@ Updated: 2026-08-14
   mode at only the two route-authority boundaries, preserving its consumption
   watermark through retry and later sent transition without widening the
   unanchored foreground selector.
+- Final ReviewGPT round 6 found that the real successful Linq rich-link retry
+  replaced the accepted media delivery's nested timestamp, making the same
+  intent compare newer than its settled watermark. The correction reuses the
+  accepted media checkpoint as the stable per-intent route order through
+  repeated partial failures and final success. It preserves the first accepted
+  timestamp only inside the nested delivery while the intent's top-level
+  `sentAt` and `updatedAt` record actual completion; no new state, selector
+  exception, or migration version is introduced.
 
 ## Verification
 
@@ -185,4 +193,10 @@ Updated: 2026-08-14
   non-sent Linq media migration, cleanup retention, later sent transition,
   unanchored rejection, and final authority removal. The five route-state,
   runtime-residue, automation, wake, and reply-event suites pass 326 tests;
+  assistant-engine typecheck and build pass under Node 24.14.1.
+- ReviewGPT round 6 remediation: the production Linq dispatch path covers an
+  accepted generated-image primary, two rich-link partial attempts, exact
+  reply consumption, marker-missing migration, successful retry, stable
+  watermark maintenance, actual unanchored rejection, and eligibility of a
+  genuinely new intent. Five affected assistant-engine suites pass 249 tests;
   assistant-engine typecheck and build pass under Node 24.14.1.

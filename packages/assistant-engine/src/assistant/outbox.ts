@@ -85,6 +85,7 @@ import {
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   persistAssistantOutboxIntentLinqAppCardTextFallback,
+  preserveAssistantOutboxAcceptedMediaDeliveryOrder,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
   sameAssistantChannelDelivery,
@@ -1028,11 +1029,16 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       ...dispatchIntent,
       vault: input.vault,
     })
-    const delivery = assistantChannelDeliverySchema.parse({
+    const completedDelivery = assistantChannelDeliverySchema.parse({
       ...delivered.delivery,
       idempotencyKey:
         delivered.delivery.idempotencyKey ??
         dispatchIntent.deliveryIdempotencyKey,
+    })
+    const completedAt = completedDelivery.sentAt
+    const delivery = preserveAssistantOutboxAcceptedMediaDeliveryOrder({
+      delivery: completedDelivery,
+      intent: effectiveDispatchIntent,
     })
     deliveryTransportIdempotent =
       dispatchIntent.deliveryTransportIdempotent ||
@@ -1056,6 +1062,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
 
     const durableDeliveredIntent =
       await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+        completedAt,
         delivery,
         deliveryTransportIdempotent,
         intent: deliveredIntent,
@@ -1089,6 +1096,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     })
     preparedDispatchReserved = false
     const sentIntent = await markAssistantOutboxIntentSent({
+      completedAt,
       delivery,
       intent: deliveredOwnerIntent,
       intentPath: dispatchIntentPath,
