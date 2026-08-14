@@ -6,6 +6,8 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
@@ -567,6 +569,11 @@ async function executeAssistantCodexAttempt(input: {
       !restrictedOneShotTurn &&
       !nativeCapabilitiesRestrictedTurn &&
       !groupEmailTurn
+    const hostedLocalTestProviderTurn =
+      attemptPlan.route.providerOptions.modelProvider ===
+        HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID ||
+      attemptPlan.route.providerOptions.modelProvider ===
+        HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy:
@@ -698,7 +705,7 @@ async function executeAssistantCodexAttempt(input: {
               : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : ordinaryHostedWorkspaceTurn
-                ? executionPlan.executionContext?.hosted?.providerWorkspaceSandbox === true
+                ? hostedLocalTestProviderTurn
                   ? null
                   : MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
                 : null,

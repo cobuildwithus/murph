@@ -200,9 +200,19 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
       .map(readAssistantProviderRequestText)
       .join("\n\n");
     expect(providerRequestText).toContain(automationSlug);
-    expect(providerRequests.some((request) =>
-      containsCreatedAutomationResult(JSON.parse(request.body))
-    )).toBe(true);
+    const automationWriteResults = providerRequests.flatMap((request) =>
+      collectAutomationWriteResults(JSON.parse(request.body))
+    );
+    expect(automationWriteResults).toEqual([
+      expect.objectContaining({
+        action: "save",
+        created: true,
+        lookupId: automationSlug,
+        routeBinding: "current_conversation",
+        status: "active",
+        timingVerified: true,
+      }),
+    ]);
 
     const faultLogs = [
       requireScenario().harness.stdoutTail(2_000_000),
@@ -739,20 +749,78 @@ function collectJsonStrings(value: unknown): string[] {
   return [];
 }
 
-function containsCreatedAutomationResult(value: unknown): boolean {
+interface AutomationWriteResultSummary {
+  action: "patch" | "save";
+  created: boolean;
+  lookupId: string;
+  routeBinding: string;
+  status: string;
+  timingVerified: boolean;
+}
+
+function collectAutomationWriteResults(
+  value: unknown,
+): AutomationWriteResultSummary[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  const request = value as Record<string, unknown>;
+  if (!Array.isArray(request.input)) {
+    return [];
+  }
+  return request.input.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+    const item = entry as Record<string, unknown>;
+    return item.type === "custom_tool_call_output"
+      ? parseAutomationWriteResult(item.output)
+      : [];
+  });
+}
+
+function parseAutomationWriteResult(
+  value: unknown,
+): AutomationWriteResultSummary[] {
   if (typeof value === "string") {
-    return /"created"\s*:\s*true/u.test(value);
+    const trimmed = value.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}"))
+      || (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return parseAutomationWriteResult(JSON.parse(trimmed));
+      } catch {
+        return [];
+      }
+    }
+    return [];
   }
   if (Array.isArray(value)) {
-    return value.some(containsCreatedAutomationResult);
+    return value.flatMap(parseAutomationWriteResult);
   }
   if (value && typeof value === "object") {
-    return Object.entries(value).some(([key,entry]) =>
-      (key === "created" && entry === true)
-      || containsCreatedAutomationResult(entry)
-    );
+    const record = value as Record<string, unknown>;
+    if (
+      (record.action === "patch" || record.action === "save")
+      && typeof record.created === "boolean"
+      && typeof record.lookupId === "string"
+      && typeof record.routeBinding === "string"
+      && typeof record.status === "string"
+      && typeof record.timingVerified === "boolean"
+    ) {
+      return [{
+        action: record.action,
+        created: record.created,
+        lookupId: record.lookupId,
+        routeBinding: record.routeBinding,
+        status: record.status,
+        timingVerified: record.timingVerified,
+      }];
+    }
+    return Object.values(record).flatMap(parseAutomationWriteResult);
   }
-  return false;
+  return [];
 }
 
 function countResponsesApiRequests(): number {

@@ -125,9 +125,6 @@ import {
   prepareHostedAssistantAutomationForWake,
 } from "./context.ts";
 import {
-  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
-} from "./launch-spec.ts";
-import {
   readHostedAssistantInputCurrentDeliveryRoute,
   resolveUnambiguousCurrentDeliveryRoute,
 } from "./current-delivery-route.ts";
@@ -2010,9 +2007,6 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        ...(usesHostedLocalTestProvider(input.runtimeEnv)
-          ? { providerWorkspaceSandbox: true }
-          : {}),
         ...(input.currentAssistantInputId
           ? {
               currentAssistantInputId: input.currentAssistantInputId,
@@ -2975,18 +2969,6 @@ export async function runHostedWorkspaceAssistantPhase(
     releaseChannelAbortRelay();
     channelAbortController.abort();
   }
-}
-
-function usesHostedLocalTestProvider(
-  runtimeEnv: Readonly<Record<string, string>>,
-): boolean {
-  // The local provider override is accepted only for NODE_ENV=test and a
-  // loopback URL. Its Wrangler-managed outer container cannot host Codex's
-  // nested bubblewrap namespace; the native runner gate proves that profile.
-  return runtimeEnv.NODE_ENV?.trim() === "test"
-    && Boolean(
-      runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim(),
-    );
 }
 
 function hasFreshHostedConversationInput(

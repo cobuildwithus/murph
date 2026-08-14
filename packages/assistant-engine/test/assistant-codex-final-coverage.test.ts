@@ -12,6 +12,10 @@ import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
+import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'features.apps': false,
@@ -1067,29 +1071,32 @@ describe('Codex model catalog', () => {
     })
     expect(foregroundProviderInput).not.toHaveProperty('processLifetime')
 
-    if (!executionPlan.executionContext?.hosted) {
-      throw new Error('Expected hosted execution context.')
+    for (const modelProvider of [
+      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+    ]) {
+      route.providerOptions.modelProvider = modelProvider
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mockClear()
+
+      const localProviderOutcome = await executeCodexTurnWithRecovery({
+        input,
+        plan: createSharedPlan(),
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-08-10T00:02:00.000Z',
+        turnId: `turn-${modelProvider}-workspace-sandbox`,
+      })
+
+      expect(localProviderOutcome.kind).toBe('succeeded')
+      const localProviderInput =
+        providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+      expect(localProviderInput?.providerConfig).toMatchObject({
+        modelProvider,
+        sandbox: 'danger-full-access',
+      })
+      expect(localProviderInput?.permissions).toBeNull()
+      expect(localProviderInput?.runtimeWorkspaceRoots).toEqual(['/work'])
     }
-    executionPlan.executionContext.hosted.providerWorkspaceSandbox = true
-    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockClear()
-
-    const localProviderOutcome = await executeCodexTurnWithRecovery({
-      input,
-      plan: createSharedPlan(),
-      resolvedSession: session,
-      route,
-      turnCreatedAt: '2026-08-10T00:02:00.000Z',
-      turnId: 'turn-local-provider-workspace-sandbox',
-    })
-
-    expect(localProviderOutcome.kind).toBe('succeeded')
-    const localProviderInput =
-      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(localProviderInput?.providerConfig).toMatchObject({
-      sandbox: 'danger-full-access',
-    })
-    expect(localProviderInput?.permissions).toBeNull()
-    expect(localProviderInput?.runtimeWorkspaceRoots).toEqual(['/work'])
   })
 
   it('keeps only song generation while denying native creative-notification capabilities', async () => {
@@ -1231,7 +1238,11 @@ describe('Codex model catalog', () => {
   })
 
   it('runs immutable room-model maintenance as a one-shot tool-only permission turn', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
@@ -1254,7 +1265,12 @@ describe('Codex model catalog', () => {
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
-      executionContext: { hosted: null },
+      executionContext: {
+        hosted: {
+          memberId: 'member-room-model-maintenance',
+          userEnvKeys: [],
+        },
+      },
       hostedToolContext: null,
       input,
       profile: {
@@ -1335,7 +1351,11 @@ describe('Codex model catalog', () => {
   })
 
   it('keeps memory maintenance one-shot and isolated from reminder tools', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
@@ -1468,7 +1488,11 @@ describe('Codex model catalog', () => {
   })
 
   it('keeps onboarding goal check-ins on a vault-readable but mutation-denied turn', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })

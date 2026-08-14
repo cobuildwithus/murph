@@ -1300,17 +1300,22 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
       break;
     }
 
-    const durableSystemLaneAdvancedAndSettled = systemImportedSeq !== null
+    const durableSystemLaneAdvancedAndDrained = systemImportedSeq !== null
       && hasDecimalSequenceAdvanced(input.systemImportedSeqBefore, systemImportedSeq)
-      && systemImportedSeq === systemHandledThroughSeq
       && receiptStatus.mailboxLag.some((lane) =>
         lane.lane === "system" && lane.lag === "0"
       );
+    const durableSystemLaneAdvancedAndSettled =
+      durableSystemLaneAdvancedAndDrained
+      && systemImportedSeq === systemHandledThroughSeq;
     if (
       durableSystemLaneAdvancedAndSettled
       || (
         input.requireAdvancedDurableFrontier !== true
-        && recordedDeviceSyncLog !== undefined
+        && (
+          durableSystemLaneAdvancedAndDrained
+          || recordedDeviceSyncLog !== undefined
+        )
       )
     ) {
       return;

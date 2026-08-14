@@ -67,8 +67,9 @@ Updated: 2026-08-14
 - The representative shell-output failure is caused by the production named
   permission profile entering a Wrangler-managed local Docker container whose
   outer security profile cannot host Codex's nested bubblewrap namespace.
-- Keep the production permission profile unchanged. Only the already-validated
-  loopback model-provider override under `NODE_ENV=test` selects the provider's
+- Keep the production permission profile unchanged. The already-validated local
+  test provider override under `NODE_ENV=test` receives a reserved effective
+  provider identity, and only that routed identity selects the provider's
   workspace sandbox; the dedicated native runner gate remains the named-profile
   proof.
 - The Junction Link scenario's provider stub returns a legacy one-field user
