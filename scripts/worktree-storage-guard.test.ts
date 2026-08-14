@@ -466,7 +466,7 @@ touch hook-installed
     expect(growth.stderr).toContain('new unmanaged temporary checkout')
   })
 
-  it('warns without admitting a new unmanaged clone during a scoped commit', () => {
+  it('warns without admitting a new unmanaged clone during scoped worktree journeys', () => {
     const harness = createHarness()
     runGit(harness.primary, [
       'remote',
@@ -477,20 +477,48 @@ touch hook-installed
     const baseline = runScript(harness, 'worktree-storage-guard')
     expect(baseline.status, baseline.stderr).toBe(0)
 
+    const existingWorktree = path.join(harness.root, 'existing-worktree')
+    const initialCreation = runScript(harness, 'create-worktree', [
+      '-b',
+      'existing-worktree',
+      existingWorktree,
+    ])
+    expect(initialCreation.status, initialCreation.stderr).toBe(0)
+
     runGit(harness.root, [
       'clone',
       harness.primary,
       path.join(harness.tempRoot, 'murph-unrelated-task'),
     ])
-    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'scoped commit\n')
-    runGit(harness.primary, ['add', 'tracked.txt'])
+    writeFileSync(path.join(existingWorktree, 'tracked.txt'), 'scoped commit\n')
+    runGit(existingWorktree, ['add', 'tracked.txt'])
 
-    const commit = runScript(harness, 'committer', ['-m', 'scoped commit'], {
-      MURPH_TEST_COMMITTER_BIN: path.join(harness.fakeBin, 'cobuild-committer'),
+    const commit = spawnSync('bash', ['scripts/committer', '-m', 'scoped commit'], {
+      cwd: existingWorktree,
+      encoding: 'utf8',
+      env: guardEnvironment(harness, {
+        MURPH_TEST_COMMITTER_BIN: path.join(harness.fakeBin, 'cobuild-committer'),
+      }),
     })
-
     expect(commit.status, commit.stderr).toBe(0)
     expect(commit.stderr).toContain('warning: 1 new unmanaged temporary checkout')
+
+    const createdWorktree = path.join(harness.root, 'created-worktree')
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'created-worktree',
+      createdWorktree,
+    ])
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(creation.stderr).toContain('warning: 1 new unmanaged temporary checkout')
+    const createdAdmin = runGit(createdWorktree, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(
+      existsSync(path.join(createdAdmin, 'murph-storage-guard-authorized')),
+    ).toBe(true)
     expect(readFileSync(path.join(harness.state, 'unmanaged-temp-checkouts'), 'utf8')).toBe('')
 
     const globalAudit = runScript(harness, 'worktree-storage-guard')
