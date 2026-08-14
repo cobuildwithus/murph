@@ -15812,11 +15812,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     if (!effect) {
       throw new Error("Expected deferred vault-share projection effect.");
     }
-    await effect();
+    expect(effect.requiresVaultShareProjectionResult).toBe(true);
+    await effect({
+      vaultShareProjectionResult: { outcome: "delivered" },
+    });
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: vaultShareItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
+      vaultShareProjectionResult: { outcome: "delivered" },
       vaultRoot: "/tmp/murph-vault",
     });
   });

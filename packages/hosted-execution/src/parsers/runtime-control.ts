@@ -4,6 +4,9 @@ import {
   parseHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "../daily-metric.ts";
+import {
   parseHostedExecutionDeviceSyncExpectedConnectedAt,
 } from "./device-sync.ts";
 import {
@@ -175,6 +178,7 @@ import {
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
   type HostedRuntimeGroupCurrentSenderDirectResult,
+  type HostedRuntimeGroupDailyMetricReportResult,
   type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
@@ -1190,6 +1194,28 @@ export function parseHostedRuntimeGroupToolRequest(
       action: "ask_current_sender",
       audience: "current_sender",
       mode: "new",
+      origin,
+    };
+  }
+  if (action === "record_current_sender_daily_metric") {
+    const label = "Hosted runtime group tool record_current_sender_daily_metric request";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "dailyMetric", "origin"]),
+      label,
+    );
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label} origin must be an accepted input.`);
+    }
+    return {
+      action,
+      dailyMetric: parseHostedExecutionDailyMetricReportedPayload(
+        record.dailyMetric,
+      ),
       origin,
     };
   }
@@ -2597,6 +2623,33 @@ function parseHostedRuntimeGroupCurrentSenderDirectResult(
   throw new TypeError(`${label} status is invalid.`);
 }
 
+function parseHostedRuntimeGroupDailyMetricReportResult(
+  value: unknown,
+): HostedRuntimeGroupDailyMetricReportResult {
+  const label = "Hosted runtime group tool daily metric response result";
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "accepted") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+        result,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  throw new TypeError(`${label} status is invalid.`);
+}
+
 function parseHostedRuntimeGroupMemberAskResult(
   value: unknown,
   action: "ask_current_sender" | "ask_member",
@@ -2655,6 +2708,18 @@ export function parseHostedRuntimeGroupToolResponse(
     return {
       action,
       result: parseHostedRuntimeGroupCurrentSenderDirectResult(record.result),
+    };
+  }
+  if (action === "record_current_sender_daily_metric") {
+    const label = "Hosted runtime group tool daily metric response";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      label,
+    );
+    return {
+      action,
+      result: parseHostedRuntimeGroupDailyMetricReportResult(record.result),
     };
   }
   if (action === "message_current_sender") {

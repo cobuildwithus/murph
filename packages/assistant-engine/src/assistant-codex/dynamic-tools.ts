@@ -1,4 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
+import { isStrictIsoDate } from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
@@ -7,7 +8,11 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH,
 } from '@murphai/hosted-execution/contracts'
+import {
+  HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+} from '@murphai/hosted-execution'
 import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
@@ -446,6 +451,26 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('record_current_sender_daily_metric'),
+      date: z.string().refine(isStrictIsoDate, {
+        message: 'date must be a valid YYYY-MM-DD calendar date',
+      }),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+      metric: z.enum(
+        HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS as [string, ...string[]],
+      ),
+      unit: z
+        .string()
+        .min(1)
+        .max(HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH)
+        .regex(/^[A-Za-z0-9._/%-]+$/u),
+      value: z.number(),
     })
     .strict(),
   z
@@ -1024,6 +1049,7 @@ type MurphGroupToolRequest =
         action:
           | 'ask'
           | 'ask_current_sender'
+          | 'record_current_sender_daily_metric'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -1055,6 +1081,16 @@ type MurphGroupToolRequest =
       audience?: 'current_sender' | 'group'
       messageRef: string
       mode: 'clarification' | 'continuation' | 'new'
+    }
+  | {
+      action: 'record_current_sender_daily_metric'
+      dailyMetric: {
+        date: string
+        metric: string
+        unit: string
+        value: number
+      }
+      messageRef: string
     }
   | {
       action: 'ask_member'
@@ -4595,6 +4631,27 @@ async function executeGroupTool(input: {
         sessionId: userActionScope.originSessionId,
       },
     }
+  } else if (input.request.action === 'record_current_sender_daily_metric') {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'group'
+      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+    ) {
+      return toolTextResult(
+        false,
+        'current-sender request requires the selected accepted message in this group turn',
+      )
+    }
+    request = {
+      action: 'record_current_sender_daily_metric',
+      dailyMetric: input.request.dailyMetric,
+      origin: {
+        assistantInputId: input.request.messageRef,
+        kind: 'accepted_input',
+        sessionId: userActionScope.originSessionId,
+      },
+    }
   } else if (input.request.action === 'ask_member') {
     if (!invocationScope) {
       return toolTextResult(
@@ -6548,6 +6605,21 @@ function parseGroupArguments(
       request: {
         action: 'ask_current_sender',
         ...decision,
+        messageRef: parsed.data.message_ref,
+      },
+    }
+  }
+  if (parsed.data.action === 'record_current_sender_daily_metric') {
+    return {
+      ok: true,
+      request: {
+        action: parsed.data.action,
+        dailyMetric: {
+          date: parsed.data.date,
+          metric: parsed.data.metric,
+          unit: parsed.data.unit,
+          value: parsed.data.value,
+        },
         messageRef: parsed.data.message_ref,
       },
     }

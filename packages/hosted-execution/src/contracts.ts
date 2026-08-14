@@ -89,6 +89,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "environment-voice.captured",
+  "health.daily-metric.reported",
   "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
@@ -842,6 +843,22 @@ export interface HostedExecutionEnvironmentVoiceCapturedWake
   kind: "environment-voice.captured";
 }
 
+export const HOSTED_EXECUTION_DAILY_METRIC_MAX_METRIC_LENGTH = 120;
+export const HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH = 80;
+
+export interface HostedExecutionDailyMetricReportedPayload {
+  date: string;
+  metric: string;
+  unit: string;
+  value: number;
+}
+
+export interface HostedExecutionDailyMetricReportedWake
+  extends HostedExecutionBaseWake {
+  dailyMetric: HostedExecutionDailyMetricReportedPayload;
+  kind: "health.daily-metric.reported";
+}
+
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
@@ -895,6 +912,7 @@ export type HostedExecutionWake =
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentVoiceCapturedWake
+  | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake

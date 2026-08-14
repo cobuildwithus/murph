@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import {
   HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
   HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
   type HostedExecutionWake,
@@ -11,12 +12,14 @@ import {
 import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionTelegramConversationMessageWake,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
 } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
@@ -26,9 +29,11 @@ const mocks = vi.hoisted(() => ({
   hostedGroupCurrentSenderClarificationUpdateMany: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   lookupHostedGroupParticipantMemberByHandle: vi.fn(),
+  readHostedHealthDataConsentState: vi.fn(),
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
@@ -61,12 +66,14 @@ function asPrismaTransactionClient(
 }
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx:
     mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
@@ -120,6 +127,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
     mocks.resolveHostedMemberRoutingByTelegramUserId,
 }));
 
+vi.mock("@/src/lib/legal/consent", () => ({
+  readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
     $transaction: async (run: (tx: typeof fakeTx) => Promise<unknown>) => {
@@ -157,6 +168,10 @@ import {
   createHostedGroupCurrentSenderLegacyAssistantAskRequestId,
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
+import {
+  createHostedGroupCurrentSenderDailyMetricReportId,
+  recordHostedGroupCurrentSenderDailyMetric,
+} from "@/src/lib/hosted-groups/group-current-sender-daily-metric";
 
 const GROUP_RUNTIME_MEMBER_ID = "member_group_runtime";
 const OLDER_SENDER_MEMBER_ID = "member_older_sender";
@@ -253,6 +268,56 @@ async function admit(input: {
   return { admission, requestId };
 }
 
+function createTelegramSourceWake() {
+  return buildHostedExecutionTelegramConversationMessageWake({
+    eventId: "source_telegram_event",
+    occurredAt: "2026-07-27T19:59:59.000Z",
+    routeAuthority: {
+      channel: "telegram",
+      containerMemberId: GROUP_RUNTIME_MEMBER_ID,
+      threadId: "telegram_group",
+    },
+    telegramMessage: {
+      from: "123456789",
+      messageId: "42",
+      schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+      text: "Synthetic daily metric evidence",
+      threadId: "telegram_group",
+      threadIsDirect: false,
+    },
+    userId: GROUP_RUNTIME_MEMBER_ID,
+  });
+}
+
+function createEvidenceSourceWake(
+  kind: "linq-media" | "telegram-media" | "linq-long-caption",
+): CurrentSenderSourceWake {
+  if (kind === "telegram-media") {
+    const wake = createTelegramSourceWake();
+    wake.message.telegramMessage.text = null;
+    wake.message.telegramMessage.attachments = [{
+      fileId: "telegram_photo",
+      kind: "photo",
+    }];
+    return wake;
+  }
+  const wake = createSourceWake({
+    text: kind === "linq-long-caption" ? "x".repeat(1_201) : "placeholder",
+  });
+  if (kind === "linq-media") {
+    wake.message.linqMessage.parts = [{
+      attachmentId: "linq_photo",
+      mimeType: "image/png",
+      type: "media",
+    }];
+  }
+  return wake;
+}
+
+type CurrentSenderSourceWake =
+  | ReturnType<typeof createSourceWake>
+  | ReturnType<typeof createTelegramSourceWake>;
+
 function requireRequestedWake(requestId: string) {
   const wake = storedWakes.get(requestId);
   if (wake === undefined || !isHostedExecutionAssistantAskRequestedWake(wake)) {
@@ -324,6 +389,9 @@ describe("hosted current-sender Assistant Ask authority", () => {
     storedItems.clear();
     storedWakes.clear();
     sourceWakes.clear();
+    sourceWakes.set(CURRENT_INPUT_ID, createSourceWake({
+      text: "Synthetic daily metric evidence",
+    }));
     pendingClarifications.clear();
     directRouteAvailable = true;
 
@@ -378,6 +446,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
           : null;
       },
     );
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
     mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
     mocks.resolveHostedAssistantNotificationDestination.mockImplementation(
@@ -446,6 +515,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
         return { count: 1 };
       },
     );
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("missing");
     mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
       async (input: {
         envelope: HostedExecutionWake;
@@ -469,6 +539,173 @@ describe("hosted current-sender Assistant Ask authority", () => {
         return { dedupeConflict: false, item };
       },
     );
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(
+      async (input: { envelope: { eventId: string } }) => ({
+        dedupeConflict: false,
+        item: { id: `item_${input.envelope.eventId}` },
+      }),
+    );
+  });
+
+  it("resolves an exact committed metric across authority changes and rejects changed replay", async () => {
+    const dailyMetric = {
+      date: "2026-07-27",
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    };
+    const reportId = createHostedGroupCurrentSenderDailyMetricReportId({
+      date: dailyMetric.date,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      metric: dailyMetric.metric,
+      originAssistantInputId: CURRENT_INPUT_ID,
+    });
+
+    let admittedWake: Record<string, unknown> | null = null;
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        admittedWake && mailboxItemId === reportId
+          ? {
+              dedupeKey: reportId,
+              id: reportId,
+              kind: "health.daily-metric.reported",
+              occurredAt: admittedWake.occurredAt,
+              userId: admittedWake.userId,
+            }
+          : null,
+    );
+    mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
+      async (input: {
+        envelope: Record<string, unknown>;
+        itemId: string;
+      }) => {
+        const dedupeConflict = admittedWake !== null
+          && JSON.stringify(admittedWake) !== JSON.stringify(input.envelope);
+        admittedWake ??= input.envelope;
+        return {
+          dedupeConflict,
+          item: { id: input.itemId },
+        };
+      },
+    );
+
+    const admission = await recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: origin(),
+    });
+
+    expect(admission).toEqual({
+      mailboxWake: {
+        expectedUserId: CURRENT_SENDER_MEMBER_ID,
+        mailboxItemId: reportId,
+      },
+      result: { status: "accepted" },
+    });
+    const appendedWake =
+      mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[0]?.[0]
+        .envelope;
+    expect(appendedWake).toEqual({
+      dailyMetric,
+      eventId: reportId,
+      kind: "health.daily-metric.reported",
+      occurredAt: "2026-07-27T19:59:59.000Z",
+      userId: CURRENT_SENDER_MEMBER_ID,
+    });
+
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: origin(),
+    })).resolves.toEqual(admission);
+    expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric: { ...dailyMetric, value: 9_000 },
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: origin(),
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "report_conflict" },
+    });
+  });
+
+  it.each([
+    "linq-media",
+    "telegram-media",
+    "linq-long-caption",
+  ] as const)("admits a daily metric from %s while ask-only text policy stays closed", async (kind) => {
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      createEvidenceSourceWake(kind),
+    );
+    const dailyMetric = {
+      date: "2026-07-27",
+      metric: "steps",
+      unit: "count",
+      value: 9_000,
+    };
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: origin(),
+    })).resolves.toMatchObject({
+      mailboxWake: { expectedUserId: CURRENT_SENDER_MEMBER_ID },
+      result: { status: "accepted" },
+    });
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      audience: "group",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      mode: "new",
+      now: NOW,
+      origin: origin(),
+    })).resolves.toMatchObject({
+      mailboxWake: null,
+      result: { status: "unavailable" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a daily metric report after health-data consent is revoked", async () => {
+    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("revoked");
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric: {
+        date: "2026-07-27",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: origin(),
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "health_data_consent_revoked",
+      },
+    });
+
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      CURRENT_SENDER_MEMBER_ID,
+      expect.objectContaining({ prisma: fakeTx }),
+    );
+    expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledWith({
+      memberId: CURRENT_SENDER_MEMBER_ID,
+      prisma: fakeTx,
+    });
+    expect(
+      mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[1],
+    ).toBeLessThan(mocks.readHostedHealthDataConsentState.mock.invocationCallOrder[0]);
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
 

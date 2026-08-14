@@ -209,7 +209,50 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("reads exact Linq or Telegram text while preserving reply evidence elsewhere", () => {
+  it("parses the current sender's exact daily metric report", () => {
+    const request = {
+      action: "record_current_sender_daily_metric",
+      dailyMetric: {
+        date: "2026-07-27",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      origin: CURRENT_SENDER_ASK.origin,
+    } as const;
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      ...request,
+      targetMemberId: "model_selected_member",
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      ...request,
+      dailyMetric: { ...request.dailyMetric, date: "2026-02-30" },
+    })).toThrow(/date is invalid/u);
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "record_current_sender_daily_metric",
+      result: { status: "accepted" },
+    })).toEqual({
+      action: "record_current_sender_daily_metric",
+      result: { status: "accepted" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "record_current_sender_daily_metric",
+      result: {
+        status: "unavailable",
+        unavailableReason: "report_conflict",
+      },
+    })).toEqual({
+      action: "record_current_sender_daily_metric",
+      result: {
+        status: "unavailable",
+        unavailableReason: "report_conflict",
+      },
+    });
+  });
+
+  it("reads exact authored Linq or Telegram text and never email text", () => {
     expect(readHostedExecutionConversationMessageText({
       channel: "linq",
       linqMessage: {

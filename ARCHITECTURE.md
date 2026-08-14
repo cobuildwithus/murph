@@ -53,6 +53,15 @@ the dedicated system-mailbox lane likewise offers before acknowledging imported
 dirty state. Conversation work still preempts the offer. Group reads query the
 current Web-owned snapshot on demand, so publication adds no per-group wake,
 cache invalidation, fanout, or second projection owner.
+
+A group participant's explicit dated daily-metric report uses that same owner
+split. The model submits the exact accepted-message ref, never a member id. Web
+reopens the accepted group input, resolves its current canonical sender, and
+appends one deterministic encrypted mailbox wake to that sender's personal
+runtime. The runtime stores a canonical `manual` daily observation beside, not
+over, wearable evidence and reuses the system-mailbox post-checkpoint projection
+opportunity to replace any already-granted group snapshots. There is no Web
+health-value table, override row, correction join, or projection-specific queue.
 The runtime resolves active Web-owned scopes without touching the vault, then
 materializes every selected record while the invocation still owns the restored
 vault path. Scope resolution receives the invocation's abort signal, so a
@@ -628,6 +637,8 @@ Scheduled non-direct Telegram execution follows the same hint-only rule without 
 The vault automation record is the only owner of a support automation's schedule, status, route, optional finite `activeUntil`, exact plan-support `supportKind`, and reserved `system:support-series:<seriesId>` ownership tag. An automation may have at most one support-series tag. Once assigned, ordinary patch or upsert operations cannot remove or replace it; legacy unowned records may receive their first owner. Exact-series reconciliation atomically archives every active member outside the desired automation-id set while leaving user-paused members paused, and namespace reconciliation rejects duplicate ownership or one desired id assigned to two series. Plan-owned experiment, habit, and supplement support revalidates the immutable owner and its active status before provider work, immediately before delivery, and before commit. The active automation's typed support kind is the exact persisted support consent for habit and supplement plans; experiment support also requires its matching live `assistantSupport` switch. Execution re-reads canonical state immediately before delivery, archives an elapsed record when `now >= activeUntil`, and never sends after that boundary. A one-shot `activeUntil` must be later than its scheduled instant. Required-send retries remain eligible only while that finite window is open.
 
 Automation evidence distinguishes intent, dispatch, and receipt. Enqueue state, generated transcript, provider transcript, and a delivery attempt prove intent only. Provider acceptance or a runtime `sent` state proves dispatch, not handset receipt or reading. Only channel delivery/read evidence or a later member reply that refers to the message proves receipt. Silence without receipt evidence must not become ignored support, non-adherence, or refusal.
+
+Ordinary recurring reminder conversation policy is resident in scheduled execution rather than copied into each automation record. The current conversation and provider-accepted or runtime-sent outputs for the current automation revision provide the evidence: an unconfirmed immediately prior attempt sends normally; a relevant human reply informs the next cue; one unanswered dispatched cue may add a room- or member-scoped keep/change/pause question; and an unanswered cadence question skips later occurrences until someone replies about the reminder or explicitly resumes or changes it. The guarantee applies while the immediately prior confirmed output remains inside the ordinary 14-day cron-response evidence horizon, covering normal daily and weekly cadences. When that output has expired after a longer cadence or unusual delay, the scheduler sends the current cue normally rather than inferring silence. When any committed conversation detail is omitted by the existing age, count, or byte bounds, provider history includes one fixed privacy-safe incompleteness marker; the scheduler continues the cue instead of treating unavailable context as silence. The assistant transcript alone cannot prove dispatch because the notification path persists it before delivery. The cadence question administers reminder cadence only and cannot infer non-completion, assign group silence to an individual, or widen a reminder into a check-in or review. Medication, prescribed treatment, clinician-directed care, clinical monitoring, and safety-critical reminders are excluded: silence does not stop those cues without an explicit member change or pause or an existing authoritative skip condition. Known Murph-managed digests, maintenance, and closeout jobs are also excluded from the reminder decision tree. This uses the existing conversation, automation, run, and outbox owners without extending message-content retention or adding a reminder-specific state machine or history store; persisted automation instructions retain only the durable user request.
 
 ### Provider-Neutral Wearable Sleep Pattern Read Model
 
@@ -1563,7 +1574,19 @@ model context.
 
 Current hosted external-data lookup boundary: `apps/web` owns read-only product label lookup on `/api/foods` and `/api/supplements`, authenticated by the shared server-to-server `MURPH_DATA_API_KEY`. The shared labels database is configured by `MURPH_LABELS_DB_URL`, and both `/api/foods` and `/api/supplements` require it; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback. Deployments must configure `MURPH_LABELS_DB_URL` before serving label lookup routes. The `foods` table stores USDA/FDC rows, and the `supplements` table stores DSLD, DailyMed, and official brand-site label rows; each row carries `data_origin`, `data_origin_id`, `data_origin_url`, `data_origin_priority`, optional `serving_grams`, and a `canonical_key` used to dedupe alternate records for the same label/product at query time. `data_origin` is the source type, such as `usda_branded`, `dsld`, `dailymed`, or `brand_site`, not a brand name. Query results use source-qualified ids such as `fdc:<id>`, `dailymed:<id>`, or `blueprint:<handle>` when a source prefix is needed, while API payloads expose provenance through `dataOrigin` and `dataOriginId` and include the stored source label JSON for search and exact lookup results. Product contaminant observations from sources such as PlasticList, NYC DOHMH, King County, and Pure Earth live in `product_tests`, with concentration limits and broad screening guidance in `contaminant_thresholds`; source-only observations keep source product identity without creating label rows, and label responses attach contaminant summaries only for rows linked to the exact selected `food_id` or `supplement_id`, including bounded raw observations plus threshold-exceedance alerts where comparable. Daily-exposure guidance can be scored at read time from the selected label's `serving_grams`, but the lookup layer never infers contaminants from names, brands, ingredients, tags, categories, or fuzzy matches. Hosted runtime callers reach label lookup through the fixed internal `murph-data-api.worker` host; `apps/cloudflare` injects the data API key during allowed `/api/foods` and `/api/supplements` `GET` egress and bounded batch-search `POST` egress, and `packages/cli` exposes those paths through `food search-labels`, `food search-labels-batch`, `supplement search-labels`, and `supplement search-labels-batch` without local key access.
 
-The public projection of that database is Murph Safe at `/search` and the
+Private food-name search bounds indexed matches before similarity scoring,
+canonical-key deduplication, and window sorting. A literal-equality btree lane
+admits up to 250 exact names without SQL-pattern semantics, a GiST trigram lane
+admits up to 5,000 nearest names, and a canonical-rank btree lane admits up to
+5,000 deterministic source-priority representatives for result diversity.
+Ranking is deterministic within that admitted set rather than exhaustive
+across the full food catalog. Exact-id and UPC lookups retain their direct
+indexed paths;
+supplement generic search and the public projection retain their pre-existing
+ranking and candidate contracts. Existing labels databases must receive the
+foods name-rank, exact-name-rank, and canonical-rank indexes before this
+private-food query shape is deployed. The public
+projection of that database is Murph Safe at `/search` and the
 read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
 to `@murphai/contracts`; one web-owned service maps bounded database records to
 those contracts. Browser search posts to the public route, while the

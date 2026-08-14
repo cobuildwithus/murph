@@ -7,10 +7,13 @@ import {
   type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
+import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedRuntimeGroupToolPort } from "../src/runtime-platform/group-tool-port.ts";
 import {
+  type HostedWebControlTransport,
   HostedWebControlPlaneResponseError,
 } from "../src/runtime-platform/web-control-transport.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const replaySafeRequests = [
   {
@@ -106,6 +109,29 @@ const replaySafeRequests = [
     },
     wireResponse: undefined,
   },
+  {
+    action: "record_current_sender_daily_metric",
+    request: {
+      action: "record_current_sender_daily_metric",
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      origin: {
+        assistantInputId: `ain_${"e".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    response: {
+      action: "record_current_sender_daily_metric",
+      result: { status: "accepted" },
+    },
+    wireRequest: undefined,
+    wireResponse: undefined,
+  },
 ] as const satisfies readonly {
   action: string;
   request: HostedRuntimeGroupToolRequest;
@@ -113,6 +139,33 @@ const replaySafeRequests = [
   wireRequest?: unknown;
   wireResponse?: unknown;
 }[];
+
+const hostedGroupToolTransports = [
+  {
+    create: (): HostedWebControlTransport => ({ mode: "proxy" }),
+    mode: "proxy",
+  },
+  {
+    create: (): HostedWebControlTransport => {
+      const environment = readHostedExecutionEnvironment(
+        createHostedExecutionTestEnv({
+          HOSTED_WEB_BASE_URL: "https://web.example.test",
+        }),
+      );
+      if (!environment.webCallbackSigning) {
+        throw new Error("expected hosted Web callback signing fixture");
+      }
+      return {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: "https://web.example.test",
+        workspaceCheckpointBridge: null,
+      };
+    },
+    mode: "direct",
+  },
+] as const;
+const dailyMetricReplay = replaySafeRequests.at(-1)!;
 
 describe("hosted group tool exact replay", () => {
   it.each(replaySafeRequests)(
@@ -154,6 +207,62 @@ describe("hosted group tool exact replay", () => {
       }
     },
   );
+
+  it.each(hostedGroupToolTransports)(
+    "exact-replays a committed daily metric after a lost $mode response body",
+    async ({ create }) => {
+      const { request, response } = dailyMetricReplay;
+      const requestBodies: BodyInit[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+        if (init?.body) {
+          requestBodies.push(init.body);
+        }
+        return requestBodies.length === 1
+          ? createLostBodyResponse(200)
+          : createJsonResponse(response);
+      });
+      const port = createHostedRuntimeGroupToolPort({
+        boundUserId: "member-bound",
+        fetchImpl,
+        timeoutMs: 5_000,
+        transport: create(),
+      });
+
+      await expect(port.request(request)).resolves.toEqual(response);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(requestBodies).toEqual([
+        JSON.stringify(request),
+        JSON.stringify(request),
+      ]);
+    },
+  );
+
+  it("exact-replays the daily metric after consuming a complete 5xx response", async () => {
+    const { request, response } = dailyMetricReplay;
+    const responses = [
+      createJsonResponse({ error: "temporarily unavailable" }, 503),
+      createJsonResponse(response),
+    ];
+    const requestBodies: BodyInit[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+      if (init?.body) {
+        requestBodies.push(init.body);
+      }
+      return responses.shift()!;
+    });
+    const port = createHostedRuntimeGroupToolPort({
+      boundUserId: "member-bound",
+      fetchImpl,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.request(request)).resolves.toEqual(response);
+    expect(requestBodies).toEqual([
+      JSON.stringify(request),
+      JSON.stringify(request),
+    ]);
+  });
 
   it("exact-replays the same Ask after consuming a complete 5xx response", async () => {
     const { request, response, wireRequest, wireResponse } = replaySafeRequests[0];
@@ -197,7 +306,7 @@ describe("hosted group tool exact replay", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.request(replaySafeRequests[0].request)).rejects.toMatchObject({
+    await expect(port.request(dailyMetricReplay.request)).rejects.toMatchObject({
       cause: secondFailure,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -223,14 +332,14 @@ describe("hosted group tool exact replay", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.request(replaySafeRequests[0].request)).rejects.toMatchObject({
+    await expect(port.request(dailyMetricReplay.request)).rejects.toMatchObject({
       name: "TimeoutError",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(canceled).toBe(true);
   });
 
-  it("does not replay an Ask rejected by Web authority", async () => {
+  it("does not replay a daily metric rejected by Web authority", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       createJsonResponse({ error: "unauthorized" }, 401)
     );
@@ -241,13 +350,13 @@ describe("hosted group tool exact replay", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.request(replaySafeRequests[0].request)).rejects.toBeInstanceOf(
+    await expect(port.request(dailyMetricReplay.request)).rejects.toBeInstanceOf(
       HostedWebControlPlaneResponseError,
     );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("does not replay an Ask after the initiating turn is canceled", async () => {
+  it("does not replay a daily metric after the initiating turn is canceled", async () => {
     const abortController = new AbortController();
     const fetchImpl = vi.fn<typeof fetch>(async () => {
       abortController.abort(new DOMException("turn cancelled", "AbortError"));
@@ -261,7 +370,7 @@ describe("hosted group tool exact replay", () => {
     });
 
     await expect(port.request(
-      replaySafeRequests[0].request,
+      dailyMetricReplay.request,
       { signal: abortController.signal },
     )).rejects.toMatchObject({ name: "AbortError" });
     expect(fetchImpl).toHaveBeenCalledTimes(1);

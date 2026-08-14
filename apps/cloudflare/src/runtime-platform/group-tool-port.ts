@@ -109,7 +109,8 @@ function isHostedReplaySafeGroupToolRequest(
 ): boolean {
   return request.action === "ask"
     || request.action === "ask_current_sender"
-    || request.action === "ask_member";
+    || request.action === "ask_member"
+    || request.action === "record_current_sender_daily_metric";
 }
 
 function buildHostedRuntimeGroupToolPath(): string {

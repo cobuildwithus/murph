@@ -102,13 +102,22 @@ export type HostedGroupCurrentSenderResultDestination =
       kind: "requester_direct";
     };
 
-interface HostedGroupCurrentSenderSourceAuthority {
-  causalSeq: string;
+export type HostedGroupCurrentSenderSourceChannel = "linq" | "telegram";
+
+export interface HostedGroupCurrentSenderAuthority {
   groupRuntimeMemberId: string;
+  messageText: string | null;
   occurredAt: string;
-  question: string;
-  sourceChannel: "linq" | "telegram";
+  sourceChannel: HostedGroupCurrentSenderSourceChannel;
   targetMemberId: string;
+}
+
+type HostedGroupCurrentSenderRawAuthority = HostedGroupCurrentSenderAuthority;
+
+interface HostedGroupCurrentSenderSourceAuthority
+  extends HostedGroupCurrentSenderRawAuthority {
+  causalSeq: string;
+  question: string;
 }
 
 export interface HostedGroupCurrentSenderAssistantAskAuthority {
@@ -593,9 +602,9 @@ type HostedGroupCurrentSenderAuthorityReadInput = {
   tx: Prisma.TransactionClient;
 };
 
-async function readHostedGroupCurrentSenderSourceAuthorityTx(
+async function readHostedGroupCurrentSenderRawAuthorityTx(
   input: HostedGroupCurrentSenderAuthorityReadInput,
-): Promise<HostedGroupCurrentSenderSourceAuthority | null> {
+): Promise<HostedGroupCurrentSenderRawAuthority | null> {
   const groupRuntimeMemberId = normalizeHostedCurrentSenderOpaqueId(
     input.expectedGroupRuntimeMemberId,
     "Hosted current-sender group runtime member ID",
@@ -617,13 +626,6 @@ async function readHostedGroupCurrentSenderSourceAuthorityTx(
   });
   const source = sourceWake ? readHostedCurrentSenderSource(sourceWake, groupRuntimeMemberId) : null;
   if (!source || !sourceWake) return null;
-  const sourceInputAuthority =
-    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
-      assistantInputId: origin.assistantInputId,
-      memberId: groupRuntimeMemberId,
-      prisma: input.tx,
-    });
-  if (!sourceInputAuthority) return null;
   try {
     await assertHostedThreadRouteEgressAuthority({ authority: source.routeAuthority, prisma: input.tx });
   } catch (error) {
@@ -652,13 +654,43 @@ async function readHostedGroupCurrentSenderSourceAuthorityTx(
   }
 
   return {
-    causalSeq: sourceInputAuthority.causalSeq,
     groupRuntimeMemberId,
+    messageText: source.messageText,
     occurredAt: sourceWake.occurredAt,
-    question: source.question,
     sourceChannel: source.sourceChannel,
     targetMemberId: senderMemberId,
   };
+}
+
+export async function readHostedGroupCurrentSenderAuthorityTx(
+  input: HostedGroupCurrentSenderAuthorityReadInput,
+): Promise<HostedGroupCurrentSenderAuthority | null> {
+  const authority = await readHostedGroupCurrentSenderRawAuthorityTx(input);
+  if (!authority) {
+    return null;
+  }
+  return authority;
+}
+
+async function readHostedGroupCurrentSenderSourceAuthorityTx(
+  input: HostedGroupCurrentSenderAuthorityReadInput,
+): Promise<HostedGroupCurrentSenderSourceAuthority | null> {
+  const authority = await readHostedGroupCurrentSenderRawAuthorityTx(input);
+  const question = authority
+    ? readHostedCurrentSenderQuestion(authority.messageText)
+    : null;
+  if (!authority || !question) {
+    return null;
+  }
+  const sourceInputAuthority =
+    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
+      assistantInputId: input.origin.assistantInputId,
+      memberId: authority.groupRuntimeMemberId,
+      prisma: input.tx,
+    });
+  return sourceInputAuthority
+    ? { ...authority, causalSeq: sourceInputAuthority.causalSeq, question }
+    : null;
 }
 
 export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
@@ -1679,7 +1711,7 @@ function readHostedCurrentSenderSource(
   wake: HostedExecutionConversationMessageWake,
   groupRuntimeMemberId: string,
 ): {
-  question: string;
+  messageText: string | null;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   sourceChannel: "linq" | "telegram";
 } | null {
@@ -1719,14 +1751,21 @@ function readHostedCurrentSenderSource(
   } else {
     return null;
   }
-  const question = readHostedExecutionConversationMessageText(message);
+  return {
+    messageText: readHostedExecutionConversationMessageText(message),
+    routeAuthority,
+    sourceChannel,
+  };
+}
+
+function readHostedCurrentSenderQuestion(messageText: string | null): string | null {
   if (
-    !question
-    || [...question].length > HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS
+    !messageText
+    || [...messageText].length > HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS
   ) {
     return null;
   }
-  return { question, routeAuthority, sourceChannel };
+  return messageText;
 }
 
 async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {

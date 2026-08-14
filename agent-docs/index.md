@@ -31,17 +31,22 @@ re-signal the same durable mailbox item once in each Web recovery bucket without
 minting another schedule-event or mailbox-item identity. Provider execution is
 intentionally at-least-once across a lost post-pull record/completion checkpoint:
 the canonical mailbox item/event already exists in the committed input
-workspace, the four read-only provider classes run, and checkpoint 1 durably
-captures the replayable post-pull/intermediate state. The proof injects its only
-failure at checkpoint 2 record/completion persistence. Cold restore from
-checkpoint 1 lacks the machine-local SQLite execution record and may repeat the
-same method/path classes without publishing cadence early. The deterministic
-WHOOP proof covers four initial classes, one four-class replay (eight requests
-total), eight workspace checkpoint attempts with seven commits and one injected
-failure, no third provider pull, and cadence publication only after the durable
-recovery/completion checkpoint. The first later bucket performs one bounded
-post-publication convergence checkpoint while returning idle with no wake; the
-following bucket is fully quiescent with no provider work or checkpoint.
+workspace. The fixture commits that clean input through the production v2
+checkpoint bridge before the four read-only provider classes run. The incident
+pass then creates the machine-local SQLite execution record, and its production
+v2 post-pull archive plan observes the live store, omits it from the archive, and
+retains the durable mailbox state. The proof injects its only failure when that
+v2 snapshot checkpoint is persisted, leaving the clean input ref as the last
+committed snapshot. The next recovery bucket cold-restores that exact ref through
+the production restore dispatch, reconstructs from durable authority, and may
+repeat the same method/path classes without publishing cadence early. The
+deterministic WHOOP proof covers four initial
+classes, one four-class replay (eight requests total), eight measured workspace
+checkpoint attempts with seven commits and one injected failure, no third
+provider pull, and cadence publication only after the durable recovery/completion
+checkpoint. The first later bucket performs one bounded post-publication
+convergence checkpoint while returning idle with no wake; the following bucket
+is fully quiescent with no provider work or checkpoint.
 The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
@@ -105,6 +110,19 @@ The producer-first hard-cut rollout is specified by `apps/cloudflare/DEPLOY.md`.
 This contract is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
+
+Exact-sender member-reported daily metrics reuse accepted-message authority,
+the encrypted personal mailbox, canonical `manual` observations, and that same
+checkpoint-gated share projection. New admission rechecks explicit health-data
+consent under the sender lock. A deterministic mailbox identity lets the
+existing Cloudflare exact-request replay resolve a committed response loss
+without re-admitting health data, while the generic mailbox append remains the
+only payload/conflict owner. The durable receipt consumes the projection
+owner's exact result. Device observations remain independent, and contradicted
+snapshots are never represented as live values. This contract is
+jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`.
 
 Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
@@ -385,7 +403,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior; no member-facing group social automation currently ships. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Newsletter as a private skill recipe over an ordinary wall-clock-aware group automation, consent-aware shared reads, normal current-chat delivery, and an optional generic group-email effect with Web-owned recipient revalidation and existing-outbox durability. | Group newsletter behavior | Medium | 2026-08-10 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads, source-tagged multi-source health shares without cross-source selection, rollback-readable legacy sleep compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-13 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads, consent-fenced member-reported Manual corrections, source-tagged multi-source health shares without cross-source selection, rollback-readable legacy sleep compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-13 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation contract for individual, team, and collective challenge standings with truthful partial and unscored states, authenticated Linq group-only delivery, complete semantic captions, and an identity-free static-image projection with the canonical Murph badge. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Hosted group self-awareness | High | 2026-07-10 |
 | `agent-docs/product-specs/private-group-consultation.md` | Implemented Assistant Ask request/reply primitive, first composed as an automatically resolved, read-only private-to-group Murph ask, with exact requester identity, deterministic exact unavailable delivery, bounded foreground-causal draining, bounded opaque failure correlation, and post-Temporal direct latency hints. | Hosted group consultation | High | 2026-07-26 |

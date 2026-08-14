@@ -91,9 +91,12 @@ residue there made every commit unbounded. Its machine-local state stores
 hashed checkout identities, not paths; filesystem identity makes a replacement
 clone at the same path a new checkout. On rollout it accepts the already-
 present legacy set, then rewrites the set downward as those checkouts retire.
-Any new unmanaged identity fails the guard even if another legacy clone
-disappeared at the same time. Registered worktrees, including locked
-`data/research:` worktrees, do not count as unmanaged.
+Any new unmanaged identity fails the explicit global audit even if another
+legacy clone disappeared at the same time. A scoped authorized commit or
+sanctioned creation warns without admitting the new identity into the baseline,
+so unrelated task work can continue while the global audit remains blocked.
+Registered worktrees, including locked `data/research:` worktrees, do not count
+as unmanaged.
 
 Registered-worktree authorization is checkout-scoped at commit time after the
 primary guard advances. The branch-independent hook then supplies the

@@ -240,6 +240,7 @@ describe("hosted runtime control contracts", () => {
       "clinical-records.sync-requested",
       "device-sync.wake",
       "environment-voice.captured",
+      "health.daily-metric.reported",
       "meal-photo.captured",
       "vault-share.delivery",
       "vault-share.revoke",

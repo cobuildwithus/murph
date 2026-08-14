@@ -750,21 +750,26 @@ Last verified: 2026-08-14
   prevent a future retry for one connection from blocking or advancing due work
   for another.
   The focused WHOOP regression fixes one canonical schedule-event identity and
-  one durable mailbox-item identity. Its first pass restores the committed input,
-  fetches that mailbox item, runs four distinct read-only method/path classes,
-  writes four artifacts, commits checkpoint 1, and injects the only failure at
-  checkpoint 2 record/completion persistence. Cold restore from checkpoint 1
-  at 00:05 observes exactly one replay of those four classes (eight requests
-  total) and makes three successful checkpoints, advancing the workspace from
-  version 1 through version 4. Its retained completion fence is due at 00:05:30
-  and carries the 06:05 provider cadence. The completion pass performs no third
-  provider pull, makes two successful checkpoints through version 6, and
+  one durable mailbox-item identity. The fixture first commits the clean input
+  workspace through the production v2 checkpoint bridge. The initial incident
+  pass then fetches that mailbox item, runs four distinct read-only method/path
+  classes, writes four artifacts, and creates the machine-local SQLite execution
+  record. Its production v2 post-pull archive plan observes the live SQLite store,
+  omits it from the archive, and retains the durable system-mailbox state. The only
+  injected failure rejects that v2 snapshot checkpoint, leaving the exact clean
+  input ref as the last committed snapshot. At 00:05, production v2 restore of
+  that committed ref starts without the SQLite execution record, reconstructs the
+  pending obligation from durable mailbox authority, observes exactly one replay
+  of the four provider classes (eight requests total), and makes three successful
+  recovery checkpoints. Its retained completion fence is
+  due at 00:05:30 and carries the 06:05 provider cadence. The completion pass
+  performs no third provider pull, makes two successful checkpoints, and
   publishes 06:05 only after the durable recovery/completion checkpoint. The
   first later bucket at 00:10 returns idle with no wake and performs one bounded
-  post-publication convergence checkpoint through version 7; the following
-  00:15 bucket is fully quiescent. The proof therefore records eight checkpoint
-  attempts, seven commits, one injected failure, and no provider work after the
-  single four-class replay.
+  post-publication convergence checkpoint; the following 00:15 bucket is fully
+  quiescent. Within the measured incident window, the proof records eight
+  checkpoint attempts, seven commits, one injected failure, and no provider work
+  after the single four-class replay.
   Future provider cadence remains projected as the workspace follow-up wake and
   is recorded with a system-mailbox checkpoint handoff; once that cadence is
   due, only a connection mailbox wake may admit it, so a generic runtime timer
@@ -822,6 +827,18 @@ Last verified: 2026-08-14
   vault state.
   This ordering adds no projection retry queue, group wake fanout, persisted
   projection watermark, or second freshness owner.
+- A group sender's daily-metric report is admitted under one deterministic
+  mailbox identity derived from the exact accepted input, date, and metric.
+  Web serializes admission with the existing current-sender authority read;
+  an exact payload replay returns accepted while a changed value or unit fails
+  closed. Mailbox import deterministically upserts one canonical `manual`
+  summary observation at noon on that civil date in the personal vault's
+  timezone. A replay must match the full canonical record or blocks as a
+  conflict. The same system-mailbox item retains a
+  `vault-share.projection` post-checkpoint obligation, so already-granted group
+  snapshots refresh only after the canonical write checkpoints and projection
+  failures reuse the existing recording retry. There is no new scheduler,
+  correction queue, projection watermark, or Web health-value owner.
 - The composed maximum for one projection opportunity is one active-scope read,
   at most 98 sequential projectable-scope deliveries from the closed registry,
   and at most 25 sequential share-replacement transactions per delivery under

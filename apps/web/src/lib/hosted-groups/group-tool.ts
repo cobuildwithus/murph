@@ -100,6 +100,9 @@ import {
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "./group-current-sender-assistant-ask";
 import {
+  recordHostedGroupCurrentSenderDailyMetric,
+} from "./group-current-sender-daily-metric";
+import {
   admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey,
@@ -186,6 +189,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
   ask_current_sender: "participant_aware",
+  record_current_sender_daily_metric: "participant_aware",
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
@@ -218,6 +222,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 >;
 
 export async function handleHostedRuntimeGroupTool(input: {
+  logger?: Pick<Console, "warn">;
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
   /**
@@ -260,6 +265,32 @@ export async function handleHostedRuntimeGroupTool(input: {
     return { action: "ask_current_sender", result: admission.result };
   }
 
+  if (input.request.action === "record_current_sender_daily_metric") {
+    const admission = await recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric: input.request.dailyMetric,
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+    });
+    if (admission.mailboxWake) {
+      try {
+        await input.scheduleMailboxWake?.(admission.mailboxWake);
+      } catch (error) {
+        (input.logger ?? console).warn(
+          "Hosted member-reported daily metric handoff failed; the mailbox recovery sweep will retry it.",
+          {
+            ...sanitizeHostedOnboardingStructuredLogDetails({
+              errorName: deriveHostedOnboardingTimingErrorName(error),
+              outcome: "post_commit_handoff_failed",
+            }),
+          },
+        );
+      }
+    }
+    return {
+      action: "record_current_sender_daily_metric",
+      result: admission.result,
+    };
+  }
   if (input.request.action === "ask_member") {
     const admission = await requestHostedGroupMemberAssistantAsk({
       grantId: input.request.grantId,

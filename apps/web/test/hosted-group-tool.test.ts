@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
   requestHostedGroupCurrentSenderAssistantAsk: vi.fn(),
+  recordHostedGroupCurrentSenderDailyMetric: vi.fn(),
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
@@ -243,6 +244,11 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
 vi.mock("@/src/lib/hosted-groups/group-current-sender-assistant-ask", () => ({
   requestHostedGroupCurrentSenderAssistantAsk:
     mocks.requestHostedGroupCurrentSenderAssistantAsk,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-current-sender-daily-metric", () => ({
+  recordHostedGroupCurrentSenderDailyMetric:
+    mocks.recordHostedGroupCurrentSenderDailyMetric,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -621,6 +627,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
     mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
@@ -631,6 +641,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
       ask_current_sender: "participant_aware",
+      record_current_sender_daily_metric: "participant_aware",
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
@@ -943,6 +954,137 @@ describe("handleHostedRuntimeGroupTool", () => {
       expectedUserId: "member_sender",
       mailboxItemId: "aask_req_current_sender",
     });
+  });
+
+  it("dispatches an exact current-sender daily metric report and schedules its personal wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    const origin = {
+      assistantInputId: `ain_${"e".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    const dailyMetric = {
+      date: "2026-08-13",
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    };
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "daily_metric_report_one",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "record_current_sender_daily_metric",
+        dailyMetric,
+        origin,
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "record_current_sender_daily_metric",
+      result: { status: "accepted" },
+    });
+    expect(mocks.recordHostedGroupCurrentSenderDailyMetric).toHaveBeenCalledWith({
+      dailyMetric,
+      groupRuntimeMemberId: "member_group_runtime",
+      origin,
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "daily_metric_report_one",
+    });
+  });
+
+  it("does not acknowledge or schedule a daily metric after consent revocation", async () => {
+    const scheduleMailboxWake = vi.fn();
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "health_data_consent_revoked",
+      },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "record_current_sender_daily_metric",
+        dailyMetric: {
+          date: "2026-08-13",
+          metric: "steps",
+          unit: "count",
+          value: 8_000,
+        },
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "record_current_sender_daily_metric",
+      result: {
+        status: "unavailable",
+        unavailableReason: "health_data_consent_revoked",
+      },
+    });
+    expect(scheduleMailboxWake).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges an already-committed daily metric when its first handoff fails", async () => {
+    const logger = { warn: vi.fn() };
+    const scheduleMailboxWake = vi.fn().mockRejectedValue(
+      new Error("Temporal unavailable"),
+    );
+    const origin = {
+      assistantInputId: `ain_${"f".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "daily_metric_report_committed",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      logger,
+      memberId: "member_group_runtime",
+      request: {
+        action: "record_current_sender_daily_metric",
+        dailyMetric: {
+          date: "2026-08-13",
+          metric: "steps",
+          unit: "count",
+          value: 8_000,
+        },
+        origin,
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "record_current_sender_daily_metric",
+      result: { status: "accepted" },
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "daily_metric_report_committed",
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("recovery sweep will retry"),
+      expect.objectContaining({ outcome: "post_commit_handoff_failed" }),
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_sender");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+      "daily_metric_report_committed",
+    );
   });
 
   it("does not acknowledge a current-sender ask when its durable mailbox handoff rejects", async () => {
