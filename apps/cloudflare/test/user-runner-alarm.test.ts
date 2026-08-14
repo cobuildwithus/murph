@@ -6660,6 +6660,105 @@ describe("HostedUserRunner execution coordination", () => {
     )).toBeUndefined();
   });
 
+  it("keeps fast successful snapshot session-owner starts silent", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, runner, sql } = createRunnerHarness();
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    mocks.emitHostedExecutionStructuredLog.mockClear();
+
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${workspacePrefix}snapshot_fast_session_owner.snapshot.enc`,
+        snapshotId: "snapshot_fast_session_owner",
+      }),
+    )).resolves.toMatchObject({
+      snapshotId: "snapshot_fast_session_owner",
+    });
+    await flushWaitUntil();
+
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.some(
+      ([entry]) => entry.message
+        === "Hosted runner workspace snapshot session start diagnostic.",
+    )).toBe(false);
+  });
+
+  it("attributes previous-session candidate persistence to alarm work", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let advancedAlarmWork = false;
+    const {
+      flushWaitUntil,
+      runner,
+      sql,
+      storageValues,
+    } = createRunnerHarness({
+      onStoragePut: ({ key }) => {
+        if (
+          !advancedAlarmWork
+          && key.startsWith(workspaceSnapshotOrphanCandidateStoragePrefix())
+        ) {
+          advancedAlarmWork = true;
+          vi.setSystemTime(new Date(Date.now() + 1_500));
+        }
+      },
+    });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
+      userId: TEST_USER_ID,
+    });
+    storageValues.set(
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${workspacePrefix}snapshot_alarm_timing_previous.snapshot.enc`,
+        snapshotId: "snapshot_alarm_timing_previous",
+      }),
+    );
+    mocks.emitHostedExecutionStructuredLog.mockClear();
+
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${workspacePrefix}snapshot_alarm_timing_current.snapshot.enc`,
+        snapshotId: "snapshot_alarm_timing_current",
+      }),
+    )).resolves.toMatchObject({
+      snapshotId: "snapshot_alarm_timing_current",
+    });
+    await flushWaitUntil();
+
+    expect(advancedAlarmWork).toBe(true);
+    const diagnosticLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry) => entry.message
+          === "Hosted runner workspace snapshot session start diagnostic.",
+      );
+    expect(diagnosticLog).toBeDefined();
+    const details = diagnosticLog?.details;
+    if (!details || typeof details !== "object" || Array.isArray(details)) {
+      throw new TypeError("Workspace snapshot session diagnostic details are invalid.");
+    }
+    expect(details).toMatchObject({
+      snapshotStartAlarmCandidateCount: 2,
+      snapshotStartAlarmCandidateWorkDurationMs: 1_500,
+      snapshotStartCurrentSessionCandidateCount: 1,
+      snapshotStartDiagnosticScopeKind: "session_owner",
+      snapshotStartDurationsCapped: false,
+      snapshotStartNewWorkspaceCandidateCount: 1,
+      snapshotStartOutcomeKind: "created",
+      snapshotStartRecordedCandidateCount: 1,
+      snapshotStartSessionCreateStorageDurationMs: 0,
+      snapshotStartSubstageKind: "completed",
+      snapshotStartWriteFenceOwnerValidationDurationMs: 0,
+    });
+  });
+
   it("does not await retained orphan scans when creating a snapshot session", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -6733,6 +6832,7 @@ describe("HostedUserRunner execution coordination", () => {
       );
     expect(diagnosticLog).toBeDefined();
     expect(diagnosticLog?.level).toBe("info");
+    expect(diagnosticLog).toMatchObject({ userId: null });
     const details = diagnosticLog?.details;
     if (!details || typeof details !== "object" || Array.isArray(details)) {
       throw new TypeError("Workspace snapshot session diagnostic details are invalid.");

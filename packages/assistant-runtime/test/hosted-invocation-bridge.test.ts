@@ -562,6 +562,51 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       .toBe(false);
   });
 
+  it("keeps a distinct runtime-wake error instance actionable", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const controller = new AbortController();
+    const activeInterruption =
+      new HostedRuntimeCheckpointInterruptedByWakeError();
+    const distinctFailure = new HostedRuntimeCheckpointInterruptedByWakeError({
+      message: "distinct checkpoint failure",
+    });
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async () => {
+        controller.abort(activeInterruption);
+        throw distinctFailure;
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(activeInterruption);
+
+    await vi.waitFor(() => {
+      const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+      expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_failed"))
+        .toBe(true);
+    });
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        level: "warn",
+        redactedJson: expect.objectContaining({
+          snapshotInterruptedBeforeCommit: true,
+        }),
+      }),
+    ]));
+    expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
+      .toBe(false);
+  });
+
   it("propagates checkpoint interruption into runtime-owned symlink cleanup", async () => {
     const vaultRoot = await createVaultRoot();
     const workspaceRoot = path.dirname(path.dirname(vaultRoot));

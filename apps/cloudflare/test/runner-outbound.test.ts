@@ -4355,6 +4355,7 @@ describe("handleRunnerOutboundRequest", () => {
       );
     expect(diagnosticLog).toBeDefined();
     expect(diagnosticLog?.level).toBe("info");
+    expect(diagnosticLog).toMatchObject({ userId: null });
     const details = requireTestObject(
       diagnosticLog?.details,
       "workspace snapshot start route diagnostic details",
@@ -4428,6 +4429,98 @@ describe("handleRunnerOutboundRequest", () => {
       "bounded workspace snapshot wrapped data key",
     ));
   });
+
+  it.each([
+    {
+      durationKey: "snapshotStartWriteFenceOwnerValidationDurationMs",
+      stage: "write_fence_owner_validation",
+    },
+    {
+      durationKey: "snapshotStartCryptoDataKeyDurationMs",
+      stage: "crypto_data_key",
+    },
+  ] as const)(
+    "attributes isolated $stage latency to the matching route diagnostic",
+    async ({ durationKey, stage }) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const fixture = await createHostedRuntimeCryptoContextFixture();
+      const runner = createWorkspaceVersionAwareUserRunner();
+      const runnerStub = runner.getByName();
+      const originalValidateRuntimeWriteFence =
+        runnerStub.validateRuntimeWriteFence;
+      if (!originalValidateRuntimeWriteFence) {
+        throw new TypeError("Workspace snapshot write-fence stub is unavailable.");
+      }
+      const timedStub: WorkerUserRunnerStubLike =
+        stage === "write_fence_owner_validation"
+          ? {
+              ...runnerStub,
+              async validateRuntimeWriteFence(request) {
+                const result = await originalValidateRuntimeWriteFence.call(
+                  runnerStub,
+                  request,
+                );
+                vi.setSystemTime(new Date(Date.now() + 1_500));
+                return result;
+              },
+            }
+          : runnerStub;
+      const timedFetch = stage === "crypto_data_key"
+        ? vi.fn<typeof fetch>(async (...args) => {
+            const response = await fixture.fetchMock(...args);
+            vi.setSystemTime(new Date(Date.now() + 1_500));
+            return response;
+          })
+        : fixture.fetchMock;
+      const env = createRunnerOutboundEnv({
+        ...fixture.env,
+        USER_RUNNER: { getByName: () => timedStub },
+      });
+      vi.stubGlobal("fetch", timedFetch);
+
+      const response = await handleRunnerOutboundRequest(
+        createWorkspaceSnapshotStartRequest({
+          expectedWorkspaceVersion: "4",
+          workspaceVersion: "4",
+        }),
+        env,
+        "member_123",
+      );
+
+      expect(response.status).toBe(200);
+      const diagnosticLog =
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+          .map(([entry]) => entry)
+          .find(
+            (entry: { details?: unknown; message?: string }) =>
+              entry.message
+                === "Hosted runner workspace snapshot start diagnostic.",
+          );
+      const details = requireTestObject(
+        diagnosticLog?.details,
+        `${stage} workspace snapshot start route diagnostic details`,
+      );
+      expect(details).toMatchObject({
+        snapshotStartDiagnosticScopeKind: "route",
+        snapshotStartDurationsCapped: false,
+        snapshotStartOutcomeKind: "created",
+        snapshotStartSubstageKind: "completed",
+        snapshotStartTotalDurationMs: 1_500,
+      });
+      expect(details[durationKey]).toBe(1_500);
+      for (const otherDurationKey of [
+        "snapshotStartWriteFenceOwnerValidationDurationMs",
+        "snapshotStartCryptoDataKeyDurationMs",
+        "snapshotStartSessionCreateStorageDurationMs",
+      ] as const) {
+        if (otherDurationKey === durationKey) {
+          continue;
+        }
+        expect(details[otherDurationKey]).toBe(0);
+      }
+    },
+  );
 
   it("refreshes only the write-fence-owned workspace snapshot handoff", async () => {
     vi.useFakeTimers();
