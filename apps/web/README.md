@@ -807,6 +807,10 @@ Hosted onboarding extras:
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall; recovery silently rearms each monitor independently.
 - `HOSTED_EXECUTION_CONTROL_URL`
+- `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` is an optional comma-separated
+  provider rollout gate for the encrypted Cloudflare Queue transport. Leave it
+  empty until the Queue-capable Worker, main Queue, DLQ, and signed Web batch
+  callback are live; enable one supported provider at a time.
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
 Hosted managed crypto:
@@ -1082,6 +1086,12 @@ Callback auth contract:
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
+- The generic hosted-mailbox append validates a durable dedupe replay before
+  crypto preparation, then warms the exact active ingress root before opening
+  its transaction. Its prepared transaction surface locks and re-reads root
+  authority and seals only from that scoped cache entry, with one full retry on
+  typed root drift. Legacy transaction append surfaces remain for separately
+  migrated callers and are not the transaction-safe generic entrypoint.
 - `POST /api/internal/hosted-runtime/owner-released` is the payload-free
   completion handoff. Web accepts a zero-byte body and either no query or the
   exact signature-bound `immediateRecheckRequested=1` positive edge, binds the

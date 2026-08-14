@@ -1,4 +1,9 @@
 import { HostedBillingStatus } from "@prisma/client";
+import {
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  type HostedCryptoDomain,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -17,16 +22,20 @@ const mocks = vi.hoisted(() => ({
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
   issueHostedInviteTx: vi.fn(),
+  hasActiveHostedCryptoDomainRootsForUserTx: vi.fn(),
+  lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberCoreByPendingLinqParticipantContact: vi.fn(),
+  projectHostedMemberRoutingState: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemOwnerById: vi.fn(),
   readHostedMemberHomeLinqRoute: vi.fn(),
+  readHostedMemberRoutingRecord: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   readHostedLinqDailyState: vi.fn(),
   readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn(),
@@ -39,12 +48,81 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
+  unwrapHostedDomainRootForWeb: vi.fn(),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+  const preparedMissingRoots = new WeakSet<object>();
+  const prepareHostedDomainRootForWeb = vi.fn(async (input: {
+    domain: HostedCryptoDomain;
+    userId: string;
+  }) => {
+    const root = await mocks.unwrapHostedDomainRootForWeb(input);
+    root.rootKey.fill(0);
+    const prepared = Object.freeze({
+      domain: input.domain,
+      rootKeyId: root.envelope.rootKeyId,
+      userId: input.userId,
+    });
+    preparedMissingRoots.add(prepared);
+    return prepared;
+  });
+  const revalidatePreparedHostedDomainRootForWebTx = vi.fn(async (input: {
+    prepared: {
+      domain: HostedCryptoDomain;
+      rootKeyId: string;
+      userId: string;
+    };
+    tx: unknown;
+  }) => {
+    const activeRootKeyId = await mocks.lockAndReadActiveHostedDomainRootKeyIdTx({
+      domain: input.prepared.domain,
+      tx: input.tx,
+      userId: input.prepared.userId,
+    });
+    if (
+      (activeRootKeyId === null && !preparedMissingRoots.has(input.prepared))
+      || (activeRootKeyId !== null
+        && activeRootKeyId !== input.prepared.rootKeyId)
+    ) {
+      throw new actual.HostedDomainRootPreparationMismatchError();
+    }
+    const root = getHostedDomainRootUnwrapCache()?.get(
+      `${input.prepared.userId}|${input.prepared.domain}|${input.prepared.rootKeyId}`,
+    );
+    if (!root) {
+      throw new TypeError("Expected prepared hosted domain root in test cache.");
+    }
+    return { root, rootKeyId: input.prepared.rootKeyId };
+  });
+  return {
+    ...actual,
+    hasActiveHostedCryptoDomainRootsForUserTx:
+      mocks.hasActiveHostedCryptoDomainRootsForUserTx,
+    lockAndReadActiveHostedDomainRootKeyIdTx:
+      mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+    prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
+    prepareHostedDomainRootForWeb,
+    revalidatePreparedHostedDomainRootForWebTx,
+    unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
+  };
+});
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx: (input: {
+    envelope: unknown;
+    tx: unknown;
+  }) =>
+    mocks.appendHostedMailboxEnvelopeTx({
+      envelope: input.envelope,
+      tx: input.tx,
+    }),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: (input: {
     envelope: unknown;
     tx: unknown;
   }) =>
@@ -83,28 +161,46 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
     mocks.ensureHostedMemberForPhoneResolutionTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
-}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/hosted-member-identity-store")>(
+    "@/src/lib/hosted-onboarding/hosted-member-identity-store",
+  );
+  return {
+    ...actual,
+    lookupHostedMemberIdentityByPhoneNumber:
+      mocks.lookupHostedMemberIdentityByPhoneNumber,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   lookupHostedMemberByVerifiedEmailAddress: mocks.lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  acquireHostedMemberHomeLinqRouteLockTx:
-    mocks.acquireHostedMemberHomeLinqRouteLockTx,
-  countHostedMemberHomeLinqBindingsByRecipientPhone:
-    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
-  lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
-  lookupHostedMemberCoreByPendingLinqParticipantContact:
-    mocks.lookupHostedMemberCoreByPendingLinqParticipantContact,
-  readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
-  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
-  upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
-  upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
-}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/hosted-member-routing-store")>(
+    "@/src/lib/hosted-onboarding/hosted-member-routing-store",
+  );
+  return {
+    ...actual,
+    acquireHostedMemberHomeLinqRouteLockTx:
+      mocks.acquireHostedMemberHomeLinqRouteLockTx,
+    countHostedMemberHomeLinqBindingsByRecipientPhone:
+      mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
+    lookupHostedMemberRoutingByHomeLinqChatId:
+      mocks.lookupHostedMemberRoutingByHomeLinqChatId,
+    lookupHostedMemberCoreByPendingLinqParticipantContact:
+      mocks.lookupHostedMemberCoreByPendingLinqParticipantContact,
+    projectHostedMemberRoutingState: mocks.projectHostedMemberRoutingState,
+    readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
+    readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
+    readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+    upsertHostedMemberHomeLinqBindingTx:
+      mocks.upsertHostedMemberHomeLinqBindingTx,
+    upsertHostedMemberPendingLinqBindingTx:
+      mocks.upsertHostedMemberPendingLinqBindingTx,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-daily-state")>(
@@ -182,6 +278,9 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
@@ -218,6 +317,45 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.readHostedLinqDeliveryProviderDispatchIntentTx.mockResolvedValue(null);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(true);
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue(
+      "root_direct_test",
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(async (input: {
+      domain: HostedCryptoDomain;
+      userId: string;
+    }) => {
+      const envelope: HostedDomainRootKeyEnvelopeV1 = {
+        authoritySignature: {
+          alg: "GCP-KMS-EC-P256-SHA256",
+          keyVersionName: "test-authority-key",
+          signature: "test-signature",
+          signedAt: "2026-03-26T00:00:00.000Z",
+        },
+        createdAt: "2026-03-26T00:00:00.000Z",
+        domain: input.domain,
+        generation: 1,
+        rootKeyId: "root_direct_test",
+        schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+        updatedAt: "2026-03-26T00:00:00.000Z",
+        userId: input.userId,
+        wraps: [],
+      };
+      const cachedRoot = Promise.resolve({
+        envelope,
+        rootKey: new Uint8Array(32).fill(7),
+      });
+      const cache = getHostedDomainRootUnwrapCache();
+      cache?.set(`${input.userId}|${input.domain}|@active`, cachedRoot);
+      cache?.set(
+        `${input.userId}|${input.domain}|${envelope.rootKeyId}`,
+        cachedRoot,
+      );
+      return {
+        envelope,
+        rootKey: new Uint8Array(32).fill(7),
+      };
+    });
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue({
       dayUtc: new Date("2026-03-26T00:00:00.000Z"),
       inboundCount: 1,
@@ -261,6 +399,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     mocks.lookupHostedMemberCoreByPendingLinqParticipantContact.mockResolvedValue(null);
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
+      memberId: "member_123",
+    });
     mocks.readHostedMemberRoutingState.mockImplementation(async () => {
       const route = await mocks.readHostedMemberHomeLinqRoute();
 
@@ -280,6 +421,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         telegramUserLookupKey: null,
       };
     });
+    mocks.projectHostedMemberRoutingState.mockImplementation(() =>
+      mocks.readHostedMemberRoutingState()
+    );
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });
@@ -1154,9 +1298,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
   it("sends the signup link directly for an unsupported-prefix inactive member", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
-      core: null,
-    });
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue(null);
     mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
       created: true,
       member: {
@@ -1381,9 +1523,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
   it("deduplicates overlapping unsupported-prefix signup link sends", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
-      core: null,
-    });
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue(null);
     mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
       created: true,
       member: {
@@ -1641,6 +1781,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     prisma.hostedMember.findUnique
       .mockResolvedValueOnce({
         accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      })
+      .mockResolvedValueOnce({
+        accountGroupMemberships: [],
         billingStatus: HostedBillingStatus.not_started,
         suspendedAt: null,
         threadContainer: null,
@@ -1667,22 +1813,25 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(4);
     const initialAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!;
-    const exactAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
-    const refreshedAccessReadOrder =
+    const exactAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
-    const reclassificationLockOrder =
+    const refreshedAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[3]!;
+    const preparedRoutingLockOrder =
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+    const reclassificationLockOrder =
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1]!;
     expect(initialAccessReadOrder).toBeLessThan(exactAccessReadOrder);
-    expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
+    expect(exactAccessReadOrder).toBeLessThan(preparedRoutingLockOrder);
+    expect(preparedRoutingLockOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
     expect(
       refreshedAccessReadOrder,
     ).toBeLessThan(
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1],
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[2],
     );
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
   });
@@ -1860,6 +2009,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).toHaveBeenCalledWith({
       linqChatId: "chat_123",
       prisma,
+      projection: "core",
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       tx: prisma,
@@ -1918,7 +2068,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("dedupes active-member Linq replays before route redirect planning", async () => {
+  it("dedupes active-member Linq replays after preflight and before route mutation", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -1931,10 +2081,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
       id: "mailbox_evt_123",
     });
-    mocks.readHostedMemberRoutingState.mockImplementationOnce(async () => {
-      throw new Error("duplicate active-member replays must not resolve route binding");
-    });
-
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_123",
@@ -1955,7 +2101,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       userId: "member_123",
     });
-    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(mocks.projectHostedMemberRoutingState).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -2119,6 +2267,9 @@ function createPrismaStub() {
         suspendedAt: null,
         threadContainer: null,
       }),
+    },
+    hostedMemberIdentity: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMemberRouting: {
       findFirst: vi.fn().mockResolvedValue(null),

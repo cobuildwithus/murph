@@ -38,6 +38,9 @@ import {
   normalizeRequiredAssistantCronText,
   type AssistantCronStore,
 } from './store.js'
+import type {
+  AssistantCronOccurrenceUnverifiedReason,
+} from './timing-verification.js'
 
 export const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
 export const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
@@ -303,6 +306,7 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
   now: Date,
 ): {
   nextOccurrenceAt: string | null
+  unverifiedReason: AssistantCronOccurrenceUnverifiedReason | null
   verified: boolean
 } {
   if (
@@ -313,6 +317,7 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
   ) {
     return {
       nextOccurrenceAt: null,
+      unverifiedReason: 'runtime_state_pending',
       verified: false,
     }
   }
@@ -330,6 +335,7 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
   ) {
     return {
       nextOccurrenceAt: null,
+      unverifiedReason: null,
       verified: true,
     }
   }
@@ -344,12 +350,15 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
   ) {
     return {
       nextOccurrenceAt: null,
+      unverifiedReason:
+        source.schedule.kind === 'at' ? null : 'stale_recurring_occurrence',
       verified: source.schedule.kind === 'at',
     }
   }
 
   return {
     nextOccurrenceAt: occurrenceAt,
+    unverifiedReason: null,
     verified: true,
   }
 }

@@ -1,88 +1,23 @@
-import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/contracts";
-
-export { JUNCTION_DEFAULT_TIMESERIES_RESOURCES };
-
-// Every default summary resource is sparse event/daily-grain data: profile is
-// a single current snapshot per source, menstrual_cycle is ~13 cycles per
-// member-year with small dated sub-arrays, and electrocardiogram is
-// dozens-to-hundreds of sub-KB recording summaries per member-year (the raw
-// electrocardiogram_voltage waveform stays excluded entirely).
-export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
-  "activity",
-  "sleep",
-  "sleep_cycle",
-  "workouts",
-  "body",
-  "meal",
-  "profile",
-  "menstrual_cycle",
-  "electrocardiogram",
-] as const);
-
-export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
-  "steps",
-  "distance",
-  "calories_active",
-  "heartrate",
-  "hrv",
-  "respiratory_rate",
-  "blood_oxygen",
-  "stress_level",
-  "vo2_max",
-  "weight",
-  "body_temperature_delta",
-  "body_temperature",
-  "basal_body_temperature",
-  "caffeine",
-  "water",
-  "mindfulness_minutes",
-  "heart_rate_recovery_one_minute",
-  "sleep_breathing_disturbance",
-  "afib_burden",
-  "glucose",
-  "blood_pressure",
-  "note",
-] as const);
-
-export type JunctionTimeseriesResource =
-  (typeof JUNCTION_KNOWN_TIMESERIES_RESOURCES)[number];
-
-// Numeric default timeseries resources keep the compact daily-aggregate path.
-// glucose, blood_oxygen, and stress_level additionally retain one bounded
-// 24-hour feature envelope and one derived measurement per source/day; raw
-// point samples are never written. Sparse caffeine,
-// water, and mindfulness_minutes intervals additionally land as exact-start
-// `measurement` events with start/end qualifiers and one compact evidence part
-// per admitted record, while their existing daily sums remain unchanged.
-// Every one of those six paths has explicit response and source/day bounds.
-// `blood_pressure` is the paired-shape exception: readings are sparse
-// (10s-100s/yr), so each reading lands as one `measurement` event plus one
-// compact artifact. `note` is another sparse exception: normalized tags land
-// on a neutral canonical note spine while provider free text is dropped.
-// Personal Patterns owns any fail-closed action classification at read time.
-// Intraday `heartrate` and
-// `hypnogram` stay deliberately excluded from defaults: their raw sample
-// streams are unbounded (thousands of samples per day) and the vault must
-// not accumulate giant raw timeseries dumps. Sleep-grain heart rate and
-// hypnogram detail already arrive through the `sleep`/`sleep_cycle` summary
-// resources.
-export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
-
-export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([] as const);
-
-export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([] as const);
-
-export const JUNCTION_ALLOWED_SUMMARY_RESOURCES = Object.freeze([
-  ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
-  ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
-  ...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
-] as const);
-
-export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([
-  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
-] as const);
-
+export {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+  JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_SUMMARY_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  JUNCTION_TIMESERIES_RESOURCE_POLICIES,
+  JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES,
+  normalizeJunctionResourceName,
+  resolveJunctionTimeseriesResourcePolicy,
+  usesJunctionTimeseriesIntervalStartOwnership,
+  type JunctionTimeseriesHistoryWindow,
+  type JunctionTimeseriesNormalizationMode,
+  type JunctionTimeseriesResource,
+  type JunctionTimeseriesResourcePolicy,
+} from "@murphai/contracts";
 export function normalizeJunctionRawIdentityKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
 }
@@ -501,46 +436,3 @@ export const JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS = Object.freeze([
   ...JUNCTION_SLEEP_TEMPERATURE_PATHS,
   ...JUNCTION_SLEEP_TEMPERATURE_DEVIATION_PATHS,
 ] as const);
-
-export function normalizeJunctionResourceName(value: unknown): string | null {
-  const resource = normalizeJunctionResourceSlug(value);
-  switch (resource) {
-    case "heart_rate":
-      return "heartrate";
-    case "meals":
-      return "meal";
-    case "stress":
-    case "stresslevel":
-      return "stress_level";
-    case "body_weight":
-      return "weight";
-    case "sleep_cycle":
-    case "hypnogram":
-      return "sleep_cycle";
-    case "spo2":
-    case "blood_oxygen_saturation":
-      return "blood_oxygen";
-    case "vo2max":
-      return "vo2_max";
-    case "heart_rate_variability":
-      return "hrv";
-    case "blood_glucose":
-      return "glucose";
-    default:
-      return resource;
-  }
-}
-
-function normalizeJunctionResourceSlug(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/gu, "_")
-    .replace(/^_+|_+$/gu, "");
-
-  return normalized || null;
-}

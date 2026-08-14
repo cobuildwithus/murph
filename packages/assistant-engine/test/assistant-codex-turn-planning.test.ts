@@ -1113,7 +1113,8 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames.filter((name) =>
         name !== 'attach_response_card' &&
-        name !== 'attach_exercise_routine_card'
+        name !== 'attach_exercise_routine_card' &&
+        name !== 'attach_telegram_rich_content'
       ),
     )
 
@@ -2559,6 +2560,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -2616,6 +2618,9 @@ describe('assistant Codex turn planning', () => {
     expect(privateTools.map((tool) => tool.name)).toContain(
       'attach_exercise_routine_card',
     )
+    expect(privateTools.map((tool) => tool.name)).toContain(
+      'attach_telegram_rich_content',
+    )
     const privateSchema = JSON.stringify(privateTool!.inputSchema)
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
@@ -2638,6 +2643,9 @@ describe('assistant Codex turn planning', () => {
     expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
       'attach_exercise_routine_card',
     )
+    expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
+      'attach_telegram_rich_content',
+    )
 
     const scheduledPrivateOptions = {
       input: {
@@ -2654,6 +2662,7 @@ describe('assistant Codex turn planning', () => {
     await expect(dynamicToolsFor(scheduledPrivateOptions)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
       ]),
     )
 
@@ -3063,7 +3072,8 @@ describe('assistant Codex turn planning', () => {
         .map((tool) => tool.name)
         .filter((name) =>
           name !== 'attach_response_card' &&
-          name !== 'attach_exercise_routine_card'
+          name !== 'attach_exercise_routine_card' &&
+          name !== 'attach_telegram_rich_content'
         ),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
@@ -3147,6 +3157,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
@@ -3323,6 +3334,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3349,6 +3361,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3428,6 +3441,7 @@ describe('assistant Codex turn planning', () => {
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
@@ -3766,7 +3780,7 @@ describe('assistant Codex turn planning', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
     )
     expect(plan.developerInstructions).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
@@ -5004,6 +5018,70 @@ describe('assistant Codex turn planning', () => {
           content: `Historical message ${index}`,
           role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
         })),
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it.each([
+    {
+      clarification:
+        'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+      request: 'Remind me tomorrow at 2:30 AM.',
+    },
+    {
+      clarification:
+        'The trusted reminder date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+      request: 'Remind me tomorrow at 1:30 AM.',
+    },
+  ])('replays the trusted DST date when native resume is unavailable', async ({
+    clarification,
+    request,
+  }) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-dst-recovery-',
+    ))
+    const session = createSession({ turnCount: 1 })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: request },
+        { kind: 'assistant', text: clarification },
+      ])
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Use the other choice.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-11-01',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: request, role: 'user' },
+        { content: clarification, role: 'assistant' },
       ])
     } finally {
       await rm(vault, { force: true, recursive: true })

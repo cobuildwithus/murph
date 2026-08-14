@@ -1,8 +1,17 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type { LinqAPIV3 } from "@linqapp/sdk";
+import type {
+  ContactCardCreateParams,
+  ContactCardUpdateParams,
+} from "@linqapp/sdk/resources/contact-card";
 
-import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import {
+  LinqApiTimeoutError,
+  readLinqApiErrorStatus,
+  runLinqApiRequest,
+} from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import { readHostedLinqContactCardCandidacySnapshot } from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
@@ -40,18 +49,6 @@ export type HostedLinqContactCardReconciliation = {
 };
 
 type HostedLinqContactCardClient = PrismaClient | Prisma.TransactionClient;
-
-type LinqContactCardResponse = {
-  first_name?: string | null;
-  image_url?: string | null;
-  is_active?: boolean | null;
-  last_name?: string | null;
-  phone_number?: string | null;
-};
-
-type LinqContactCardsResponse = {
-  contact_cards?: LinqContactCardResponse[] | null;
-};
 
 export async function reconcileHostedLinqContactCards(input: {
   maxLines?: number;
@@ -170,20 +167,23 @@ export async function listHostedLinqContactCards(input: {
   signal?: AbortSignal;
 } = {}): Promise<HostedLinqContactCard[]> {
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-  const payload = await fetchHostedLinqJson<LinqContactCardsResponse | LinqContactCardResponse>({
-    method: "GET",
+  const payload: unknown = await requestHostedLinqContactCardSdkOrThrow({
     operation: "contact card list",
-    path: phoneNumber
-      ? `contact_card?phone_number=${encodeURIComponent(phoneNumber)}`
-      : "contact_card",
+    request: (client) => client.contactCard.retrieve(
+      phoneNumber ? { phone_number: phoneNumber } : {},
+      { signal: input.signal },
+    ),
     signal: input.signal,
     timeoutMessage: "Linq contact card list timed out.",
   });
 
-  const values = Array.isArray((payload as LinqContactCardsResponse | null)?.contact_cards)
-    ? (payload as LinqContactCardsResponse).contact_cards ?? []
-    : payload
-      ? [payload as LinqContactCardResponse]
+  const payloadRecord = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : null;
+  const values: unknown[] = Array.isArray(payloadRecord?.contact_cards)
+    ? payloadRecord.contact_cards
+    : payloadRecord
+      ? [payloadRecord]
       : [];
 
   return values
@@ -207,14 +207,16 @@ export async function setupHostedLinqContactCard(input: {
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCard> {
-  const payload = await fetchHostedLinqJson<LinqContactCardResponse>({
-    body: buildHostedLinqContactCardBody({
-      firstName: input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
-      phoneNumber: input.phoneNumber,
-    }),
-    method: "POST",
+  const body: ContactCardCreateParams = {
+    first_name: requireNonEmptyText(
+      input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
+      "contact card first name",
+    ),
+    phone_number: requireNonEmptyText(input.phoneNumber, "phone number"),
+  };
+  const payload = await requestHostedLinqContactCardSdkOrThrow({
     operation: "contact card setup",
-    path: "contact_card",
+    request: (client) => client.contactCard.create(body, { signal: input.signal }),
     signal: input.signal,
     timeoutMessage: "Linq contact card setup timed out.",
   });
@@ -227,21 +229,22 @@ export async function updateHostedLinqContactCard(input: {
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCard> {
-  const phoneNumber = requireNonEmptyText(input.phoneNumber, "phone number");
-  const payload = await fetchHostedLinqJson<LinqContactCardResponse>({
-    body: buildHostedLinqContactCardBody({
-      firstName: input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
-    }),
-    method: "PATCH",
+  const params: ContactCardUpdateParams = {
+    first_name: requireNonEmptyText(
+      input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
+      "contact card first name",
+    ),
+    phone_number: requireNonEmptyText(input.phoneNumber, "phone number"),
+  };
+  const payload = await requestHostedLinqContactCardSdkOrThrow({
     operation: "contact card update",
-    path: `contact_card?phone_number=${encodeURIComponent(phoneNumber)}`,
+    request: (client) => client.contactCard.update(params, { signal: input.signal }),
     signal: input.signal,
     timeoutMessage: "Linq contact card update timed out.",
   });
 
   return requireHostedLinqContactCard(payload, "update");
 }
-
 type HostedLinqContactCardOutcome =
   | "activeCards"
   | "createdCards"
@@ -338,80 +341,43 @@ function getMurphContactCardImageUrl(): string | null {
   return url.protocol === "https:" ? url.toString() : MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL;
 }
 
-async function fetchHostedLinqJson<T>(input: {
-  body?: Record<string, unknown>;
-  method: "GET" | "PATCH" | "POST";
+async function requestHostedLinqContactCardSdkOrThrow<T>(input: {
   operation: string;
-  path: string;
+  request: (client: LinqAPIV3) => Promise<T>;
   signal?: AbortSignal;
   timeoutMessage: string;
-}): Promise<T | null> {
-  const response = await fetchHostedLinqResponse(input);
-  const text = await response.text();
-
-  if (text.trim().length === 0) {
-    return null;
-  }
-
-  return JSON.parse(text) as T;
-}
-
-async function fetchHostedLinqResponse(input: {
-  body?: Record<string, unknown>;
-  method: "GET" | "PATCH" | "POST";
-  operation: string;
-  path: string;
-  signal?: AbortSignal;
-  timeoutMessage: string;
-}): Promise<Response> {
+}): Promise<T> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
-
-  let response: Response;
   try {
-    response = await fetchLinqApi({
+    return await runLinqApiRequest({
       apiBaseUrl,
       apiToken,
-      ...(input.body ? { body: JSON.stringify(input.body) } : {}),
-      method: input.method,
-      path: input.path,
+      request: input.request,
       signal: input.signal,
+      timeoutMessage: input.timeoutMessage,
     });
   } catch (error) {
     if (error instanceof LinqApiTimeoutError) {
       throw hostedOnboardingError({
+        cause: error,
         code: "LINQ_REQUEST_TIMED_OUT",
         message: input.timeoutMessage,
         httpStatus: 502,
         retryable: true,
       });
     }
-
+    const status = readLinqApiErrorStatus(error);
+    if (status !== null) {
+      throw hostedOnboardingError({
+        cause: error,
+        code: "LINQ_REQUEST_FAILED",
+        message: `Linq ${input.operation} failed with HTTP ${status}.`,
+        httpStatus: 502,
+        retryable: status === 429 || status >= 500,
+      });
+    }
     throw error;
   }
-
-  if (!response.ok) {
-    throw hostedOnboardingError({
-      code: "LINQ_REQUEST_FAILED",
-      message: `Linq ${input.operation} failed with HTTP ${response.status}.`,
-      httpStatus: 502,
-      retryable: response.status === 429 || response.status >= 500,
-    });
-  }
-
-  return response;
-}
-
-function buildHostedLinqContactCardBody(input: {
-  firstName?: string | null;
-  phoneNumber?: string | null;
-}): Record<string, string> {
-  const firstName = normalizeNullableString(input.firstName);
-  const phoneNumber = normalizeNullableString(input.phoneNumber);
-
-  return {
-    ...(firstName ? { first_name: firstName } : {}),
-    ...(phoneNumber ? { phone_number: phoneNumber } : {}),
-  };
 }
 
 function parseHostedLinqContactCard(value: unknown): HostedLinqContactCard | null {
@@ -438,7 +404,7 @@ function parseHostedLinqContactCard(value: unknown): HostedLinqContactCard | nul
 }
 
 function requireHostedLinqContactCard(
-  value: LinqContactCardResponse | null,
+  value: unknown,
   operation: "setup" | "update",
 ): HostedLinqContactCard {
   const card = parseHostedLinqContactCard(value);

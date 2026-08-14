@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 300,
+  "item": {
+    "id": "private-group-replies-keep-context",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Private group replies keep their context",
+    "summary": "When you ask Murph in a group to continue privately, the reply now stays in your existing personal conversation so you can follow up without starting over.",
+    "details": "Murph still verifies the current sender, same messaging channel, direct route, expiry, and exact reviewed answer before delivery, and never posts the private answer to the group.",
+    "relevanceTags": ["groups", "messaging", "privacy", "reliability"],
+    "sourcePullRequests": [1683]
+  }
+}

@@ -1368,11 +1368,16 @@ export interface HostedRuntimeGroupSharedReadRequest {
 
 export type HostedRuntimeGroupSharedRecord = Pick<
   HostedVaultShareDeliveryRecord,
-  "data" | "occurredAt" | "recordKey"
+  "data" | "occurredAt" | "recordKey" | "source"
 >;
 
 export interface HostedRuntimeGroupSharedProjection {
-  dataStatus: "available" | "missing";
+  /**
+   * `pending` means an active readable grant exists but its first projection
+   * snapshot has not materialized. `missing` is reserved for a completed empty
+   * snapshot or a grant that current access makes unreadable.
+   */
+  dataStatus: "available" | "missing" | "pending";
   /**
    * Canonical UTC time at which the current exact-scope grant became active.
    * Missing means the producer predates this additive evidence field; null is

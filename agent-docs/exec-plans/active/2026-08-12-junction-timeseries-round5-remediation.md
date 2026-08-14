@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -70,12 +70,14 @@ Updated: 2026-08-13
 20. [x] Resolve round eighteen's account-owned source identity finding.
 21. [x] Resolve round nineteen's split persisted-source authority finding.
 22. [x] Resolve round twenty's hosted exact-key precedence finding.
-23. [ ] Obtain exact-head green CI and a ReviewGPT PASS no later than round
-    twenty-two, then merge and retire
+23. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
     the task worktree.
 24. [x] Stop the review loop at the user-authorized round-twenty-two cap and
     resolve its final reconnect-authority finding without starting round
     twenty-three.
+25. [x] Resume the review loop under the user's explicit 2026-08-14 direction,
+    integrate current `main`, resolve its Junction ownership conflicts, and
+    restore focused green proof before round twenty-three.
 
 ## Decisions
 
@@ -241,6 +243,11 @@ Updated: 2026-08-13
   as monotonic arrival evidence. The correction replaces the two divergent
   rules with one package-local helper and adds no persisted state, manager,
   queue, scheduler, registry, service, or reconciliation loop.
+- On 2026-08-14 the user explicitly superseded the prior round-twenty-two stop
+  boundary and directed the lane to continue through conflict resolution,
+  ReviewGPT PASS, merge, and completion. The current-main integration keeps
+  the branch's six-resource calendar-fidelity owner while adopting `main`'s
+  bounded per-resource continuation path for broad collections.
 
 ## Verification
 
@@ -420,5 +427,11 @@ Updated: 2026-08-13
   data beats the old fence while retaining historical arrival evidence, both
   alias orders agree across hydration and job listing, and equal lifecycle
   conflicts fail before source mutation.
+- The 2026-08-14 current-main integration passes all affected package
+  typechecks plus 272 Junction provider tests, 180 Junction importer tests, 101
+  hosted device-sync runtime tests, 22 normalized wearable query tests, and 42
+  runner-bundle budget tests. Docs drift, 206-scenario integrity, provider
+  request boundaries, dependency installation, and both staged and unstaged
+  `git diff --check` passes are green.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

@@ -11,6 +11,9 @@ export {
 export {
   DatabaseHealthDurableObject,
 } from "./worker/database-health-durable-object.ts";
+export {
+  DeviceWebhookQueueHealthDurableObject,
+} from "./worker/device-webhook-queue-health-durable-object.ts";
 
 import {
   handleHostedEmailIngress,
@@ -33,6 +36,7 @@ import {
 } from "./worker/public-routes.ts";
 import {
   handleDatabaseHealthScheduled,
+  handleDeviceWebhookQueueHealthScheduled,
 } from "./worker/index.ts";
 
 export const handleHostedLocalTestWorkerFetch = createWorkerFetchHandler({
@@ -65,5 +69,6 @@ export default {
     ctx: WorkerExecutionContext,
   ): void {
     handleDatabaseHealthScheduled(controller, env, ctx);
+    handleDeviceWebhookQueueHealthScheduled(controller, env, ctx);
   },
 };

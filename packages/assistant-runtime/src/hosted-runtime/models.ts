@@ -2,6 +2,7 @@ import type {
   ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import type {
+  HostedExecutionDeviceSyncWake,
   HostedExecutionWake,
   HostedExecutionRedactedLogEntry,
 } from "@murphai/hosted-execution";
@@ -162,6 +163,8 @@ export type HostedSystemMailboxPostCheckpointRecord =
   | {
       kind: "device-sync.dirty-processed-batch";
       nextWakeAt?: string | null;
+      retainMailboxItemUntil?: string | null;
+      retainedWake?: HostedExecutionDeviceSyncWake;
       records: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
     }
   | {
@@ -174,6 +177,10 @@ export type HostedSystemMailboxPostCheckpointRecord =
       kind: "codex-auth.updated";
       nextWakeAt?: null;
       phase: "connected" | "disconnected";
+    }
+  | {
+      kind: "vault-share.projection";
+      nextWakeAt?: null;
     };
 
 export interface HostedConversationWakeMetrics {

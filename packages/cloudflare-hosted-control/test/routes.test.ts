@@ -187,6 +187,7 @@ describe("cloudflare hosted control routes", () => {
 
     expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
       "./client",
+      "./device-webhook-queue",
       "./inference-verification",
       "./routes",
     ]);

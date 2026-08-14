@@ -19,7 +19,12 @@ import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
-import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
+import type {
+  HostedDeviceSyncSecretTestCodec,
+  HostedRuntimeConnectionSecretMaterial,
+  HostedRuntimeApplyPreparedTokenWrite,
+  HostedRuntimeApplyTokenWritePreparation,
+} from "./prisma-store/connection-secrets";
 import type { DeviceProviderApplicationBinding } from "./provider-applications/types";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
@@ -29,13 +34,16 @@ import {
   type HostedMemberDeviceConnectionStatus,
   type HostedStoredDeviceSyncAccount,
 } from "./prisma-store/connections";
-import type { HostedRuntimeConnectionSecretMaterial } from "./prisma-store/connection-secrets";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
-import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
+import type {
+  CompanionHrvNightReceiptInspection,
+  PreparedHostedDeviceSyncDirtyConnectionUpsert,
+} from "./prisma-store/dirty-connections";
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
+  type HostedConnectionSourceAdmissionCandidate,
   type HostedDeviceConnectionSource,
   type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
@@ -74,14 +82,25 @@ export {
   type HostedRuntimeConnectionRecord,
   type HostedRuntimeRedactedConnectionRecord,
 } from "./prisma-store/connections";
+export type {
+  HostedRuntimeConnectionSecretMaterial,
+  HostedRuntimeApplyPreparedTokenWrite,
+  HostedRuntimeApplyTokenWritePreparation,
+} from "./prisma-store/connection-secrets";
 export {
   HOSTED_AGENT_BEARER_TOKEN_PREFIX,
   generateHostedAgentBearerToken,
 } from "./prisma-store/agent-sessions";
 export {
+  HostedDeviceSyncDirtyPreparationMismatchError,
+  hasHostedDeviceSyncDirtyResourcePayload,
+  type PreparedHostedDeviceSyncDirtyConnectionUpsert,
+} from "./prisma-store/dirty-connections";
+export {
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
+  type HostedConnectionSourceAdmissionCandidate,
   type HostedDeviceConnectionSource,
   type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
@@ -249,8 +268,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.webhookTraces.releaseWebhookTrace(provider, traceId, claimToken);
   }
 
-  async markWebhookReceived(accountId: string, now: string): Promise<void> {
-    return this.connections.markWebhookReceived(accountId, now);
+  async markWebhookReceived(
+    accountId: string,
+    now: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
+    return this.connections.markWebhookReceived(accountId, now, tx);
   }
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
@@ -326,8 +349,25 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionRecordForUser(userId, connectionId, tx);
   }
 
-  async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {
+  async syncDurableConnectionState(
+    account: PublicDeviceSyncAccount,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord> {
     return this.connections.syncDurableConnectionState(account, tx);
+  }
+
+  async prepareRuntimeApplyTokenWrites(
+    entries: readonly HostedRuntimeApplyTokenWritePreparation[],
+  ): Promise<Map<string, HostedRuntimeApplyPreparedTokenWrite>> {
+    return this.connections.prepareRuntimeApplyTokenWrites(entries);
+  }
+
+  async persistPreparedRuntimeApplyTokenWrite(input: {
+    prepared: HostedRuntimeApplyPreparedTokenWrite;
+    record: HostedConnectionRecord;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionRecord> {
+    return this.connections.persistPreparedRuntimeApplyTokenWrite(input);
   }
 
   async persistStoredConnectionTokenBundle(input: {
@@ -399,6 +439,19 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.upsertDirtyConnection(input);
   }
 
+  async prepareDirtyConnectionUpsert(
+    input: Omit<UpsertHostedDeviceSyncDirtyConnectionInput, "tx">,
+  ): Promise<PreparedHostedDeviceSyncDirtyConnectionUpsert> {
+    return this.dirtyConnections.prepareDirtyConnectionUpsert(input);
+  }
+
+  async upsertDirtyConnectionWithPreparedPlanTx(input: {
+    prepared: PreparedHostedDeviceSyncDirtyConnectionUpsert;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
+    return this.dirtyConnections.upsertDirtyConnectionWithPreparedPlanTx(input);
+  }
+
   async inspectCompanionHrvNightReceipt(input: {
     connectionIds: readonly string[];
     nightDate: string;
@@ -422,6 +475,14 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient,
   ): Promise<boolean> {
     return this.dirtyConnections.hasPendingDirtyConnection(connectionId, tx);
+  }
+
+  async shouldRequestWakeForDirtyConnectionUpsert(input: {
+    connectionId: string;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    return this.dirtyConnections.shouldRequestWakeForDirtyConnectionUpsert(input);
   }
 
   async hasPendingDirtyConnectionForUser(
@@ -501,6 +562,14 @@ export class PrismaDeviceSyncControlPlaneStore
       (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
       && (!input.status || source.status === input.status)
     );
+  }
+
+  async listConnectionSourceAdmissionCandidates(input: {
+    connectionId: string;
+    sourceProviderSlug: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
+    return this.sources.listConnectionSourceAdmissionCandidates(input);
   }
 
   async listConnectionSourcesForConnections(

@@ -1,11 +1,19 @@
+import { createHash } from 'node:crypto'
 import { isIP } from 'node:net'
 
+import LinqAPIV3, {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+  APIUserAbortError,
+} from '@linqapp/sdk'
 import {
   containsHttpUrlText,
   splitTrailingHttpsLink,
 } from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
+  CapabilityCheckIMessageParams,
   ChatCreateParams,
   ChatCreateResponse,
   ChatSendVoicememoParams,
@@ -33,7 +41,6 @@ import {
   type ResponseHeadersLike,
 } from './http-retry.js'
 import {
-  fetchJsonResponse,
   readJsonErrorResponse,
   requestJsonWithRetry,
 } from './http-json-retry.js'
@@ -67,10 +74,13 @@ const LINQ_HTTP_TIMEOUT_MS = 30_000
 const LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS = 2_500
 const LINQ_HTTP_MAX_ATTEMPTS = 3
 const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
+const LINQ_SDK_BASE_URL = 'https://linq-sdk.invalid'
+const LINQ_SDK_RESPONSE_MAX_BYTES = 256 * 1024
 const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
 const LINQ_CHAT_NOT_FOUND_MESSAGES = new Set(['Chat not found'])
 const LINQ_MAX_MESSAGE_PARTS = 100
 const LINQ_MAX_MEDIA_PARTS = 40
+const LINQ_MAX_TEXT_PART_LENGTH = 10_000
 const LINQ_SUPPORTED_ATTACHMENT_CONTENT_TYPES = [
   'image/jpeg',
   'image/png',
@@ -187,33 +197,8 @@ type LinqOperation =
 
 type LinqFailureKind = 'chat_not_found'
 
-type LinqIMessageCapabilityCheckRequest = {
-  address: string
-  from?: string
-}
-
-type LinqIMessageAppCardRequest = {
-  message: {
-    preferred_service: 'iMessage'
-    idempotency_key: string
-    parts: [{
-      type: 'imessage_app'
-      app: {
-        name: 'Murph'
-        team_id: 'G9DJH2XUMK'
-        bundle_id: 'ai.withmurph.app.messages'
-      }
-      interactive: true
-      url: string
-      fallback_text: ReturnType<typeof buildLinqIMessageAppFallbackText>
-      layout: LinqIMessageAppLayout
-    }]
-  }
-}
-
 type LinqJsonRequestBody =
-  | LinqIMessageCapabilityCheckRequest
-  | LinqIMessageAppCardRequest
+  | CapabilityCheckIMessageParams
   | AttachmentCreateParams
   | ChatCreateParams
   | ChatSendVoicememoParams
@@ -236,11 +221,20 @@ type LinqSafeRequestDetails = {
   requestAttachmentContentType?: string
   requestAttachmentHeaderCount?: number
   requestBodyShape?: string
+  requestAttachmentMediaPartCount?: number
+  requestMediaPartCount?: number
   requestMessageLength?: number
   requestMessagePartCount?: number
+  requestPublicUrlMediaPartCount?: number
+  requestTextPartCount?: number
+  providerErrorCode?: string
+  providerRequestId?: string
   responseBodyKeyCount?: number
   responseBodyKind?: string
+  responseBodyKeySummary?: string
   responseBodyKeys?: string[]
+  responseBodySha256?: string
+  responseBodyStringFieldSummary?: string
   responseBodyStringFields?: string[]
   responseBodyStringFieldCount?: number
   responseBodyTextLength?: number
@@ -257,10 +251,12 @@ type LinqSafeRequestDetails = {
 
 export interface LinqFetchResponse {
   arrayBuffer(): Promise<ArrayBuffer>
+  body?: ReadableStream<Uint8Array> | null
   headers?: ResponseHeadersLike | null
   json(): Promise<unknown>
   ok: boolean
   status: number
+  statusText?: string
   text(): Promise<string>
 }
 
@@ -352,7 +348,7 @@ export async function probeLinqApi(
   } = {},
 ): Promise<ProbeLinqApiResult> {
   const env = dependencies.env ?? process.env
-  const response = await requestLinqJson<PhoneNumberListResponse>({
+  const response = await requestLinqSdk<PhoneNumberListResponse>({
     details: {
       operation: 'list_phone_numbers',
       provider: 'linq',
@@ -361,6 +357,7 @@ export async function probeLinqApi(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'GET',
     path: '/phone_numbers',
+    request: (client, signal) => client.phoneNumbers.list({ signal }),
     signal: dependencies.signal,
   })
 
@@ -532,6 +529,7 @@ async function sendLinqChatMessageParts(
     idempotencyKey: input.idempotencyKey,
     media: input.media ?? [],
     message,
+    operation: 'send_message',
     ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
     replyToMessageId,
   })
@@ -646,7 +644,8 @@ async function sendLinqChatMessageBody(
     signal?: AbortSignal
   },
 ): Promise<LinqMessageSendResponse> {
-  return requestLinqJson<MessageSendResponse>({
+  return requestLinqSdk<MessageSendResponse>({
+    body: input.body,
     details: {
       hasIdempotencyKey: input.idempotencyKey !== null,
       hasReplyToMessageId: input.replyToMessageId !== null,
@@ -657,7 +656,8 @@ async function sendLinqChatMessageBody(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(input.chatId)}/messages`,
-    body: input.body,
+    request: (client, signal) =>
+      client.chats.messages.send(input.chatId, input.body, { signal }),
     signal: dependencies.signal,
   })
 }
@@ -675,12 +675,13 @@ export async function checkLinqIMessageCapability(
 ): Promise<boolean> {
   const address = normalizeRequiredString(input.address, 'capability address')
   const from = normalizeNullableString(input.from)
-  const body: LinqIMessageCapabilityCheckRequest = {
+  const body: CapabilityCheckIMessageParams = {
     address,
-    ...(from ? { from } : {}),
   }
-  const response = await requestLinqJson<unknown>({
+  if (from) body.from = from
+  const response = await requestLinqSdk({
     allowRateLimitRetries: false,
+    body,
     details: {
       operation: 'check_imessage_capability',
       provider: 'linq',
@@ -689,11 +690,11 @@ export async function checkLinqIMessageCapability(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/capability/check_imessage',
-    body,
+    request: (client, signal) => client.capability.checkIMessage(body, { signal }),
     signal: dependencies.signal,
     singleAttemptTimeoutMs: LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS,
   })
-  return readRecord(response)?.available === true
+  return response?.available === true
 }
 
 export async function sendLinqIMessageAppCard(
@@ -713,7 +714,7 @@ export async function sendLinqIMessageAppCard(
     input.idempotencyKey,
     'iMessage app card idempotency key',
   )
-  const body: LinqIMessageAppCardRequest = {
+  const body: MessageSendParams = {
     message: {
       preferred_service: 'iMessage',
       idempotency_key: idempotencyKey,
@@ -734,7 +735,8 @@ export async function sendLinqIMessageAppCard(
     },
   }
 
-  return requestLinqJson<MessageSendResponse>({
+  return requestLinqSdk<MessageSendResponse>({
+    body,
     details: {
       hasIdempotencyKey: true,
       operation: 'send_imessage_app_card',
@@ -744,7 +746,7 @@ export async function sendLinqIMessageAppCard(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/messages`,
-    body,
+    request: (client, signal) => client.chats.messages.send(chatId, body, { signal }),
     signal: dependencies.signal,
   })
 }
@@ -769,8 +771,9 @@ async function createLinqAttachmentUpload(
     filename,
     size_bytes: sizeBytes,
   }
-  return requestLinq<CreateLinqAttachmentUploadResult>({
+  return requestLinqSdk<CreateLinqAttachmentUploadResult>({
     allowRateLimitRetries: false,
+    body,
     details: {
       operation: 'create_attachment_upload',
       provider: 'linq',
@@ -781,8 +784,8 @@ async function createLinqAttachmentUpload(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/attachments',
-    body,
-    parseResponse: async (response) => {
+    request: async (client, signal) => {
+      const response = await client.attachments.create(body, { signal }).asResponse()
       let payload: unknown
       try {
         payload = await response.json()
@@ -871,6 +874,7 @@ async function uploadLinqAttachmentBytes(
           timeout.signal.throwIfAborted()
         }
         try {
+          // provider-request-boundary-allow-next-line: linq-presigned-bytes
           return await fetchImplementation(uploadUrl, {
             body,
             headers,
@@ -986,7 +990,8 @@ export async function sendLinqVoiceMemo(
   const body: ChatSendVoicememoParams = {
     attachment_id: attachmentId,
   }
-  const response = await requestLinqJson<ChatSendVoicememoResponse>({
+  const response = await requestLinqSdk<ChatSendVoicememoResponse>({
+    body,
     details: {
       hasIdempotencyKey: false,
       operation: 'send_voice_memo',
@@ -996,7 +1001,7 @@ export async function sendLinqVoiceMemo(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/voicememo`,
-    body,
+    request: (client, signal) => client.chats.sendVoicememo(chatId, body, { signal }),
     signal: dependencies.signal,
   })
 
@@ -1020,7 +1025,7 @@ export async function deleteLinqMessage(
   const messageId = normalizeRequiredString(input.messageId, 'message id')
 
   try {
-    await requestLinqNoContent({
+    await requestLinqSdk<void>({
       allowDeleteRetries: true,
       details: {
         operation: 'delete_message',
@@ -1030,6 +1035,7 @@ export async function deleteLinqMessage(
       fetchImplementation: dependencies.fetchImplementation,
       method: 'DELETE',
       path: `/messages/${encodeURIComponent(messageId)}`,
+      request: (client, signal) => client.messages.delete(messageId, { signal }),
       signal: dependencies.signal,
     })
   } catch (error) {
@@ -1061,7 +1067,8 @@ export async function setLinqMessageReaction(
     type: resolveLinqReactionType(input.reaction),
   }
 
-  await requestLinqJson<MessageAddReactionResponse>({
+  await requestLinqSdk<MessageAddReactionResponse>({
+    body,
     details: {
       hasIdempotencyKey: false,
       operation: 'set_message_reaction',
@@ -1071,7 +1078,7 @@ export async function setLinqMessageReaction(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/messages/${encodeURIComponent(targetMessageId)}/reactions`,
-    body,
+    request: (client, signal) => client.messages.addReaction(targetMessageId, body, { signal }),
     signal: dependencies.signal,
   })
 
@@ -1093,7 +1100,7 @@ export async function startLinqChatTypingIndicator(
 ): Promise<void> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
 
-  await requestLinqNoContent({
+  await requestLinqSdk<void>({
     details: {
       operation: 'typing_start',
       provider: 'linq',
@@ -1102,6 +1109,7 @@ export async function startLinqChatTypingIndicator(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/typing`,
+    request: (client, signal) => client.chats.typing.start(chatId, { signal }),
     signal: dependencies.signal,
   })
 }
@@ -1118,7 +1126,7 @@ export async function stopLinqChatTypingIndicator(
 ): Promise<void> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
 
-  await requestLinqNoContent({
+  await requestLinqSdk<void>({
     details: {
       operation: 'typing_stop',
       provider: 'linq',
@@ -1127,6 +1135,7 @@ export async function stopLinqChatTypingIndicator(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'DELETE',
     path: `/chats/${encodeURIComponent(chatId)}/typing`,
+    request: (client, signal) => client.chats.typing.stop(chatId, { signal }),
     signal: dependencies.signal,
   })
 }
@@ -1143,7 +1152,7 @@ export async function markLinqChatRead(
 ): Promise<void> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
 
-  await requestLinqNoContent({
+  await requestLinqSdk<void>({
     details: {
       operation: 'mark_read',
       provider: 'linq',
@@ -1152,6 +1161,7 @@ export async function markLinqChatRead(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/read`,
+    request: (client, signal) => client.chats.markAsRead(chatId, { signal }),
     signal: dependencies.signal,
   })
 }
@@ -1276,13 +1286,15 @@ async function createLinqChatWithPrimaryMessage(
     idempotencyKey: input.idempotencyKey,
     media: input.media ?? [],
     message: input.message,
+    operation: 'create_chat',
   })
   const body: ChatCreateParams = {
     from,
     message: messageBody.message,
     to: recipients,
   }
-  const response = await requestLinqJson<ChatCreateResponse>({
+  const response = await requestLinqSdk<ChatCreateResponse>({
+    body,
     details: {
       hasIdempotencyKey: idempotencyKey !== null,
       operation: 'create_chat',
@@ -1293,7 +1305,7 @@ async function createLinqChatWithPrimaryMessage(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/chats',
-    body,
+    request: (client, signal) => client.chats.create(body, { signal }),
     signal: dependencies.signal,
   })
 
@@ -1457,7 +1469,8 @@ export async function createLinqWebhookSubscription(
   if (phoneNumbers) {
     body.phone_numbers = phoneNumbers
   }
-  const response = await requestLinqJson<WebhookSubscriptionCreateResponse>({
+  const response = await requestLinqSdk<WebhookSubscriptionCreateResponse>({
+    body,
     details: {
       operation: 'create_webhook_subscription',
       phoneNumberCount: phoneNumbers?.length ?? 0,
@@ -1468,7 +1481,7 @@ export async function createLinqWebhookSubscription(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/webhook-subscriptions',
-    body,
+    request: (client, signal) => client.webhookSubscriptions.create(body, { signal }),
     signal: dependencies.signal,
   })
 
@@ -1484,115 +1497,118 @@ export async function createLinqWebhookSubscription(
   }
 }
 
-async function requestLinqJson<T>(input: {
-  allowRateLimitRetries?: boolean
-  details: LinqSafeRequestDetails
-  env: NodeJS.ProcessEnv
-  fetchImplementation?: LinqFetch
-  method: LinqHttpMethod
-  path: string
-  body?: LinqJsonRequestBody
-  signal?: AbortSignal
-  singleAttemptTimeoutMs?: number
-}): Promise<T> {
-  return requestLinq<T>({
-    ...input,
-    parseResponse: async (response) => (await response.json()) as T,
-  })
-}
-
-async function requestLinqNoContent(input: {
-  allowDeleteRetries?: boolean
-  allowRateLimitRetries?: boolean
-  details: LinqSafeRequestDetails
-  env: NodeJS.ProcessEnv
-  fetchImplementation?: LinqFetch
-  method: LinqHttpMethod
-  path: string
-  signal?: AbortSignal
-}): Promise<void> {
-  await requestLinq<void>({
-    ...input,
-    parseResponse: async () => undefined,
-  })
-}
-
 type LinqHttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT'
 
-async function requestLinq<T>(input: {
+type LinqSdkErrorResponse = {
+  bodyKind?: string
+  headers: Headers
+  payload: unknown | null
+  rawText: string | null
+  status: number
+}
+
+type LinqSdkAttemptState = {
+  errorResponse: LinqSdkErrorResponse | null
+  requestOrigin: string | null
+  transportError: unknown | null
+}
+
+class LinqSdkResponseTooLargeError extends Error {
+  readonly headers: Headers
+  readonly status: number
+
+  constructor(status: number, headers: Headers) {
+    super('Linq SDK response exceeded the configured byte limit.')
+    this.name = 'LinqSdkResponseTooLargeError'
+    this.headers = headers
+    this.status = status
+  }
+}
+
+async function requestLinqSdk<T>(input: {
   allowDeleteRetries?: boolean
   allowRateLimitRetries?: boolean
+  body?: LinqJsonRequestBody
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   method: LinqHttpMethod
   path: string
-  body?: LinqJsonRequestBody
-  parseResponse(response: LinqFetchResponse): Promise<T>
+  request(client: LinqAPIV3, signal: AbortSignal | undefined): Promise<T>
   signal?: AbortSignal
   singleAttemptTimeoutMs?: number
 }): Promise<T> {
-  const request = resolveLinqRequest(input)
+  const runtime = resolveLinqSdkRuntime(input)
   const diagnosticPath = sanitizeLinqPathForDiagnostics(input.path)
+  const serializedBody = input.body === undefined
+    ? undefined
+    : JSON.stringify(input.body)
   const details: LinqSafeRequestDetails = {
     ...input.details,
-    ...buildLinqRequestBodyDiagnostics(input.body, request.body),
+    ...buildLinqRequestBodyDiagnostics(input.body, serializedBody),
     path: diagnosticPath,
   }
-  const fetchInput = {
-    allowDeleteRetries: input.allowDeleteRetries === true,
-    allowRateLimitRetries: input.allowRateLimitRetries !== false,
-    body: request.body,
-    details,
-    fetchImplementation: request.fetchImplementation,
-    headers: request.headers,
-    method: input.method,
-    path: diagnosticPath,
-    signal: input.signal,
-    url: request.url,
-  }
+  const timeoutMs = input.singleAttemptTimeoutMs ?? LINQ_HTTP_TIMEOUT_MS
+  const maxAttempts = input.singleAttemptTimeoutMs === undefined
+    ? LINQ_HTTP_MAX_ATTEMPTS
+    : 1
 
-  if (input.singleAttemptTimeoutMs !== undefined) {
-    return fetchCompleteLinqAttempt({
-      ...fetchInput,
-      parseResponse: input.parseResponse,
-      timeoutMs: input.singleAttemptTimeoutMs,
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    input.signal?.throwIfAborted()
+    const state: LinqSdkAttemptState = {
+      errorResponse: null,
+      requestOrigin: null,
+      transportError: null,
+    }
+    const client = createLinqSdkClient({
+      apiRoot: runtime.apiRoot,
+      fetchImplementation: runtime.fetchImplementation,
+      state,
+      timeoutMs,
+      token: runtime.token,
     })
+
+    try {
+      return await input.request(client, input.signal)
+    } catch (error) {
+      if (input.signal?.aborted) {
+        input.signal.throwIfAborted()
+      }
+
+      const failure = normalizeLinqSdkRequestFailure({
+        allowDeleteRetries: input.allowDeleteRetries === true,
+        allowRateLimitRetries: input.allowRateLimitRetries !== false,
+        details,
+        error,
+        method: input.method,
+        path: diagnosticPath,
+        state,
+        timeoutMs,
+      })
+      if (!isRetryableLinqRequestError(failure) || attempt >= maxAttempts) {
+        throw failure
+      }
+
+      await waitForLinqRetryDelay(
+        attempt,
+        input.signal,
+        state.errorResponse?.headers
+          ?? (error instanceof APIError ? error.headers : undefined),
+      )
+    }
   }
 
-  return requestJsonWithRetry<T, LinqFetchResponse>({
-    createHttpError: (response) =>
-      createLinqHttpError(
-        response,
-        details,
-        input.method,
-        diagnosticPath,
-        input.allowDeleteRetries === true,
-        input.allowRateLimitRetries !== false,
-      ),
-    fetchResponse: () => fetchLinqResponse({
-      ...fetchInput,
-      timeoutMs: LINQ_HTTP_TIMEOUT_MS,
-    }),
-    isRetryableError: isRetryableLinqRequestError,
-    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
-    parseResponse: input.parseResponse,
-    signal: input.signal,
-    waitForRetryDelay: waitForLinqRetryDelay,
-  })
+  throw new Error('Unreachable Linq SDK retry state.')
 }
 
-function resolveLinqRequest(input: {
+function resolveLinqSdkRuntime(input: {
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
-  path: string
-  body?: LinqJsonRequestBody
 }): {
-  body?: string
+  apiRoot: string
   fetchImplementation: LinqFetch
-  headers: Record<string, string>
-  url: string
+  token: string
 } {
   const token = resolveLinqApiToken(input.env)
   if (!token) {
@@ -1603,8 +1619,8 @@ function resolveLinqRequest(input: {
     )
   }
 
-  const fetchImplementation = input.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
-  if (typeof fetchImplementation !== 'function') {
+  const fetchImplementation = input.fetchImplementation ?? resolveDefaultLinqFetch()
+  if (!fetchImplementation) {
     throw createLinqConfigurationError(
       'LINQ_UNAVAILABLE',
       'Linq access requires fetch support in the current Node.js runtime.',
@@ -1612,20 +1628,474 @@ function resolveLinqRequest(input: {
     )
   }
 
-  const baseUrl = normalizeLinqBaseUrl(
-    resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
-  )
-  const body = input.body ? JSON.stringify(input.body) : undefined
-
   return {
-    body,
+    apiRoot: normalizeLinqBaseUrl(
+      resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
+    ),
     fetchImplementation,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(body ? { 'content-type': 'application/json' } : {}),
-    },
-    url: buildLinqRequestUrl(baseUrl, input.path),
+    token,
   }
+}
+
+function resolveDefaultLinqFetch(): LinqFetch | null {
+  if (typeof globalThis.fetch !== 'function') {
+    return null
+  }
+  return (input, init) => globalThis.fetch(input, init)
+}
+
+function createLinqSdkClient(input: {
+  apiRoot: string
+  fetchImplementation: LinqFetch
+  state: LinqSdkAttemptState
+  timeoutMs: number
+  token: string
+}): LinqAPIV3 {
+  return new LinqAPIV3({
+    apiKey: input.token,
+    baseURL: LINQ_SDK_BASE_URL,
+    fetch: createLinqSdkFetch(input),
+    logLevel: 'off',
+    maxRetries: 0,
+    timeout: input.timeoutMs,
+  })
+}
+
+function createLinqSdkFetch(input: {
+  apiRoot: string
+  fetchImplementation: LinqFetch
+  state: LinqSdkAttemptState
+}): (
+  request: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response> {
+  return async (request, init) => {
+    const url = mapLinqSdkRequestUrl(request, input.apiRoot)
+    input.state.requestOrigin = readRequestOrigin(url)
+    let response: LinqFetchResponse
+    try {
+      response = await input.fetchImplementation.call(undefined, url, {
+        ...(init?.body === null || init?.body === undefined
+          ? {}
+          : { body: normalizeLinqSdkRequestBody(init.body) }),
+        headers: normalizeLinqSdkRequestHeaders(init?.headers),
+        method: normalizeNullableString(init?.method) ?? 'GET',
+        ...(init?.signal ? { signal: init.signal } : {}),
+      })
+    } catch (error) {
+      input.state.transportError = error
+      throw error
+    }
+    return await bufferLinqSdkResponse(
+      response,
+      input.state,
+      LINQ_SDK_RESPONSE_MAX_BYTES,
+    )
+  }
+}
+
+function mapLinqSdkRequestUrl(
+  request: string | URL | Request,
+  apiRoot: string,
+): string {
+  const source = new URL(
+    typeof request === 'string'
+      ? request
+      : request instanceof URL
+        ? request.toString()
+        : request.url,
+  )
+  const sdkBase = new URL(LINQ_SDK_BASE_URL)
+  if (
+    source.origin !== sdkBase.origin
+    || !/^\/v3(?:\/|$)/u.test(source.pathname)
+  ) {
+    throw new TypeError('Linq SDK emitted an unexpected request URL.')
+  }
+
+  const relativePath = encodeLinqSdkPath(
+    source.pathname.replace(/^\/v3\/?/u, ''),
+  )
+  const target = new URL(buildLinqRequestUrl(apiRoot, relativePath))
+  target.search = source.search
+  return target.toString()
+}
+
+function encodeLinqSdkPath(pathname: string): string {
+  return pathname
+    .split('/')
+    .map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+    .join('/')
+}
+
+function normalizeLinqSdkRequestBody(body: BodyInit): string | Blob {
+  if (typeof body === 'string' || body instanceof Blob) {
+    return body
+  }
+  throw new TypeError('Linq SDK emitted an unsupported control-plane request body.')
+}
+
+function normalizeLinqSdkRequestHeaders(
+  headers: HeadersInit | undefined,
+): Record<string, string> {
+  const source = new Headers(headers)
+  const normalized: Record<string, string> = {}
+  for (const name of ['authorization', 'content-type', 'idempotency-key']) {
+    const value = source.get(name)
+    if (value !== null) {
+      normalized[name] = value
+    }
+  }
+  return normalized
+}
+
+async function bufferLinqSdkResponse(
+  response: LinqFetchResponse,
+  state: LinqSdkAttemptState,
+  maxResponseBytes: number,
+): Promise<Response> {
+  const headers = normalizeLinqSdkResponseHeaders(response.headers)
+  const declaredLength = Number(headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > maxResponseBytes) {
+    await response.body?.cancel().catch(() => undefined)
+    state.errorResponse = {
+      bodyKind: 'oversize',
+      headers,
+      payload: null,
+      rawText: null,
+      status: response.status,
+    }
+    throw new LinqSdkResponseTooLargeError(response.status, headers)
+  }
+
+  const bytes = response.body
+    ? await readBoundedLinqSdkStream(
+        response.body,
+        maxResponseBytes,
+        response.status,
+        headers,
+        state,
+      )
+    : new Uint8Array(await response.arrayBuffer())
+  if (bytes.byteLength > maxResponseBytes) {
+    state.errorResponse = {
+      bodyKind: 'oversize',
+      headers,
+      payload: null,
+      rawText: null,
+      status: response.status,
+    }
+    throw new LinqSdkResponseTooLargeError(response.status, headers)
+  }
+
+  if (!response.ok) {
+    state.errorResponse = parseLinqSdkErrorResponse(
+      bytes,
+      response.status,
+      headers,
+    )
+  }
+
+  if (bytes.byteLength > 0) {
+    headers.set('content-type', 'application/json')
+  }
+
+  const body = bytes.byteLength === 0
+    || response.status === 204
+    || response.status === 205
+    || response.status === 304
+    ? null
+    : copyLinqSdkResponseBytes(bytes)
+  return new Response(body, {
+    headers,
+    status: response.status,
+    ...(response.statusText ? { statusText: response.statusText } : {}),
+  })
+}
+
+function copyLinqSdkResponseBytes(bytes: Uint8Array): ArrayBuffer {
+  const body = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(body).set(bytes)
+  return body
+}
+
+async function readBoundedLinqSdkStream(
+  stream: ReadableStream<Uint8Array>,
+  maxResponseBytes: number,
+  status: number,
+  headers: Headers,
+  state: LinqSdkAttemptState,
+): Promise<Uint8Array> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const next = await reader.read()
+    if (next.done) {
+      break
+    }
+    total += next.value.byteLength
+    if (total > maxResponseBytes) {
+      await reader.cancel().catch(() => undefined)
+      state.errorResponse = {
+        bodyKind: 'oversize',
+        headers,
+        payload: null,
+        rawText: null,
+        status,
+      }
+      throw new LinqSdkResponseTooLargeError(status, headers)
+    }
+    chunks.push(next.value)
+  }
+
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+function normalizeLinqSdkResponseHeaders(
+  source: ResponseHeadersLike | null | undefined,
+): Headers {
+  if (source instanceof Headers) {
+    return new Headers(source)
+  }
+
+  const headers = new Headers()
+  const record = readRecord(source)
+  if (record) {
+    for (const [name, value] of Object.entries(record)) {
+      if (typeof value === 'string') {
+        headers.set(name, value)
+      }
+    }
+  }
+  if (source && typeof source.get === 'function') {
+    for (const name of [
+      'content-length',
+      'content-type',
+      'retry-after',
+      'x-should-retry',
+    ]) {
+      const value = source.get(name)
+      if (value !== null && value !== undefined) {
+        headers.set(name, value)
+      }
+    }
+  }
+  return headers
+}
+
+function parseLinqSdkErrorResponse(
+  bytes: Uint8Array,
+  status: number,
+  headers: Headers,
+): LinqSdkErrorResponse {
+  const text = new TextDecoder().decode(bytes)
+  if (!text.trim()) {
+    return {
+      headers,
+      payload: null,
+      rawText: null,
+      status,
+    }
+  }
+
+  try {
+    return {
+      headers,
+      payload: JSON.parse(text),
+      rawText: null,
+      status,
+    }
+  } catch {
+    return {
+      headers,
+      payload: null,
+      rawText: text,
+      status,
+    }
+  }
+}
+
+function normalizeLinqSdkRequestFailure(input: {
+  allowDeleteRetries: boolean
+  allowRateLimitRetries: boolean
+  details: LinqSafeRequestDetails
+  error: unknown
+  method: LinqHttpMethod
+  path: string
+  state: LinqSdkAttemptState
+  timeoutMs: number
+}): Error {
+  if (input.error instanceof VaultCliError) {
+    return input.error
+  }
+
+  const preProviderError = readPreProviderLinqRequestErrorFromChain(input.error)
+  if (preProviderError) {
+    return preProviderError
+  }
+
+  const tooLarge = readLinqSdkResponseTooLargeError(input.error)
+  if (tooLarge) {
+    return createLinqSdkHttpError({
+      ...input,
+      errorResponse: input.state.errorResponse ?? {
+        bodyKind: 'oversize',
+        headers: tooLarge.headers,
+        payload: null,
+        rawText: null,
+        status: tooLarge.status,
+      },
+    })
+  }
+
+  if (input.error instanceof APIError && typeof input.error.status === 'number') {
+    return createLinqSdkHttpError({
+      ...input,
+      errorResponse: input.state.errorResponse ?? {
+        headers: input.error.headers ?? new Headers(),
+        payload: normalizeLinqSdkApiErrorPayload(input.error.error),
+        rawText: null,
+        status: input.error.status,
+      },
+    })
+  }
+
+  const timedOut = input.error instanceof APIConnectionTimeoutError
+  const transportCause = input.state.transportError
+    ?? readLinqSdkTransportCause(input.error)
+  return createLinqRequestError({
+    details: input.details,
+    error: transportCause,
+    requestOrigin: input.state.requestOrigin,
+    method: input.method,
+    path: input.path,
+    timedOut,
+    timeoutMs: input.timeoutMs,
+    retryable: shouldRetryLinqTransportFailure(
+      input.method,
+      input.allowDeleteRetries,
+      input.details.hasIdempotencyKey === true,
+    ),
+  })
+}
+
+function createLinqSdkHttpError(input: {
+  allowDeleteRetries: boolean
+  allowRateLimitRetries: boolean
+  details: LinqSafeRequestDetails
+  errorResponse: LinqSdkErrorResponse
+  method: LinqHttpMethod
+  path: string
+}): VaultCliError {
+  const responseDiagnostics = input.errorResponse.bodyKind
+    ? { responseBodyKind: input.errorResponse.bodyKind }
+    : buildLinqErrorResponseDiagnostics(
+        input.errorResponse.payload,
+        input.errorResponse.rawText,
+      )
+  const responseTraceId = readSafeLinqResponseHeader(
+    input.errorResponse.headers,
+    'x-trace-id',
+  )
+  const linqFailureKind = classifyLinqFailureKind(input.errorResponse.payload)
+
+  return new VaultCliError(
+    'LINQ_API_REQUEST_FAILED',
+    `Linq request ${input.method} ${input.path} failed with HTTP ${input.errorResponse.status}.`,
+    {
+      ...input.details,
+      ...responseDiagnostics,
+      ...(!responseDiagnostics.providerRequestId && responseTraceId
+        ? { providerRequestId: responseTraceId }
+        : {}),
+      failureStage: 'http',
+      ...(linqFailureKind ? { linqFailureKind } : {}),
+      method: input.method,
+      path: input.path,
+      retryable: shouldRetryLinqHttpStatus(
+        input.method,
+        input.errorResponse.status,
+        input.allowDeleteRetries,
+        input.details.hasIdempotencyKey === true,
+        input.allowRateLimitRetries,
+      ),
+      status: input.errorResponse.status,
+    },
+  )
+}
+
+function normalizeLinqSdkApiErrorPayload(value: unknown): unknown | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  return typeof value === 'string' ? { error: value } : value
+}
+
+function readPreProviderLinqRequestErrorFromChain(error: unknown): Error | null {
+  let current: unknown = error
+  let depth = 0
+  while (current !== null && current !== undefined && depth < 8) {
+    const preProviderError = readPreProviderLinqRequestError(current)
+    if (preProviderError) {
+      return preProviderError
+    }
+    current = readLinqSdkErrorCause(current)
+    depth += 1
+  }
+  return null
+}
+
+function readLinqSdkResponseTooLargeError(
+  error: unknown,
+): LinqSdkResponseTooLargeError | null {
+  let current: unknown = error
+  let depth = 0
+  while (current !== null && current !== undefined && depth < 8) {
+    if (current instanceof LinqSdkResponseTooLargeError) {
+      return current
+    }
+    current = readLinqSdkErrorCause(current)
+    depth += 1
+  }
+  return null
+}
+
+function readLinqSdkTransportCause(error: unknown): unknown {
+  if (
+    !(error instanceof APIConnectionError)
+    && !(error instanceof APIUserAbortError)
+  ) {
+    return error
+  }
+
+  let current: unknown = error
+  let previous: unknown = error
+  let depth = 0
+  while (current !== null && current !== undefined && depth < 8) {
+    previous = current
+    const next = readLinqSdkErrorCause(current)
+    if (next === undefined) {
+      break
+    }
+    current = next
+    depth += 1
+  }
+  return previous
+}
+
+function readLinqSdkErrorCause(error: unknown): unknown {
+  return typeof error === 'object'
+    && error !== null
+    && 'cause' in error
+    ? error.cause
+    : undefined
 }
 
 function createLinqConfigurationError(
@@ -1643,87 +2113,6 @@ function createLinqConfigurationError(
   })
 }
 
-type LinqFetchInput = {
-  allowDeleteRetries: boolean
-  allowRateLimitRetries: boolean
-  details: LinqSafeRequestDetails
-  fetchImplementation: LinqFetch
-  url: string
-  method: LinqHttpMethod
-  path: string
-  headers: Record<string, string>
-  body?: string
-  signal?: AbortSignal
-  timeoutMs: number
-}
-
-async function fetchLinqResponse(input: LinqFetchInput): Promise<LinqFetchResponse> {
-  return fetchJsonResponse({
-    body: input.body,
-    createTransportError: ({ error, timedOut }) =>
-      createLinqTransportError(input, error, timedOut),
-    fetchImplementation: input.fetchImplementation,
-    headers: input.headers,
-    method: input.method,
-    signal: input.signal,
-    timeoutMs: input.timeoutMs,
-    url: input.url,
-  })
-}
-
-async function fetchCompleteLinqAttempt<T>(
-  input: LinqFetchInput & {
-    parseResponse(response: LinqFetchResponse): Promise<T>
-  },
-): Promise<T> {
-  return fetchJsonResponse({
-    body: input.body,
-    consumeResponse: async (response) => {
-      if (!response.ok) {
-        throw await createLinqHttpError(
-          response,
-          input.details,
-          input.method,
-          input.path,
-          input.allowDeleteRetries,
-          input.allowRateLimitRetries,
-        )
-      }
-      return input.parseResponse(response)
-    },
-    createTransportError: ({ error, timedOut }) =>
-      createLinqTransportError(input, error, timedOut),
-    fetchImplementation: input.fetchImplementation,
-    headers: input.headers,
-    method: input.method,
-    signal: input.signal,
-    timeoutMs: input.timeoutMs,
-    url: input.url,
-  })
-}
-
-function createLinqTransportError(
-  input: LinqFetchInput,
-  error: unknown,
-  timedOut: boolean,
-): Error {
-  return readPreProviderLinqRequestError(error)
-    ?? createLinqRequestError({
-      details: input.details,
-      error,
-      requestOrigin: readRequestOrigin(input.url),
-      method: input.method,
-      path: input.path,
-      timedOut,
-      timeoutMs: input.timeoutMs,
-      retryable: shouldRetryLinqTransportFailure(
-        input.method,
-        input.allowDeleteRetries,
-        input.details.hasIdempotencyKey === true,
-      ),
-    })
-}
-
 async function createLinqHttpError(
   response: LinqFetchResponse,
   details: LinqSafeRequestDetails,
@@ -1734,6 +2123,10 @@ async function createLinqHttpError(
 ): Promise<VaultCliError> {
   const { payload, rawText } = await readJsonErrorResponse(response)
   const responseDiagnostics = buildLinqErrorResponseDiagnostics(payload, rawText)
+  const responseTraceId = readSafeLinqResponseHeader(
+    response.headers,
+    'x-trace-id',
+  )
   const linqFailureKind = classifyLinqFailureKind(payload)
 
   return new VaultCliError(
@@ -1742,6 +2135,9 @@ async function createLinqHttpError(
     {
       ...details,
       ...responseDiagnostics,
+      ...(!responseDiagnostics.providerRequestId && responseTraceId
+        ? { providerRequestId: responseTraceId }
+        : {}),
       failureStage: 'http',
       ...(linqFailureKind ? { linqFailureKind } : {}),
       method,
@@ -1756,6 +2152,20 @@ async function createLinqHttpError(
       status: response.status,
     },
   )
+}
+
+function readSafeLinqResponseHeader(
+  headers: ResponseHeadersLike | null | undefined,
+  name: string,
+): string | null {
+  if (!headers) {
+    return null
+  }
+  const rawValue = typeof headers.get === 'function'
+    ? headers.get(name)
+    : Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1]
+  const value = typeof rawValue === 'string' ? rawValue.trim() : ''
+  return /^[A-Za-z0-9_.:-]{1,120}$/u.test(value) ? value : null
 }
 
 function buildLinqRequestBodyDiagnostics(
@@ -1773,15 +2183,23 @@ function buildLinqRequestBodyDiagnostics(
 
   const message = readRecord(record.message)
   const parts = Array.isArray(message?.parts) ? message.parts : []
+  const partRecords = parts.map(readRecord).filter((part) => part !== null)
+  const mediaParts = partRecords.filter((part) => part.type === 'media')
   const requestMessageLength = parts.reduce((total, part) => {
     const record = readRecord(part)
     return total + (typeof record?.value === 'string' ? record.value.length : 0)
   }, 0)
 
   return {
+    requestAttachmentMediaPartCount:
+      mediaParts.filter((part) => typeof part.attachment_id === 'string').length,
     requestBodyShape: summarizeLinqJsonObjectShape(record),
+    requestMediaPartCount: mediaParts.length,
     requestMessageLength,
     requestMessagePartCount: parts.length,
+    requestPublicUrlMediaPartCount:
+      mediaParts.filter((part) => typeof part.url === 'string').length,
+    requestTextPartCount: partRecords.filter((part) => part.type === 'text').length,
   }
 }
 
@@ -1792,6 +2210,7 @@ function buildLinqErrorResponseDiagnostics(
   if (rawText !== null) {
     return {
       responseBodyKind: 'text',
+      responseBodySha256: hashLinqDiagnosticBody(rawText),
       responseBodyTextLength: rawText.length,
     }
   }
@@ -1807,6 +2226,7 @@ function buildLinqErrorResponseDiagnostics(
   if (Array.isArray(payload)) {
     return {
       responseBodyKind: 'json_array',
+      responseBodySha256: hashLinqDiagnosticBody(serialized),
       responseBodyTextLength: serialized.length,
     }
   }
@@ -1815,22 +2235,57 @@ function buildLinqErrorResponseDiagnostics(
     const record = payload as Record<string, unknown>
     const keys = Object.keys(record).sort()
     const safeKeys = keys.filter(isSafeLinqResponseBodyKey)
+    const safeStringFields = safeKeys.filter((key) => typeof record[key] === 'string')
+    const providerError = readRecord(record.error)
+    const providerErrorCode = readSafeLinqDiagnosticToken(
+      providerError ?? record,
+      ['code', 'type'],
+    )
+    const providerRequestId = readSafeLinqDiagnosticToken(record, ['request_id', 'trace_id'])
     return {
+      ...(providerErrorCode ? { providerErrorCode } : {}),
+      ...(providerRequestId ? { providerRequestId } : {}),
       responseBodyKind: 'json_object',
       responseBodyKeyCount: keys.length,
+      ...(safeKeys.length > 0 ? { responseBodyKeySummary: safeKeys.join(',') } : {}),
       responseBodyKeys: safeKeys,
+      responseBodySha256: hashLinqDiagnosticBody(serialized),
       responseBodyStringFieldCount:
         keys.filter((key) => typeof record[key] === 'string').length,
-      responseBodyStringFields:
-        safeKeys.filter((key) => typeof record[key] === 'string'),
+      ...(safeStringFields.length > 0
+        ? { responseBodyStringFieldSummary: safeStringFields.join(',') }
+        : {}),
+      responseBodyStringFields: safeStringFields,
       responseBodyTextLength: serialized.length,
     }
   }
 
   return {
     responseBodyKind: `json_${typeof payload}`,
+    responseBodySha256: hashLinqDiagnosticBody(serialized),
     responseBodyTextLength: serialized.length,
   }
+}
+
+function hashLinqDiagnosticBody(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function readSafeLinqDiagnosticToken(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = readStringField(record, key)?.trim() ?? ''
+    if (/^[A-Za-z0-9_.:-]{1,120}$/u.test(value)) {
+      return value
+    }
+    const numericValue = record[key]
+    if (typeof numericValue === 'number' && Number.isSafeInteger(numericValue)) {
+      return String(numericValue)
+    }
+  }
+  return null
 }
 
 function resolveLinqReactionType(
@@ -2134,8 +2589,7 @@ function parseLinqVoiceMemoResponse(input: {
   chatId: string
   response: ChatSendVoicememoResponse
 }): SendLinqVoiceMemoResult {
-  const record = readRecord(input.response)
-  const voiceMemoRecord = readRecord(record?.voice_memo)
+  const voiceMemoRecord = readRecord(input.response.voice_memo)
   const nestedVoiceMemo = readRecord(voiceMemoRecord?.voice_memo)
   const chatRecord = readRecord(voiceMemoRecord?.chat)
   return {
@@ -2379,6 +2833,7 @@ function buildLinqMessageBody(input: {
   media?: readonly LinqMessageMediaInput[] | null
   message: string
   nativeReplyRequested?: true
+  operation: 'create_chat' | 'send_message'
   replyToMessageId?: string | null
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -2387,17 +2842,17 @@ function buildLinqMessageBody(input: {
     : null
   const media = normalizeLinqMediaList(input.media ?? [])
   const normalizedMessage = normalizeNullableString(input.message)
-  let textPart: TextPart | null = null
-  if (normalizedMessage !== null) {
-    const renderedText = renderMarkdownMessageText(normalizedMessage)
-    textPart = {
-      type: 'text',
-      value: renderedText.text,
-    }
-    if (renderedText.decorations.length > 0) {
-      textPart.text_decorations = renderedText.decorations
-    }
-  }
+  const textPart = normalizedMessage === null
+    ? null
+    : buildLinqTextPartWithinLimit({
+        message: normalizedMessage,
+        operation: input.operation,
+        requestAttachmentMediaPartCount:
+          media.filter((part) => 'attachment_id' in part).length,
+        requestMediaPartCount: media.length,
+        requestPublicUrlMediaPartCount:
+          media.filter((part) => 'url' in part).length,
+      })
   const parts: MessageContent['parts'] = textPart ? [textPart, ...media] : media
   if (parts.length === 0) {
     throw new VaultCliError(
@@ -2419,6 +2874,63 @@ function buildLinqMessageBody(input: {
     message.reply_to = { message_id: replyToMessageId }
   }
   return { message }
+}
+
+export function assertLinqMessageTextPartWithinLimit(input: {
+  message: string
+  operation: 'create_chat' | 'send_message'
+  requestAttachmentMediaPartCount: number
+  requestMediaPartCount: number
+  requestPublicUrlMediaPartCount: number
+}): void {
+  const normalizedMessage = normalizeNullableString(input.message)
+  if (normalizedMessage === null) {
+    return
+  }
+  buildLinqTextPartWithinLimit({
+    ...input,
+    message: normalizedMessage,
+  })
+}
+
+function buildLinqTextPartWithinLimit(input: {
+  message: string
+  operation: 'create_chat' | 'send_message'
+  requestAttachmentMediaPartCount: number
+  requestMediaPartCount: number
+  requestPublicUrlMediaPartCount: number
+}): TextPart {
+  const renderedText = renderMarkdownMessageText(input.message)
+  if (renderedText.text.length > LINQ_MAX_TEXT_PART_LENGTH) {
+    throw Object.assign(new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      `Linq text parts may contain at most ${LINQ_MAX_TEXT_PART_LENGTH} characters.`,
+      {
+        failureStage: 'configuration',
+        operation: input.operation,
+        provider: 'linq',
+        requestAttachmentMediaPartCount: input.requestAttachmentMediaPartCount,
+        requestMediaPartCount: input.requestMediaPartCount,
+        requestMessageLength: renderedText.text.length,
+        requestMessagePartCount: input.requestMediaPartCount + 1,
+        requestPublicUrlMediaPartCount: input.requestPublicUrlMediaPartCount,
+        requestTextPartCount: 1,
+        retryable: false,
+      },
+    ), {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: false as const,
+    })
+  }
+
+  const textPart: TextPart = {
+    type: 'text',
+    value: renderedText.text,
+  }
+  if (renderedText.decorations.length > 0) {
+    textPart.text_decorations = renderedText.decorations
+  }
+  return textPart
 }
 
 function normalizeLinqMediaList(

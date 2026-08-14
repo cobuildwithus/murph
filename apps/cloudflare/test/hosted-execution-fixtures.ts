@@ -44,7 +44,7 @@ export const TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON = JSON.stringify(
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
 );
 export const TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION =
-  "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+  "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
 export const TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM = [
   "-----BEGIN PUBLIC KEY-----",
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExSelVJv6r6LPUS8GCNgj1T/7z5GX",

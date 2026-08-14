@@ -17,6 +17,14 @@ import type {
 } from "./workspace-snapshot-store.ts";
 import type { DatabaseHealthMonitorResult } from "./database-health/monitor.ts";
 import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
+import type {
+  DeviceWebhookQueueEnvelopeV1,
+} from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import type { DeviceWebhookQueueHealthMonitorResult } from "./device-webhook-queue-health/monitor.ts";
+import type {
+  DeviceWebhookQueueHealthObservation,
+  DeviceWebhookQueueHealthState,
+} from "./device-webhook-queue-health/store.ts";
 
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
@@ -220,6 +228,26 @@ export interface WorkerDatabaseHealthNamespaceLike<
   getByName(name: string): TStub;
 }
 
+export interface WorkerDeviceWebhookQueueHealthStubLike {
+  readLatestObservation?():
+    | Promise<DeviceWebhookQueueHealthObservation | null>
+    | DeviceWebhookQueueHealthObservation
+    | null;
+  readState?():
+    | Promise<DeviceWebhookQueueHealthState>
+    | DeviceWebhookQueueHealthState;
+  runScheduledCheck(input?: {
+    scheduledAtMs?: number;
+  }): Promise<DeviceWebhookQueueHealthMonitorResult>;
+}
+
+export interface WorkerDeviceWebhookQueueHealthNamespaceLike<
+  TStub extends WorkerDeviceWebhookQueueHealthStubLike =
+    WorkerDeviceWebhookQueueHealthStubLike,
+> {
+  getByName(name: string): TStub;
+}
+
 export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
@@ -232,6 +260,9 @@ export interface WorkerEnvironmentContract<
   };
   CF_PUBLIC_BASE_URL?: string;
   DATABASE_HEALTH_MONITOR?: WorkerDatabaseHealthNamespaceLike;
+  DEVICE_WEBHOOK_DLQ?: Queue<DeviceWebhookQueueEnvelopeV1>;
+  DEVICE_WEBHOOK_QUEUE?: Queue<DeviceWebhookQueueEnvelopeV1>;
+  DEVICE_WEBHOOK_QUEUE_MONITOR?: WorkerDeviceWebhookQueueHealthNamespaceLike;
   HOSTED_DATABASE_ALERT_ENABLED?: string;
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
   HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID?: string;

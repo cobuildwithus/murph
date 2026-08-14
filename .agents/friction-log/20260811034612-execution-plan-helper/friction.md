@@ -1,6 +1,7 @@
 ---
 title: 'Execution-plan helper treats --help as a plan title'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1654'
 ---
 
 ## Expected Behavior

@@ -152,7 +152,6 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
-  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MEMBER_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
@@ -218,6 +217,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareProjectionMaxRecords,
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
@@ -2419,7 +2419,11 @@ function parseHostedRuntimeGroupSharedProjection(
     throw new TypeError(`${label}.grantStatus is invalid.`);
   }
   const dataStatus = requireString(projection.dataStatus, `${label}.dataStatus`);
-  if (dataStatus !== "available" && dataStatus !== "missing") {
+  if (
+    dataStatus !== "available"
+    && dataStatus !== "missing"
+    && dataStatus !== "pending"
+  ) {
     throw new TypeError(`${label}.dataStatus is invalid.`);
   }
   const grantedAt = projection.grantedAt === undefined
@@ -2442,12 +2446,10 @@ function parseHostedRuntimeGroupSharedProjection(
   }
 
   const rawRecords = requireArray(projection.records, `${label}.records`);
-  if (
-    rawRecords.length >
-      HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION
-  ) {
+  const maxRecords = getHostedVaultShareProjectionMaxRecords(projectionScope);
+  if (rawRecords.length > maxRecords) {
     throw new TypeError(
-      `${label}.records must contain at most ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION} entries.`,
+      `${label}.records must contain at most ${maxRecords} entries.`,
     );
   }
   if (grantStatus === "not_granted" && dataStatus !== "missing") {
@@ -2460,8 +2462,10 @@ function parseHostedRuntimeGroupSharedProjection(
       `${label} available projections must contain at least one record.`,
     );
   }
-  if (dataStatus === "missing" && rawRecords.length !== 0) {
-    throw new TypeError(`${label} missing projections must not contain records.`);
+  if (dataStatus !== "available" && rawRecords.length !== 0) {
+    throw new TypeError(
+      `${label} pending or missing projections must not contain records.`,
+    );
   }
 
   const seenRecordKeys = new Set<string>();
@@ -2471,7 +2475,7 @@ function parseHostedRuntimeGroupSharedProjection(
       const record = requireObject(rawRecord, recordLabel);
       assertAllowedObjectKeys(
         record,
-        new Set(["data", "occurredAt", "recordKey"]),
+        new Set(["data", "occurredAt", "recordKey", "source"]),
         recordLabel,
       );
       const parsed = parseHostedVaultShareDeliveryRecord(record, projectionScope);
@@ -2483,6 +2487,7 @@ function parseHostedRuntimeGroupSharedProjection(
         data: parsed.data,
         occurredAt: parsed.occurredAt,
         recordKey: parsed.recordKey,
+        ...(parsed.source ? { source: parsed.source } : {}),
       };
     },
   );

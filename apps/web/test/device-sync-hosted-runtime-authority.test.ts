@@ -1,9 +1,28 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
 } from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+function addWeightHistoryCoverage(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+): Record<string, unknown> {
+  const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata,
+    providerSlug,
+    resource: "weight",
+    version: 1,
+  });
+  if (!update) {
+    throw new TypeError("Expected representable Junction weight history coverage.");
+  }
+  return { ...metadata, [update.metadataKey]: update.value };
+}
 
 const mocks = vi.hoisted(() => ({
   buildHostedPublicDeviceSyncAccount: vi.fn((input: {
@@ -17,6 +36,7 @@ const mocks = vi.hoisted(() => ({
         ?? `opaque:${input.record.id}`,
     })),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
   mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => ({
     ...record,
     createdAt: toTestIsoTimestamp(record.createdAt),
@@ -37,6 +57,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  lockAndReadActiveHostedDomainRootKeyIdTx:
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
 }));
 
 vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
@@ -80,6 +105,7 @@ function buildHostedRecord(
     createdAt: Date | string;
     credentialKind: "oauth_tokens" | "provider_config" | "none";
     credentialMetadata: Record<string, unknown>;
+    credentialMetadataJson: Record<string, unknown>;
     displayName: string | null;
     externalAccountId: string | null;
     externalAccountIdEncrypted: string | null;
@@ -92,16 +118,19 @@ function buildHostedRecord(
     lastSyncStartedAt: string | null;
     lastWebhookAt: string | null;
     metadata: Record<string, unknown>;
+    metadataJson: Record<string, unknown>;
     nextReconcileAt: string | null;
     provider: string;
     providerApplicationId: string | null;
     providerApplicationRevision: number | null;
     providerConfigKey: string | null;
+    providerAccountBlindIndex: string | null;
     refreshLeaseExpiresAt: string | null;
     refreshLeaseOwner: string | null;
     refreshLeaseTokenVersion: number | null;
     refreshTokenEncrypted: string | null;
     scopes: string[];
+    scopesJson: string[];
     setupExpiresAt: string | null;
     setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
     status: "active" | "reauthorization_required" | "disconnected";
@@ -117,6 +146,7 @@ function buildHostedRecord(
     createdAt: "2026-04-06T09:00:00.000Z",
     credentialKind: "oauth_tokens" as const,
     credentialMetadata: {},
+    credentialMetadataJson: {},
     displayName: "Hosted Device",
     externalAccountId: "acct_123",
     externalAccountIdEncrypted: "encrypted-external-account-id",
@@ -131,16 +161,21 @@ function buildHostedRecord(
     metadata: {
       source: "hosted",
     },
+    metadataJson: {
+      source: "hosted",
+    },
     nextReconcileAt: null,
     provider: "oura",
     providerApplicationId: null,
     providerApplicationRevision: null,
     providerConfigKey: null,
+    providerAccountBlindIndex: "blind:acct_123",
     refreshLeaseExpiresAt: null,
     refreshLeaseOwner: null,
     refreshLeaseTokenVersion: null,
     refreshTokenEncrypted: "encrypted-refresh-token",
     scopes: ["daily"],
+    scopesJson: ["daily"],
     setupExpiresAt: null,
     setupPhase: null,
     status: "active" as const,
@@ -211,23 +246,52 @@ function buildStoredAccount(
   };
 }
 
-function createAuthorityHarness(input: {
-  connectionSources?: Array<{
+function buildConnectionSource(
+  overrides: Partial<{
     connectionId: string;
     displayName: string | null;
     firstSeenAt: string;
-    lastDataAt?: string | null;
+    lastDataAt: string | null;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string | null;
     resourceAvailabilitySummary: Record<string, unknown>;
-    sourceInstanceKey?: string;
+    sourceInstanceKey: string;
     sourceProviderSlug: string;
     status: "connected" | "disconnected" | "error" | "unavailable";
-  }>;
+  }> = {},
+) {
+  return {
+    connectionId: "conn_123",
+    displayName: "WHOOP",
+    firstSeenAt: "2026-04-06T09:00:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-06T10:00:00.000Z",
+    resourceAvailabilitySummary: {},
+    sourceInstanceKey: "whoop",
+    sourceProviderSlug: "whoop",
+    status: "connected" as const,
+    ...overrides,
+  };
+}
+
+function createAuthorityHarness(input: {
+  connectionSources?: Array<NonNullable<Parameters<typeof buildConnectionSource>[0]>>;
+  activeTokenRootKeyId?: string | null;
+  beforeConnectionMutationLock?: (
+    record: ReturnType<typeof buildHostedRecord>,
+  ) => ReturnType<typeof buildHostedRecord>;
+  beforeConnectionMutationLockSources?: (
+    sources: ReturnType<typeof buildConnectionSource>[],
+  ) => ReturnType<typeof buildConnectionSource>[];
+  omitPreparedRecord?: boolean;
+  preparedTokenRootKeyId?: string | null;
   record?: ReturnType<typeof buildHostedRecord>;
   storedAccount?: ReturnType<typeof buildStoredAccount> | null;
 } = {}) {
+  const authorityEvents: string[] = [];
   let currentRecord = input.record ?? buildHostedRecord();
   let currentStoredAccount = input.storedAccount === undefined
     ? buildStoredAccount(currentRecord)
@@ -268,9 +332,11 @@ function createAuthorityHarness(input: {
         updatedAt: "2026-04-06T10:11:00.000Z",
       };
     }
+    return currentRecord;
   });
 
-  const persistStoredConnectionTokenBundle = vi.fn(async (input: {
+  const preparedTokenBundles = new Map<string, {
+    externalAccountId: string | null;
     tokenBundle: {
       accessToken: string;
       accessTokenExpiresAt: string | null;
@@ -278,10 +344,56 @@ function createAuthorityHarness(input: {
       refreshToken: string | null;
       tokenVersion: number;
     } | null;
+  }>();
+  const prepareRuntimeApplyTokenWrites = vi.fn(async (entries: Array<{
+    externalAccountId: string | null;
+    record: ReturnType<typeof buildHostedRecord>;
+    tokenBundle: {
+      accessToken: string;
+      accessTokenExpiresAt: string | null;
+      keyVersion: string;
+      refreshToken: string | null;
+      tokenVersion: number;
+    } | null;
+  }>) => new Map(entries.map((entry) => {
+    preparedTokenBundles.set(entry.record.id, {
+      externalAccountId: entry.externalAccountId,
+      tokenBundle: entry.tokenBundle,
+    });
+    return [entry.record.id, {
+      accessTokenEncrypted: entry.tokenBundle
+        ? `prepared:${entry.tokenBundle.accessToken}`
+        : null,
+      accessTokenExpiresAt: entry.tokenBundle?.accessTokenExpiresAt ?? null,
+      externalAccountIdEncrypted: entry.externalAccountId
+        ? `prepared:${entry.externalAccountId}`
+        : null,
+      keyVersion: entry.tokenBundle ? "test-key-version" : null,
+      refreshTokenEncrypted: entry.tokenBundle?.refreshToken
+        ? `prepared:${entry.tokenBundle.refreshToken}`
+        : null,
+      rootKeyId: input.preparedTokenRootKeyId ?? null,
+      tokenVersion: entry.tokenBundle?.tokenVersion ?? null,
+    }] as const;
+  })));
+  const persistPreparedRuntimeApplyTokenWrite = vi.fn(async (input: {
+    record: ReturnType<typeof buildHostedRecord>;
   }) => {
-    currentStoredAccount = input.tokenBundle
-      ? buildStoredAccount(currentRecord, input.tokenBundle)
+    authorityEvents.push("persist-token");
+    const prepared = preparedTokenBundles.get(input.record.id);
+    if (!prepared) {
+      throw new Error("missing prepared token bundle");
+    }
+    currentRecord = {
+      ...currentRecord,
+      accessTokenExpiresAt: prepared.tokenBundle?.accessTokenExpiresAt ?? null,
+      externalAccountId: prepared.externalAccountId ?? currentRecord.externalAccountId,
+      updatedAt: "2026-04-06T10:11:00.000Z",
+    };
+    currentStoredAccount = prepared.tokenBundle
+      ? buildStoredAccount(currentRecord, prepared.tokenBundle)
       : null;
+    return currentRecord;
   });
 
   const findFirst = vi.fn(async () => currentRecord);
@@ -298,7 +410,16 @@ function createAuthorityHarness(input: {
   const providerApplicationFindFirst = vi.fn(
     async (): Promise<{ id: string } | null> => null,
   );
+  const activeTokenRootRead = vi.fn(async () => {
+    authorityEvents.push("lock-and-read-root");
+    return input.activeTokenRootKeyId ?? null;
+  });
+  mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockImplementation(
+    activeTokenRootRead,
+  );
   const tx = {
+    $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
     deviceConnection: {
       findFirst,
       update,
@@ -308,10 +429,9 @@ function createAuthorityHarness(input: {
     },
   };
 
-  const connectionSources = (input.connectionSources ?? []).map((source) => ({
-    ...source,
-    sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
-  }));
+  let connectionSources = (input.connectionSources ?? []).map((source) =>
+    buildConnectionSource(source)
+  );
   const readRuntimeConnectionSecretMaterial = vi.fn(async (secretInput: {
     records: ReturnType<typeof buildHostedRecord>[];
     tokenConnectionIds: ReadonlySet<string>;
@@ -330,7 +450,10 @@ function createAuthorityHarness(input: {
         }
       : null;
     return [record.id, {
-      externalAccountId: storedAccount?.externalAccountId ?? record.externalAccountId ?? null,
+      externalAccountId:
+        storedAccount?.externalAccountId
+        ?? record.externalAccountId
+        ?? (record.externalAccountIdEncrypted ? "acct_123" : null),
       tokenBundle,
     }] as const;
   })));
@@ -367,11 +490,21 @@ function createAuthorityHarness(input: {
         return currentStoredAccount;
       },
     ),
-    persistStoredConnectionTokenBundle,
+    persistPreparedRuntimeApplyTokenWrite,
+    persistStoredConnectionTokenBundle: vi.fn(),
+    prepareRuntimeApplyTokenWrites,
     providerApplicationFindFirst,
     prisma: {
       deviceConnection: {
-        findMany: vi.fn(),
+        findMany: vi.fn(async ({ where }: {
+          select?: Record<string, unknown>;
+          where?: { id?: { in?: string[] } };
+        }) =>
+          !input.omitPreparedRecord
+          && (!where?.id?.in || where.id.in.includes(currentRecord.id))
+            ? [{ ...currentRecord }]
+            : []
+        ),
       },
       deviceProviderApplication: {
         findFirst: providerApplicationFindFirst,
@@ -382,9 +515,16 @@ function createAuthorityHarness(input: {
     upsertConnectionSource,
     withConnectionMutationLock: vi.fn(async (
       _connectionId: string,
-      callback: (tx: { deviceConnection: { findFirst: typeof findFirst; update: typeof update } }) => Promise<unknown>,
-    ) =>
-      callback(tx)),
+      callback: (transaction: typeof tx) => Promise<unknown>,
+    ) => {
+      if (input.beforeConnectionMutationLock) {
+        currentRecord = input.beforeConnectionMutationLock(currentRecord);
+      }
+      if (input.beforeConnectionMutationLockSources) {
+        connectionSources = input.beforeConnectionMutationLockSources(connectionSources);
+      }
+      return callback(tx);
+    }),
   };
 
   mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
@@ -392,13 +532,16 @@ function createAuthorityHarness(input: {
   });
 
   return {
+    activeTokenRootRead,
+    authorityEvents,
     get record() {
       return currentRecord;
     },
     get storedAccount() {
       return currentStoredAccount;
     },
-    persistStoredConnectionTokenBundle,
+    persistStoredConnectionTokenBundle: persistPreparedRuntimeApplyTokenWrite,
+    prepareRuntimeApplyTokenWrites,
     readRuntimeConnectionSecretMaterial,
     store,
     syncDurableConnectionState,
@@ -406,6 +549,226 @@ function createAuthorityHarness(input: {
     updateConnectionRecord: update,
   };
 }
+
+function createRuntimeApplyFanoutHarness() {
+  const records = Array.from({ length: 100 }, (_, index) =>
+    buildHostedRecord({
+      externalAccountId: `acct_${index}`,
+      id: `conn_${String(index).padStart(3, "0")}`,
+    }));
+  const recordsById = new Map(records.map((record) => [record.id, record]));
+  let activeTransactions = 0;
+  let maxActiveTransactions = 0;
+  let liveConnectionReads = 0;
+  let liveSourceReads = 0;
+  let preparedRootBindingReads = 0;
+
+  const preparationConnectionRead = vi.fn(async () => {
+    expect(activeTransactions).toBe(0);
+    return [...recordsById.values()];
+  });
+  const readRuntimeConnectionSecretMaterial = vi.fn(async (
+    secretInput: {
+      records: Array<ReturnType<typeof buildHostedRecord>>;
+      tokenConnectionIds: ReadonlySet<string>;
+    },
+  ) => {
+    expect(activeTransactions).toBe(0);
+    expect(secretInput.tokenConnectionIds).toEqual(
+      new Set(secretInput.records.map((record) => record.id)),
+    );
+    return new Map(secretInput.records.map((record) => [record.id, {
+      externalAccountId: record.externalAccountId,
+      tokenBundle: {
+        accessToken: `old-access:${record.id}`,
+        accessTokenExpiresAt: null,
+        keyVersion: "kv_stored",
+        refreshToken: `old-refresh:${record.id}`,
+        tokenVersion: 3,
+      },
+    }] as const));
+  });
+  const prepareRuntimeApplyTokenWrites = vi.fn(async (entries: Array<{
+    externalAccountId: string | null;
+    record: ReturnType<typeof buildHostedRecord>;
+    tokenBundle: {
+      accessToken: string;
+      accessTokenExpiresAt: string | null;
+      keyVersion: string;
+      refreshToken: string | null;
+      tokenVersion: number;
+    } | null;
+  }>) => {
+    expect(activeTransactions).toBe(0);
+    return new Map(entries.map((entry) => [entry.record.id, {
+      accessTokenEncrypted: entry.tokenBundle
+        ? `sealed-access:${entry.record.id}`
+        : null,
+      accessTokenExpiresAt: entry.tokenBundle?.accessTokenExpiresAt ?? null,
+      externalAccountIdEncrypted: entry.externalAccountId
+        ? `sealed-account:${entry.record.id}`
+        : null,
+      keyVersion: entry.tokenBundle ? "hosted-device-secure-box:v1" : null,
+      refreshTokenEncrypted: entry.tokenBundle?.refreshToken
+        ? `sealed-refresh:${entry.record.id}`
+        : null,
+      rootKeyId: entry.tokenBundle || entry.externalAccountId
+        ? "device-root-active"
+        : null,
+      tokenVersion: entry.tokenBundle?.tokenVersion ?? null,
+    }] as const));
+  });
+  const syncDurableConnectionState = vi.fn(async () => {
+    expect(activeTransactions).toBe(1);
+    throw new Error("credential-only fanout must not rewrite durable connection state");
+  });
+  const persistPreparedRuntimeApplyTokenWrite = vi.fn(async (input: {
+    prepared: {
+      accessTokenExpiresAt: string | null;
+      tokenVersion: number | null;
+    };
+    record: ReturnType<typeof buildHostedRecord>;
+  }) => {
+    expect(activeTransactions).toBe(1);
+    const written = buildHostedRecord({
+      ...input.record,
+      accessTokenExpiresAt: input.prepared.accessTokenExpiresAt,
+      updatedAt: "2026-04-06T10:11:00.000Z",
+    });
+    recordsById.set(input.record.id, written);
+    return written;
+  });
+  const upsertConnectionSource = vi.fn(async () => {
+    expect(activeTransactions).toBe(1);
+  });
+  const withConnectionMutationLock = vi.fn(async (
+    connectionId: string,
+    callback: (tx: {
+      deviceConnection: {
+        findFirst: () => Promise<ReturnType<typeof buildHostedRecord> | null>;
+      };
+    }) => Promise<unknown>,
+  ) => {
+    activeTransactions += 1;
+    maxActiveTransactions = Math.max(
+      maxActiveTransactions,
+      activeTransactions,
+    );
+    try {
+      return await callback({
+        deviceConnection: {
+          findFirst: vi.fn(async () => {
+            expect(activeTransactions).toBe(1);
+            liveConnectionReads += 1;
+            return recordsById.get(connectionId) ?? null;
+          }),
+        },
+      });
+    } finally {
+      activeTransactions -= 1;
+    }
+  });
+  mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockImplementation(async () => {
+    expect(activeTransactions).toBe(1);
+    preparedRootBindingReads += 1;
+    return "device-root-active";
+  });
+  const forbiddenPostWriteHydration = vi.fn(async () => {
+    throw new Error("runtime apply must not hydrate after the write");
+  });
+  const store = {
+    getConnectionForUser: forbiddenPostWriteHydration,
+    getStoredConnectionAccountForUser: forbiddenPostWriteHydration,
+    listConnectionSources: vi.fn(async () => {
+      expect(activeTransactions).toBe(1);
+      liveSourceReads += 1;
+      return [];
+    }),
+    materializeDurableConnectionRecord: forbiddenPostWriteHydration,
+    materializeStoredConnectionAccount: forbiddenPostWriteHydration,
+    persistPreparedRuntimeApplyTokenWrite,
+    persistStoredConnectionTokenBundle: forbiddenPostWriteHydration,
+    prepareRuntimeApplyTokenWrites,
+    prisma: {
+      deviceConnection: {
+        findMany: preparationConnectionRead,
+      },
+    },
+    readRuntimeConnectionSecretMaterial,
+    syncDurableConnectionState,
+    upsertConnectionSource,
+    withConnectionMutationLock,
+  };
+
+  mocks.createHostedDeviceSyncControlPlane.mockReturnValue({ store });
+
+  return {
+    forbiddenPostWriteHydration,
+    get liveConnectionReads() {
+      return liveConnectionReads;
+    },
+    get liveSourceReads() {
+      return liveSourceReads;
+    },
+    get maxActiveTransactions() {
+      return maxActiveTransactions;
+    },
+    persistPreparedRuntimeApplyTokenWrite,
+    preparationConnectionRead,
+    prepareRuntimeApplyTokenWrites,
+    get preparedRootBindingReads() {
+      return preparedRootBindingReads;
+    },
+    readRuntimeConnectionSecretMaterial,
+    records,
+    syncDurableConnectionState,
+    upsertConnectionSource,
+    withConnectionMutationLock,
+  };
+}
+
+describe("readHostedDeviceSyncPendingDirtyState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("scopes a dirty pending read to the selected connection", async () => {
+    const listPendingDirtyConnectionsForUser = vi.fn(async () => ({
+      hasMore: false,
+      items: [],
+    }));
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: { listPendingDirtyConnectionsForUser },
+    });
+    const { readHostedDeviceSyncPendingDirtyState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await readHostedDeviceSyncPendingDirtyState({
+      request: new Request("https://example.test/device-sync/runtime/dirty-pending", {
+        body: JSON.stringify({
+          connectionId: "conn_dirty_selected",
+          limit: 10,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(listPendingDirtyConnectionsForUser).toHaveBeenCalledWith({
+      connectionId: "conn_dirty_selected",
+      limit: 10,
+      userId: "user_123",
+    });
+    expect(response).toEqual({
+      hasMore: false,
+      items: [],
+      nextWakeAt: null,
+      userId: "user_123",
+    });
+  });
+});
 
 describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   beforeEach(() => {
@@ -619,6 +982,32 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     mocks.resolveDeviceProviderApplication.mockReset();
   });
 
+  it("rejects a 65-source update before control-plane, KMS, or transaction work", async () => {
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    const sources = Array.from({ length: 65 }, (_, index) => ({
+      lastSeenAt: "2026-04-06T10:00:00.000Z",
+      observedLastSeenAt: null,
+      sourceInstanceKey: `source_${index}`,
+      sourceProviderSlug: `provider_${index}`,
+      status: "connected",
+    }));
+
+    await expect(applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{ connectionId: "conn_123", sources }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/updates\[0\]\.sources must include no more than 64 entries/u);
+
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+  });
+
   it("applies accepted connection updates sequentially in request order", async () => {
     let activeLocks = 0;
     let maxActiveLocks = 0;
@@ -645,6 +1034,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
+        prepareRuntimeApplyTokenWrites: vi.fn(async () => new Map()),
+        prisma: {
+          deviceConnection: {
+            findMany: vi.fn(async () => []),
+          },
+        },
+        readRuntimeConnectionSecretMaterial: vi.fn(async () => new Map()),
         withConnectionMutationLock,
       },
     });
@@ -681,6 +1077,424 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       "conn_first",
       "conn_second",
     ]);
+  });
+
+  it("bounds an N=100 no-op apply to one set read and 100 serial transactions", async () => {
+    const harness = createRuntimeApplyFanoutHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: harness.records.map((record) => ({ connectionId: record.id })),
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates).toHaveLength(100);
+    expect(response.updates.every((update) =>
+      update.tokenUpdate === "unchanged"
+      && update.writeUpdate === "unchanged"
+    )).toBe(true);
+    expect(harness.preparationConnectionRead).toHaveBeenCalledOnce();
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.prepareRuntimeApplyTokenWrites).not.toHaveBeenCalled();
+    expect(harness.withConnectionMutationLock).toHaveBeenCalledTimes(100);
+    expect(harness.maxActiveTransactions).toBe(1);
+    expect(harness.liveConnectionReads).toBe(100);
+    expect(harness.liveSourceReads).toBe(100);
+    expect(harness.preparedRootBindingReads).toBe(0);
+    expect(harness.persistPreparedRuntimeApplyTokenWrite).not.toHaveBeenCalled();
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.forbiddenPostWriteHydration).not.toHaveBeenCalled();
+
+    const datastoreStatements =
+      harness.preparationConnectionRead.mock.calls.length
+      + harness.withConnectionMutationLock.mock.calls.length
+      + harness.liveConnectionReads
+      + harness.liveSourceReads;
+    expect(datastoreStatements).toBe(301);
+  });
+
+  it("prepares an N=100 token incident outside BEGIN and uses one DB-only write per transaction", async () => {
+    const harness = createRuntimeApplyFanoutHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: harness.records.map((record) => ({
+            connectionId: record.id,
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle: {
+                accessToken: `new-access:${record.id}`,
+                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                keyVersion: "kv_runtime",
+                refreshToken: `new-refresh:${record.id}`,
+                tokenVersion: 3,
+              },
+            },
+            observedConnectedAt: record.connectedAt,
+            observedTokenVersion: 3,
+          })),
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates).toHaveLength(100);
+    expect(response.updates.every((update) =>
+      update.tokenUpdate === "applied"
+      && update.writeUpdate === "applied"
+    )).toBe(true);
+    expect(harness.preparationConnectionRead).toHaveBeenCalledOnce();
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.prepareRuntimeApplyTokenWrites).toHaveBeenCalledOnce();
+    expect(harness.prepareRuntimeApplyTokenWrites.mock.calls[0]?.[0]).toHaveLength(100);
+    expect(harness.withConnectionMutationLock).toHaveBeenCalledTimes(100);
+    expect(harness.maxActiveTransactions).toBe(1);
+    expect(harness.liveConnectionReads).toBe(100);
+    expect(harness.liveSourceReads).toBe(100);
+    expect(harness.preparedRootBindingReads).toBe(100);
+    expect(harness.persistPreparedRuntimeApplyTokenWrite).toHaveBeenCalledTimes(100);
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.forbiddenPostWriteHydration).not.toHaveBeenCalled();
+
+    const datastoreStatements =
+      harness.preparationConnectionRead.mock.calls.length
+      + harness.withConnectionMutationLock.mock.calls.length
+      + harness.liveConnectionReads
+      + harness.liveSourceReads
+      + harness.preparedRootBindingReads
+      + harness.persistPreparedRuntimeApplyTokenWrite.mock.calls.length;
+    expect(datastoreStatements).toBe(501);
+  });
+
+  it("bounds the composed N=100 by 64-source apply to 6,400 serial source writes", async () => {
+    const harness = createRuntimeApplyFanoutHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: harness.records.map((record) => ({
+            connectionId: record.id,
+            observedConnectedAt: record.connectedAt,
+            sources: Array.from({ length: 64 }, (_, index) => ({
+              lastSeenAt: "2026-04-06T10:00:00.000Z",
+              observedLastSeenAt: null,
+              sourceInstanceKey: `${record.id}:source:${index}`,
+              sourceProviderSlug: `source_${index}`,
+              status: "connected",
+            })),
+          })),
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates).toHaveLength(100);
+    expect(response.updates.every((update) =>
+      update.tokenUpdate === "unchanged"
+      && update.writeUpdate === "applied"
+    )).toBe(true);
+    expect(harness.preparationConnectionRead).toHaveBeenCalledOnce();
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.prepareRuntimeApplyTokenWrites).not.toHaveBeenCalled();
+    expect(harness.withConnectionMutationLock).toHaveBeenCalledTimes(100);
+    expect(harness.maxActiveTransactions).toBe(1);
+    expect(harness.liveConnectionReads).toBe(100);
+    expect(harness.liveSourceReads).toBe(100);
+    expect(harness.preparedRootBindingReads).toBe(0);
+    expect(harness.upsertConnectionSource).toHaveBeenCalledTimes(6_400);
+    expect(harness.persistPreparedRuntimeApplyTokenWrite).not.toHaveBeenCalled();
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.forbiddenPostWriteHydration).not.toHaveBeenCalled();
+
+    const datastoreStatements =
+      harness.preparationConnectionRead.mock.calls.length
+      + harness.withConnectionMutationLock.mock.calls.length
+      + harness.liveConnectionReads
+      + harness.liveSourceReads
+      + harness.upsertConnectionSource.mock.calls.length;
+    expect(datastoreStatements).toBe(6_701);
+  });
+
+  it.each([
+    {
+      name: "connected epoch",
+      mutate: (record: ReturnType<typeof buildHostedRecord>) => ({
+        ...record,
+        connectedAt: "2026-04-06T09:30:00.000Z",
+      }),
+    },
+    {
+      name: "token version",
+      mutate: (record: ReturnType<typeof buildHostedRecord>) => ({
+        ...record,
+        tokenVersion: 4,
+      }),
+    },
+    {
+      name: "refresh lease authority",
+      mutate: (record: ReturnType<typeof buildHostedRecord>) => ({
+        ...record,
+        refreshLeaseExpiresAt: "2026-04-06T10:30:00.000Z",
+        refreshLeaseOwner: "other-runtime",
+        refreshLeaseTokenVersion: 3,
+      }),
+    },
+    {
+      name: "disconnect state",
+      mutate: (record: ReturnType<typeof buildHostedRecord>) => ({
+        ...record,
+        status: "disconnected" as const,
+      }),
+    },
+    {
+      name: "credential ciphertext",
+      mutate: (record: ReturnType<typeof buildHostedRecord>) => ({
+        ...record,
+        accessTokenEncrypted: "encrypted-access-token-rotated",
+      }),
+    },
+  ])("revalidates prepared $name before its DB-only token write", async (caseInput) => {
+    const { mutate } = caseInput;
+    const harness = createAuthorityHarness({
+      beforeConnectionMutationLock: mutate,
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId: "conn_123",
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle: {
+                accessToken: "fresh-access-token",
+                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                keyVersion: "kv_runtime",
+                refreshToken: "fresh-refresh-token",
+                tokenVersion: 3,
+              },
+            },
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedTokenVersion: 3,
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "skipped_version_mismatch",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("allows unrelated updatedAt drift when the live credential fences still match", async () => {
+    const harness = createAuthorityHarness({
+      activeTokenRootKeyId: "device-root-active",
+      beforeConnectionMutationLock: (record) => ({
+        ...record,
+        updatedAt: "2026-04-06T10:00:01.000Z",
+      }),
+      preparedTokenRootKeyId: "device-root-active",
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId: "conn_123",
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle: {
+                accessToken: "fresh-access-token",
+                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                keyVersion: "kv_runtime",
+                refreshToken: "fresh-refresh-token",
+                tokenVersion: 3,
+              },
+            },
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedTokenVersion: 3,
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "applied",
+      writeUpdate: "applied",
+    });
+    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenCalledOnce();
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledWith({
+      domain: "device",
+      tx: expect.any(Object),
+      userId: "user_123",
+    });
+    expect(harness.authorityEvents).toEqual([
+      "lock-and-read-root",
+      "persist-token",
+    ]);
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("reports missing when a connection appears only after bounded preparation", async () => {
+    const harness = createAuthorityHarness({ omitPreparedRecord: true });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{ connectionId: "conn_123" }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toEqual({
+      connection: null,
+      connectionId: "conn_123",
+      status: "missing",
+      tokenUpdate: "missing",
+      writeUpdate: "missing",
+    });
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledWith({
+      records: [],
+      tokenConnectionIds: new Set(),
+    });
+    expect(harness.prepareRuntimeApplyTokenWrites).not.toHaveBeenCalled();
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { activeTokenRootKeyId: "device-root-new", name: "changes" },
+    { activeTokenRootKeyId: null, name: "is absent" },
+  ])("rejects a prepared token write when the active device root $name before BEGIN", async ({
+    activeTokenRootKeyId,
+  }) => {
+    const harness = createAuthorityHarness({
+      activeTokenRootKeyId,
+      preparedTokenRootKeyId: "device-root-old",
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId: "conn_123",
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle: {
+                accessToken: "fresh-access-token",
+                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                keyVersion: "kv_runtime",
+                refreshToken: "fresh-refresh-token",
+                tokenVersion: 3,
+              },
+            },
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedTokenVersion: 3,
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.activeTokenRootRead).toHaveBeenCalledOnce();
+    expect(response.updates[0]).toMatchObject({
+      tokenUpdate: "skipped_version_mismatch",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+  });
+
+  it("uses live source fences when unrelated source authority drifts after preparation", async () => {
+    const harness = createAuthorityHarness({
+      beforeConnectionMutationLockSources: (sources) => [
+        ...sources.map((source) => ({
+          ...source,
+          lastSeenAt: "2026-04-06T10:05:00.000Z",
+        })),
+        buildConnectionSource({
+          sourceInstanceKey: "garmin",
+          sourceProviderSlug: "garmin",
+        }),
+      ],
+      connectionSources: [buildConnectionSource()],
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId: "conn_123",
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            sources: [{
+              lastSeenAt: "2026-04-06T10:10:00.000Z",
+              observedLastSeenAt: "2026-04-06T10:05:00.000Z",
+              sourceInstanceKey: "whoop",
+              sourceProviderSlug: "whoop",
+              status: "connected",
+            }],
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      tokenUpdate: "unchanged",
+      writeUpdate: "applied",
+    });
+    expect(harness.upsertConnectionSource).toHaveBeenCalledOnce();
   });
 
   it("rejects omitted observedUpdatedAt fences for connection and local-state mutations", async () => {
@@ -805,6 +1619,47 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       },
     });
     expect(harness.storedAccount?.tokenVersion).toBe(3);
+  });
+
+  it("does not resurrect companion weight coverage from a pre-reconnect completion", async () => {
+    const currentMetadata = addWeightHistoryCoverage({}, "withings");
+    const staleMetadata = addWeightHistoryCoverage(
+      currentMetadata,
+      "apple_health_kit",
+    );
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        id: "conn_junction_weight_reconnect",
+        metadata: currentMetadata,
+        provider: "junction",
+        updatedAt: "2026-04-06T10:01:00.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connection: {
+              metadata: staleMetadata,
+            },
+            connectionId: "conn_junction_weight_reconnect",
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.record.metadata).toEqual(currentMetadata);
   });
 
   it("rejects runtime writes after a provider-application binding becomes stale", async () => {
@@ -2474,15 +3329,22 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       tokenUpdate: "missing",
       writeUpdate: "applied",
     });
+    expect(harness.prepareRuntimeApplyTokenWrites).toHaveBeenNthCalledWith(
+      1,
+      [expect.objectContaining({
+        externalAccountId: "acct_123",
+        record: expect.objectContaining({ id: "conn_123" }),
+        tokenBundle: null,
+      })],
+    );
     expect(harness.persistStoredConnectionTokenBundle).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        connectionId: "conn_123",
-        externalAccountId: undefined,
-        tokenBundle: null,
+        prepared: expect.objectContaining({ tokenVersion: null }),
+        record: expect.objectContaining({ id: "conn_123" }),
       }),
     );
-    expect(harness.store.getConnectionForUser).toHaveBeenCalledWith("user_123", "conn_123", expect.any(Object));
+    expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
     expect(harness.storedAccount).toBeNull();
 
     const retokenizedResponse = await applyHostedDeviceSyncRuntimeResult({
@@ -2520,16 +3382,25 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       tokenUpdate: "applied",
       writeUpdate: "applied",
     });
-    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenNthCalledWith(
+    expect(harness.prepareRuntimeApplyTokenWrites).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({
-        connectionId: "conn_123",
-        externalAccountId: undefined,
+      [expect.objectContaining({
+        externalAccountId: "acct_123",
+        record: expect.objectContaining({ id: "conn_123" }),
         tokenBundle: expect.objectContaining({
           accessToken: "fresh-access-token",
           refreshToken: "fresh-refresh-token",
           tokenVersion: 1,
         }),
+      })],
+    );
+    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        prepared: expect.objectContaining({
+          tokenVersion: 1,
+        }),
+        record: expect.objectContaining({ id: "conn_123" }),
       }),
     );
     expect(harness.storedAccount).toMatchObject({
@@ -2913,6 +3784,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       connectionId: record.id,
       displayName: `Source ${index + 1}`,
       firstSeenAt: "2026-04-06T09:00:00.000Z",
+      lastDataAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
       lastSeenAt: `2026-04-06T10:0${index}:00.000Z`,
@@ -3271,6 +4143,65 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     })).rejects.toBe(secretError);
   });
 
+  it("rejects an active credential snapshot with no external identity ciphertext before opening secrets", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        externalAccountId: null,
+        externalAccountIdEncrypted: null,
+      }),
+      storedAccount: null,
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    await expect(readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/missing its external account identity/u);
+
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+  });
+
+  it("rejects an active credential snapshot when its external identity opens empty", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        externalAccountId: null,
+      }),
+      storedAccount: null,
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+    harness.readRuntimeConnectionSecretMaterial.mockResolvedValue(new Map([
+      ["conn_123", {
+        externalAccountId: null,
+        tokenBundle: null,
+      }],
+    ]));
+
+    await expect(readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/missing its external account identity/u);
+
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
+  });
+
   it("withholds runtime OAuth material while a refresh lease covers the current token", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
@@ -3520,6 +4451,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         refreshTokenEncrypted: null,
         tokenVersion: null,
       }),
+      select: {
+        accessTokenEncrypted: true,
+        externalAccountIdEncrypted: true,
+        refreshTokenEncrypted: true,
+      },
     });
   });
 
@@ -3613,6 +4549,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         },
         providerConfigKey: null,
       }),
+      select: {
+        accessTokenEncrypted: true,
+        externalAccountIdEncrypted: true,
+        refreshTokenEncrypted: true,
+      },
     });
   });
 

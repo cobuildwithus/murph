@@ -49,7 +49,11 @@ import {
 } from "@murphai/hosted-execution/routes";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
 } from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
@@ -68,10 +72,17 @@ function buildExpectedSupportedProjectionScopePath(path: string): string {
   return `${path}?${params.toString()}`;
 }
 
-function buildExpectedVaultShareActiveKindsPath(): string {
-  return buildExpectedSupportedProjectionScopePath(
+function buildExpectedVaultShareActiveKindsPath(
+  projectionMode?: typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+): string {
+  const path = buildExpectedSupportedProjectionScopePath(
     HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   );
+  const capabilityPath =
+    `${path}&${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM}=${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION}`;
+  return projectionMode
+    ? `${capabilityPath}&${HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM}=${projectionMode}`
+    : capabilityPath;
 }
 
 function buildExpectedGroupToolPath(): string {
@@ -91,6 +102,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedExecutionStructuredLogRecord,
+  readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
   buildHostedExecutionRuntimePlatform,
@@ -1099,6 +1111,85 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const putRequest = requireFetchRequest(fetchMock.mock.calls[1], "direct R2 workspace snapshot PUT");
       expect(putRequest.method).toBe("PUT");
       expect(putRequest.url).toBe(putUrl);
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("retains bounded R2 error diagnostics without presigned URL material", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-secret`;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot platform fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        return new Response(
+          "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<Error><Code>InternalError</Code>"
+            + "<Message>We encountered an internal error. Please try again. "
+            + `Object ${objectKey}?X-Amz-Signature=fixture-secret.</Message>`
+            + "<RequestId>r2request0123456789</RequestId>"
+            + `<Resource>${objectKey}?X-Amz-Signature=fixture-secret</Resource>`
+            + "</Error>",
+          {
+            headers: {
+              "content-type": "application/xml",
+            },
+            status: 500,
+          },
+        );
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      let uploadError: unknown;
+      try {
+        await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+          encryptedByteSize: encryptedBytes.byteLength,
+          encryptedObjectSha256: "c".repeat(64),
+          objectKey,
+          snapshotId: "snapshot_runner_platform",
+          sourceFilePath: encryptedFilePath,
+        });
+      } catch (error) {
+        uploadError = error;
+      }
+
+      const safeError = readHostedRuntimeSafeErrorText(uploadError);
+      expect(safeError).toContain("R2 error code InternalError.");
+      expect(safeError).toContain(
+        "R2 error message: We encountered an internal error. Please try again.",
+      );
+      expect(safeError).toContain("R2 request ID r2request0123456789.");
+      expect(safeError).not.toContain(objectKey);
+      expect(safeError).not.toContain("fixture-secret");
+      expect(safeError).not.toContain(putUrl);
     } finally {
       await rm(tempRoot, {
         force: true,
@@ -4494,8 +4585,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (url.pathname.endsWith(HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH)) {
+        const projectionMode = url.searchParams.get(
+          HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
+        );
         return new Response(JSON.stringify({
           projectionKinds: ["activity-days.v0"],
+          ...(projectionMode === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+            ? { projectionMode }
+            : {}),
           projectionScopes: [{ projectionKind: "activity-days.v0" }],
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
@@ -4631,14 +4728,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         action: "read_current",
         result: { group: null, status: "none" },
       });
-    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual([
-      { projectionKind: "activity-days.v0" },
-    ]);
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: ["activity-days.v0"],
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    });
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    })).resolves.toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: ["activity-days.v0"],
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    });
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(14);
+    expect(fetchMock).toHaveBeenCalledTimes(15);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -4656,6 +4763,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
       `http://web-control.worker${buildExpectedGroupToolPath()}`,
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
+      `http://web-control.worker${buildExpectedVaultShareActiveKindsPath(HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE)}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
     for (const request of requests) {
@@ -5771,6 +5879,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
+        connectionId: "dsc_123",
         limit: 1,
         stagedDirtyAcks: [
           {
@@ -5805,6 +5914,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const pending = await platform.deviceSyncPort!.fetchDirtyStates({
+      connectionId: "dsc_123",
       limit: 1,
       stagedDirtyAcks: [
         {
@@ -5829,6 +5939,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.url).toBe("https://web.example.test/api/internal/device-sync/runtime/dirty-pending");
     expect(request.method).toBe("POST");
     await expect(request.text()).resolves.toBe(JSON.stringify({
+      connectionId: "dsc_123",
       limit: 1,
       stagedDirtyAcks: [
         {

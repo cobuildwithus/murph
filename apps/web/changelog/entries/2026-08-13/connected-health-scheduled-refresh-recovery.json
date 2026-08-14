@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 200,
+  "item": {
+    "id": "connected-health-scheduled-refresh-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Connected health refreshes recover on schedule",
+    "summary": "A connected health source can now resume its scheduled refresh after an interrupted handoff instead of remaining stuck on an update Murph already handled.",
+    "details": "Recovery keeps the existing bounded schedule and connection ownership, respects health-data consent, and does not require the member to reconnect the source.",
+    "relevanceTags": ["wearables", "health-data", "reliability"],
+    "sourcePullRequests": [1776]
+  }
+}

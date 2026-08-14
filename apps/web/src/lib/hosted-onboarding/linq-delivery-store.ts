@@ -462,6 +462,92 @@ export type HostedLinqGroupLineRecoveryAuthority =
   | "in_flight"
   | "none";
 
+export interface HostedLinqGroupLineRecoveryAuthorityCandidate {
+  memberId: string;
+  originalRecipientPhone: string;
+  pendingGroupSetupId: string;
+  setupArmedAt: Date;
+}
+
+/**
+ * Classifies every bounded pending-setup candidate from one intent projection.
+ * Each candidate still owns the same five exact attempt ids and the same
+ * provider-correlation, time, target, template, source-ref, and line predicates
+ * as the scalar authority read.
+ */
+export async function readHostedLinqGroupLineRecoveryAuthoritiesTx(input: {
+  candidates: readonly HostedLinqGroupLineRecoveryAuthorityCandidate[];
+  occurredAt: Date;
+  prisma: HostedLinqDeliveryClient;
+  recoveredRecipientPhoneLookupKey: string;
+  threadId: string;
+}): Promise<Map<string, HostedLinqGroupLineRecoveryAuthority>> {
+  const descriptors = input.candidates.map((candidate) => {
+    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: candidate.originalRecipientPhone,
+      memberId: candidate.memberId,
+      pendingGroupSetupId: candidate.pendingGroupSetupId,
+      threadId: input.threadId,
+    });
+    const attemptEffectIds = Array.from(
+      { length: HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS },
+      (_, index) => buildHostedLinqGroupLineRecoveryAttemptEffectId({
+        attempt: index + 1,
+        effectId,
+      }),
+    );
+    return { attemptEffectIds, candidate, effectId };
+  });
+  const persistedIntents =
+    await readHostedLinqDeliveryProviderDispatchIntentsTx({
+      idempotencyKeys: descriptors.flatMap(
+        (descriptor) => descriptor.attemptEffectIds,
+      ),
+      prisma: input.prisma,
+    });
+  const intentsByLookupKey = new Map(
+    persistedIntents.map((intent) => [intent.idempotencyLookupKey, intent]),
+  );
+  const authorityBySetupId = new Map<
+    string,
+    HostedLinqGroupLineRecoveryAuthority
+  >();
+  for (const descriptor of descriptors) {
+    const matchingIntents = descriptor.attemptEffectIds
+      .map(createHostedLinqDeliveryIdempotencyLookupKey)
+      .flatMap((lookupKey) => {
+        if (!lookupKey) {
+          return [];
+        }
+        const intent = intentsByLookupKey.get(lookupKey);
+        return intent ? [intent] : [];
+      })
+      .filter((intent) =>
+        intent.attemptedAt >= descriptor.candidate.setupArmedAt
+        && intent.attemptedAt <= input.occurredAt
+        && intent.phoneNumberLookupKey
+          === input.recoveredRecipientPhoneLookupKey
+        && intent.status !== "failed"
+        && intent.status !== "skipped"
+        && intent.targetKind === "participant"
+        && intent.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+        && isHostedLinqGroupLineRecoverySourceRefForEffect({
+          candidate: intent.sourceRef,
+          effectId: descriptor.effectId,
+        })
+      );
+    authorityBySetupId.set(
+      descriptor.candidate.pendingGroupSetupId,
+      matchingIntents.some((intent) => intent.providerCorrelated)
+        ? "accepted"
+        : matchingIntents.length > 0
+          ? "in_flight"
+          : "none",
+    );
+  }
+  return authorityBySetupId;
+}
+
 /**
  * A completed private recovery delivery is the existing durable proof that a
  * member was told to move this exact group from one Murph line to another.
@@ -480,42 +566,19 @@ export async function readHostedLinqGroupLineRecoveryAuthorityTx(input: {
   setupArmedAt: Date;
   threadId: string;
 }): Promise<HostedLinqGroupLineRecoveryAuthority> {
-  const effectId = buildHostedLinqGroupLineRecoveryEffectId({
-    incomingRecipientPhone: input.originalRecipientPhone,
-    memberId: input.memberId,
-    pendingGroupSetupId: input.pendingGroupSetupId,
+  return (await readHostedLinqGroupLineRecoveryAuthoritiesTx({
+    candidates: [{
+      memberId: input.memberId,
+      originalRecipientPhone: input.originalRecipientPhone,
+      pendingGroupSetupId: input.pendingGroupSetupId,
+      setupArmedAt: input.setupArmedAt,
+    }],
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+    recoveredRecipientPhoneLookupKey:
+      input.recoveredRecipientPhoneLookupKey,
     threadId: input.threadId,
-  });
-  const attemptEffectIds = Array.from(
-    { length: HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS },
-    (_, index) => buildHostedLinqGroupLineRecoveryAttemptEffectId({
-      attempt: index + 1,
-      effectId,
-    }),
-  );
-  const persistedIntents =
-    await readHostedLinqDeliveryProviderDispatchIntentsTx({
-      idempotencyKeys: attemptEffectIds,
-      prisma: input.prisma,
-    });
-  const matchingIntents = persistedIntents.filter((intent) =>
-    intent.attemptedAt >= input.setupArmedAt
-    && intent.attemptedAt <= input.occurredAt
-    && intent.phoneNumberLookupKey
-      === input.recoveredRecipientPhoneLookupKey
-    && intent.status !== "failed"
-    && intent.status !== "skipped"
-    && intent.targetKind === "participant"
-    && intent.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
-    && isHostedLinqGroupLineRecoverySourceRefForEffect({
-      candidate: intent.sourceRef,
-      effectId,
-    })
-  );
-  if (matchingIntents.some((intent) => intent.providerCorrelated)) {
-    return "accepted";
-  }
-  return matchingIntents.length > 0 ? "in_flight" : "none";
+  })).get(input.pendingGroupSetupId) ?? "none";
 }
 
 export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {

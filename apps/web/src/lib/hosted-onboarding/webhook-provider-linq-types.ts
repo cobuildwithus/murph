@@ -29,5 +29,6 @@ export type HostedOnboardingLinqDirectPlan =
     firstContactAdmissionParticipantContact?: HostedLinqParticipantContact;
     firstContactAdmissionRequest?: HostedLinqFirstContactAdmissionRequest;
     instantStartEnrollment?: HostedLinqInstantStartEnrollment;
+    nextRequiredPendingGroupSetupCandidateId?: string | null;
     postCommitGroupRosterReconciles?: readonly HostedOnboardingLinqGroupRosterReconcile[];
   };

@@ -7,6 +7,7 @@ import type {
   EventAttachment,
   EventImportDecision,
   EventImportRetractionDecision,
+  EventImportUpsertDecision,
   ExternalRef,
   EventKind,
   EventRecord,
@@ -81,6 +82,7 @@ import {
   type EventSpineEntry,
 } from "./history/event-spine.ts";
 import {
+  buildEventImportDecisionRecord,
   buildPublicEventImportRecord,
   loadEventLedgerShardsById,
   selectLatestMatchedEvent,
@@ -1878,6 +1880,7 @@ type PreparedEventImportDecision =
       action: "upsert";
       allowsKindReplacement: boolean;
       entry: PreparedJsonlEntry<EventRecord>;
+      expectedLatest?: EventImportUpsertDecision["expectedLatest"];
     }
   | {
       action: "retract";
@@ -3143,6 +3146,29 @@ async function reconcileEventImportDecisionsByExternalRef(
     },
   );
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
+
+  for (const decision of decisions) {
+    signal?.throwIfAborted();
+    if (decision.action !== "upsert" || !decision.expectedLatest) {
+      continue;
+    }
+    const externalRef = decision.entry.record.externalRef;
+    const latestById = index.latestById.get(decision.expectedLatest.eventId);
+    const latestByRef = externalRef
+      ? index.latestByRefKey.get(eventExternalRefKey(externalRef))?.record
+      : undefined;
+    if (
+      !latestById
+      || latestById.id !== latestByRef?.id
+      || eventSpineRevision(latestById) !== decision.expectedLatest.lifecycleRevision
+    ) {
+      throw new VaultError(
+        "EVENT_EXPECTED_LATEST_MISMATCH",
+        "An imported event changed after it was inspected; the whole batch was rejected without writes.",
+      );
+    }
+  }
+
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
   const forceAppendIds = new Set<string>();
   const eventIds: string[] = [];
@@ -5752,11 +5778,18 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         return;
       }
 
-      const record = buildPublicEventImportRecord({ ...decision.payload }, vault.metadata.timezone);
+      // Decisions are the trusted importer-owner path. Their contract permits
+      // verified workout CSV evidence to retain an unknown duration, while the
+      // generic public payload path above remains stricter.
+      const record = buildEventImportDecisionRecord(
+        { ...decision.payload },
+        vault.metadata.timezone,
+      );
       decisions.push({
         action: "upsert",
         allowsKindReplacement: true,
         entry: { relativePath: toEventLedgerFile(record.occurredAt), record },
+        ...(decision.expectedLatest ? { expectedLatest: decision.expectedLatest } : {}),
       });
     } catch (error) {
       failures.push({

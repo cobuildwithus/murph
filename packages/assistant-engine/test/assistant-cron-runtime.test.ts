@@ -215,7 +215,6 @@ import {
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
-import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import type { AssistantChannelDependencies } from '../src/assistant/channels/types.ts'
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import {
@@ -1057,6 +1056,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(completed.job.state.nextRunAt).toBe('2026-08-10T17:00:00.000Z')
     expect(completed).toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: null,
       occurrenceVerified: true,
     })
 
@@ -1077,6 +1077,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(retrying.job.state.nextRunAt).toBe('2026-08-10T16:30:00.000Z')
     expect(retrying).toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: 'runtime_state_pending',
       occurrenceVerified: false,
     })
   })
@@ -1233,6 +1234,7 @@ describe('assistant cron runtime orchestration', () => {
       'America/New_York',
     )).resolves.toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: 'stale_recurring_occurrence',
       occurrenceVerified: false,
     })
   })
@@ -10139,171 +10141,6 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
-  it('executes existing email thread routes only when a sender identity is present', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-thread-identity-',
-    )
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-email-thread-identity',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Reply to the existing email thread.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: null,
-        threadId: 'email-thread-123',
-      },
-      schedule: {
-        at: '2026-04-08T10:00:00.000Z',
-        kind: 'at',
-      },
-      slug: 'email-thread-identity-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email thread identity reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 1,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'email-thread-123',
-        channel: 'email',
-        deliveryKind: 'thread',
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: null,
-        threadId: 'email-thread-123',
-      }),
-    )
-  })
-
-  it('executes existing local email participant routes when a sender identity is present', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-participant-identity-',
-    )
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-email-participant-identity',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Send the email participant reminder.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: 'recipient@example.test',
-        threadId: null,
-      },
-      schedule: {
-        at: '2026-04-08T10:00:00.000Z',
-        kind: 'at',
-      },
-      slug: 'email-participant-identity-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email participant identity reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      deliveryDispatchMode: 'queue-only',
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 1,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'recipient@example.test',
-        channel: 'email',
-        deliveryDispatchMode: 'queue-only',
-        deliveryKind: 'participant',
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: 'recipient@example.test',
-        threadId: null,
-      }),
-    )
-  })
-
-  it('executes existing local queue-only email thread routes when a sender identity is present', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-thread-identity-queue-only-',
-    )
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-email-thread-identity-queue-only',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Reply to the existing email thread.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: null,
-        threadId: 'email-thread-123',
-      },
-      schedule: {
-        at: '2026-04-08T10:00:00.000Z',
-        kind: 'at',
-      },
-      slug: 'email-thread-identity-queue-only-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email thread identity queue-only reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      deliveryDispatchMode: 'queue-only',
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 1,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'email-thread-123',
-        channel: 'email',
-        deliveryDispatchMode: 'queue-only',
-        deliveryKind: 'thread',
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        threadId: 'email-thread-123',
-      }),
-    )
-  })
-
   it('rejects email participant routes before hosted queue-only execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -10319,7 +10156,7 @@ describe('assistant cron runtime orchestration', () => {
         channel: 'email',
         deliverySource: null,
         deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
+        identityId: 'hosted-email-identity-1',
         participantId: 'recipient@example.test',
         threadId: null,
       },
@@ -10384,7 +10221,7 @@ describe('assistant cron runtime orchestration', () => {
         channel: 'email',
         deliverySource: null,
         deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
+        identityId: 'hosted-email-identity-1',
         participantId: null,
         threadId: 'email-thread-123',
       },
@@ -10432,98 +10269,6 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
-  })
-
-  it('rejects existing explicit email targets without a usable sender identity outside hosted execution', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-
-    for (const scenario of [
-      {
-        automationId: 'automation-explicit-email-target-local',
-        identityId: null,
-        processInput: {},
-        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-local-',
-      },
-      {
-        automationId: 'automation-explicit-email-target-queue-only-local',
-        identityId: null,
-        processInput: { deliveryDispatchMode: 'queue-only' as const },
-        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-queue-only-local-',
-      },
-      {
-        automationId: 'automation-explicit-email-target-private-identity-local',
-        identityId: 'hid_email_identity',
-        processInput: {},
-        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-private-identity-local-',
-      },
-    ]) {
-      const { vaultRoot } = await createRuntimeContext(scenario.vaultPrefix)
-      getVaultAutomationStore(vaultRoot).push({
-        automationId: scenario.automationId,
-        continuityPolicy: 'fresh',
-        createdAt: '2026-04-08T08:00:00.000Z',
-        instructions: 'Send the explicit email reminder.',
-        route: {
-          channel: 'email',
-          deliverySource: null,
-          deliveryTarget: 'team@example.com',
-          identityId: scenario.identityId,
-          participantId: null,
-          threadId: null,
-        },
-        schedule: {
-          at: '2026-04-08T10:00:00.000Z',
-          kind: 'at',
-        },
-        slug: 'explicit-email-target-local-reminder',
-        status: 'active',
-        summary: null,
-        tags: ['assistant', 'scheduled'],
-        title: 'Explicit email target local reminder',
-        updatedAt: '2026-04-08T08:00:00.000Z',
-      })
-
-      const events: unknown[] = []
-      const summary = await processDueAssistantCronJobsLocal({
-        ...scenario.processInput,
-        limit: 1,
-        onEvent: (event) => {
-          events.push(event)
-        },
-        vault: vaultRoot,
-      })
-
-      expect(summary).toEqual({
-        failed: 1,
-        processed: 1,
-        succeeded: 0,
-      })
-      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-      expect(
-        (
-          await listAssistantCronRuns({
-            job: scenario.automationId,
-            vault: vaultRoot,
-          })
-        ).runs[0],
-      ).toMatchObject({
-        error: expect.stringContaining('sender identity'),
-        status: 'failed',
-      })
-      expect(events).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            failureContext: expect.objectContaining({
-              errorCode: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-              errorPresent: true,
-              runOutcome: 'failed',
-            }),
-            type: 'cron.job.completed',
-          }),
-        ]),
-      )
-    }
   })
 
   it('executes existing explicit hosted email targets without a sender identity', async () => {
@@ -10915,7 +10660,7 @@ describe('assistant cron runtime orchestration', () => {
     )?.status).toBe('archived')
   })
 
-  it('fails an existing email thread-locator-only automation before running the assistant turn', async () => {
+  it('fails an existing local email automation before running the assistant turn', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
     cronMocks.loadVault.mockResolvedValue({
@@ -10924,9 +10669,9 @@ describe('assistant cron runtime orchestration', () => {
       },
     })
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-thread-only-',
+      'assistant-cron-runtime-local-email-unsupported-',
     )
-    const automationId = 'automation_email_thread_only_reminder'
+    const automationId = 'automation_local_email_unsupported'
     getVaultAutomationStore(vaultRoot).push({
       automationId,
       continuityPolicy: 'fresh',
@@ -10935,72 +10680,8 @@ describe('assistant cron runtime orchestration', () => {
       route: {
         channel: 'email',
         deliverySource: null,
-        deliveryTarget: null,
+        deliveryTarget: 'recipient@example.test',
         identityId: null,
-        participantId: null,
-        threadId: 'h1_333333333333333333333333',
-      },
-      schedule: {
-        expression: '0 11 * * 5',
-        kind: 'cron',
-      },
-      slug: 'email-thread-only-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email thread-only reminder',
-      updatedAt: '2026-06-19T14:56:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 1,
-      processed: 1,
-      succeeded: 0,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    await expect(
-      listAssistantCronRuns({
-        job: automationId,
-        vault: vaultRoot,
-      }),
-    ).resolves.toMatchObject({
-      jobId: automationId,
-      runs: [
-        expect.objectContaining({
-          error: expect.stringContaining('Email assistant cron jobs require an explicit delivery target'),
-          status: 'failed',
-        }),
-      ],
-    })
-  })
-
-  it('fails an existing email placeholder-target automation before running the assistant turn', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
-    cronMocks.loadVault.mockResolvedValue({
-      metadata: {
-        timezone: 'America/New_York',
-      },
-    })
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-placeholder-target-',
-    )
-    const automationId = 'automation_email_placeholder_target_reminder'
-    getVaultAutomationStore(vaultRoot).push({
-      automationId,
-      continuityPolicy: 'fresh',
-      createdAt: '2026-06-19T14:56:00.000Z',
-      instructions: 'Send the 11am reminder.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: 'h1_333333333333333333333333',
-        identityId: 'identity_email_sender_1',
         participantId: null,
         threadId: null,
       },
@@ -11008,11 +10689,11 @@ describe('assistant cron runtime orchestration', () => {
         expression: '0 11 * * 5',
         kind: 'cron',
       },
-      slug: 'email-placeholder-target-reminder',
+      slug: 'local-email-unsupported',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled'],
-      title: 'Email placeholder-target reminder',
+      title: 'Unsupported local email reminder',
       updatedAt: '2026-06-19T14:56:00.000Z',
     })
 
@@ -11037,7 +10718,7 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           error: expect.stringContaining(
-            'Email assistant cron jobs cannot use redacted conversation placeholders as delivery targets',
+            'Local email automation delivery is not supported',
           ),
           status: 'failed',
         }),

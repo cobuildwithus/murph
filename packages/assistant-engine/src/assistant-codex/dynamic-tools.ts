@@ -83,6 +83,7 @@ import {
 import {
   exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
+  telegramRichContentResponseCardV1Schema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -97,6 +98,9 @@ import {
 import type {
   AssistantConversationScope,
 } from '../assistant/conversation-policy.js'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../assistant/active-turn-input-journal.js'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -124,6 +128,7 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
@@ -226,6 +231,7 @@ import {
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
+  buildPhysicalNoteFailureInstruction,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
   resolvePhysicalNoteExplicitOriginInputId,
@@ -257,6 +263,7 @@ import {
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
@@ -307,9 +314,15 @@ const attachExerciseRoutineCardArgumentsSchema = z
   })
   .strict()
 
+const attachTelegramRichContentArgumentsSchema = z
+  .object({
+    card: telegramRichContentResponseCardV1Schema,
+  })
+  .strict()
+
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(40),
+    media: z.array(z.unknown()).max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -1280,6 +1293,9 @@ function isMurphDynamicToolNamespace(namespace: string | null): boolean {
 
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
+  input?: {
+    automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+  },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
   if (!request) {
@@ -1296,6 +1312,8 @@ export function readMurphDynamicToolRequest(
 
   const automationRequest = readAutomationDynamicToolRequest({
     arguments: request.arguments,
+    relativeDateReferenceWindow:
+      input?.automationRelativeDateReferenceWindow ?? null,
     tool: request.tool,
   })
   if (automationRequest) {
@@ -1414,6 +1432,20 @@ export function readMurphDynamicToolRequest(
     }
     case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
       const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-card-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'attach-response-card',
+        card: parsed.card,
+      }
+    }
+    case MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name: {
+      const parsed = parseAttachTelegramRichContentArguments(request.arguments)
       if (!parsed.ok) {
         return {
           kind: 'invalid-response-card-arguments',
@@ -1861,8 +1893,41 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
-    case 'invalid-automation-arguments':
-      return toolTextResult(false, 'invalid automation arguments')
+    case 'invalid-automation-arguments': {
+      switch (input.request.safeFailureCode) {
+        case 'local_at_gap':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask for another local time; retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${input.request.localAtTargetKey}, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
+          )
+        case 'local_at_fold':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask whether the earlier or later occurrence is intended; retry with schedule.localAt.date=${input.request.resolvedLocalDate}, schedule.localAt.fold, and localAtRecoveryKey=${input.request.localAtTargetKey} instead of relativeDay, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
+          )
+        case 'local_at_invalid_timezone':
+          return toolTextResult(
+            false,
+            'the reminder timezone is invalid; ask for or infer a valid IANA timezone before retrying',
+          )
+        case 'local_at_reference_unavailable':
+          return toolTextResult(
+            false,
+            'the relative reminder date could not be safely anchored to the accepted message; ask the user for an explicit calendar date before retrying',
+          )
+        case 'local_at_reference_spans_dates':
+          return toolTextResult(
+            false,
+            'the accepted messages span different calendar dates in that timezone; ask the user for an explicit calendar date before retrying',
+          )
+        default:
+          return toolTextResult(false, 'invalid automation arguments')
+      }
+    }
     case 'invalid-device-arguments':
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
@@ -2024,6 +2089,11 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation-local-at-recovery-dismissal':
+      return toolTextResult(
+        false,
+        'local-time recovery dismissal is unavailable outside the active root turn',
+      )
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
       if (!automationTool) {
@@ -2353,6 +2423,18 @@ export async function executeMurphDynamicToolRequest(input: {
         })
         switch (result.status) {
           case 'accepted':
+            if (result.failureReason === 'prior_note_accepted') {
+              return toolTextResult(
+                true,
+                JSON.stringify({
+                  failureReason: result.failureReason,
+                  note:
+                    'Provider records show that this earlier physical-note submission was accepted for printing. This replay did not send another note. Historical billing evidence is unavailable, so do not describe it as paid or complimentary and do not state a cost. Say accepted for printing, not delivered.',
+                  physicalNoteId: result.physicalNoteId,
+                  status: result.status,
+                }),
+              )
+            }
             return toolTextResult(
               true,
               JSON.stringify({
@@ -2405,7 +2487,14 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'The physical note was not accepted for printing.',
+              JSON.stringify({
+                failureReason: result.failureReason ?? 'unknown',
+                note: buildPhysicalNoteFailureInstruction(
+                  result.failureReason,
+                ),
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
             )
         }
       } catch {
@@ -2730,13 +2819,24 @@ export async function executeMurphDynamicToolRequest(input: {
         acceptedInvocationSessionId ??
         userActionScope?.originSessionId ??
         null
+      const usesDetachedImageGeneration = Boolean(
+        imageGenerationLauncher && originAssistantInputId,
+      )
+      if (
+        !usesDetachedImageGeneration
+        && (input.currentResponseMedia?.length ?? 0)
+          >= ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS
+      ) {
+        return toolTextResult(false, 'response media limit reached')
+      }
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
       const generateImageArgs = input.request.args
       if (
-        imageGenerationLauncher
+        usesDetachedImageGeneration
+        && imageGenerationLauncher
         && originAssistantInputId
       ) {
         const launch = imageGenerationLauncher.launch({
@@ -3468,24 +3568,22 @@ function groupSharedUnavailableToolResult(
 /**
  * One read returns every member crossed with every requested scope. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one three-state status. Non-workout record arrays remain
+ * is collapsed to one four-state status. Non-workout record arrays remain
  * byte-identical. `workouts.v0` additionally compacts repeated day identity,
  * time semantics, completion watermark, and activity kinds because its
  * per-workout lists are the one record payload dense enough to need that extra
  * reduction. Encrypted stored records and the complete Web response retain
  * their validated shapes.
- */
-/**
- * `grantStatus` and `dataStatus` only ever encode three states between them, so
- * the model reads one field instead of decoding a pair.
+ * The model reads the four collapsed states from one field instead of decoding
+ * the grant/data pair.
  */
 function groupSharedProjectionStatus(
   projection: AssistantHostedGroupSharedProjection,
-): 'available' | 'missing' | 'not_granted' {
+): 'available' | 'missing' | 'not_granted' | 'pending' {
   if (projection.grantStatus === 'not_granted') {
     return 'not_granted'
   }
-  return projection.dataStatus === 'missing' ? 'missing' : 'available'
+  return projection.dataStatus
 }
 
 function groupSharedWorkoutsModelProjection(
@@ -6748,6 +6846,35 @@ function parseAttachExerciseRoutineCardArguments(
         schemaName,
         schemaRootKeys: readZodObjectRootKeys(
           attachExerciseRoutineCardArgumentsSchema,
+        ),
+        toolName,
+      }),
+    }
+  }
+
+  return {
+    card: parsed.data.card,
+    ok: true,
+  }
+}
+
+function parseAttachTelegramRichContentArguments(
+  value: unknown,
+):
+  | { ok: true; card: AssistantResponseCard }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const schemaName = 'murph.attach_telegram_rich_content.input'
+  const toolName = 'murph.attach_telegram_rich_content'
+  const parsed = attachTelegramRichContentArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachTelegramRichContentArgumentsSchema,
         ),
         toolName,
       }),

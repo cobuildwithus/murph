@@ -148,13 +148,19 @@ describe("Linq first-contact admission", () => {
       kind: "allow",
       source: "model",
     });
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.openai.com/v1/responses",
       expect.objectContaining({
         method: "POST",
       }),
     );
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+    const requestInit = fetchMock.mock.calls[0][1];
+    const requestHeaders = new Headers(requestInit.headers);
+    expect(requestHeaders.get("authorization")).toBe("Bearer test-openai-key");
+    expect(requestHeaders.get("content-type")).toBe("application/json");
+    expect(requestHeaders.get("x-stainless-retry-count")).toBe("0");
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
       model: "gpt-5.4-nano",
       reasoning: { effort: "medium" },
       service_tier: "priority",
@@ -166,7 +172,7 @@ describe("Linq first-contact admission", () => {
         },
       },
     });
-    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).input[0].content;
+    const prompt = JSON.parse(String(requestInit.body)).input[0].content;
     expect(prompt).toContain("Goal: decide whether");
     expect(prompt).toContain("Default to allow");
     expect(prompt).toContain("Only block if the message is clearly automated marketing");
@@ -337,8 +343,26 @@ describe("Linq first-contact admission", () => {
     }
   });
 
+  it("maps an injected fetch rejection to one retryable typed 503 attempt", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(classifyHostedLinqFirstContactAdmission({
+      request: BASE_REQUEST,
+    })).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+      details: {
+        operationName: "hosted_linq_first_contact_admission",
+        type: "transport",
+      },
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("throws a typed 503 on non-success or malformed classifier responses", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+    const rateLimitFetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       error: {
         code: "rate_limit_exceeded",
         message: "Rate limit reached for this request.",
@@ -349,7 +373,8 @@ describe("Linq first-contact admission", () => {
         "x-request-id": "req_123",
       },
       status: 429,
-    })));
+    }));
+    vi.stubGlobal("fetch", rateLimitFetch);
 
     await expect(classifyHostedLinqFirstContactAdmission({
       request: BASE_REQUEST,
@@ -366,6 +391,7 @@ describe("Linq first-contact admission", () => {
       httpStatus: 503,
       retryable: true,
     });
+    expect(rateLimitFetch).toHaveBeenCalledOnce();
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       output_text: "not json",

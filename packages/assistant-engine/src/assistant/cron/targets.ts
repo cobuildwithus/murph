@@ -95,9 +95,7 @@ export function validateAssistantCronDeliveryTarget(
   )
   if (deliveryIssue) {
     throw new VaultCliError(
-      deliveryIssue.code === 'email_identity_required'
-        ? 'ASSISTANT_EMAIL_IDENTITY_REQUIRED'
-        : 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
       formatAssistantCronDeliveryIssueMessage(deliveryIssue.message),
     )
   }
