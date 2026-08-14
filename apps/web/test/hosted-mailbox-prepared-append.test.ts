@@ -424,6 +424,7 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
       await expect(appendHostedMailboxEnvelopeWithPreparedCryptoTx({
         envelope,
         prepared,
+        sourceMessageLookupKey: "hbidx:linq-message:v2:prepared",
         tx: fixture.tx as never,
       })).resolves.toMatchObject({
         duplicate: false,
@@ -445,6 +446,9 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
         preparedRootKeyId: "root-prepared-envelope",
         userId: USER_ID,
       }));
+    expect(fixture.tx.$queryRaw.mock.calls.some(
+      (call) => call[4] === "hbidx:linq-message:v2:prepared",
+    )).toBe(true);
   });
 
   it("rejects a same-key cache replacement before taking mailbox locks", async () => {
