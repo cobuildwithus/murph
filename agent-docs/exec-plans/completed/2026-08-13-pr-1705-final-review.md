@@ -1,8 +1,8 @@
 # PR #1705 final review
 
-Status: active
+Status: completed
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -156,10 +156,26 @@ Local replacement-candidate evidence on 2026-08-13:
   and `REVIEW_COMPLETE`. Nothing was accepted or rejected, and no remediation
   or complexity was added. Independent capture metadata verified the requested
   `gpt-5.6-sol` run returned the `gpt-5-6-pro` response model.
-- Required GitHub Actions remain pending because the current base conflict
-  prevents GitHub from creating the pull-request merge ref that triggers those
-  workflows. The permitted base-update budget remains consumed, so resolving
-  that conflict requires explicit new user authorization.
+- Fresh user authorization permitted one final base merge. The resulting
+  two-parent commit `76c9853a36` combines the reviewed current-sender design
+  with `main` at `4c4a7c2e6d`. Manual conflict resolution retained the unified
+  `ask_current_sender` writer, its bounded legacy parser/drain seam, and the
+  newly merged `record_current_sender_daily_metric` contract without restoring
+  a second private-message writer. This behavior-preserving base composition
+  is exempt from a new ReviewGPT round under the bounded manual-conflict rule.
+- Post-merge focused proof passed 619 assertions: Hosted Execution 16,
+  Assistant Engine 107, Assistant Runtime 292, Web 190, and Cloudflare 14.
+  Prepared Web plus the four owning package typechecks passed. Agent-doc drift,
+  diff hygiene, and identifier/privacy scanning passed. The commit hook's
+  non-blocking config-schema generation attempt did not complete locally; exact
+  GitHub Actions remain the authoritative broad proof.
+- All required GitHub checks passed on exact head `76c9853a36`: both CLI host
+  matrix jobs and the required hosted Stripe billing boundary. The non-required
+  Frontend design proof exposed only a PR-body changelog-label mismatch; the
+  declaration now has the required single `Items:` bullet without changing the
+  reviewed code head. After `main` advanced again, a fresh
+  `git merge-tree --write-tree` against `ca5515fe7b` remained clean, so policy
+  requires the existing exact-head merge path instead of another base refresh.
 - The manually dispatched private `Public Murph Integration` run against
   `dad0a41ed486` passed every feature E2E scenario and the current-sender
   PostgreSQL proof, then exposed a pre-existing missing authority-signing method
@@ -196,3 +212,4 @@ the read and persisted completion. Provider entry must replace its answer with
 the existing fixed non-disclosing fallback rather than permanently silencing
 the group. This reuses the outbox fallback signal and adds no second terminal
 identity or recovery owner.
+Completed: 2026-08-14
