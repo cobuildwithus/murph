@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-13
+Last verified: 2026-08-14
 
 ## Current Guardrails
 
@@ -715,7 +715,21 @@ Last verified: 2026-08-13
   errors remain terminal; the runtime must not create a second artifact retry queue.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
-  schedule consumed by the global due-reconcile sweep. While a runner is warm,
+  schedule consumed by the global due-reconcile sweep. The selector suppresses
+  an unchanged due tuple only within the current five-minute recovery bucket;
+  if checkpoint recovery leaves that tuple stale, a later bucket may re-signal
+  the same durable mailbox item. The bounded identities are one canonical
+  schedule event and one durable mailbox item, not one Temporal signal or one
+  provider execution for the tuple's entire lifetime. The canonical mailbox
+  item/event already exists in the committed input workspace. Its read-only
+  provider request classes run before checkpoint 1, which then durably captures
+  the replayable post-pull/intermediate state. If checkpoint 2 fails to persist
+  record/completion, a cold restore from checkpoint 1 may execute the same HTTP
+  method/path classes again because the machine-local device-sync SQLite store is
+  intentionally absent from the snapshot. This is bounded at-least-once replay
+  of the existing work identity; avoiding it would require a new durable
+  provider-effect journal or snapshot protocol, which this design deliberately
+  does not add. While a runner is warm,
   an earlier queued-job wake reaches Temporal through the existing workspace
   `nextWakeAt`. Hosted provider scheduling runs only for the account named by a
   connection mailbox wake; only that wake may fetch its exact Web-owned dirty
@@ -735,6 +749,22 @@ Last verified: 2026-08-13
   `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
   for another.
+  The focused WHOOP regression fixes one canonical schedule-event identity and
+  one durable mailbox-item identity. Its first pass restores the committed input,
+  fetches that mailbox item, runs four distinct read-only method/path classes,
+  writes four artifacts, commits checkpoint 1, and injects the only failure at
+  checkpoint 2 record/completion persistence. Cold restore from checkpoint 1
+  at 00:05 observes exactly one replay of those four classes (eight requests
+  total) and makes three successful checkpoints, advancing the workspace from
+  version 1 through version 4. Its retained completion fence is due at 00:05:30
+  and carries the 06:05 provider cadence. The completion pass performs no third
+  provider pull, makes two successful checkpoints through version 6, and
+  publishes 06:05 only after the durable recovery/completion checkpoint. The
+  first later bucket at 00:10 returns idle with no wake and performs one bounded
+  post-publication convergence checkpoint through version 7; the following
+  00:15 bucket is fully quiescent. The proof therefore records eight checkpoint
+  attempts, seven commits, one injected failure, and no provider work after the
+  single four-class replay.
   Future provider cadence remains projected as the workspace follow-up wake and
   is recorded with a system-mailbox checkpoint handoff; once that cadence is
   due, only a connection mailbox wake may admit it, so a generic runtime timer
