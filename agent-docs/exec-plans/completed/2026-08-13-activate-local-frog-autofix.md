@@ -146,6 +146,15 @@ authority, product runtime path, or compatibility lifecycle is introduced. The
 large source shape is explicit trust-boundary and recovery code for this one
 feature, not a generalized automation platform.
 
+ReviewGPT round 2 found two adjacent publication-boundary gaps. The follow-up
+keeps root and nested `AGENTS.md` plus the worker prompt in both loaded-runner
+and trusted-review control inventories, and repeats the complete candidate
+authority check after the fresh pre-push fetch. It also retains the exact SHA
+only after a successful candidate push so task drift before draft creation can
+replace that proven remote head with the existing neutral handoff under an
+exact force-with-lease. No new durable state, service, or authority owner is
+introduced; an unproven remote move still fails closed.
+
 ## Verification
 
 - `pnpm exec vitest run scripts/frog-autofix.test.ts --config scripts/vitest.config.ts --no-coverage`
@@ -158,7 +167,9 @@ feature, not a generalized automation platform.
 
 Current candidate proof:
 
-- Frog suite: 50 passed.
+- Frog suite: 54 passed, including fresh protected-main instruction drift and
+  post-push task-drift lease recovery.
+- Full repository-tools suite: 595 passed.
 - ReviewGPT packager regression suite: 43 passed, 1 existing
   environment-dependent skip.
 - Native worker permission profile: passed.
@@ -167,8 +178,8 @@ Current candidate proof:
 - Full typecheck: passed; the non-failing boundary reporter also repeated two
   unchanged current-main Web-test warnings outside this diff.
 - Documentation drift and gardening: passed with zero issues.
-- Diff-aware verifier: repo-tools phase passed 591 tests and affected CLI
-  typecheck passed; the broad unchanged assistant-CLI bucket produced eight
+- Diff-aware verifier: the affected CLI typecheck passed; the broad unchanged
+  assistant-CLI bucket produced eight
   60-second scenario timeouts and was stopped after no further useful output.
   The directly affected focused suites above remain green; exact-head CI owns
   the broad PR proof.

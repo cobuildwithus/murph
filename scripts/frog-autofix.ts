@@ -333,6 +333,13 @@ class TaskAuthorityChangedError extends Error {
   }
 }
 
+class CandidateWorkerAuthorityChangedError extends Error {
+  constructor() {
+    super("candidate changes worker instruction authority");
+    this.name = "CandidateWorkerAuthorityChangedError";
+  }
+}
+
 export class TerminalPrePullRequestFailure extends Error {
   readonly failureClass: TerminalPrePullRequestFailureClass;
 
@@ -617,6 +624,8 @@ function resolvePrimaryWorktree(root: string): string {
 }
 
 const loadedRunnerPaths = [
+  "AGENTS.md",
+  ":(glob)**/AGENTS.md",
   "scripts/frog-autofix",
   "scripts/frog-autofix-bootstrap",
   "scripts/frog-autofix.ts",
@@ -625,6 +634,7 @@ const loadedRunnerPaths = [
   "scripts/frog-autofix-lib.ts",
   "scripts/frog-autofix-parent.ts",
   "scripts/frog-autofix-recovery.ts",
+  FROG_AUTOFIX_WORKER_PROMPT_PATH,
 ];
 
 const primaryDependencyControlPaths = [
@@ -639,6 +649,8 @@ export function primaryAdvanceRequiresRestart(paths: string[]): boolean {
   return paths.some((filePath) => (
     loadedRunnerPaths.includes(filePath)
     || primaryDependencyControlPaths.includes(filePath)
+    || filePath === "AGENTS.md"
+    || filePath.endsWith("/AGENTS.md")
   ));
 }
 
@@ -1640,6 +1652,8 @@ function commitParentOwnedChanges(
 }
 
 export const trustedReviewControlPaths = [
+  "AGENTS.md",
+  ":(glob)**/AGENTS.md",
   ".agents/skills/frog/SKILL.md",
   ".npmrc",
   ".pnpmfile.cjs",
@@ -1658,6 +1672,7 @@ export const trustedReviewControlPaths = [
   "scripts/review-gpt-context-policy.sh",
   "scripts/review-gpt-pr-head-preflight.sh",
   "scripts/review-gpt.config.sh",
+  FROG_AUTOFIX_WORKER_PROMPT_PATH,
 ];
 
 function readCommittedAuthorityBlob(
@@ -1712,28 +1727,32 @@ export function verifyCandidateWorkerAuthority(
   )).filter((relativePath) => (
     !relativePath.replaceAll("\\", "/").split("/").includes("node_modules")
   ));
+  const authorityDiff = runCommand(
+    "git",
+    [
+      "diff",
+      "--quiet",
+      "origin/main",
+      "--",
+      expectedTask.path,
+      FROG_AUTOFIX_SKILL_PATH,
+      FROG_AUTOFIX_WORKER_PROMPT_PATH,
+      "AGENTS.md",
+      ":(glob)**/AGENTS.md",
+    ],
+    worktree,
+  );
+  if (authorityDiff.status !== 0 && authorityDiff.status !== 1) {
+    throw new Error(`git failed with status ${authorityDiff.status}`);
+  }
   if (
     instructionPaths.length === 0
     || instructionPaths.length > 64
     || new Set(instructionPaths).size !== instructionPaths.length
     || untrackedInstructions.length !== 0
-    || runCommand(
-      "git",
-      [
-        "diff",
-        "--quiet",
-        "origin/main",
-        "--",
-        expectedTask.path,
-        FROG_AUTOFIX_SKILL_PATH,
-        FROG_AUTOFIX_WORKER_PROMPT_PATH,
-        "AGENTS.md",
-        ":(glob)**/AGENTS.md",
-      ],
-      worktree,
-    ).status !== 0
+    || authorityDiff.status !== 0
   ) {
-    throw new Error("candidate changes worker instruction authority");
+    throw new CandidateWorkerAuthorityChangedError();
   }
   const task = requireCommittedFrictionTask(primary, issueNumber, expectedTask);
   const skill = readCommittedAuthorityBlob(
@@ -1749,7 +1768,7 @@ export function verifyCandidateWorkerAuthority(
     0,
   );
   if (totalInstructionBytes > 1024 * 1024) {
-    throw new Error("candidate changes worker instruction authority");
+    throw new CandidateWorkerAuthorityChangedError();
   }
   return [
     "The parent verified these exact protected `origin/main` blobs immediately before launch:",
@@ -2454,6 +2473,7 @@ function publishPullRequest(
   branch: string,
   issueNumber: number,
   expectedTask?: FrogTaskIdentity,
+  publicationAttempt?: { pushedHead?: string },
 ): number {
   const head = requireCommand("git", ["rev-parse", "HEAD"], worktree);
   return publishDraftRepair(head, {
@@ -2514,11 +2534,20 @@ function publishPullRequest(
       {},
       30 * 60 * 1_000,
     ),
-    refreshAndVerifyIssue: () => refreshAndVerifyExactIssue(
-      primary,
-      issueNumber,
-      expectedTask,
-    ),
+    recordPushedHead: (pushedHead) => {
+      if (publicationAttempt) publicationAttempt.pushedHead = pushedHead;
+    },
+    refreshAndVerifyIssue: () => {
+      refreshAndVerifyExactIssue(primary, issueNumber, expectedTask);
+      if (expectedTask) {
+        verifyCandidateWorkerAuthority(
+          primary,
+          worktree,
+          issueNumber,
+          expectedTask,
+        );
+      }
+    },
   });
 }
 
@@ -2733,10 +2762,14 @@ function persistRepairHandoff(options: {
   failure?: TerminalPrePullRequestFailureClass;
   issueNumber: number;
   primary: string;
+  pushedHead?: string;
   recoveredExistingBody: string | null;
   task?: FrogTaskIdentity;
   worktree: string;
 }): number {
+  if (options.pushedHead && !/^[0-9a-f]{40}$/u.test(options.pushedHead)) {
+    throw new Error("successfully pushed repair head is invalid");
+  }
   let head = requireCommand("git", ["rev-parse", "HEAD"], options.worktree);
   let firstHead: string | undefined;
   if (options.recoveredExistingBody) {
@@ -2906,7 +2939,7 @@ function persistRepairHandoff(options: {
     options.worktree,
     options.branch,
   );
-  const previousHandoffHead = head;
+  const previousHandoffHead = options.pushedHead ?? head;
   const currentMainTree = requireCommand(
     "git",
     ["rev-parse", "origin/main^{tree}"],
@@ -3463,6 +3496,7 @@ async function runEditOnlyCycle(options: {
   } catch (error) {
     if (
       error instanceof TaskAuthorityChangedError
+      || error instanceof CandidateWorkerAuthorityChangedError
       || error instanceof TerminalPrePullRequestFailure
     ) throw error;
     throw new TerminalPrePullRequestFailure("worker-output");
@@ -3840,6 +3874,7 @@ async function reviewPublishAndFinalize(options: {
   issueNumber: number;
   loadedRunnerHead: string;
   primary: string;
+  publicationAttempt: { pushedHead?: string };
   recoveredExistingBody: string | null;
   task: FrogTaskIdentity;
   transient: string;
@@ -3926,6 +3961,7 @@ async function reviewPublishAndFinalize(options: {
     options.branch,
     options.issueNumber,
     options.task,
+    options.publicationAttempt,
   );
 
   const persistMetadata = (): boolean => {
@@ -4348,6 +4384,7 @@ async function runOnce() {
     mkdirSync(transientRoot, { mode: 0o700, recursive: true });
     const transient = mkdtempSync(path.join(transientRoot, "run-"));
     let repairTaskIdentity: FrogTaskIdentity | undefined;
+    const publicationAttempt: { pushedHead?: string } = {};
     try {
       if (workerMode === "implement") {
         repairTaskIdentity = admittedTask;
@@ -4427,6 +4464,7 @@ async function runOnce() {
         issueNumber: issue.number,
         loadedRunnerHead,
         primary,
+        publicationAttempt,
         recoveredExistingBody,
         task: repairTask,
         transient,
@@ -4445,6 +4483,7 @@ async function runOnce() {
     } catch (error) {
       if (
         error instanceof TaskAuthorityChangedError
+        || error instanceof CandidateWorkerAuthorityChangedError
         || error instanceof TerminalPrePullRequestFailure
       ) {
         persistRepairHandoff({
@@ -4455,6 +4494,7 @@ async function runOnce() {
             : undefined,
           issueNumber: issue.number,
           primary,
+          pushedHead: publicationAttempt.pushedHead,
           recoveredExistingBody,
           task: repairTaskIdentity,
           worktree,

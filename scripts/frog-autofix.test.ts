@@ -367,6 +367,9 @@ describe("Frog autofix guards", () => {
     ];
     expect(trustedReviewControlPaths).toContain("scripts/chatgpt-review-presets");
     expect(trustedReviewControlPaths).toContain(".agents/skills/frog/SKILL.md");
+    expect(trustedReviewControlPaths).toContain("AGENTS.md");
+    expect(trustedReviewControlPaths).toContain(":(glob)**/AGENTS.md");
+    expect(trustedReviewControlPaths).toContain("scripts/frog-autofix-worker.md");
     for (const promptPath of specialistPromptPaths) {
       expect(trustedReviewControlPaths).toContain(promptPath);
     }
@@ -386,8 +389,15 @@ describe("Frog autofix guards", () => {
       mkdirSync(skillDirectory, { recursive: true });
       mkdirSync(promptDirectory, { recursive: true });
       mkdirSync(path.join(root, "scripts"), { recursive: true });
+      mkdirSync(path.join(root, "nested"), { recursive: true });
       writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "trusted\n");
       writeFileSync(path.join(skillDirectory, "SKILL.md"), "trusted\n");
+      writeFileSync(path.join(root, "AGENTS.md"), "trusted\n");
+      writeFileSync(path.join(root, "nested", "AGENTS.md"), "trusted\n");
+      writeFileSync(
+        path.join(root, "scripts", "frog-autofix-worker.md"),
+        "trusted\n",
+      );
       for (const promptPath of specialistPromptPaths) {
         writeFileSync(path.join(root, promptPath), "trusted\n");
       }
@@ -415,7 +425,10 @@ describe("Frog autofix guards", () => {
         "scripts/package-audit-context-full.sh",
         "scripts/review-gpt-pr-head-preflight.sh",
         "scripts/chatgpt-review-presets/pr-deep-review.md",
+        "scripts/frog-autofix-worker.md",
         ".agents/skills/frog/SKILL.md",
+        "AGENTS.md",
+        "nested/AGENTS.md",
         ...specialistPromptPaths,
       ]) {
         writeFileSync(path.join(root, changedPath), `candidate ${changedPath}\n`);
@@ -1155,6 +1168,9 @@ describe("Frog autofix guards", () => {
     );
     expect(terminalHandoff).toContain("authorizedTerminalHandoffLease({");
     expect(terminalHandoff).toContain(
+      "const previousHandoffHead = options.pushedHead ?? head",
+    );
+    expect(terminalHandoff).toContain(
       "normalizeUnpushedDescendantToPullRequestHead(",
     );
     expect(terminalHandoff.indexOf("samePullRequestProjection(existing"))
@@ -1170,6 +1186,14 @@ describe("Frog autofix guards", () => {
     expect(terminalHandoff).not.toContain(
       "observedRemoteHead\n          ? [`--force-with-lease",
     );
+    const publication = source.slice(
+      source.indexOf("function publishPullRequest"),
+      source.indexOf("function updateParentPullRequestBody"),
+    );
+    expect(publication.indexOf("refreshAndVerifyExactIssue("))
+      .toBeLessThan(publication.indexOf("verifyCandidateWorkerAuthority("));
+    expect(publication).toContain("publicationAttempt.pushedHead = pushedHead");
+    expect(runOnce).toContain("pushedHead: publicationAttempt.pushedHead");
   });
 
   it("restamps foreign-edited exact and ancestor handoffs before worktree recovery", () => {
@@ -2546,11 +2570,13 @@ esac
       },
       editPullRequest: () => events.push("edit"),
       pushExactHead: () => events.push("push"),
+      recordPushedHead: (pushedHead) => events.push(`pushed:${pushedHead}`),
       refreshAndVerifyIssue: () => events.push("verify"),
     })).toBe(99);
     expect(events).toEqual([
       "verify",
       "push",
+      `pushed:${head}`,
       "lookup",
       "verify",
       "create",
@@ -2566,9 +2592,16 @@ esac
       },
       editPullRequest: () => existingEvents.push("edit"),
       pushExactHead: () => existingEvents.push("push"),
+      recordPushedHead: (pushedHead) => existingEvents.push(`pushed:${pushedHead}`),
       refreshAndVerifyIssue: () => existingEvents.push("verify"),
     })).toBe(99);
-    expect(existingEvents).toEqual(["verify", "push", "lookup", "edit"]);
+    expect(existingEvents).toEqual([
+      "verify",
+      "push",
+      `pushed:${head}`,
+      "lookup",
+      "edit",
+    ]);
     expect(() => publishDraftRepair(head, {
       createPullRequest: () => undefined,
       currentOpenPullRequest: () => ({
@@ -2581,6 +2614,19 @@ esac
       pushExactHead: () => undefined,
       refreshAndVerifyIssue: () => undefined,
     })).toThrow("head changed before body edit");
+
+    const failedPushProofs: string[] = [];
+    expect(() => publishDraftRepair(head, {
+      createPullRequest: () => undefined,
+      currentOpenPullRequest: () => null,
+      editPullRequest: () => undefined,
+      pushExactHead: () => {
+        throw new Error("push failed");
+      },
+      recordPushedHead: (pushedHead) => failedPushProofs.push(pushedHead),
+      refreshAndVerifyIssue: () => undefined,
+    })).toThrow("push failed");
+    expect(failedPushProofs).toEqual([]);
   });
 
   it("creates no draft after issue authority is revoked at either checkpoint", () => {
@@ -2596,6 +2642,7 @@ esac
         },
         editPullRequest: () => events.push("edit"),
         pushExactHead: () => events.push("push"),
+        recordPushedHead: (pushedHead) => events.push(`pushed:${pushedHead}`),
         refreshAndVerifyIssue: () => {
           events.push("verify");
           verificationCount += 1;
@@ -2606,7 +2653,96 @@ esac
       })).toThrow("revoked Frog authority");
       expect(events).toEqual(revokedAt === 1
         ? ["verify"]
-        : ["verify", "push", "lookup", "verify"]);
+        : ["verify", "push", `pushed:${head}`, "lookup", "verify"]);
+    }
+  });
+
+  it("lease-replaces only the exact candidate proven pushed before task drift", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "frog-post-push-drift-"));
+    const origin = path.join(root, "origin.git");
+    const worktree = path.join(root, "worktree");
+    const branch = "agent/frog-autofix-42";
+    const git = (cwd: string, ...args: string[]) => {
+      const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    try {
+      mkdirSync(worktree);
+      git(root, "init", "--bare", "--quiet", origin);
+      git(worktree, "init", "--quiet");
+      git(worktree, "config", "user.name", "Automation");
+      git(worktree, "config", "user.email", "automation@example.invalid");
+      git(worktree, "remote", "add", "origin", origin);
+      writeFileSync(path.join(worktree, "tracked.txt"), "candidate\n");
+      git(worktree, "add", "tracked.txt");
+      git(worktree, "commit", "--quiet", "-m", "candidate");
+      const candidate = git(worktree, "rev-parse", "HEAD");
+      let pushedHead: string | undefined;
+      let verificationCount = 0;
+
+      expect(() => publishDraftRepair(candidate, {
+        createPullRequest: () => {
+          throw new Error("draft creation must not run after task drift");
+        },
+        currentOpenPullRequest: () => null,
+        editPullRequest: () => {
+          throw new Error("body edit must not run without a pull request");
+        },
+        pushExactHead: () => {
+          git(worktree, "push", "origin", `${candidate}:refs/heads/${branch}`);
+        },
+        recordPushedHead: (head) => {
+          pushedHead = head;
+        },
+        refreshAndVerifyIssue: () => {
+          verificationCount += 1;
+          if (verificationCount === 2) throw new Error("task drift");
+        },
+      })).toThrow("task drift");
+      expect(pushedHead).toBe(candidate);
+      expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(candidate);
+
+      const tree = git(worktree, "rev-parse", `${candidate}^{tree}`);
+      const handoff = git(
+        worktree,
+        "commit-tree",
+        tree,
+        "-p",
+        candidate,
+        "-m",
+        "neutral handoff",
+      );
+      const lease = authorizedTerminalHandoffLease({
+        currentHandoffHead: handoff,
+        observedRemoteHead: candidate,
+        previousHandoffHead: pushedHead as string,
+      });
+      git(
+        worktree,
+        "push",
+        `--force-with-lease=refs/heads/${branch}:${lease}`,
+        "origin",
+        `${handoff}:refs/heads/${branch}`,
+      );
+      expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(handoff);
+
+      const foreign = git(
+        worktree,
+        "commit-tree",
+        tree,
+        "-p",
+        candidate,
+        "-m",
+        "foreign move",
+      );
+      expect(() => authorizedTerminalHandoffLease({
+        currentHandoffHead: handoff,
+        observedRemoteHead: foreign,
+        previousHandoffHead: candidate,
+      })).toThrow("unproven remote issue branch");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
     }
   });
 
@@ -3416,6 +3552,9 @@ esac
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-bootstrap"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix.ts"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-parent.ts"])).toBe(true);
+    expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-worker.md"])).toBe(true);
+    expect(primaryAdvanceRequiresRestart(["AGENTS.md"])).toBe(true);
+    expect(primaryAdvanceRequiresRestart(["nested/AGENTS.md"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["package.json"])).toBe(true);
     expect(primaryAdvanceRequiresRestart(["pnpm-lock.yaml"])).toBe(true);
 
@@ -3428,8 +3567,12 @@ esac
     try {
       mkdirSync(path.join(root, "scripts"), { recursive: true });
       mkdirSync(path.join(root, "apps", "web"), { recursive: true });
+      mkdirSync(path.join(root, "nested"), { recursive: true });
       writeFileSync(path.join(root, "scripts", "frog-autofix-bootstrap"), "trusted\n");
       writeFileSync(path.join(root, "scripts", "frog-autofix-finalize.ts"), "trusted\n");
+      writeFileSync(path.join(root, "scripts", "frog-autofix-worker.md"), "trusted\n");
+      writeFileSync(path.join(root, "AGENTS.md"), "trusted\n");
+      writeFileSync(path.join(root, "nested", "AGENTS.md"), "trusted\n");
       writeFileSync(path.join(root, "apps", "web", "page.tsx"), "unrelated\n");
       git("init", "--quiet");
       git("config", "user.name", "Automation");
@@ -3504,6 +3647,20 @@ esac
       )).toBe(true);
       expect(recoveredReviewPassState(root, persistedPass, loadedHead).authorityDrift)
         .toBe(false);
+
+      for (const changedPath of [
+        "AGENTS.md",
+        "nested/AGENTS.md",
+        "scripts/frog-autofix-worker.md",
+      ]) {
+        writeFileSync(path.join(root, changedPath), `advanced ${changedPath}\n`);
+        git("add", changedPath);
+        git("commit", "--quiet", "-m", `replace ${changedPath}`);
+        git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+        expect(loadedRunnerControlsMatch(root, loadedHead), changedPath).toBe(false);
+        git("reset", "--hard", unrelatedMain);
+        git("update-ref", "refs/remotes/origin/main", unrelatedMain);
+      }
 
       writeFileSync(path.join(root, "scripts", "frog-autofix-bootstrap"), "replaced\n");
       git("add", ".");
