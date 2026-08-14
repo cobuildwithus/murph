@@ -263,9 +263,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 
 vi.mock("@/src/lib/hosted-crypto/env", async () => {
   const { generateKeyPairSync, sign } = await import("node:crypto");
-  const { createHostedAuthorityVerifyKeyring } = await import(
-    "@murphai/runtime-state"
-  );
   const authoritySignKeyVersionName =
     "projects/test-project/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
   const authorityKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -278,10 +275,13 @@ vi.mock("@/src/lib/hosted-crypto/env", async () => {
     getHostedWebCryptoConfig: () => ({
       authoritySignKeyVersionName,
       authoritySignPublicKeyPem,
-      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({
-        activeKeyVersionName: authoritySignKeyVersionName,
-        activePublicKeyPem: authoritySignPublicKeyPem,
-      }),
+      authorityVerifyKeyring: {
+        [authoritySignKeyVersionName]: {
+          keyVersionName: authoritySignKeyVersionName,
+          publicKeyPem: authoritySignPublicKeyPem,
+          status: "active",
+        },
+      },
       env: "test",
       gcpKms: {
         asymmetricSign: async ({
@@ -292,10 +292,8 @@ vi.mock("@/src/lib/hosted-crypto/env", async () => {
           message: Uint8Array;
         }) => ({
           keyVersionName,
-          signature: sign("sha256", message, {
-            dsaEncoding: "ieee-p1363",
-            key: authorityKey.privateKey,
-          }).toString("base64"),
+          signature: sign("sha256", message, authorityKey.privateKey)
+            .toString("base64"),
         }),
         decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
           plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
