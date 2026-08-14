@@ -312,6 +312,12 @@ test("design sections keep the route footer as the sole canonical footer target"
   expect(routeMarkup).toContain('id="design-site-footer-preview"');
   expect(routeMarkup).toContain('data-design-section="homepage-footer"');
   expect(routeMarkup).toContain("inert=");
+
+  const sectionsSource = readFileSync(
+    new URL("../app/design/sections-content.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(sectionsSource.match(/vitalsMode="synthetic"/g)).toHaveLength(1);
 });
 
 test("biomarker preparing study reassures members and previews the index structure", () => {
