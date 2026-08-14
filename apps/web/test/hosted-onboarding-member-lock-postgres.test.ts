@@ -262,57 +262,41 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 });
 
 vi.mock("@/src/lib/hosted-crypto/env", async () => {
-  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { createHostedAuthorityVerifyKeyring } = await vi.importActual<
+    typeof import("@murphai/runtime-state")
+  >("@murphai/runtime-state");
+  const { createHostedGcpKmsClientFromEnv } = await vi.importActual<
+    typeof import("@/src/lib/hosted-crypto/gcp-kms")
+  >("@/src/lib/hosted-crypto/gcp-kms");
   const authoritySignKeyVersionName =
-    "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
-  const authorityKeyPair = generateKeyPairSync("ec", {
-    namedCurve: "P-256",
+    "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
   });
-  const authoritySignPublicKeyPem = authorityKeyPair.publicKey.export({
-    format: "pem",
-    type: "spki",
-  }).toString();
+  const gcpKms = createHostedGcpKmsClientFromEnv({
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+    NODE_ENV: "test",
+  });
 
   return {
     getHostedWebCryptoConfig: () => ({
       authoritySignKeyVersionName,
-      authoritySignPublicKeyPem,
-      authorityVerifyKeyring: {
-        [authoritySignKeyVersionName]: {
-          keyVersionName: authoritySignKeyVersionName,
-          publicKeyPem: authoritySignPublicKeyPem,
-          status: "active",
-        },
-      },
+      authoritySignPublicKeyPem: authorityKey.publicKey,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({
+        activeKeyVersionName: authoritySignKeyVersionName,
+        activePublicKeyPem: authorityKey.publicKey,
+      }),
       env: "test",
-      gcpKms: {
-        asymmetricSign: async ({
-          keyVersionName,
-          message,
-        }: {
-          keyVersionName: string;
-          message: Uint8Array;
-        }) => ({
-          keyVersionName,
-          signature: sign("sha256", message, authorityKeyPair.privateKey)
-            .toString("base64"),
-        }),
-        decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
-          plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
-        }),
-        encrypt: async ({
-          keyName,
-          plaintext,
-        }: {
-          keyName: string;
-          plaintext: Uint8Array;
-        }) => ({
-          ciphertext: Buffer.from(plaintext).toString("base64"),
-          keyName,
-        }),
-      },
+      gcpKms,
       webWrapKmsKeyName:
-        "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
+        "projects/example/locations/global/keyRings/hosted/cryptoKeys/delete-race",
     }),
   };
 });
