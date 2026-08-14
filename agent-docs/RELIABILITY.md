@@ -129,6 +129,13 @@ Last verified: 2026-08-14
   input, cache-read, cache-write, and output rates and records the provider
   model and pricing source in the snapshot; unknown non-Venice standard
   provider evidence retains the existing OpenAI-compatible behavior.
+- The operator `/ops/usage` collection is bounded independently of lifetime
+  member count. It reads at most 26 hosted-member primary keys to admit a
+  25-row page, uses one scalar whole-population aggregate, filters mailbox and
+  immutable-usage groupings to those 25 IDs, and runs the canonical allowance
+  gate sequentially in one short repeatable-read transaction per displayed
+  member. No transaction spans members, no off-page member reaches the gate,
+  and peak added transactional connection ownership is one.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing
@@ -525,6 +532,19 @@ Last verified: 2026-08-14
   route also requires proof: a new browser on an old instance receives 404, and
   an old browser on a new instance receives 400, so mixed-version traffic fails
   safely during convergence.
+- The Family owner snapshot admits at most the six supported active and pending
+  seats before reading private invite history. Active membership admission uses
+  the existing group/status index without a pre-limit sort; live pending invite
+  admission seeks by group/status/expiry/id. Both restore created order only
+  after the cap checks pass. The ordinary root-client read evaluates roster,
+  paid capacities, and accepted-invite history in one short repeatable-read
+  database snapshot, then closes that transaction before private invite
+  projection and decryption; a caller already inside a canonical transaction
+  reuses it instead of nesting another transaction. For each current non-owner
+  member, one indexed lateral lookup selects only the earliest accepted invite;
+  departed members and later historical accepts never reach decryption. A
+  roster that exceeds the product invariant fails closed instead of turning a
+  settings read into an unbounded history scan.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a
@@ -1675,6 +1695,15 @@ Last verified: 2026-08-14
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
+- The best-effort ingress-latency checkpoint-publication milestone updates at
+  most 250 of the newest currently staged, unconsumed traces for the
+  authenticated member and source in one set-based statement. A 251st locked
+  candidate reports truncation without widening the write. PostgreSQL owns row
+  serialization while the write preserves attempt and monotonic
+  lease-generation authority, max-merges the publication deadline, sanitizes
+  stored diagnostic JSON, and changes `updated_at` only when state changes. It
+  must not select trace ids into the application, lock an unbounded collection,
+  or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event
