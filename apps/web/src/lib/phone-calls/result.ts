@@ -422,8 +422,7 @@ export function buildPhoneCallResultNotificationWake(input: {
   result: HostedPhoneCallResult;
 }) {
   const notificationKey = buildPhoneCallResultNotificationKey(input.callId);
-  const requireSend = input.requiresTransferFollowUp === true
-    || isHostedThreadContainerNotificationDestination(input.destination);
+  const isGroup = isHostedThreadContainerNotificationDestination(input.destination);
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildPhoneCallResultNotificationEventId(input.callId),
     memberId: input.memberId,
@@ -439,16 +438,14 @@ export function buildPhoneCallResultNotificationWake(input: {
         : {}),
       instructions: buildPhoneCallResultNotificationInstructions({
         brief: input.brief,
-        requireSend,
+        isGroup,
         requiresTransferFollowUp: input.requiresTransferFollowUp === true,
         result: input.result,
       }),
-      // A room must always hear how its call ended. A successful direct
-      // transfer must also ask the member what happened after Murph left;
-      // either omission would be an unrecoverable silent failure.
-      responsePolicy: requireSend
-        ? { kind: "require_send" }
-        : { kind: "allow_send_or_skip" },
+      // A call is a paid, externally visible action. Every direct member and
+      // group requester must hear how it ended; omission recreates the exact
+      // uncertainty the result notification exists to resolve.
+      responsePolicy: { kind: "require_send" },
       route: input.destination.route,
     },
     occurredAt: new Date().toISOString(),
@@ -573,7 +570,7 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
 
 export function buildPhoneCallResultNotificationInstructions(input: {
   brief: HostedPhoneCallBrief;
-  requireSend?: boolean;
+  isGroup?: boolean;
   requiresTransferFollowUp?: boolean;
   result: HostedPhoneCallResult;
 }): string {
@@ -586,12 +583,12 @@ export function buildPhoneCallResultNotificationInstructions(input: {
         "Do not claim that the post-handoff goal was completed or failed.",
       ]
     : [
-        input.requireSend
+        input.isGroup
           ? "The Murph phone call has finished. Report the final result to this group chat."
-          : "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
-        input.requireSend
+          : "The Murph phone call has finished. Report the final result to the user.",
+        input.isGroup
           ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The group asked for this call, so never stay silent about it."
-          : "If there is nothing meaningful to report, you may skip sending a message.",
+          : "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. Never leave the user uncertain about the result.",
       ];
   lines.push(
     "Use normal Murph wording; do not send a hard-coded template.",
@@ -608,7 +605,7 @@ export function buildPhoneCallResultNotificationInstructions(input: {
     }),
   );
   if (input.result.outcome === "completed" && !input.result.followUp) {
-    lines.push("If you do notify the user, tell them that no follow-up is needed.");
+    lines.push("Tell the user that no follow-up is needed.");
   }
 
   return lines.join("\n\n");

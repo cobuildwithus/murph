@@ -988,6 +988,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
               )
             )
           ),
+        phoneCallStatusAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          typeof input.hostedToolContext?.phoneCalls?.status === 'function',
+        phoneCallStopAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,

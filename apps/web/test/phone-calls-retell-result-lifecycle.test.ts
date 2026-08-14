@@ -154,7 +154,6 @@ describe("Retell phone-call result lifecycle", () => {
     const mapped = mapRetellCallAnalysis(result.call);
     const instructions = buildPhoneCallResultNotificationInstructions({
       brief: BRIEF,
-      requireSend: true,
       requiresTransferFollowUp: result.requiresTransferFollowUp,
       result: mapped,
     });

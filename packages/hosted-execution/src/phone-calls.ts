@@ -9,6 +9,7 @@ import type {
 // response to cross the control-plane boundary.
 export const HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS = 40_000;
 export const HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS = 45_000;
+export const HOSTED_PHONE_CALL_STATUS_MAX_ITEMS = 3;
 export const HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX = 32;
 export const HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX =
   "phone_call_scheduled_";
@@ -89,13 +90,6 @@ export const hostedPhoneCallStartResponseSchema = z
   })
   .strict();
 
-export const hostedPhoneCallAdviceSchema = z
-  .object({
-    answer: z.string().trim().min(1).max(1_500),
-    directive: z.enum(["continue", "transfer_to_user", "end_call"]),
-  })
-  .strict();
-
 export const hostedPhoneCallResultSchema = z
   .object({
     followUp: z.string().trim().max(1_000).optional(),
@@ -104,7 +98,77 @@ export const hostedPhoneCallResultSchema = z
   })
   .strict();
 
+export const hostedPhoneCallStatusRequestSchema = z
+  .object({
+    phoneCallId: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
+export const hostedPhoneCallStatusItemSchema = z
+  .object({
+    analyzedAt: z.iso.datetime().nullable(),
+    createdAt: z.iso.datetime(),
+    endedAt: z.iso.datetime().nullable(),
+    phoneCallId: z.string().trim().min(1).max(200),
+    result: hostedPhoneCallResultSchema.nullable(),
+    status: z.enum([
+      "starting",
+      "calling",
+      "ended",
+      "completed",
+      "needs_user",
+      "failed",
+    ]),
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const hostedPhoneCallStatusResponseSchema = z
+  .object({
+    calls: z.array(hostedPhoneCallStatusItemSchema).max(
+      HOSTED_PHONE_CALL_STATUS_MAX_ITEMS,
+    ),
+  })
+  .strict();
+
+export const hostedPhoneCallStopRequestSchema = z
+  .object({
+    phoneCallId: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+export const hostedPhoneCallStopResponseSchema = z
+  .object({
+    phoneCallId: z.string().trim().min(1).max(200),
+    state: z.enum([
+      "stopped",
+      "already_terminal",
+      "start_pending",
+      "not_found",
+    ]),
+    status: z.enum([
+      "starting",
+      "calling",
+      "ended",
+      "completed",
+      "needs_user",
+      "failed",
+    ]).nullable(),
+  })
+  .strict();
+
+export const hostedPhoneCallAdviceSchema = z
+  .object({
+    answer: z.string().trim().min(1).max(1_500),
+    directive: z.enum(["continue", "transfer_to_user", "end_call"]),
+  })
+  .strict();
+
 export const HOSTED_PHONE_CALLS_PATH = "/api/internal/phone-calls" as const;
+export const HOSTED_PHONE_CALL_STATUS_PATH =
+  "/api/internal/phone-calls/status" as const;
+export const HOSTED_PHONE_CALL_STOP_PATH =
+  "/api/internal/phone-calls/stop" as const;
 
 export type HostedPhoneCallBrief = z.infer<typeof hostedPhoneCallBriefSchema>;
 export type HostedPhoneCallGroupRequester =
@@ -114,6 +178,21 @@ export type HostedPhoneCallStartRequest = z.infer<
 >;
 export type HostedPhoneCallStartResponse = z.infer<
   typeof hostedPhoneCallStartResponseSchema
+>;
+export type HostedPhoneCallStatusRequest = z.infer<
+  typeof hostedPhoneCallStatusRequestSchema
+>;
+export type HostedPhoneCallStatusItem = z.infer<
+  typeof hostedPhoneCallStatusItemSchema
+>;
+export type HostedPhoneCallStatusResponse = z.infer<
+  typeof hostedPhoneCallStatusResponseSchema
+>;
+export type HostedPhoneCallStopRequest = z.infer<
+  typeof hostedPhoneCallStopRequestSchema
+>;
+export type HostedPhoneCallStopResponse = z.infer<
+  typeof hostedPhoneCallStopResponseSchema
 >;
 export type HostedPhoneCallAdvice = z.infer<typeof hostedPhoneCallAdviceSchema>;
 export type HostedPhoneCallResult = z.infer<typeof hostedPhoneCallResultSchema>;

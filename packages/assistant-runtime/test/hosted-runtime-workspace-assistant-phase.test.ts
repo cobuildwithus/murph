@@ -14958,6 +14958,85 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
   });
 
+  it("drains an exact phone-call result before a newer pending assistant input", async () => {
+    const pendingInputAt = "2026-09-01T15:02:00.000Z";
+    const completionItem = createExternalCompletionSystemMailboxItem({
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_pending_input",
+    });
+    const deliveryEffect: HostedAssistantDeliverySideEffect = {
+      ...createDeliveryEffect(),
+      effectId: `effect_${completionItem.itemId}`,
+      payload: {
+        ...createDeliveryEffect().payload,
+        channel: "linq",
+        explicitTarget: "linq_source_thread",
+        idempotencyKey: "phone-call-result:phone_call_pending_input",
+        identityId: "hbidx:phone:v1:test",
+        threadId: "linq_source_thread",
+        threadIsDirect: true,
+      },
+    };
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(
+      pendingInputAt,
+    );
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
+      pendingInputAt,
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        item: completionItem,
+        itemId: completionItem.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 2,
+      now: () => "2026-09-01T15:03:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint)
+      .toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({
+          allowedMailboxDedupeKeyPrefixes: [
+            "assistant.notification.requested:phone-call-result:",
+          ],
+          allowedRouteActions: ["dispatch-assistant-notification"],
+          allowedWakeKinds: ["assistant.notification.requested"],
+        }),
+      );
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+        wake: completionItem.wake,
+      }),
+    );
+  });
+
   it.each([
     {
       dedupeKey:
@@ -15110,7 +15189,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("keeps assistant ask completions out when pending-input ordering is incomplete", async () => {
+  it("keeps assistant ask completions out but still checks urgent call results when input is pending", async () => {
     const now = "2026-04-27T00:03:00.000Z";
     const armedWakeAt = "2026-04-27T00:08:00.000Z";
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
@@ -15141,12 +15220,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         assistantAskCompletionOccurredBefore: null,
       }),
     );
-    expect(
-      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.some(
-        ([request]) =>
-          Object.hasOwn(request, "allowedMailboxDedupeKeyPrefixes"),
-      ),
-    ).toBe(false);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedMailboxDedupeKeyPrefixes: [
+          "assistant.notification.requested:phone-call-result:",
+        ],
+        allowedRouteActions: ["dispatch-assistant-notification"],
+        allowedWakeKinds: ["assistant.notification.requested"],
+      }),
+    );
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
       inspectOnly: true,
       now: expect.any(Function),

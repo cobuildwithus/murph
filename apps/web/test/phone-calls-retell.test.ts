@@ -749,7 +749,7 @@ describe("Retell phone-call result handling", () => {
     expect(instructions).not.toContain("create or update the calendar");
   });
 
-  it("builds an allow-skip notification wake keyed for idempotent delivery", () => {
+  it("requires an idempotent direct result notification", () => {
     const route = {
       actorId: "+12125550111",
       channel: "linq" as const,
@@ -781,9 +781,7 @@ describe("Retell phone-call result handling", () => {
     });
 
     expect(wake.kind).toBe("assistant.notification.requested");
-    // Allow-skip is the one deliberate deviation from the pre-context delivery
-    // tail: Murph composes and may skip a non-meaningful result.
-    expect(wake.notification.responsePolicy).toEqual({ kind: "allow_send_or_skip" });
+    expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
     expect(wake.notification.deliveryDedupeToken).toBe("phone-call-result:hpc_123");
     expect(wake.notification.deliveryIdempotencyKey).toBe("phone-call-result:hpc_123");
     expect(wake.notification.deliveryDispatchMode).toBe("queue-only");
@@ -793,7 +791,12 @@ describe("Retell phone-call result handling", () => {
     expect(wake.notification.instructions).toContain(
       "The office confirmed the appointment for Friday at 10am.",
     );
-    expect(wake.notification.instructions).toContain("you may skip sending a message");
+    expect(wake.notification.instructions).toContain(
+      "Never leave the user uncertain about the result.",
+    );
+    expect(wake.notification.instructions).not.toContain(
+      "you may skip sending a message",
+    );
   });
 
   it("requires a direct transferred-call follow-up from trusted instructions", () => {

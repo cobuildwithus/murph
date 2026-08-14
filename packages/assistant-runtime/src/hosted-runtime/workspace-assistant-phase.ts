@@ -307,6 +307,9 @@ const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   "aask_done_",
   "aask_private_",
 ] as const;
+const HOSTED_PRE_CHECKPOINT_URGENT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
+  "assistant.notification.requested:phone-call-result:",
+] as const;
 const HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS = [
   "continue-assistant-ask",
 ] as const;
@@ -5247,12 +5250,13 @@ async function runSystemMailboxMaintenancePhase(input: {
   if (
     phaseInput.foregroundCausalOnly === true
     && foregroundCausalPreparation === null
-    && pendingAssistantInputWakeAt === null
   ) {
     foregroundCausalPreparation =
       await prepareHostedSystemMailboxItemForCheckpoint({
         allowedMailboxDedupeKeyPrefixes:
-          HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES,
+          pendingAssistantInputWakeAt === null
+            ? HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES
+            : HOSTED_PRE_CHECKPOINT_URGENT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES,
         allowedRouteActions:
           HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS,
         allowedWakeKinds:

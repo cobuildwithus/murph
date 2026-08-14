@@ -9,6 +9,8 @@ import {
 } from "@murphai/hosted-execution/clinical-records-boundary";
 import {
   HOSTED_PHONE_CALLS_PATH,
+  HOSTED_PHONE_CALL_STATUS_PATH,
+  HOSTED_PHONE_CALL_STOP_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import {
   HOSTED_PHYSICAL_NOTES_PATH,
@@ -107,6 +109,8 @@ export type HostedRunnerWebControlOperation =
   | "subscription_tool"
   | "thread_route_authority"
   | "phone_call_start"
+  | "phone_call_status"
+  | "phone_call_stop"
   | "physical_note_send"
   | "runtime_latency_trace"
   | "runtime_log_write"
@@ -161,6 +165,8 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
   [HOSTED_PHONE_CALLS_PATH, "phone_call_start"],
+  [HOSTED_PHONE_CALL_STATUS_PATH, "phone_call_status"],
+  [HOSTED_PHONE_CALL_STOP_PATH, "phone_call_stop"],
   [HOSTED_PHYSICAL_NOTES_PATH, "physical_note_send"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);

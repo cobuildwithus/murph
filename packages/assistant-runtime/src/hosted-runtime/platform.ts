@@ -88,6 +88,10 @@ import type {
 import type {
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
+  HostedPhoneCallStatusRequest,
+  HostedPhoneCallStatusResponse,
+  HostedPhoneCallStopRequest,
+  HostedPhoneCallStopResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
   HostedPhysicalNoteSendRequest,
@@ -557,6 +561,18 @@ export interface HostedRuntimeCodexAuthPort {
 }
 
 export interface HostedRuntimePhoneCallPort {
+  stop?(
+    request: HostedPhoneCallStopRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhoneCallStopResponse>;
+  status?(
+    request: HostedPhoneCallStatusRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhoneCallStatusResponse>;
   start(
     request: HostedPhoneCallStartRequest,
     context?: {

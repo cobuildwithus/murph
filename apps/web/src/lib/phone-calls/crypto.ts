@@ -137,7 +137,10 @@ export async function readHostedPhoneCallBrief(input: {
 }
 
 export async function readHostedPhoneCallResult(input: {
-  call: HostedPhoneCall;
+  call: Pick<
+    HostedPhoneCall,
+    "id" | "memberId" | "resultEncrypted" | "resultJson"
+  >;
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedSecureBoxPrismaClient;
 }): Promise<HostedPhoneCallResult | null> {

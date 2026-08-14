@@ -251,13 +251,27 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
     options: { signal?: AbortSignal } = {},
   ): Promise<void> {
     const client = this.buildClient();
-    const call = await client.call.retrieve(providerCallId, {
-      signal: options.signal,
-    });
-    if (call.call_status === "registered" || call.call_status === "ongoing") {
-      await client.call.stop(providerCallId, {
+    let call: Awaited<ReturnType<typeof client.call.retrieve>>;
+    try {
+      call = await client.call.retrieve(providerCallId, {
         signal: options.signal,
       });
+    } catch (error) {
+      if (isRetellMissingCallError(error)) {
+        return;
+      }
+      throw error;
+    }
+    if (call.call_status === "registered" || call.call_status === "ongoing") {
+      try {
+        await client.call.stop(providerCallId, {
+          signal: options.signal,
+        });
+      } catch (error) {
+        if (!isRetellMissingCallError(error)) {
+          throw error;
+        }
+      }
     }
   }
 
