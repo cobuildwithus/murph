@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 
 import {
+  CloudflareHostedControlBrowserVaultReplicaNotFoundError,
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
   readCloudflareHostedControlHttpError,
@@ -1211,7 +1212,7 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.createBrowserVaultSession({
+    const promise = client.createBrowserVaultSession({
       browserPublicKeyJwk: {
         crv: "P-256",
         kty: "EC",
@@ -1220,7 +1221,14 @@ describe("createCloudflareHostedControlClient", () => {
       },
       replicaRef: createReplicaRef(),
       userId: "user_123",
-    })).rejects.toThrow("Hosted execution browser vault replica was not found.");
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(
+      CloudflareHostedControlBrowserVaultReplicaNotFoundError,
+    );
+    await expect(promise).rejects.toThrow(
+      "Hosted execution browser vault replica was not found.",
+    );
   });
 
   it("leaves generic browser vault 404s as HTTP failures", async () => {

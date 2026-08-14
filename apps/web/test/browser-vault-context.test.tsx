@@ -399,6 +399,50 @@ test("browser-vault warm store navigates accumulated capabilities and resets on 
   assert.equal(getBrowserVaultReadySnapshot()?.shards.labs, undefined);
 });
 
+test("browser-vault warm store preserves an admitted snapshot when a selected child is temporarily unavailable", async () => {
+  const replica = createReplica();
+  const ref = await createShardedReplicaRef(replica);
+  const shardSet = await splitBrowserVaultReplica(replica);
+  const coreBytes = new TextEncoder().encode(JSON.stringify(shardSet.core));
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      shards: {
+        core: createEncryptedShardResponse(ref, "core"),
+      },
+      state: "ready",
+    }))
+    .mockResolvedValueOnce(jsonErrorResponse({
+      error: {
+        code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+        message: "Requested browser vault data is temporarily unavailable.",
+        retryable: true,
+      },
+    }, 503));
+
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockResolvedValueOnce(gzipSync(coreBytes));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const first = await startBrowserVaultWarmLoad({ requestedShards: ["core"] });
+  assert.equal(first.status, "ready");
+  const admittedSnapshot = getBrowserVaultReadySnapshot();
+  assert.ok(admittedSnapshot);
+
+  const partialLoad = await startBrowserVaultWarmLoad({
+    requestedShards: ["core", "labs"],
+  });
+
+  assert.equal(partialLoad.status, "error");
+  assert.equal(getBrowserVaultReadySnapshot(), admittedSnapshot);
+  assert.deepEqual(getBrowserVaultReadySnapshot()?.loadedShards, ["core"]);
+  const request = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.deepEqual(request.knownReplicaRef, ref);
+  assert.deepEqual(request.knownShards, ["core"]);
+  assert.deepEqual(request.requestedShards, ["core", "labs"]);
+});
+
 test("browser-vault warm store reuses same-ref bucket intersections and retains only active demand", async () => {
   const replica = createReplica();
   const ref = await createShardedReplicaRef(replica);
@@ -4043,6 +4087,14 @@ function jsonResponse(value: unknown): Response {
     json: async () => value,
     ok: true,
     status: 200,
+  } as Response;
+}
+
+function jsonErrorResponse(value: unknown, status: number): Response {
+  return {
+    json: async () => value,
+    ok: false,
+    status,
   } as Response;
 }
 

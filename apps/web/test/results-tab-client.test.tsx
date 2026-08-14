@@ -73,6 +73,7 @@ import { ResultsTabClient } from "../app/(dashboard)/experiments/[experimentId]/
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.resolveBrowserVaultExperimentRun.mockReturnValue(null);
+  mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(true);
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
@@ -91,6 +92,7 @@ beforeEach(() => {
 test("passes browser-vault loading errors and retry ownership to the results view", () => {
   const protocol = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
   assert.ok(protocol);
+  mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(false);
 
   const markup = renderToStaticMarkup(
     createElement(ResultsTabClient, { protocol }),
@@ -101,6 +103,29 @@ test("passes browser-vault loading errors and retry ownership to the results vie
   assert.equal(mocks.resultsTab.mock.calls[0]?.[0]?.privateRunError, "Browser vault failed");
   assert.equal(mocks.resultsTab.mock.calls[0]?.[0]?.onPrivateRunRetry, mocks.refresh);
   assert.equal(mocks.resolveBrowserVaultExperimentRun.mock.calls[0]?.[0]?.client, null);
+});
+
+test("keeps ready unresolved bucket demand in the loading state", () => {
+  const protocol = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
+  assert.ok(protocol);
+  mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(false);
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: "v1",
+    deviceSyncImportPending: false,
+    error: null,
+    freshness: "fresh",
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    runtimeRefreshPending: false,
+    status: "ready",
+    workspaceVersion: "v1",
+  } satisfies BrowserVaultContextValue);
+
+  const markup = renderToStaticMarkup(createElement(ResultsTabClient, { protocol }));
+
+  assert.equal(markup, "<div>loading|no-error|no-private</div>");
 });
 
 test("keeps a completed run and its context visible instead of applying the active-run filter", () => {

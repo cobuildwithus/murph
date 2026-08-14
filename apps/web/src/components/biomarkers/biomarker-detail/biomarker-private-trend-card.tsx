@@ -82,15 +82,26 @@ export function BiomarkerPrivateTrendCard({
   );
   const { client, deviceSyncImportPending, error, refresh, status } = useBrowserVault();
   const metricsClient = isBrowserVaultMetricsCapable(client) ? client : null;
+  const privateTrendStatus = status === "loading"
+    || (status === "ready" && !metricBucketsLoaded)
+    ? "loading"
+    : status;
   const trend = useMemo(
     () => resolvePrivateTrend({
       biomarker,
-      browserVaultStatus: metricBucketsLoaded ? status : "loading",
+      browserVaultStatus: privateTrendStatus,
       client: metricBucketsLoaded ? metricsClient : null,
       deviceSyncImportPending,
       error,
     }),
-    [biomarker, deviceSyncImportPending, error, metricBucketsLoaded, metricsClient, status],
+    [
+      biomarker,
+      deviceSyncImportPending,
+      error,
+      metricBucketsLoaded,
+      metricsClient,
+      privateTrendStatus,
+    ],
   );
 
   return (

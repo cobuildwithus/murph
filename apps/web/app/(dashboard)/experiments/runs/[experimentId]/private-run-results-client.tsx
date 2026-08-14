@@ -37,7 +37,8 @@ export function PrivateRunResultsClient({ experimentId }: { experimentId: string
     return (
       <PrivateRunRouteState
         error={browserVault.error}
-        loading={browserVault.status === "loading" || !metricBucketsLoaded}
+        loading={browserVault.status === "loading"
+          || (browserVault.status === "ready" && !metricBucketsLoaded)}
         onRetry={browserVault.refresh}
       />
     );

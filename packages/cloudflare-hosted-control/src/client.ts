@@ -335,6 +335,19 @@ const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_ENVIRONMENT_VOICE_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
+export class CloudflareHostedControlBrowserVaultReplicaNotFoundError extends Error {
+  constructor() {
+    super(BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE);
+    this.name = "CloudflareHostedControlBrowserVaultReplicaNotFoundError";
+  }
+}
+
+export function isCloudflareHostedControlBrowserVaultReplicaNotFoundError(
+  error: unknown,
+): error is CloudflareHostedControlBrowserVaultReplicaNotFoundError {
+  return error instanceof CloudflareHostedControlBrowserVaultReplicaNotFoundError;
+}
+
 export function parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
   value: unknown,
 ): CloudflareHostedControlTelegramUsageLimitNoticeRequest {
@@ -435,7 +448,7 @@ export function createCloudflareHostedControlClient(
           CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
         )
       ) {
-        throw new Error(BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE);
+        throw new CloudflareHostedControlBrowserVaultReplicaNotFoundError();
       }
 
       throw error;

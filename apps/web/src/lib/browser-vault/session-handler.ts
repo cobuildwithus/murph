@@ -1,6 +1,6 @@
 import {
-  parseHostedBrowserVaultReplicaRef,
-} from "@murphai/hosted-execution/parsers";
+  isCloudflareHostedControlBrowserVaultReplicaNotFoundError,
+} from "@murphai/cloudflare-hosted-control/client";
 import {
   assessBrowserVaultReplicaFreshness,
 } from "@murphai/hosted-execution";
@@ -11,6 +11,9 @@ import {
   type HostedBrowserVaultReplicaMetricBucketId,
   type HostedBrowserVaultReplicaShardKind,
 } from "@murphai/hosted-execution/browser-vault";
+import {
+  parseHostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/parsers";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
@@ -228,8 +231,17 @@ export function createBrowserVaultSessionRoute() {
         },
       );
     } catch (error) {
-      if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
+      if (isCloudflareHostedControlBrowserVaultReplicaNotFoundError(error)) {
         scheduleRefreshAfterResponse();
+        if (requestedShards !== undefined || requestedMetricBuckets !== undefined) {
+          throw hostedOnboardingError({
+            cause: error,
+            code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+            httpStatus: 503,
+            message: "Requested browser vault data is temporarily unavailable.",
+            retryable: true,
+          });
+        }
         return emptyBrowserVaultSession({
           deviceSyncImportPending,
           memberId: auth.member.id,

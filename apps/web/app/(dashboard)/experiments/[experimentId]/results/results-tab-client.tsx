@@ -41,6 +41,10 @@ export function ResultsTabClient({
     }),
     [metricsClient, protocol],
   );
+  const privateRunStatus = browserVault.status === "loading"
+    || (browserVault.status === "ready" && !metricBucketsLoaded)
+    ? "loading"
+    : browserVault.status;
   const experiment = useMemo<ResultsTabExperiment>(
     () => ({
       status: privateRun?.status ?? "upcoming",
@@ -69,7 +73,7 @@ export function ResultsTabClient({
     <ResultsTab
       experiment={experiment}
       privateRunError={browserVault.error}
-      privateRunStatus={metricBucketsLoaded ? browserVault.status : "loading"}
+      privateRunStatus={privateRunStatus}
       onPrivateRunRetry={browserVault.refresh}
       startAction={startAction}
     />

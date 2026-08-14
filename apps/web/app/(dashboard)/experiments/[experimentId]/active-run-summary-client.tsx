@@ -58,7 +58,9 @@ export function ActiveRunSummaryClient({ protocol, protocolFacts }: ActiveRunSum
     [protocol, privateRun, protocolFacts],
   );
 
-  if (browserVault.status === "loading" || !metricBucketsLoaded) {
+  const privateRunLoading = browserVault.status === "loading"
+    || (browserVault.status === "ready" && !metricBucketsLoaded);
+  if (privateRunLoading) {
     return <ResultsSummarySkeleton />;
   }
 

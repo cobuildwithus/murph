@@ -1,5 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  CloudflareHostedControlBrowserVaultReplicaNotFoundError,
+} from "@murphai/cloudflare-hosted-control/client";
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 import {
@@ -1166,6 +1169,58 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("returns a retryable partial-load error when a selected child of the known sharded ref is missing", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownMetricBuckets: ["00"],
+        knownReplicaRef: replicaRef,
+        knownShards: ["core", "metricsIndex"],
+        requestedMetricBuckets: ["00", "01"],
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      requestedMetricBuckets: ["01"],
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+        message: "Requested browser vault data is temporarily unavailable.",
+        retryable: true,
+      },
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+  });
+
   it.each([
     { knownShards: ["core"], requestedShards: undefined },
     { requestedShards: [] },
@@ -1993,7 +2048,7 @@ describe("browser vault session route", () => {
       version: "1",
     });
     const createBrowserVaultSession = vi.fn().mockRejectedValue(
-      new Error("Hosted execution browser vault replica was not found."),
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
     );
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,

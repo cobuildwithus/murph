@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 
-import { createElement, type ReactNode } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
 import type { ResultsTabExperiment } from "@/src/components/experiments/experiment-detail/results-tab";
 import type { BrowserVaultContextValue } from "@/src/lib/browser-vault/context";
 import type { ExperimentRunProjection } from "@/src/types/experiments";
+import { renderClientComponent } from "./render-client-component";
 
 type ResolvePrivateRunByIdInput = {
   client: BrowserVaultContextValue["client"];
@@ -58,6 +59,7 @@ import { PrivateRunResultsClient } from "../app/(dashboard)/experiments/runs/[ex
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.resolveBrowserVaultExperimentRunById.mockReturnValue(null);
+  mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(true);
   mocks.useBrowserVault.mockReturnValue(browserVaultContext({
     client: null,
     error: null,
@@ -145,6 +147,35 @@ test("renders the vault loading state before declaring a private run absent", ()
 
   assert.match(markup, /Loading your experiment/u);
   assert.doesNotMatch(markup, /Experiment not found/u);
+});
+
+test("renders and retries a required bucket error instead of leaving the route loading", async () => {
+  mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(false);
+  mocks.useBrowserVault.mockReturnValue(browserVaultContext({
+    client: null,
+    error: "Browser vault failed",
+    status: "error",
+  }));
+
+  const rendered = await renderClientComponent(
+    createElement(PrivateRunResultsClient, { experimentId: "exp:pending" }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Your experiment couldn't load/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Loading your experiment/u);
+    const retry = [...rendered.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry",
+    );
+    assert.ok(retry);
+    await act(async () => {
+      retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 function browserVaultContext(
