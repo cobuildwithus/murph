@@ -1,6 +1,6 @@
 # Recover hosted Stripe and Junction live canaries
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-14
 
@@ -82,6 +82,8 @@ Updated: 2026-08-14
 - Expected outcomes: deterministic local proof and actionable, fail-closed live
   provider results without seven-minute opaque waits.
 - Observed before closure: focused runner and workflow tests, affected
-  typechecks, the real Ubuntu headed-Chromium/Xvfb job, exact-head CI, and the
-  preliminary specialist ReviewGPT pass are green. Final ReviewGPT and fresh
-  protected-main live workflows remain required before this plan is complete.
+  typechecks, the real Ubuntu headed-Chromium/Xvfb job, and every exact-head CI
+  check are green. Preliminary specialist ReviewGPT and the final remediation
+  round both returned zero-finding PASS outcomes. Fresh protected-main live
+  workflows remain required immediately after merge.
+Completed: 2026-08-14
