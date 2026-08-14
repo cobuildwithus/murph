@@ -807,7 +807,12 @@ Last verified: 2026-08-13
   persists a fresh `cannot_answer` completion to the already-authorized origin
   group. It never redirects or exposes the private answer. Provider entry still
   revalidates expiry, exact text digest, the same personal member, and the
-  current same-channel direct route before any private provider call.
+  current same-channel direct route before any private provider call. A
+  committed group fallback permanently supersedes the pending private effect:
+  authority replay returns that exact fallback before route recovery can
+  authorize a send. Conversely, expired detached-control replay re-hands a
+  still-valid private effect instead of appending another group terminal; only
+  its provider-entry authority may convert that effect to the fixed fallback.
 - Rolling compatibility is legacy-facing only. New callers use one strict body
   marker. Deployed unmarked old `ask_current_sender` /
   `message_current_sender` requests remain accepted and are subjected to the

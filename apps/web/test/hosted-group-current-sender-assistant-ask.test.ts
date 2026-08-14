@@ -1296,6 +1296,140 @@ describe("hosted current-sender Assistant Ask authority", () => {
     expect(JSON.stringify(fallback)).not.toContain(answer);
   });
 
+  it("keeps a route-loss group terminal sticky after authority response loss and route recovery", async () => {
+    const { requestId } = await admit({
+      audience: "current_sender",
+      text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
+    });
+    const answer = "Synthetic private answer that must stay private.";
+    await handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: NOW,
+      request: {
+        action: "complete",
+        requestId,
+        result: { answer, outcome: "answered" },
+      },
+    });
+    const privateDeliveryId =
+      createHostedGroupCurrentSenderPrivateDeliveryId(requestId);
+    const requestWake = requireRequestedWake(requestId);
+    const authorityInput = {
+      answeredMailboxItemIds: [privateDeliveryId],
+      assistantAskCompletionExpiresAt: requestWake.ask.expiresAt,
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+          privateDeliveryId,
+        ),
+      responseTextDigest: createHash("sha256").update(answer).digest("hex"),
+      route: DIRECT_ROUTE,
+      tx: asPrismaTransactionClient(fakeTx),
+    };
+    const fallbackWake = {
+      expectedUserId: GROUP_RUNTIME_MEMBER_ID,
+      mailboxItemId: createHostedAssistantAskCompletionId(requestId),
+    };
+
+    directRouteAvailable = false;
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        ...authorityInput,
+        now: new Date(NOW.getTime() + 1_000),
+      }),
+    ).resolves.toEqual({
+      assistantAskFallbackRequired: true,
+      mailboxWake: fallbackWake,
+    });
+
+    directRouteAvailable = true;
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        ...authorityInput,
+        now: new Date(NOW.getTime() + 2_000),
+      }),
+    ).resolves.toEqual({
+      assistantAskFallbackRequired: true,
+      mailboxWake: fallbackWake,
+    });
+    expect(storedItems.size).toBe(3);
+    expect(JSON.stringify(requireCompletedWake(
+      createHostedAssistantAskCompletionId(requestId),
+    ))).not.toContain(answer);
+  });
+
+  it("replays a committed private terminal instead of adding a group fallback after request expiry", async () => {
+    const { requestId } = await admit({
+      audience: "current_sender",
+      text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
+    });
+    const requestWake = requireRequestedWake(requestId);
+    const completedAt = new Date(Date.parse(requestWake.ask.expiresAt) - 1);
+    const privateDeliveryId =
+      createHostedGroupCurrentSenderPrivateDeliveryId(requestId);
+    const completionId = createHostedAssistantAskCompletionId(requestId);
+    const answer = "Synthetic private answer that remains privately queued.";
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: completedAt,
+      request: {
+        action: "complete",
+        requestId,
+        result: { answer, outcome: "answered" },
+      },
+    })).resolves.toMatchObject({
+      mailboxWake: { mailboxItemId: privateDeliveryId },
+      response: { status: "completed" },
+    });
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: new Date(Date.parse(requestWake.ask.expiresAt)),
+      request: { action: "prepare", requestId },
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: CURRENT_SENDER_MEMBER_ID,
+        mailboxItemId: privateDeliveryId,
+      },
+      response: { action: "prepare", status: "already_completed" },
+    });
+    expect(storedItems.has(completionId)).toBe(false);
+    expect(storedItems.size).toBe(2);
+
+    const fallbackAt = new Date(Date.parse(requestWake.ask.expiresAt) + 1);
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        answeredMailboxItemIds: [privateDeliveryId],
+        assistantAskCompletionExpiresAt: requestWake.ask.expiresAt,
+        boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+        idempotencyKey:
+          createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+            privateDeliveryId,
+          ),
+        now: fallbackAt,
+        responseTextDigest: createHash("sha256").update(answer).digest("hex"),
+        route: DIRECT_ROUTE,
+        tx: asPrismaTransactionClient(fakeTx),
+      }),
+    ).resolves.toMatchObject({
+      assistantAskFallbackRequired: true,
+      mailboxWake: { mailboxItemId: completionId },
+    });
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: new Date(fallbackAt.getTime() + 1),
+      request: { action: "prepare", requestId },
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
+        mailboxItemId: completionId,
+      },
+      response: { action: "prepare", status: "already_completed" },
+    });
+    expect(storedItems.size).toBe(3);
+  });
+
   it("persists a fresh group terminal when private delivery reaches provider entry after expiry", async () => {
     const { requestId } = await admit({
       audience: "current_sender",

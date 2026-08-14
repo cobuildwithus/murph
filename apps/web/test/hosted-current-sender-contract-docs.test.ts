@@ -41,4 +41,17 @@ describe("current-sender durable contract", () => {
       expect(ownerDoc).toMatch(/provider\s+request\s+order/iu);
     }
   });
+
+  it("keeps private and group terminal effects mutually exclusive across retry", () => {
+    for (const url of PROTOCOL_OWNER_DOC_URLS) {
+      const ownerDoc = readFileSync(url, "utf8");
+
+      expect(ownerDoc).toMatch(
+        /fallback[\s\S]{0,320}(?:recovered|recovery|supersed)/iu,
+      );
+      expect(ownerDoc).toMatch(
+        /(?:expired[\s\S]{0,260}(?:private|effect)|(?:private|effect)[\s\S]{0,260}expired)/iu,
+      );
+    }
+  });
 });

@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
+
 import {
   HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
   HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
 } from "@murphai/hosted-execution/contracts";
 import {
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
 } from "@murphai/hosted-execution";
@@ -15,7 +18,9 @@ import {
   handleHostedRuntimeAssistantAskControl,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
+  assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
+  createHostedGroupCurrentSenderPrivateDeliveryId,
   readHostedGroupCurrentSenderAssistantAskRequestIds,
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
@@ -652,6 +657,244 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toMatchObject({
           response: { status: "already_completed" },
         });
+      } finally {
+        if (fixture) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("keeps a persisted route-loss fallback sticky when the exact route recovers", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const now = new Date();
+      let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
+
+      try {
+        fixture = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          prisma,
+          question: "Murph, ask my Murph privately how my synthetic activity changed.",
+        });
+        const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.assistantInputId,
+        });
+        await requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "current_sender",
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "new",
+          now,
+          origin: fixture.origin,
+          prisma,
+        });
+        const answer = "Synthetic private answer for sticky fallback proof.";
+        await handleHostedRuntimeAssistantAskControl({
+          boundRuntimeMemberId: fixture.senderMemberId,
+          now,
+          prisma,
+          request: {
+            action: "complete",
+            requestId,
+            result: { answer, outcome: "answered" },
+          },
+        });
+
+        const requestWake = await readHostedMailboxWakeByItemId({
+          availableAt: now,
+          mailboxItemId: requestId,
+          prisma,
+        });
+        if (!requestWake || !isHostedExecutionAssistantAskRequestedWake(requestWake)) {
+          throw new Error("Expected the persisted private request.");
+        }
+        const privateDeliveryId =
+          createHostedGroupCurrentSenderPrivateDeliveryId(requestId);
+        const privateWake = await readHostedMailboxWakeByItemId({
+          availableAt: now,
+          mailboxItemId: privateDeliveryId,
+          prisma,
+        });
+        if (
+          !privateWake
+          || privateWake.kind !== "assistant.notification.requested"
+          || privateWake.notification.responsePolicy?.kind
+            !== "require_send_exact_text"
+        ) {
+          throw new Error("Expected the persisted exact private completion.");
+        }
+        const authorityInput = {
+          answeredMailboxItemIds: [privateDeliveryId],
+          assistantAskCompletionExpiresAt: requestWake.ask.expiresAt,
+          boundRuntimeMemberId: fixture.senderMemberId,
+          idempotencyKey:
+            createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+              privateDeliveryId,
+            ),
+          responseTextDigest: createHash("sha256").update(answer).digest("hex"),
+          route: privateWake.notification.route,
+        };
+        const completionId = createHostedAssistantAskCompletionId(requestId);
+        const expectedFallback = {
+          assistantAskFallbackRequired: true as const,
+          mailboxWake: {
+            expectedUserId: fixture.groupRuntimeMemberId,
+            mailboxItemId: completionId,
+          },
+        };
+
+        await prisma.hostedMemberRouting.deleteMany({
+          where: { memberId: fixture.senderMemberId },
+        });
+        await expect(prisma.$transaction((tx) =>
+          assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+            ...authorityInput,
+            now: new Date(now.getTime() + 1_000),
+            tx,
+          })
+        )).resolves.toEqual(expectedFallback);
+
+        await prisma.$transaction((tx) =>
+          upsertHostedMemberTelegramRoutingBindingTx({
+            memberId: fixture!.senderMemberId,
+            prisma: tx,
+            telegramThreadId: privateWake.notification.route.threadId,
+            telegramUserId: fixture!.telegramUserId,
+          })
+        );
+        await expect(prisma.$transaction((tx) =>
+          assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+            ...authorityInput,
+            now: new Date(now.getTime() + 2_000),
+            tx,
+          })
+        )).resolves.toEqual(expectedFallback);
+        await expect(prisma.hostedMailboxItem.count({
+          where: { id: { in: [requestId, privateDeliveryId, completionId] } },
+        })).resolves.toBe(3);
+      } finally {
+        if (fixture) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("replays the persisted private owner after request expiry before its single fallback conversion", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const now = new Date();
+      let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
+
+      try {
+        fixture = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          prisma,
+          question: "Murph, ask my Murph privately how my synthetic activity changed.",
+        });
+        const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.assistantInputId,
+        });
+        await requestHostedGroupCurrentSenderAssistantAsk({
+          audience: "current_sender",
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          mode: "new",
+          now,
+          origin: fixture.origin,
+          prisma,
+        });
+        const requestWake = await readHostedMailboxWakeByItemId({
+          availableAt: now,
+          mailboxItemId: requestId,
+          prisma,
+        });
+        if (!requestWake || !isHostedExecutionAssistantAskRequestedWake(requestWake)) {
+          throw new Error("Expected the persisted private request.");
+        }
+        const completedAt = new Date(Date.parse(requestWake.ask.expiresAt) - 1);
+        const answer = "Synthetic private answer for expired replay proof.";
+        const privateDeliveryId =
+          createHostedGroupCurrentSenderPrivateDeliveryId(requestId);
+        const completionId = createHostedAssistantAskCompletionId(requestId);
+        await expect(handleHostedRuntimeAssistantAskControl({
+          boundRuntimeMemberId: fixture.senderMemberId,
+          now: completedAt,
+          prisma,
+          request: {
+            action: "complete",
+            requestId,
+            result: { answer, outcome: "answered" },
+          },
+        })).resolves.toMatchObject({
+          mailboxWake: { mailboxItemId: privateDeliveryId },
+          response: { status: "completed" },
+        });
+        const expiredAt = new Date(Date.parse(requestWake.ask.expiresAt));
+        await expect(handleHostedRuntimeAssistantAskControl({
+          boundRuntimeMemberId: fixture.senderMemberId,
+          now: expiredAt,
+          prisma,
+          request: { action: "prepare", requestId },
+        })).resolves.toEqual({
+          mailboxWake: {
+            expectedUserId: fixture.senderMemberId,
+            mailboxItemId: privateDeliveryId,
+          },
+          response: { action: "prepare", status: "already_completed" },
+        });
+        await expect(prisma.hostedMailboxItem.count({
+          where: { id: completionId },
+        })).resolves.toBe(0);
+
+        const privateWake = await readHostedMailboxWakeByItemId({
+          availableAt: expiredAt,
+          mailboxItemId: privateDeliveryId,
+          prisma,
+        });
+        if (
+          !privateWake
+          || privateWake.kind !== "assistant.notification.requested"
+          || privateWake.notification.responsePolicy?.kind
+            !== "require_send_exact_text"
+        ) {
+          throw new Error("Expected the still-live private completion.");
+        }
+        await expect(prisma.$transaction((tx) =>
+          assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+            answeredMailboxItemIds: [privateDeliveryId],
+            assistantAskCompletionExpiresAt: requestWake.ask.expiresAt,
+            boundRuntimeMemberId: fixture!.senderMemberId,
+            idempotencyKey:
+              createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+                privateDeliveryId,
+              ),
+            now: new Date(expiredAt.getTime() + 1),
+            responseTextDigest: createHash("sha256").update(answer).digest("hex"),
+            route: privateWake.notification.route,
+            tx,
+          })
+        )).resolves.toEqual({
+          assistantAskFallbackRequired: true,
+          mailboxWake: {
+            expectedUserId: fixture.groupRuntimeMemberId,
+            mailboxItemId: completionId,
+          },
+        });
+        await expect(handleHostedRuntimeAssistantAskControl({
+          boundRuntimeMemberId: fixture.senderMemberId,
+          now: new Date(expiredAt.getTime() + 2),
+          prisma,
+          request: { action: "prepare", requestId },
+        })).resolves.toEqual({
+          mailboxWake: {
+            expectedUserId: fixture.groupRuntimeMemberId,
+            mailboxItemId: completionId,
+          },
+          response: { action: "prepare", status: "already_completed" },
+        });
+        await expect(prisma.hostedMailboxItem.count({
+          where: { id: { in: [requestId, privateDeliveryId, completionId] } },
+        })).resolves.toBe(3);
       } finally {
         if (fixture) {
           await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });

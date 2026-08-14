@@ -409,7 +409,13 @@ admission or at provider entry, or if the request expires before prepare, Web
 discards the private answer and persists a fresh fixed `cannot_answer`
 completion to the already-authorized originating group. The private delivery
 identity cannot occupy that group fallback identity. Exact replay returns the
-persisted terminal experience; a terminal or unavailable control response
+persisted terminal experience. Once the group fallback commits, private
+provider-entry replay recognizes it before considering a recovered route and
+returns that same terminal. If a private completion commits but its detached
+control response is lost, expired control replay re-hands the existing private
+effect; its provider-entry owner alone may convert it to the group fallback.
+The expired control path never creates a competing terminal beside a valid
+private effect. A terminal or unavailable control response
 without a valid persisted completion is never successful consumption.
 
 Rolling-deploy compatibility is transport-only. New Cloudflare callers send one

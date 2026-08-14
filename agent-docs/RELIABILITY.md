@@ -1219,7 +1219,13 @@ Last verified: 2026-08-13
   at provider entry, or the request expires before prepare, Web discards the
   private answer and atomically persists a fresh fixed `cannot_answer` group
   completion instead. Completion replay recognizes that fallback as the one
-  authorized terminal experience. The detached runtime
+  authorized terminal experience before considering a subsequently recovered
+  direct route. A lost fallback-authority response therefore replays the same
+  fallback and cannot later release the private effect. If a private completion
+  committed before a lost detached-control response, expired control replay
+  re-hands that deterministic private item instead of independently appending a
+  group terminal; provider-entry authority remains the sole owner that may
+  convert it to the fallback. The detached runtime
   removes work only after a valid persisted completion or an explicit
   `already_completed` response; a terminal/unavailable response with no valid
   completion requeues until expiry rather than consuming accepted work.

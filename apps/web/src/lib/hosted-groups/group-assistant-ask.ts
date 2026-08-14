@@ -62,6 +62,8 @@ import {
   createHostedGroupCurrentSenderPrivateDeliveryId,
   readHostedGroupCurrentSenderAssistantAskAuthorityTx,
   readHostedGroupCurrentSenderAssistantAskRequestIds,
+  readHostedGroupCurrentSenderFallbackCompletionMailboxWakeTx,
+  readHostedGroupCurrentSenderPersistedPrivateCompletionMailboxWakeTx,
   readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx,
   type HostedGroupCurrentSenderCompletionAuthority,
 } from "./group-current-sender-assistant-ask";
@@ -848,6 +850,58 @@ async function appendExpiredHostedCurrentSenderFallbackTx(input: {
   const canonicalCompletionId = createHostedAssistantAskCompletionId(
     input.requestId,
   );
+  if (authority.resultDestination.kind === "requester_direct") {
+    const canonicalPrivateDeliveryId =
+      createHostedGroupCurrentSenderPrivateDeliveryId(input.requestId);
+    const canonicalPrivateDelivery = await readHostedMailboxItemById({
+      mailboxItemId: canonicalPrivateDeliveryId,
+      prisma: input.tx,
+    });
+    const canonicalCompletionSlot = await readHostedMailboxItemById({
+      mailboxItemId: canonicalCompletionId,
+      prisma: input.tx,
+    });
+    const legacyPrivateDelivery =
+      canonicalCompletionSlot?.kind === "assistant.notification.requested"
+        ? canonicalCompletionSlot
+        : null;
+    const privateDelivery = canonicalPrivateDelivery ?? legacyPrivateDelivery;
+    const privateDeliveryId = privateDelivery?.id
+      ?? canonicalPrivateDeliveryId;
+    const existingFallback =
+      await readHostedGroupCurrentSenderFallbackCompletionMailboxWakeTx({
+        authority: completionAuthority,
+        completionId: createHostedGroupCurrentSenderFallbackCompletionId({
+          privateDeliveryId,
+          requestId: input.requestId,
+        }),
+        now: input.now,
+        tx: input.tx,
+      });
+    if (existingFallback) {
+      return existingFallback;
+    }
+    if (privateDelivery) {
+      const privateMailboxWake =
+        await readHostedGroupCurrentSenderPersistedPrivateCompletionMailboxWakeTx({
+          authority: completionAuthority,
+          existingPrivateDelivery: {
+            dedupeKey: privateDelivery.dedupeKey,
+            expiresAt: readHostedAssistantAskItemExpiresAt(
+              privateDelivery.expiresAt,
+            ),
+            kind: privateDelivery.kind,
+            userId: privateDelivery.userId,
+          },
+          privateDeliveryId,
+          now: input.now,
+          tx: input.tx,
+        });
+      if (privateMailboxWake) {
+        return privateMailboxWake;
+      }
+    }
+  }
   const existingCompletion =
     await readExpiredHostedCurrentSenderExistingGroupCompletionMailboxWakeTx({
       authority: completionAuthority,

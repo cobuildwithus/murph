@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Natural audience choices for personal group questions",
     "summary": "When a group asks someone's personal Murph for help, Murph follows the requester's ordinary wording to answer here or privately.",
-    "details": "If the audience is genuinely unclear, Murph asks a normal follow-up instead of requiring special phrasing. Before opening personal context, Murph fixes whether the reviewed answer returns to the room or the sender's existing direct chat; when it will return to the room, Murph tells the room first. Every request stays bound to the exact sender and message, expires within ten minutes, and grants no future access.",
+    "details": "If the audience is genuinely unclear, Murph asks a normal follow-up instead of requiring special phrasing. Before opening personal context, Murph fixes whether the reviewed answer returns to the room or the sender's existing direct chat; when it will return to the room, Murph tells the room first. Every request stays bound to the exact sender and message, retries cannot complete it both ways, it expires within ten minutes, and it grants no future access.",
     "relevanceTags": [
       "groups",
       "privacy",

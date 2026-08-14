@@ -152,7 +152,11 @@ group.
   destination, fixed permission, private-route admission, replay identity, and
   completion route. Multiple valid refs in one turn remain independent.
   An accepted origin can produce at most one request and one authorized terminal
-  experience. Legacy action names, origins, and destination fields are drain
+  experience. A committed group fallback remains sticky across lost responses
+  and direct-route recovery. A committed private effect remains the terminal
+  owner across expired detached-control replay until its provider-entry
+  authority either sends it or converts it once to that fallback. Legacy action
+  names, origins, and destination fields are drain
   inputs only and never result-destination authority. Already-admitted
   `group_sender` and `group_sender_private` targets retain their stored meaning
   during the bounded drain; new requests write only the unified personal target

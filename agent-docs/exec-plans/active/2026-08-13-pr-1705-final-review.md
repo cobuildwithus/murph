@@ -23,6 +23,9 @@ Updated: 2026-08-13
 - A later continuation cannot reach its notice or Web transition before an
   earlier clarification settles, while independent new exact-ref requests
   remain concurrent.
+- A committed group fallback supersedes private delivery across lost authority
+  responses and route recovery; expired detached replay does not create a
+  competing group terminal beside an existing private effect.
 - Durable owner docs describe natural audience inference and clarification instead of retired phrase classification.
 - Focused Web, assistant-runtime, PostgreSQL, type, documentation, and privacy checks pass.
 - The final ReviewGPT gate passes, required exact-head CI is green, and the PR reaches the repository-authorized merge boundary.
@@ -84,5 +87,16 @@ Local replacement-candidate evidence on 2026-08-13:
   while an independent exact-ref request still starts concurrently. The focused
   runtime test, seven current-sender engine tests, Assistant Engine typecheck,
   owner-doc contract, and docs drift pass.
+- ReviewGPT round 15 found that a committed route-loss fallback did not fence a
+  later private provider-entry retry after route recovery, while expired
+  detached control could append a group terminal beside a committed private
+  effect. Both paths failed in focused reproduction. Provider-entry authority
+  now recognizes and re-hands the existing fallback before route resolution;
+  expired control re-hands the deterministic private item and leaves fallback
+  conversion to that item's existing provider-entry owner. The focused Web
+  suite passes 24 tests, real PostgreSQL proof passes 9 tests, and prepared Web
+  typecheck passes. Round 15 returned findings but reported unknown model
+  confirmation, so it is remediation evidence rather than the required trusted
+  final PASS.
 - A fresh full-snapshot ReviewGPT PASS and required GitHub checks remain pending
   on the remediated exact head.

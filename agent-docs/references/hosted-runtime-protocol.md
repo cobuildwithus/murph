@@ -989,9 +989,14 @@ identity. If that direct route disappears after admission or at provider entry,
 or if the request expires before prepare, Web persists a fresh non-disclosing
 `cannot_answer` completion to the already-authorized originating group; the
 private answer never falls back. Replay, restart, and concurrent prepare or
-completion observe the persisted terminal result. A detached runner must
-requeue rather than consume a terminal or unavailable response that has no
-persisted completion.
+completion observe the persisted terminal result. Provider-entry replay checks
+that fallback before live-route authorization, so route recovery cannot revive
+the superseded private effect after a lost authority response. When the private
+effect committed first but its detached-control response was lost, expired
+control replay re-hands that effect and leaves any fallback conversion to its
+provider-entry owner rather than creating a competing terminal. A detached
+runner must requeue rather than consume a terminal or unavailable response that
+has no persisted completion.
 
 New callers identify the strict protocol with the single
 `currentSenderProtocol: "v3"` body field. During the bounded drain, Web also
