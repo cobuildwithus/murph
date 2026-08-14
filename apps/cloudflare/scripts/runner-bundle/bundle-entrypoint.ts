@@ -268,7 +268,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // production assembly measured 10,174,998B on Linux and 10,218,245B on macOS
 // on 2026-08-13, so ratchet the total to the larger cross-platform measurement
 // and retain the established 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_218_245 + 32_768;
+//
+// Bounded Junction timeseries fidelity extends the existing provider,
+// importer, and hosted-runtime outputs without adding a forbidden boot input.
+// Exact merged-main Linux CI assembly measured 10,283,234B on 2026-08-14, so
+// ratchet only the total baseline and retain the established 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_283_234 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

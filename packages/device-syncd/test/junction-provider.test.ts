@@ -1152,7 +1152,7 @@ test.each([
 
   const result = await executeJunctionJob(
     provider,
-    createJunctionJobContext(),
+    createJunctionJobContext({ now: "2026-04-03T12:00:00.000Z" }),
     createJob("reconcile", {
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
       timeseriesResourceCursor: resource,
@@ -9362,15 +9362,20 @@ test("Junction dense jobs wait for global provider-day closure in either transpo
         importedSnapshots.push(snapshot);
         return { imported: true };
       };
+      const execute = (
+        kind: keyof typeof jobs,
+        context: ProviderJobContext,
+      ) => kind === "reconcile"
+        ? executeJunctionFullJob(provider, context, jobs[kind])
+        : executeJunctionJob(provider, context, jobs[kind]);
 
       for (const kind of order) {
-        await executeJunctionJob(
-          provider,
+        await execute(
+          kind,
           createJunctionJobContext({
             importSnapshot,
             now: "2026-04-02T00:05:00.000Z",
           }),
-          jobs[kind],
         );
       }
       assert.equal(
@@ -9385,14 +9390,13 @@ test("Junction dense jobs wait for global provider-day closure in either transpo
       );
 
       for (const kind of order) {
-        await executeJunctionJob(
-          provider,
+        await execute(
+          kind,
           createJunctionJobContext({
             account: createAccount({ lastSyncCompletedAt: "2026-04-02T00:05:00.000Z" }),
             importSnapshot,
             now: "2026-04-02T12:00:00.000Z",
           }),
-          jobs[kind],
         );
       }
       const glucoseSnapshots = importedSnapshots.flatMap((snapshot) => {
@@ -10032,6 +10036,146 @@ test("Junction direct dense resource jobs reuse closed calendar-day ownership", 
     "2026-04-02",
     "2026-04-02",
   );
+});
+
+test("Junction yielded sparse history retains every accepted day as calendar work", async () => {
+  const requests: URL[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    requests.push(url);
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { caffeine: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+      const requestedDay = requireValue(
+        url.searchParams.get("start_date"),
+        "Junction sparse history request date",
+      );
+      assert.equal(requestedDay, url.searchParams.get("end_date"));
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              end: `${requestedDay}T08:05:00.000Z`,
+              id: `caffeine-${requestedDay}`,
+              start: `${requestedDay}T08:00:00.000Z`,
+              unit: "g",
+              value: 0.1,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryBackfillDays: 2,
+    timeseriesBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const sourceRecord = createConnectionSource({
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    resourceAvailabilitySummary: { caffeine: true },
+  });
+  const source = {
+    displayName: sourceRecord.displayName,
+    firstSeenAt: sourceRecord.firstSeenAt,
+    lastDataAt: sourceRecord.lastDataAt,
+    lastErrorCode: sourceRecord.lastErrorCode,
+    lastErrorMessage: sourceRecord.lastErrorMessage,
+    lastSeenAt: sourceRecord.lastSeenAt,
+    resourceAvailabilitySummary: sourceRecord.resourceAvailabilitySummary,
+    resourceCount: Object.keys(sourceRecord.resourceAvailabilitySummary).length,
+    sourceProviderSlug: sourceRecord.sourceProviderSlug,
+    status: sourceRecord.status,
+  };
+  const now = "2026-04-03T12:00:00.000Z";
+  const scheduler = requireValue(
+    provider.jobExecutor?.createScheduledJobs,
+    "Junction provider should expose scheduled jobs.",
+  );
+  const initialJob = requireValue(
+    scheduler(createStoredAccount({ sources: [source] }), now).jobs.find((job) =>
+      job.kind === "resource"
+      && job.payload?.historicalBackfill === true
+      && job.payload?.resource === "caffeine"
+    ),
+    "Junction should schedule extended caffeine history.",
+  );
+  const acceptedDays: string[] = [];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [source] }),
+    connectionSourceAdmissionMode: "listed_only",
+    importSnapshot: async (snapshot) => {
+      const records = (snapshot as {
+        timeseries?: { caffeine?: Array<{ start?: string }> };
+      }).timeseries?.caffeine ?? [];
+      const dayKey = requireValue(records[0]?.start, "accepted caffeine timestamp").slice(0, 10);
+      acceptedDays.push(dayKey);
+      return {
+        canonicalEventCount: records.length,
+        canonicalEventDayKeys: [dayKey],
+        canonicalSparseCalendarTargets: [{
+          dayKey,
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+        }],
+        durableDeliveryAccepted: true,
+      };
+    },
+    now,
+  });
+
+  const firstResult = await executeJunctionJob(
+    provider,
+    context,
+    createJobFromInput(initialJob),
+  );
+  const preciseContinuation = requireValue(
+    firstResult.scheduledJobs?.find((job) =>
+      job.payload?.historicalBackfill === true
+      && job.payload?.calendarRefreshDay === undefined
+    ),
+    "Yielded sparse history should retain its precise continuation.",
+  );
+  const firstCalendarJob = requireValue(
+    firstResult.scheduledJobs?.find((job) => job.payload?.calendarRefreshDay === "2026-04-01"),
+    "Yielded sparse history should retain its first accepted calendar day.",
+  );
+  assert.equal(firstCalendarJob.payload?.resource, "caffeine");
+  assert.equal(firstCalendarJob.payload?.sourceProviderSlug, "garmin");
+
+  const finalResult = await executeJunctionJob(
+    provider,
+    context,
+    createJobFromInput(preciseContinuation, 1),
+  );
+  const finalCalendarJob = requireValue(
+    finalResult.scheduledJobs?.find((job) => job.payload?.calendarRefreshDay === "2026-04-02"),
+    "Terminal sparse history should retain its final accepted calendar day.",
+  );
+
+  assert.deepEqual(acceptedDays, ["2026-04-01", "2026-04-02"]);
+  assert.equal(finalCalendarJob.payload?.resource, "caffeine");
+  assert.equal(finalResult.scheduledJobs?.some((job) =>
+    job.payload?.historicalBackfill === true
+    && job.payload?.calendarRefreshDay === undefined
+  ), false);
+  assert.deepEqual(
+    requests
+      .filter((url) => url.pathname.includes("/v2/timeseries/"))
+      .map((url) => url.searchParams.get("start_date")),
+    ["2026-04-01", "2026-04-02"],
+  );
+  assert.notEqual(firstCalendarJob.dedupeKey, finalCalendarJob.dedupeKey);
 });
 
 test("Junction sparse sub-day corrections refresh the provider-owned calendar date", async () => {

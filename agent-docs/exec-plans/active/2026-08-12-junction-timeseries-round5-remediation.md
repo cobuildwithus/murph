@@ -78,6 +78,9 @@ Updated: 2026-08-14
 25. [x] Resume the review loop under the user's explicit 2026-08-14 direction,
     integrate current `main`, resolve its Junction ownership conflicts, and
     restore focused green proof before round twenty-three.
+26. [x] Resolve round twenty-three's yielded sparse-history repair loss and
+    unclosed broad-continuation publication findings without adding another
+    queue, frontier, or state owner.
 
 ## Decisions
 
@@ -248,6 +251,15 @@ Updated: 2026-08-14
   ReviewGPT PASS, merge, and completion. The current-main integration keeps
   the branch's six-resource calendar-fidelity owner while adopting `main`'s
   bounded per-resource continuation path for broad collections.
+- Round twenty-three's review-induced findings are accepted. Every successful
+  yielded precise-history chunk now returns its already-proven provider-day
+  repair jobs beside the existing precise continuation, so the current atomic
+  completion/enqueue transaction retains both obligations. Broad calendar
+  continuations project offset cursors onto complete UTC-day request windows
+  and skip only a terminal day beyond the existing UTC-12 closure frontier.
+  The correction reorders existing result construction and derives one local
+  request window; it adds no queue, persisted frontier, scheduler, worker, or
+  state owner.
 
 ## Verification
 
@@ -433,5 +445,13 @@ Updated: 2026-08-14
   runner-bundle budget tests. Docs drift, 206-scenario integrity, provider
   request boundaries, dependency installation, and both staged and unstaged
   `git diff --check` passes are green.
+- Round twenty-three was recovered from its accepted ChatGPT thread after the
+  original response-capture step failed. It returned one High yielded-repair
+  loss and one material unclosed-day publication finding. Focused regressions
+  pass for both paths, all 273 Junction provider tests pass, the device-sync
+  and Cloudflare typechecks pass, the 42-test bundle-budget file passes, and
+  provider request boundaries plus 206-scenario integrity remain green. The
+  exact Linux CI runner measurement is retained with the existing 32KB
+  allowance.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

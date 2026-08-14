@@ -2602,36 +2602,42 @@ export function createJunctionDeviceSyncProvider(
           historicalUnresolvedProviderRecordCount === undefined
             ? undefined
             : historicalUnresolvedProviderRecordCount > 0;
+        const calendarRefreshJobs =
+          JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
+            ? buildJunctionSparseCalendarRefreshJobs({
+                asOf: context.now,
+                priority: job.priority,
+                resource: effectiveResource,
+                targets: timeseriesImport.canonicalSparseCalendarTargets,
+              })
+            : [];
         if (timeseriesImport.yieldedAt) {
+          const yieldedResult = buildYieldedJunctionJobResult({
+            context,
+            emptyBackfillAttempts:
+              extendedHistoricalPolicy?.completion === "daily_aggregate"
+                ? 0
+                : undefined,
+            historicalProviderRecordsSeen,
+            historicalRecordsSeen,
+            historicalUnresolvedProviderRecordIdentitiesJson,
+            historicalUnresolvedProviderRecordCount,
+            job,
+            windowEnd: window.windowEnd,
+            windowStart: timeseriesImport.yieldedAt,
+          });
           return withJunctionSkippedResourceMetadata(
             context,
-            buildYieldedJunctionJobResult({
-              context,
-              emptyBackfillAttempts:
-                extendedHistoricalPolicy?.completion === "daily_aggregate"
-                  ? 0
-                  : undefined,
-              historicalProviderRecordsSeen,
-              historicalRecordsSeen,
-              historicalUnresolvedProviderRecordIdentitiesJson,
-              historicalUnresolvedProviderRecordCount,
-              job,
-              windowEnd: window.windowEnd,
-              windowStart: timeseriesImport.yieldedAt,
-            }),
+            {
+              ...yieldedResult,
+              scheduledJobs: [
+                ...(yieldedResult.scheduledJobs ?? []),
+                ...calendarRefreshJobs,
+              ],
+            },
             skippedOptionalResources,
           );
         }
-
-        const calendarRefreshJobs = timeseriesImport.fetchComplete
-            && JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
-          ? buildJunctionSparseCalendarRefreshJobs({
-              asOf: context.now,
-              priority: job.priority,
-              resource: effectiveResource,
-              targets: timeseriesImport.canonicalSparseCalendarTargets,
-            })
-          : [];
 
         const result = withJunctionSkippedResourceMetadata(
           context,
@@ -3983,16 +3989,29 @@ export function createJunctionDeviceSyncProvider(
       }
     } else {
       try {
-        await importJunctionTimeseriesResourceSnapshot({
-          collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
-          context,
-          dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
-          resource,
-          skippedOptionalResources,
-          sourceProviders: [],
-          windowEnd: executionWindowEnd,
-          windowStart: timeseriesCursor,
-        });
+        const calendarDayAggregate =
+          JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource);
+        const importWindow = calendarDayAggregate
+          ? {
+              windowEnd: floorUtcDayTimestamp(executionWindowEnd),
+              windowStart: floorUtcDayTimestamp(timeseriesCursor),
+            }
+          : {
+              windowEnd: executionWindowEnd,
+              windowStart: timeseriesCursor,
+            };
+        if (Date.parse(importWindow.windowStart) < Date.parse(importWindow.windowEnd)) {
+          await importJunctionTimeseriesResourceSnapshot({
+            collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
+            context,
+            dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
+            resource,
+            skippedOptionalResources,
+            sourceProviders: [],
+            windowEnd: importWindow.windowEnd,
+            windowStart: importWindow.windowStart,
+          });
+        }
       } catch (error) {
         if (
           isJunctionTimeseriesWindowTooLarge(error)
@@ -4046,6 +4065,20 @@ export function createJunctionDeviceSyncProvider(
     const calendarDayAggregate = JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(
       input.resource,
     );
+    if (calendarDayAggregate) {
+      const windowEndMs = Date.parse(input.windowEnd);
+      const globallyClosedProviderDayEnd = resolveGloballyClosedProviderDayEnd(
+        input.windowEnd,
+        input.context.now,
+      );
+      if (
+        !Number.isFinite(windowEndMs)
+        || !Number.isFinite(globallyClosedProviderDayEnd)
+        || windowEndMs > globallyClosedProviderDayEnd
+      ) {
+        return;
+      }
+    }
     const records = await fetchTimeseriesResourceInChunks(
       input.context,
       input.resource,
