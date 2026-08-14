@@ -259,6 +259,21 @@ cannot be corrected inside the existing ownership boundary without that
 machinery, return `RETROSPECTIVE_REQUIRED`; do not prescribe another
 compensating patch.
 
+For every finding, evaluate the correction as a complexity collapse before
+recommending it. Findings caused by one mechanism must share one root-cause
+correction instead of accumulating guards. Classify the correction as:
+
+- `collapse`: delete or combine production concepts, branches, states, or
+  ownership paths;
+- `reuse`: correct the behavior through an existing owner or primitive without
+  adding a production concept; or
+- `additive`: add a production concept, branch, state, or owner only after
+  naming why collapse, reordering, derivation, and reuse are insufficient.
+
+An `additive` correction without that proof is not a recommendation. When the
+serious defect truly requires new machinery, return `RETROSPECTIVE_REQUIRED` as
+defined above.
+
 # Change-shape anomaly
 
 The PR description's change-shape breakdown is both reviewer orientation and a
@@ -383,6 +398,10 @@ For each finding provide:
    merge
 4. the production-faithful scenario or end-to-end path that validates it
 5. the smallest safe correction and focused validation it needs
+6. `Complexity disposition: collapse|reuse|additive` followed by the production
+   concepts, branches, states, or owners removed, reused, or added; for
+   `additive`, include the evidence that rules out collapse, reordering,
+   derivation, and reuse
 
 For a Complexity Collapse, also state the expected net deletion, concepts or
 owners removed, and invariants the smaller shape preserves.

@@ -1,6 +1,13 @@
 Continue the PR review in this conversation. Apply the review rules and output
 contract already given above. Do not start another conversation.
 
+Preserve the required `Complexity disposition: collapse|reuse|additive` for
+every finding. Reconsider the remediation as a complexity collapse instead of
+stacking another guard, and give findings caused by one mechanism one shared
+root-cause correction. Do not recommend an additive correction without the
+required proof that collapse, reordering, derivation, and reuse are
+insufficient.
+
 Read the attached `codebase.zip` and then read `reviewScope` and `contextMode`
 from `review-gpt-pr-context/review-round.json` before choosing the round scope.
 

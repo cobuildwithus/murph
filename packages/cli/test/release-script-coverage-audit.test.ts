@@ -1366,6 +1366,24 @@ describe('monorepo release flow coverage audit', () => {
     expect(prFollowupReviewPrompt).toContain(
       'report only a `REVIEW_INDUCED` finding',
     )
+    expect(prDeepReviewPrompt).toContain(
+      '`Complexity disposition: collapse|reuse|additive`',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Findings caused by one mechanism must share one root-cause',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'evidence that rules out collapse, reordering,',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      '`Complexity disposition: collapse|reuse|additive`',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      'one shared\nroot-cause correction',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      'collapse, reordering, derivation, and reuse are\ninsufficient',
+    )
     expect(prDeepReviewPrompt).toContain('`ORIGINAL_PR`')
     expect(prDeepReviewPrompt).toContain('`REVIEW_INDUCED`')
     expect(prDeepReviewPrompt).toContain('`PRE_EXISTING_OR_ADJACENT`')
