@@ -35,6 +35,9 @@ import {
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
 import {
+  hostedBrowserVaultReplicaObjectKey,
+} from "../src/storage-paths.js";
+import {
   buildAssistantProviderMurphToolCall,
   buildAssistantProviderShellCommandCall,
 } from "./helpers/hosted-local-e2e-support.js";
@@ -192,13 +195,16 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     expect(BigInt(finalStatus.workspace!.version)).toBeGreaterThan(activationWorkspaceVersion);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundBaseline + 1);
 
-    const providerRequestText = requireScenario().assistantProviderRequests
+    const providerRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
-      .slice(providerBaseline)
+      .slice(providerBaseline);
+    const providerRequestText = providerRequests
       .map(readAssistantProviderRequestText)
       .join("\n\n");
     expect(providerRequestText).toContain(automationSlug);
-    expect(providerRequestText).toMatch(/"created"\s*:\s*true/u);
+    expect(providerRequests.some((request) =>
+      containsCreatedAutomationResult(JSON.parse(request.body))
+    )).toBe(true);
 
     const faultLogs = [
       requireScenario().harness.stdoutTail(2_000_000),
@@ -453,7 +459,7 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
     receiptLogArtifact.bytes,
   );
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
-    browserVaultReplicaRef: createPreferenceRecoveryBrowserVaultReplicaRef(
+    browserVaultReplicaRef: await createPreferenceRecoveryBrowserVaultReplicaRef(
       snapshotHash,
     ),
     environment: requireScenario().runtimeEnv,
@@ -629,16 +635,21 @@ function createSnapshotBundleRef(input: {
   };
 }
 
-function createPreferenceRecoveryBrowserVaultReplicaRef(
+async function createPreferenceRecoveryBrowserVaultReplicaRef(
   sourceBundleHash: string,
-): HostedBrowserVaultReplicaRef {
+): Promise<HostedBrowserVaultReplicaRef> {
+  const generatedAt = new Date().toISOString();
+  const dataVersion = `preference-receipt-${sourceBundleHash.slice(0, 16)}`;
   return {
     byteLength: 256,
-    dataVersion: `preference-receipt-${sourceBundleHash.slice(0, 16)}`,
-    generatedAt: new Date().toISOString(),
+    dataVersion,
+    generatedAt,
     keyId: "browser-vault-replica:preference-receipt-recovery",
-    objectKey:
-      `browser-vault/${preferenceRecoveryUserId}/preference-receipt-recovery.json`,
+    objectKey: await hostedBrowserVaultReplicaObjectKey({
+      dataVersion,
+      generatedAt,
+      userId: preferenceRecoveryUserId,
+    }),
     replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: "udrk:runtime:preference-receipt-recovery",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
@@ -728,6 +739,22 @@ function collectJsonStrings(value: unknown): string[] {
     return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
   }
   return [];
+}
+
+function containsCreatedAutomationResult(value: unknown): boolean {
+  if (typeof value === "string") {
+    return /"created"\s*:\s*true/u.test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some(containsCreatedAutomationResult);
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).some(([key,entry]) =>
+      (key === "created" && entry === true)
+      || containsCreatedAutomationResult(entry)
+    );
+  }
+  return false;
 }
 
 function countResponsesApiRequests(): number {

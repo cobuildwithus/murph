@@ -71,6 +71,15 @@ Updated: 2026-08-14
   loopback model-provider override under `NODE_ENV=test` selects the provider's
   workspace sandbox; the dedicated native runner gate remains the named-profile
   proof.
+- The Junction Link scenario's provider stub returns a legacy one-field user
+  payload. The pinned SDK now validates the complete user resource before the
+  application adapter sees it, so the stub must return the current required
+  provider fields for both resolve and create.
+- The post-scenario PostgreSQL suite contains three independent crypto fixture
+  mismatches: short synthetic KMS project names rejected by the production
+  parser, an older current privacy key paired with a newer key, and a mock that
+  does not implement the current signing and verification boundary. Repair the
+  fixtures while leaving production validation unchanged.
 
 ## Verification
 
@@ -83,5 +92,7 @@ Updated: 2026-08-14
 - Completed focused proof: 309 assistant-engine/runtime tests passed; both
   changed packages typechecked; the candidate runner bundle assembled within
   budget; the shell-based cold preference recovery case passed against that
-  rebuilt bundle. The sibling canonical lost-ack case still exposes an
-  independent missing dynamic-tool result and remains required work.
+  rebuilt bundle. The Junction user stub has two focused response-contract
+  tests passing and the Cloudflare package typechecks. The 33 affected
+  PostgreSQL concurrency tests pass with the refreshed crypto fixtures and the
+  web package typechecks. The exact combined private matrix is pending.

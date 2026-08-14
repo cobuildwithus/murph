@@ -49,4 +49,29 @@ describe("hosted local Junction stub", () => {
       user_id: stub.junctionUserId,
     });
   });
+
+  it("returns the current Junction Link token contract", async () => {
+    stub = await startHostedLocalJunctionStub();
+
+    const response = await fetch(`${stub.baseUrl}/v2/link/token`, {
+      body: JSON.stringify({
+        provider: "garmin",
+        redirect_url: "https://example.test/junction/callback",
+        user_id: stub.junctionUserId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      link_token: "hosted-local-junction-stub",
+      link_web_url: "https://link.tryvital.io/?token=hosted-local-junction-stub",
+    });
+    expect(stub.linkTokenRequests).toEqual([{
+      provider: "garmin",
+      redirectUrl: "https://example.test/junction/callback",
+      userId: stub.junctionUserId,
+    }]);
+  });
 });

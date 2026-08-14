@@ -33,6 +33,7 @@ export interface HostedLocalJunctionStub {
 
 const HOSTED_LOCAL_JUNCTION_STUB_USER_ID = "junction_user_local_stub_1";
 const HOSTED_LOCAL_JUNCTION_STUB_TEAM_ID = "junction_team_local_stub_1";
+const HOSTED_LOCAL_JUNCTION_LINK_TOKEN = "hosted-local-junction-stub";
 const HOSTED_LOCAL_JUNCTION_LINK_WEB_URL =
   "https://link.tryvital.io/?token=hosted-local-junction-stub";
 
@@ -109,6 +110,7 @@ export async function startHostedLocalJunctionStub(): Promise<HostedLocalJunctio
         userId,
       });
       writeJsonResponse(response, 200, {
+        link_token: HOSTED_LOCAL_JUNCTION_LINK_TOKEN,
         link_web_url: HOSTED_LOCAL_JUNCTION_LINK_WEB_URL,
       });
       return;
