@@ -1893,10 +1893,10 @@ test('sendAssistantMessageLocal resolves required progress to one exact accepted
       providerTurn: {
         onboardingGuidanceInjected: true,
         codexContinuation: { kind: 'explicit-structured-history' },
-        response: '',
+        response: 'Review complete.',
         responseDeliveryContextOrdinal: 0,
         session,
-        transcriptResponse: '',
+        transcriptResponse: 'Review complete.',
       },
     }
   })
@@ -1904,24 +1904,8 @@ test('sendAssistantMessageLocal resolves required progress to one exact accepted
   await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: acceptedMessage.inputId,
-            version: acceptedMessage.schema,
-          },
-          id: acceptedMessage.inputId,
-          source: 'assistant-input',
-        },
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: newerMessage.inputId,
-            version: newerMessage.schema,
-          },
-          id: newerMessage.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(acceptedMessage).acceptedInput,
+        assistantInputCandidateFromStoredEvent(newerMessage).acceptedInput,
       ],
     },
     deliverResponse: true,
@@ -4258,15 +4242,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   const resultPromise = sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: earlierHostedInput.inputId,
-            version: earlierHostedInput.schema,
-          },
-          id: earlierHostedInput.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(earlierHostedInput).acceptedInput,
       ],
     },
     activeTurnInput,
