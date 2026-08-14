@@ -23,7 +23,7 @@ async function readSkill(slug: (typeof ASSISTANT_SKILLS)[number]['slug']) {
   )
 }
 
-function buildPrompt(): string {
+function buildPrompt(input: { conversationScope?: 'group' } = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
@@ -37,6 +37,9 @@ function buildPrompt(): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
+    ...(input.conversationScope
+      ? { conversationScope: input.conversationScope }
+      : {}),
   })
 }
 
@@ -64,6 +67,7 @@ describe('bounded self-management experiment guidance', () => {
 
   it('puts the symptom-experiment correction in the resident direct prompt', () => {
     const prompt = buildPrompt()
+    const groupPrompt = buildPrompt({ conversationScope: 'group' })
     const legacyGate =
       'Suggest experiments only when asked to try, test, track, or set one up.'
     const intentCorrection =
@@ -72,6 +76,7 @@ describe('bounded self-management experiment guidance', () => {
     const legacyGateIndex = prompt.indexOf(legacyGate)
 
     expect(prompt).toContain('Persistent-symptom next steps:')
+    expect(groupPrompt).not.toContain('Persistent-symptom next steps:')
     expect(prompt).toContain(
       'treat that as experiment intent even if they do not use the word "experiment"',
     )
