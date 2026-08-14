@@ -2100,22 +2100,26 @@ that is already due is suppressed from generic runtime-timer projection and can
 be admitted only by its connection mailbox wake.
 
 The executable WHOOP regression fixes one canonical schedule-event identity and
-one durable mailbox-item identity. Its initial trace restores the committed
-artifact, fetches the mailbox item, issues sleep, recovery, cycle, and workout
-reads, writes four artifacts, commits checkpoint 1, and injects the only failure
-at checkpoint 2 record/completion persistence. Cold restore from checkpoint 1 in
-the next five-minute bucket lacks the machine-local SQLite execution record and
-replays those same four method/path classes exactly once, for eight requests
-total. That 00:05 recovery pass makes three successful checkpoint attempts and
-advances the workspace from version 1 through version 4. Its retained
-completion-fence wake is due at 00:05:30 and carries the 06:05 provider cadence.
-The completion pass makes no third provider pull, makes two successful
-checkpoints through version 6, and publishes 06:05 only after the durable
+one durable mailbox-item identity. The fixture commits the clean input workspace
+through the production v2 checkpoint bridge. Its initial incident pass then
+fetches the mailbox item, issues sleep, recovery, cycle, and workout reads, writes
+four artifacts, and creates the machine-local SQLite execution record. The
+production v2 post-pull archive plan observes the live SQLite store, omits it from
+the archive, and retains the durable system-mailbox state. The only injected
+failure rejects that snapshot checkpoint, so the clean input ref remains the last
+committed snapshot. In the next five-minute bucket, the production v2 restore
+dispatch restores that exact ref without the SQLite execution record,
+reconstructs the pending obligation from durable mailbox authority, and replays
+those same four method/path classes exactly once,
+for eight requests total. That 00:05 recovery pass makes three successful
+checkpoints. Its retained completion-fence wake is due at 00:05:30 and carries
+the 06:05 provider cadence. The completion pass makes no third provider pull,
+makes two successful checkpoints, and publishes 06:05 only after the durable
 recovery/completion checkpoint. The 00:10 pass returns idle with no wake and
-makes one bounded post-publication convergence checkpoint through version 7;
-the 00:15 pass is fully quiescent. The full proof observes eight checkpoint
-attempts, seven commits, one injected failure, and no provider work after the
-single replay.
+makes one bounded post-publication convergence checkpoint; the 00:15 pass is
+fully quiescent. Within the measured incident window, the proof observes eight
+checkpoint attempts, seven commits, one injected failure, and no provider work
+after the single replay.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally
