@@ -31,17 +31,22 @@ re-signal the same durable mailbox item once in each Web recovery bucket without
 minting another schedule-event or mailbox-item identity. Provider execution is
 intentionally at-least-once across a lost post-pull record/completion checkpoint:
 the canonical mailbox item/event already exists in the committed input
-workspace, the four read-only provider classes run, and checkpoint 1 durably
-captures the replayable post-pull/intermediate state. The proof injects its only
-failure at checkpoint 2 record/completion persistence. Cold restore from
-checkpoint 1 lacks the machine-local SQLite execution record and may repeat the
-same method/path classes without publishing cadence early. The deterministic
-WHOOP proof covers four initial classes, one four-class replay (eight requests
-total), eight workspace checkpoint attempts with seven commits and one injected
-failure, no third provider pull, and cadence publication only after the durable
-recovery/completion checkpoint. The first later bucket performs one bounded
-post-publication convergence checkpoint while returning idle with no wake; the
-following bucket is fully quiescent with no provider work or checkpoint.
+workspace. The fixture commits that clean input through the production v2
+checkpoint bridge before the four read-only provider classes run. The incident
+pass then creates the machine-local SQLite execution record, and its production
+v2 post-pull archive plan observes the live store, omits it from the archive, and
+retains the durable mailbox state. The proof injects its only failure when that
+v2 snapshot checkpoint is persisted, leaving the clean input ref as the last
+committed snapshot. The next recovery bucket cold-restores that exact ref through
+the production restore dispatch, reconstructs from durable authority, and may
+repeat the same method/path classes without publishing cadence early. The
+deterministic WHOOP proof covers four initial
+classes, one four-class replay (eight requests total), eight measured workspace
+checkpoint attempts with seven commits and one injected failure, no third
+provider pull, and cadence publication only after the durable recovery/completion
+checkpoint. The first later bucket performs one bounded post-publication
+convergence checkpoint while returning idle with no wake; the following bucket
+is fully quiescent with no provider work or checkpoint.
 The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
