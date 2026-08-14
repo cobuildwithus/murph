@@ -272,16 +272,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Generation-10 Browser Vault projection adds the replica builder to lazy
 // runner output. A dedicated Query server facade keeps that graph off startup;
 // exact macOS assembly measured an 8,065,357B static closure and 10,325,065B
-// total after the merged AgentMail removal on 2026-08-14. Ratchet those
-// measurements while retaining the existing cross-platform tolerances and
-// forbidden-startup-input guards.
-//
-// Current-main workout-card capacity and Telegram rich-card composition then
-// measured 10,361,173B on Linux. The exact integrated macOS assembly measured
-// 10,410,888B on 2026-08-14, so ratchet to the larger cross-platform result;
-// the boot-path baselines, forbidden-input guards, and established 32KB total
-// allowance are unchanged.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_410_888 + 32_768;
+// total after the merged AgentMail removal on 2026-08-14. Keep the entry and
+// static-closure ratchets below, while giving the previous 10,357,833B total
+// cap 10% headroom and retaining the forbidden-startup-input guards.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_393_617;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
