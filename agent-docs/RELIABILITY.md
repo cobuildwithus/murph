@@ -1493,3 +1493,8 @@ mailbox and reports success only for `applied` or `unchanged`; a rejected or
 missing outcome retains the local draft. The first workout editor additionally
 requires the V6 card's opaque exact-workout binding under the existing workout
 mutation lock, so delayed or forwarded cards cannot retarget a later workout.
+Admission also rejects any destructive set batch whose final visible projection
+equals its prestate; otherwise an early exact-replay check could mistake a first
+application for convergence when hidden canonical set fields differ. Validated
+set removal uses one narrow canonical replacement operation, while every generic
+workout replacement remains fail-closed against saved-set loss.

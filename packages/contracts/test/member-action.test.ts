@@ -326,6 +326,60 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
+  it("rejects a destructive batch whose final visible sequence matches its prestate", () => {
+    const request = validRequest();
+    const expectedSets = [
+      { logged: true, result: { kind: "reps" as const, reps: 10 } },
+      { logged: true, result: { kind: "reps" as const, reps: 10 } },
+      { logged: true, result: { kind: "reps" as const, reps: 10 } },
+    ];
+    const expectedWorkout = {
+      ...request.action.expectedWorkout,
+      exercises: [{
+        name: "Leg press",
+        sets: expectedSets.map(({ logged }) => ({ logged })),
+      }],
+      setRemovalBinding: "b".repeat(64),
+    };
+    const removal = {
+      exerciseName: "Leg press",
+      exercisePosition: 1,
+      expectedSets,
+      kind: "set.remove" as const,
+      setPosition: 1,
+    };
+    const append = {
+      exerciseName: "Leg press",
+      exercisePosition: 1,
+      kind: "set.append" as const,
+      result: { kind: "reps" as const, reps: 10 },
+      setPosition: 3,
+    };
+
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        expectedWorkout,
+        mutations: [removal, append],
+      },
+    }).success).toBe(false);
+    expect(memberActionRequestV1Schema.safeParse({
+      ...request,
+      action: {
+        ...request.action,
+        expectedWorkout,
+        mutations: [
+          removal,
+          {
+            ...append,
+            result: { kind: "reps" as const, reps: 12 },
+          },
+        ],
+      },
+    }).success).toBe(true);
+  });
+
   it("rejects duplicate mutation targets so exact replay has one postcondition", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({

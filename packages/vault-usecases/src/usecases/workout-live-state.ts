@@ -13,7 +13,10 @@ import {
   toCommandShowEntity,
 } from '../commands/query-record-command-helpers.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
-import { editWorkoutRecord } from './workout.js'
+import {
+  editWorkoutRecord,
+  editWorkoutRecordAfterValidatedSetRemoval,
+} from './workout.js'
 import { showWorkoutRecord, workoutLookupSchema } from './workout-read.js'
 import {
   type LiveWorkoutExerciseLookup,
@@ -129,6 +132,40 @@ export async function updateLiveWorkoutExercises(
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
 ) {
+  const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
+  const set = [
+    `${EXERCISES_PATCH_PREFIX}${JSON.stringify(update.exercises)}`,
+  ]
+  if (update.durationMinutes !== undefined) {
+    set.push(`durationMinutes=${update.durationMinutes}`)
+  }
+
+  return editWorkoutRecord({
+    vault: shown.vault,
+    lookup: shown.entity.id,
+    set,
+  })
+}
+
+export async function updateLiveWorkoutExercisesAfterValidatedSetRemoval(
+  shown: WorkoutShowResult,
+  workout: WorkoutSession,
+  exercises: WorkoutExercise[],
+) {
+  const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
+  return editWorkoutRecordAfterValidatedSetRemoval({
+    durationMinutes: update.durationMinutes,
+    exercises: update.exercises,
+    lookup: shown.entity.id,
+    vault: shown.vault,
+  })
+}
+
+function validateLiveWorkoutExerciseUpdate(
+  shown: WorkoutShowResult,
+  workout: WorkoutSession,
+  exercises: WorkoutExercise[],
+) {
   const parsed = workoutSessionSchema.safeParse({ ...workout, exercises })
   if (!parsed.success) {
     throw new VaultCliError(
@@ -139,23 +176,12 @@ export async function updateLiveWorkoutExercises(
   }
   assertTargetableLiveWorkout(parsed.data, `Workout ${shown.entity.id}`)
 
-  const set = [
-    `${EXERCISES_PATCH_PREFIX}${JSON.stringify(parsed.data.exercises)}`,
-  ]
-  if (workout.startedAt) {
-    set.push(
-      `durationMinutes=${elapsedDurationMinutes(
-        workout.startedAt,
-        new Date().toISOString(),
-      )}`,
-    )
+  return {
+    durationMinutes: workout.startedAt
+      ? elapsedDurationMinutes(workout.startedAt, new Date().toISOString())
+      : undefined,
+    exercises: parsed.data.exercises,
   }
-
-  return editWorkoutRecord({
-    vault: shown.vault,
-    lookup: shown.entity.id,
-    set,
-  })
 }
 
 export function resolveExerciseIndex(

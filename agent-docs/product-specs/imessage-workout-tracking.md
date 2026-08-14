@@ -145,8 +145,11 @@ complete ordered exercise/set state. The canonical owner recomputes that binding
 under its existing lock before removing a set, so any concurrent type, note,
 duration, distance, RPE, bodyweight, assistance, added-load, result, or mixed
 field change rejects the immutable card without exposing those hidden fields in
-the message URL. Exact replay instead proves the one final sequence: original
-edits, descending removals, then contiguous appends.
+the message URL. Admission rejects a destructive batch when original edits,
+descending removals, and contiguous appends would recreate the same visible set
+sequence; without stable set identities, that projection cannot distinguish a
+first application from an exact retry. Every admitted destructive batch therefore
+has one observable final sequence for replay convergence.
 
 Positions are one-based presentation coordinates, and each coordinate within
 its original-edit, original-remove, or final-append namespace may appear at most
@@ -165,7 +168,10 @@ consent under the existing member locks, and durably appends the action before
 returning `202 Accepted`. An ambiguous network retry reuses the exact action id,
 body, and client timestamp, so mailbox dedupe remains stable. Runtime applies the
 complete batch under the existing live-workout mutation lock with one canonical
-write and no model call, then records an `applied`, `unchanged`, or typed
+write and no model call. The generic workout editor continues to reject every
+saved exercise or set deletion; only the member-action owner, after exact removal
+binding and snapshot validation, uses the narrow set-removal replacement path.
+Runtime then records an `applied`, `unchanged`, or typed
 `rejected` receipt through the same mailbox checkpoint. The editor stays locked
 while polling that receipt and says the changes were saved only after an applied
 or converged result. A missing, completed, ambiguous, bound-to-another, or

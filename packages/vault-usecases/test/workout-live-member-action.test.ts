@@ -21,6 +21,8 @@ vi.mock("../src/usecases/workout-live-state.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/usecases/workout-live-state.js")>(),
   findActiveLiveWorkouts: mocks.findActiveLiveWorkouts,
   updateLiveWorkoutExercises: mocks.updateLiveWorkoutExercises,
+  updateLiveWorkoutExercisesAfterValidatedSetRemoval:
+    mocks.updateLiveWorkoutExercises,
   withLiveWorkoutMutationLock: mocks.withLiveWorkoutMutationLock,
 }));
 
@@ -293,6 +295,65 @@ describe("live workout member action", () => {
       action: removeAction(),
       vault: "/vault",
     })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("rejects a destructive projection collision before exact-replay detection", async () => {
+    const workout: WorkoutSession = {
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [
+          { order: 1, reps: 10, type: "warmup" },
+          { order: 2, reps: 10 },
+          { order: 3, reps: 10 },
+        ],
+      }],
+    };
+    const expectedSets = workout.exercises[0].sets.map(() => ({
+      logged: true,
+      result: { kind: "reps" as const, reps: 10 },
+    }));
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        expectedWorkout: {
+          actionBinding: ACTION_BINDING,
+          exercises: [{
+            name: "Leg press",
+            sets: expectedSets.map(({ logged }) => ({ logged })),
+          }],
+          setRemovalBinding: deriveWorkoutSetRemovalBinding(
+            "evt_test_workout",
+            workout.exercises,
+          ),
+        },
+        kind: "workout.live.apply",
+        mutations: [
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedSets,
+            kind: "set.remove",
+            setPosition: 1,
+          },
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            kind: "set.append",
+            result: { kind: "reps", reps: 10 },
+            setPosition: 3,
+          },
+        ],
+        version: 1,
+      },
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.withLiveWorkoutMutationLock).not.toHaveBeenCalled();
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 

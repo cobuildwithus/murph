@@ -667,7 +667,13 @@ Last verified: 2026-08-13
   binding reveals no raw hidden field and is checked only as a destructive
   stale-state precondition under the existing canonical workout lock; it never
   grants identity or write authority. Neither binding reveals a canonical id or
-  member. An editable note is admitted only when its exact
+  member. A destructive batch is invalid when its typed final visible set
+  sequence equals its submitted prestate, because the projection cannot prove
+  whether that batch was first-applied or replayed; reject it before mailbox
+  append rather than adding stable client-visible set ids or another receipt
+  store. Canonical persistence keeps the generic no-deletion guard and exposes
+  set removal only to the live-workout member-action owner after the exact
+  binding and snapshot checks succeed. An editable note is admitted only when its exact
   canonical value fits the visible 40-character result field; a longer hidden
   note forces the authority-free V4 presentation instead of entering either
   persisted card state or the Linq request.

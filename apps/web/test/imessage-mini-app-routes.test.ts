@@ -402,6 +402,53 @@ describe("iMessage mini-app routes", () => {
     });
   });
 
+  it("rejects an indistinguishable destructive batch before mailbox append", async () => {
+    const request = validMemberActionRequest();
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      {
+        ...request,
+        action: {
+          ...request.action,
+          expectedWorkout: {
+            actionBinding: "a".repeat(64),
+            exercises: [{
+              name: "Leg press",
+              sets: [{ logged: true }, { logged: true }, { logged: true }],
+            }],
+            setRemovalBinding: "b".repeat(64),
+          },
+          mutations: [
+            {
+              exerciseName: "Leg press",
+              exercisePosition: 1,
+              expectedSets: [
+                { logged: true, result: { kind: "reps", reps: 10 } },
+                { logged: true, result: { kind: "reps", reps: 10 } },
+                { logged: true, result: { kind: "reps", reps: 10 } },
+              ],
+              kind: "set.remove",
+              setPosition: 1,
+            },
+            {
+              exerciseName: "Leg press",
+              exercisePosition: 1,
+              kind: "set.append",
+              result: { kind: "reps", reps: 10 },
+              setPosition: 3,
+            },
+          ],
+        },
+      },
+    ));
+
+    expect(response.status).toBe(400);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the credential owner no longer has active account access", async () => {
     mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",

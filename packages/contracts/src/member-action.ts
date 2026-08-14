@@ -217,6 +217,70 @@ export type WorkoutMemberActionMutationV1 = z.infer<
   typeof workoutMemberActionMutationV1Schema
 >;
 
+type WorkoutMemberActionSetPutV1 = Extract<
+  WorkoutMemberActionMutationV1,
+  { kind: "set.put" }
+>;
+type WorkoutMemberActionSetAppendV1 = Extract<
+  WorkoutMemberActionMutationV1,
+  { kind: "set.append" }
+>;
+type WorkoutMemberActionSetRemoveV1 = Extract<
+  WorkoutMemberActionMutationV1,
+  { kind: "set.remove" }
+>;
+
+function destructiveSetBatchChangesVisibleSequence(input: {
+  exercisePosition: number;
+  expectedSets: WorkoutMemberActionExpectedSetStateV1[];
+  mutations: WorkoutMemberActionMutationV1[];
+}): boolean {
+  const projected = input.expectedSets.map((state) => ({
+    logged: state.logged,
+    result: state.result === null ? null : { ...state.result },
+  }));
+  const puts = input.mutations.filter(
+    (mutation): mutation is WorkoutMemberActionSetPutV1 =>
+      mutation.kind === "set.put"
+      && mutation.exercisePosition === input.exercisePosition,
+  );
+  for (const mutation of puts) {
+    if (projected[mutation.setPosition - 1] === undefined) {
+      return true;
+    }
+    projected[mutation.setPosition - 1] = {
+      logged: true,
+      result: mutation.result,
+    };
+  }
+
+  const removals = input.mutations.filter(
+    (mutation): mutation is WorkoutMemberActionSetRemoveV1 =>
+      mutation.kind === "set.remove"
+      && mutation.exercisePosition === input.exercisePosition,
+  ).sort((left, right) => right.setPosition - left.setPosition);
+  for (const mutation of removals) {
+    projected.splice(mutation.setPosition - 1, 1);
+  }
+
+  const appends = input.mutations.filter(
+    (mutation): mutation is WorkoutMemberActionSetAppendV1 =>
+      mutation.kind === "set.append"
+      && mutation.exercisePosition === input.exercisePosition,
+  ).sort((left, right) => left.setPosition - right.setPosition);
+  for (const mutation of appends) {
+    if (mutation.setPosition !== projected.length + 1) {
+      return true;
+    }
+    projected.push({
+      logged: mutation.result !== null,
+      result: mutation.result,
+    });
+  }
+
+  return JSON.stringify(projected) !== JSON.stringify(input.expectedSets);
+}
+
 export const workoutLiveApplyMemberActionV1Schema = z
   .object({
     expectedWorkout: z
@@ -294,6 +358,26 @@ export const workoutLiveApplyMemberActionV1Schema = z
         path: ["expectedWorkout", "setRemovalBinding"],
       });
     }
+
+    const checkedRemovalExercises = new Set<number>();
+    removals.forEach((removal) => {
+      if (checkedRemovalExercises.has(removal.exercisePosition)) {
+        return;
+      }
+      checkedRemovalExercises.add(removal.exercisePosition);
+      if (!destructiveSetBatchChangesVisibleSequence({
+        exercisePosition: removal.exercisePosition,
+        expectedSets: removal.expectedSets,
+        mutations: action.mutations,
+      })) {
+        const index = action.mutations.indexOf(removal);
+        context.addIssue({
+          code: "custom",
+          message: "A destructive set batch must change the visible set sequence.",
+          path: ["mutations", index],
+        });
+      }
+    });
 
     const appendsByExercise = new Map<
       number,

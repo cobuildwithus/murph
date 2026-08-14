@@ -7,6 +7,7 @@ import {
   type WorkoutSession,
   type WorkoutSessionDetailV1,
   type WorkoutSet,
+  workoutLiveApplyMemberActionV1Schema,
   workoutSessionSchema,
   workoutTemplateSchema,
 } from '@murphai/contracts'
@@ -48,6 +49,7 @@ import {
   resolveExerciseIndex,
   resolveLiveWorkout,
   updateLiveWorkoutExercises,
+  updateLiveWorkoutExercisesAfterValidatedSetRemoval,
   withLiveWorkoutMutationLock,
 } from './workout-live-state.js'
 
@@ -77,6 +79,9 @@ const MAX_LIVE_WORKOUT_SETS_PER_EXERCISE = 150
 export async function applyLiveWorkoutMemberAction(
   input: ApplyLiveWorkoutMemberActionInput,
 ): Promise<ApplyLiveWorkoutMemberActionResult> {
+  if (!workoutLiveApplyMemberActionV1Schema.safeParse(input.action).success) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
   return withLiveWorkoutMutationLock(input.vault, () =>
     applyLiveWorkoutMemberActionWithLockHeld(input),
   )
@@ -229,7 +234,10 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     return { status: 'unchanged' }
   }
 
-  await updateLiveWorkoutExercises(shown, workout, parsed.data.exercises)
+  const persistExercises = removeMutations.length > 0
+    ? updateLiveWorkoutExercisesAfterValidatedSetRemoval
+    : updateLiveWorkoutExercises
+  await persistExercises(shown, workout, parsed.data.exercises)
   return { status: 'applied' }
 }
 

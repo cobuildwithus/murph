@@ -109,6 +109,14 @@ Messages extension as the first action family.
   one supported note, reps, or weight/reps family. Unsupported or mixed result
   fields keep the whole immutable card on V4 so attachment cannot replace a
   truthful actual with a reduced editable value.
+- Admission rejects destructive batches whose final typed visible set sequence
+  recreates their prestate. This is the smallest deterministic answer to an
+  otherwise indistinguishable first application versus retry and avoids stable
+  client-visible set ids or a second receipt store.
+- The generic workout edit path retains its saved-set deletion guard. Only the
+  live-workout member-action owner may use the narrow set-removal persistence
+  path, after exact binding, full snapshot, exercise retention, and final-set
+  checks pass under the canonical workout lock.
 
 ## Verification
 
@@ -118,6 +126,8 @@ Messages extension as the first action family.
 - Focused assistant-runtime mailbox routing, retry, foreground-priority, and
   model-free dispatch tests.
 - Focused vault-usecase snapshot/version and idempotent workout-apply tests.
+- Real-vault persistence tests for tail, middle, multiple, remove-plus-append,
+  exact-retry, final-set rejection, and the generic no-deletion guard.
 - iOS extension model/client/view-model tests, extension-safe typecheck/build,
   formatting, and rendered compact/expanded state proof.
 - `git diff --check`, privacy/path inspection, exact-head ReviewGPT gates, and
