@@ -84,6 +84,15 @@ checkout contents before the exclusion exists. It also adds the root marker to
 the repository's common local exclude file so the marker never appears as
 worktree dirt. Keep the marker in place for the worktree's lifetime.
 
+After materialization, the helper invokes the configured `post-checkout` hook
+once from the canonical worktree root with Git's repository-local environment
+variables cleared, matching native `git worktree add` behavior. If
+materialization fails, the helper removes only the exact worktree it just
+registered while the creation lock is still held, preserves the created branch
+for retry, skips `post-checkout`, and returns the materialization failure. A
+failed rollback is reported explicitly and leaves the target registered for
+manual diagnosis instead of hiding the partial state.
+
 `scripts/worktree-storage-guard` scans only conventional direct-child
 `murph-*` Git checkouts in the system `/tmp` roots by default and matches the
 current repository by normalized origin. Tests and specialized hosts can set

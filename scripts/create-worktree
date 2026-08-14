@@ -145,15 +145,39 @@ checkout_status=$?
 set -e
 
 if (( checkout_status != 0 )); then
+  set +e
+  git -C "$repo_root" worktree remove --force --force "$target_path"
+  cleanup_status=$?
+  set -e
+
+  if (( cleanup_status != 0 )); then
+    printf 'create-worktree: checkout materialization failed (status %d); rollback failed (status %d), leaving the target registered\n' \
+      "$checkout_status" "$cleanup_status" >&2
+    exit "$cleanup_status"
+  fi
   exit "$checkout_status"
 fi
 
 head_oid="$(git -C "$target_path" rev-parse HEAD)"
 null_oid="$(printf '%0*d' "${#head_oid}" 0)"
+hook_path="$(git -C "$target_path" rev-parse --path-format=absolute --git-path hooks/post-checkout)"
 
-set +e
-git -C "$target_path" hook run --ignore-missing post-checkout -- \
-  "$null_oid" "$head_oid" 1
+if [[ -x "$hook_path" ]]; then
+  local_env_vars="$(git -C "$target_path" rev-parse --local-env-vars)"
+  hook_env=(env)
+  while IFS= read -r local_env_var; do
+    [[ -n "$local_env_var" ]] && hook_env+=(-u "$local_env_var")
+  done <<<"$local_env_vars"
+  set +e
+  (
+    cd -P "$target_path"
+    "${hook_env[@]}" "$hook_path" "$null_oid" "$head_oid" 1
+  )
+else
+  set +e
+  git -C "$target_path" hook run --ignore-missing post-checkout -- \
+    "$null_oid" "$head_oid" 1
+fi
 hook_status=$?
 set -e
 

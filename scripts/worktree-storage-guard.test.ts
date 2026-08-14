@@ -469,7 +469,7 @@ touch hook-installed
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
-  it('keeps a marked authorized worktree when checkout materialization fails', () => {
+  it('rolls back a marked worktree when checkout materialization fails', () => {
     const harness = createHarness()
     const target = path.join(harness.root, 'partial-materialization')
     const markerObserved = path.join(harness.root, 'marker-observed-before-failure')
@@ -513,17 +513,35 @@ touch ${JSON.stringify(hookInvoked)}
     expect(creation.stderr).toContain('smudge filter materialization-failure failed')
     expect(existsSync(markerObserved)).toBe(true)
     expect(existsSync(hookInvoked)).toBe(false)
-    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(target)
-    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
-    const adminDir = runGit(target, [
-      'rev-parse',
-      '--path-format=absolute',
-      '--git-dir',
-    ])
-    expect(existsSync(path.join(adminDir, 'murph-storage-guard-authorized'))).toBe(true)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/partial-materialization-failure',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
 
     const guard = runScript(harness, 'worktree-storage-guard')
     expect(guard.status, guard.stderr).toBe(0)
+
+    runGit(harness.primary, [
+      'config',
+      'filter.materialization-failure.smudge',
+      'cat',
+    ])
+    const retry = runScript(harness, 'create-worktree', [
+      '-B',
+      'partial-materialization-failure',
+      target,
+    ])
+    expect(retry.status, retry.stderr).toBe(0)
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    expect(existsSync(hookInvoked)).toBe(true)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
   it('ratchets unmanaged temporary clones to zero and rejects new paths', () => {
@@ -1433,6 +1451,65 @@ exit 23
     expect(guard.status, guard.stderr).toBe(0)
   })
 
+  it('matches native post-checkout repository-local environment behavior', () => {
+    const harness = createHarness()
+    const secondary = path.join(harness.root, 'secondary')
+    mkdirSync(secondary)
+    runGit(secondary, ['init', '-b', 'main'])
+    runGit(secondary, ['config', 'user.name', 'Worktree Guard Test'])
+    runGit(secondary, [
+      'config',
+      'user.email',
+      'worktree-guard@users.noreply.github.com',
+    ])
+    const secondaryFile = path.join(secondary, 'secondary-only.txt')
+    writeFileSync(secondaryFile, 'baseline\n')
+    runGit(secondary, ['add', 'secondary-only.txt'])
+    runGit(secondary, ['commit', '-m', 'baseline'])
+    writeFileSync(secondaryFile, 'changed\n')
+
+    const hookEnvironments = path.join(harness.root, 'post-checkout-environments')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+printf '%s|%s\n' "$PWD" "\${GIT_DIR-unset}" >>${JSON.stringify(hookEnvironments)}
+git -C ${JSON.stringify(secondary)} add secondary-only.txt
+`,
+    )
+    expect(runScript(harness, 'install-git-hooks').status).toBe(0)
+
+    const nativeTarget = path.join(harness.root, 'native-hook-environment')
+    runGit(harness.primary, [
+      'worktree',
+      'add',
+      '-b',
+      'native-hook-environment',
+      nativeTarget,
+    ])
+    expect(runGit(nativeTarget, ['status', '--porcelain'])).toBe('')
+    expect(runGit(secondary, ['status', '--porcelain'])).toBe(
+      'M  secondary-only.txt',
+    )
+
+    runGit(secondary, ['reset', 'HEAD', '--', 'secondary-only.txt'])
+    const target = path.join(harness.root, 'helper-hook-environment')
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'helper-hook-environment',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(readFileSync(hookEnvironments, 'utf8').trim().split('\n')).toEqual([
+      `${realpathSync(nativeTarget)}|unset`,
+      `${realpathSync(target)}|unset`,
+    ])
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(runGit(secondary, ['status', '--porcelain'])).toBe(
+      'M  secondary-only.txt',
+    )
+  })
+
   it('ignores a stale advisory-lock file after its owner exits', () => {
     const harness = createHarness()
     mkdirSync(harness.state, { recursive: true })
@@ -1488,5 +1565,65 @@ printf '%s\\n' 'testfs 200000000 1 10000000 95% /'
     })
     expect(lowDisk.status).toBe(1)
     expect(lowDisk.stderr).toContain('only 9 GiB free')
+  })
+
+  it('rolls back a locked data worktree when checkout materialization fails', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'failed-data-materialization')
+    runGit(harness.primary, [
+      'config',
+      'filter.data-materialization-failure.smudge',
+      'exit 29',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.data-materialization-failure.clean',
+      'cat',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.data-materialization-failure.required',
+      'true',
+    ])
+    writeFileSync(
+      path.join(harness.primary, '.gitattributes'),
+      'data-materialization-probe.txt filter=data-materialization-failure\n',
+    )
+    writeFileSync(
+      path.join(harness.primary, 'data-materialization-probe.txt'),
+      'probe\n',
+    )
+    runGit(harness.primary, [
+      'add',
+      '.gitattributes',
+      'data-materialization-probe.txt',
+    ])
+    runGit(harness.primary, ['commit', '-m', 'add failing data materialization probe'])
+
+    const creation = runScript(harness, 'create-worktree', [
+      '--data-research',
+      'failure cleanup proof',
+      '-b',
+      'failed-data-materialization',
+      target,
+    ])
+
+    expect(creation.status).not.toBe(0)
+    expect(creation.stderr).toContain(
+      'smudge filter data-materialization-failure failed',
+    )
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/failed-data-materialization',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
+    const guard = runScript(harness, 'worktree-storage-guard')
+    expect(guard.status, guard.stderr).toBe(0)
   })
 })
