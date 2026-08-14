@@ -39,6 +39,12 @@ const TERMINAL_COMPUTER_RUN_STATUSES = [
   "expired",
   "canceled",
 ] satisfies HostedComputerRunStatus[];
+const MEMBER_OWNED_PROVIDER_SETUP_RUN_ACQUISITION_STATUSES = new Set([
+  "authorized",
+  "browser_setup",
+  "capturing",
+  "deletion_pending",
+]);
 
 export interface ComputerRunRecord {
   awaitingMessage: string | null;
@@ -639,6 +645,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       expectedRunId: input.expectedRunId,
       memberId: input.memberId,
       ownerKey: input.ownerKey,
+      requireAcquisitionEligible: true,
     });
     if (input.candidateRunId) {
       await requireMemberOwnedProviderSetupAcquisitionRecovery(this.prisma, {
@@ -1712,6 +1719,7 @@ async function lockMemberComputerRunCreationAvailable(
     memberId: input.memberId,
     now: input.now,
     ownerKey: input.ownerKey,
+    requireAcquisitionEligible: true,
   });
 }
 
@@ -1732,12 +1740,10 @@ async function lockMemberComputerRunMutationAvailable(
     && run.ownerKey
   ) {
     await requireMemberOwnedProviderSetupRunAccess(prisma, {
-      allowStaleBoundRunReplacement: true,
-      allowUnboundRun: true,
       expectedRunId: input.runId,
       memberId: input.memberId,
-      now: input.now,
       ownerKey: run.ownerKey,
+      requireAcquisitionEligible: true,
     });
     return;
   }
@@ -1793,6 +1799,7 @@ async function requireMemberOwnedProviderSetupRunAccess(
     memberId: string;
     now?: Date;
     ownerKey: string;
+    requireAcquisitionEligible?: boolean;
     runId?: string;
   },
 ): Promise<void> {
@@ -1823,6 +1830,16 @@ async function requireMemberOwnedProviderSetupRunAccess(
     throw computerUseConflictError({
       code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
       message: "Computer run owner is no longer available.",
+      retryable: false,
+    });
+  }
+  if (
+    input.requireAcquisitionEligible === true
+    && !MEMBER_OWNED_PROVIDER_SETUP_RUN_ACQUISITION_STATUSES.has(setup.status)
+  ) {
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      message: "Computer run owner is not accepting browser work.",
       retryable: false,
     });
   }

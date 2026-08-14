@@ -277,13 +277,18 @@ class MemorySetupStore {
 
 class FakeProviderComputer implements ProviderSetupComputer {
   readonly acquireOwnedRun = vi.fn(async (
-    _input: Parameters<ProviderSetupComputer["acquireOwnedRun"]>[0],
-  ) => ({
-    awaitingReason: null,
-    reused: false,
-    runId: RUN_ID,
-    status: "running",
-  }));
+    input: Parameters<ProviderSetupComputer["acquireOwnedRun"]>[0],
+  ) => {
+    if (input.expectedRunId !== RUN_ID) {
+      await input.admitRun(RUN_ID);
+    }
+    return {
+      awaitingReason: null,
+      reused: false,
+      runId: RUN_ID,
+      status: "running",
+    };
+  });
   readonly finishOwnedRun = vi.fn(async (
     input: Parameters<ProviderSetupComputer["finishOwnedRun"]>[0],
   ) => ({
@@ -609,11 +614,14 @@ describe("member-owned provider setup service", () => {
       version: 4,
     });
     const computer = new FakeProviderComputer();
-    computer.acquireOwnedRun.mockResolvedValueOnce({
-      awaitingReason: null,
-      reused: false,
-      runId: successorRunId,
-      status: "running",
+    computer.acquireOwnedRun.mockImplementationOnce(async (input) => {
+      await input.admitRun(successorRunId);
+      return {
+        awaitingReason: null,
+        reused: false,
+        runId: successorRunId,
+        status: "running",
+      };
     });
     computer.missingApplicationCaptureOnce = true;
     const service = createService({ computer, store });

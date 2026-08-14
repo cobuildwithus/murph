@@ -100,6 +100,7 @@ interface ProviderSetupStore {
 
 interface ProviderSetupComputer {
   acquireOwnedRun(input: {
+    admitRun: (runId: string) => Promise<void>;
     expectedRunId: string | null;
     memberId: string;
     ownerKey: string;
@@ -393,20 +394,13 @@ export class MemberOwnedProviderSetupService {
     }
     if (setup.status === "capturing") {
       const contract = this.browserContract(setup.memberId);
-      const run = await this.computer.acquireOwnedRun({
-        expectedRunId: setup.browserRunId,
-        memberId: setup.memberId,
-        ownerKey: setup.id,
-        ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
-        startUrl: contract.developerPortalUrl,
-      });
-      if (run.runId !== setup.browserRunId) {
-        setup = await this.transition(setup, {
-          browserRunId: run.runId,
-          status: "capturing",
-        });
-      }
-      return { contract, run, setup: this.toView(setup) };
+      const acquired = await this.acquireBrowserRun(
+        setup,
+        "capturing",
+        contract.developerPortalUrl,
+      );
+      setup = acquired.setup;
+      return { contract, run: acquired.run, setup: this.toView(setup) };
     }
     if (
       setup.status === "canceling"
@@ -417,23 +411,16 @@ export class MemberOwnedProviderSetupService {
     }
 
     const contract = this.browserContract(setup.memberId);
-    const run = await this.computer.acquireOwnedRun({
-      expectedRunId: setup.browserRunId,
-      memberId: setup.memberId,
-      ownerKey: setup.id,
-      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
-      startUrl: contract.developerPortalUrl,
-    });
-    if (setup.browserRunId !== run.runId || setup.status !== "browser_setup") {
-      setup = await this.transition(setup, {
-        browserRunId: run.runId,
-        status: "browser_setup",
-      });
-    }
+    const acquired = await this.acquireBrowserRun(
+      setup,
+      "browser_setup",
+      contract.developerPortalUrl,
+    );
+    setup = acquired.setup;
 
     return {
       contract,
-      run,
+      run: acquired.run,
       setup: this.toView(setup),
     };
   }
@@ -557,22 +544,15 @@ export class MemberOwnedProviderSetupService {
       throw disconnectFirstError(this.registration.presentation.providerName);
     }
     const contract = this.browserContract(memberId);
-    const run = await this.computer.acquireOwnedRun({
-      expectedRunId: setup.browserRunId,
-      memberId,
-      ownerKey: setup.id,
-      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
-      startUrl: contract.developerPortalUrl,
-    });
-    if (setup.browserRunId !== run.runId) {
-      setup = await this.transition(setup, {
-        browserRunId: run.runId,
-        status: "deletion_pending",
-      });
-    }
+    const acquired = await this.acquireBrowserRun(
+      setup,
+      "deletion_pending",
+      contract.developerPortalUrl,
+    );
+    setup = acquired.setup;
     return {
       contract,
-      run,
+      run: acquired.run,
       setup: this.toView(setup),
     };
   }
@@ -1032,6 +1012,31 @@ export class MemberOwnedProviderSetupService {
       provider: setup.provider,
       setupId: setup.id,
     });
+  }
+
+  private async acquireBrowserRun(
+    input: MemberOwnedProviderSetupRecord,
+    status: "browser_setup" | "capturing" | "deletion_pending",
+    startUrl: string,
+  ): Promise<{
+    run: Awaited<ReturnType<ProviderSetupComputer["acquireOwnedRun"]>>;
+    setup: MemberOwnedProviderSetupRecord;
+  }> {
+    let setup = input;
+    const run = await this.computer.acquireOwnedRun({
+      admitRun: async (runId) => {
+        setup = await this.transition(setup, { browserRunId: runId, status });
+      },
+      expectedRunId: setup.browserRunId,
+      memberId: setup.memberId,
+      ownerKey: setup.id,
+      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+      startUrl,
+    });
+    if (setup.browserRunId !== run.runId) {
+      throw setupBusyError(setup.status);
+    }
+    return { run, setup };
   }
 
   private browserContract(memberId: string): MemberOwnedProviderSetupBrowserContract {

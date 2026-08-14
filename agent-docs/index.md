@@ -43,7 +43,8 @@ concurrency proof, are jointly specified by `ARCHITECTURE.md`,
 
 Member-owned device provider application ownership, exact OAuth and connection
 revision binding, member-locked OAuth/deletion serialization, independent
-zero-marker recovery, same-owner expired-run replacement without resubmit,
+zero-marker recovery, pre-Kernel exact-run admission, same-owner expired-run
+replacement without resubmit,
 terminal setup-slot release, invocation-scoped credential projection, exact token-return
 authority, credential-free stored-token cleanup without operator fallback, and
 permanent-versus-transient credential failure handling are jointly specified by

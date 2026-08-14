@@ -3701,8 +3701,9 @@ describe("ComputerUseService", () => {
 
     const handle = await service.startRun({
       memberId: "member_123",
-      startUrl: null,
+      startUrl: "https://dentist.example.test/intake",
     });
+    expect(kernel.executePlaywrightCalls).toBe(1);
 
     expect(handle).toMatchObject({
       reused: false,
@@ -6902,6 +6903,7 @@ describe("ComputerUseService", () => {
     const service = new ComputerUseService({ kernel, store });
 
     await expect(service.acquireOwnedRun({
+      admitRun: vi.fn(async () => undefined),
       expectedRunId: null,
       memberId: "member_123",
       ownerKey: "dps_setup123",
@@ -6926,6 +6928,7 @@ describe("ComputerUseService", () => {
     const service = new ComputerUseService({ kernel, now: () => now, store });
 
     await expect(service.acquireOwnedRun({
+      admitRun: vi.fn(async () => undefined),
       expectedRunId: "hcr_run123",
       memberId: "member_123",
       ownerKey: "dps_setup123",
@@ -6937,6 +6940,7 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.acquireOwnedRun({
+      admitRun: vi.fn(async () => undefined),
       expectedRunId: "hcr_run123",
       memberId: "member_123",
       ownerKey: "dps_other",
@@ -6984,8 +6988,12 @@ describe("ComputerUseService", () => {
       now: () => now,
       store,
     });
+    const admitRun = vi.fn(async () => {
+      expect(kernel.createdBrowserInputs).toEqual([]);
+    });
 
     const result = await service.acquireOwnedRun({
+      admitRun,
       expectedRunId: terminalRun.id,
       memberId: "member_123",
       ownerKey: "dps_setup123",
@@ -7001,7 +7009,51 @@ describe("ComputerUseService", () => {
       ownerKey: "dps_setup123",
       ownerPurpose: "member_owned_provider_setup",
     });
+    expect(admitRun).toHaveBeenCalledWith(result.runId);
     expect(kernel.createdBrowserInputs).toHaveLength(1);
+  });
+
+  it("retires a reserved setup run when durable admission loses before Kernel provisioning", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const terminalRun = createRunRecord({
+      completedAt: new Date("2026-06-17T11:30:00.000Z"),
+      expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+      id: "hcr_terminal_setup",
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T11:30:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [terminalRun],
+      run: terminalRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.acquireOwnedRun({
+      admitRun: vi.fn(async () => {
+        throw Object.assign(new Error("Setup changed before run admission."), {
+          code: "DEVICE_PROVIDER_SETUP_CONFLICT",
+        });
+      }),
+      expectedRunId: terminalRun.id,
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_CONFLICT",
+    });
+
+    expect(kernel.createdBrowserInputs).toEqual([]);
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.run.status).toBe("failed");
+    await expect(store.findActiveRunForMember({
+      memberId: "member_123",
+      now,
+    })).resolves.toBeNull();
   });
 
   it("recovers an ambiguous setup-owned acquisition only when the prior binding is terminal", async () => {
@@ -7035,6 +7087,7 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.acquireOwnedRun({
+      admitRun: vi.fn(async () => undefined),
       expectedRunId: terminalRun.id,
       memberId: "member_123",
       ownerKey: "dps_setup123",
@@ -7074,6 +7127,7 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.acquireOwnedRun({
+      admitRun: vi.fn(async () => undefined),
       expectedRunId: expectedRun.id,
       memberId: "member_123",
       ownerKey: "dps_setup123",
@@ -7240,6 +7294,7 @@ describe("ComputerUseService", () => {
       runId: generic.runId,
     });
     const secondSetup = await service.acquireOwnedRun({
+      admitRun: vi.fn(async () => undefined),
       expectedRunId: null,
       memberId: "member_123",
       ownerKey: "dps_second_provider",
@@ -10330,6 +10385,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       suggestedReply: null,
       updatedAt: input.now,
     };
+    this.storeMemberRun(this.run);
     return this.run;
   }
 

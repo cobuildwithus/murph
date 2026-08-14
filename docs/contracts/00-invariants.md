@@ -296,8 +296,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   successor already proven by the computer owner to belong to the same setup may
   replace its run binding, without changing `capturing`. A fully loaded exact safe
   landing with no ownership marker may clear that fence without submitting;
-  only a later independent invocation may attempt creation again. Successful
-  application deletion deactivates the terminal setup only after its exact
+  only a later independent invocation may attempt creation again. Run
+  reservation is not navigation authority: a new or successor candidate
+  must CAS-bind to an acquisition-eligible exact setup before Kernel provisioning
+  and attach under that binding before navigation. A losing admission retires the
+  candidate synchronously; a winning admission makes cancellation finish it.
+  Successful application deletion deactivates the terminal setup only after its exact
   browser run is released, so a fresh setup never overlaps owned browser work.
   Continue and setup-owned handoff completion append exact typed continuation
   work to the existing system

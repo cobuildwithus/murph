@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { ComputerKernelClient } from "@/src/lib/computer-use/kernel-client";
+import { ComputerUseService } from "@/src/lib/computer-use/service";
+import { PrismaComputerUseStore } from "@/src/lib/computer-use/store";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { MemberOwnedProviderSetupService } from "@/src/lib/device-sync/provider-setup/service";
 import { PrismaDeviceProviderSetupStore } from "@/src/lib/device-sync/provider-setup/store";
@@ -39,12 +42,97 @@ type TransactionProbe = {
   };
 };
 
+class PausedRunAdmissionStore extends PrismaDeviceProviderSetupStore {
+  private paused = false;
+
+  constructor(
+    prisma: PrismaClient,
+    private readonly admissionReached: Deferred<void>,
+    private readonly releaseAdmission: Deferred<void>,
+  ) {
+    super(prisma);
+  }
+
+  override async transition(
+    input: Parameters<PrismaDeviceProviderSetupStore["transition"]>[0],
+  ): ReturnType<PrismaDeviceProviderSetupStore["transition"]> {
+    if (!this.paused && input.browserRunId && input.status === "browser_setup") {
+      this.paused = true;
+      this.admissionReached.resolve();
+      await this.releaseAdmission.promise;
+    }
+    return super.transition(input);
+  }
+}
+
 function createDeferred<T = void>(): Deferred<T> {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function createProviderSetupKernel(input: {
+  ensureProfileReached: Deferred<void>;
+  releaseEnsureProfile: Deferred<void>;
+}): ComputerKernelClient & {
+  createdBrowsers: number;
+  navigationCalls: number;
+} {
+  return {
+    createdBrowsers: 0,
+    navigationCalls: 0,
+    async createBrowser() {
+      this.createdBrowsers += 1;
+      return {
+        liveViewUrl: "https://proxy.test-browser.onkernel.com/live/provider-setup",
+        sessionId: "kernel-provider-setup",
+      };
+    },
+    async deleteBrowserByIdOrName() {},
+    async deleteManagedAuthConnection() {},
+    async deleteProfile() {},
+    async ensureManagedAuthConnection(managedInput) {
+      return {
+        browserSessionId: null,
+        domain: managedInput.domain,
+        flowExpiresAt: null,
+        flowStatus: null,
+        hostedUrl: null,
+        id: "managed-auth-provider-setup",
+        profileName: managedInput.profileName,
+        status: "NEEDS_AUTH" as const,
+      };
+    },
+    async ensureProfile() {
+      input.ensureProfileReached.resolve();
+      await input.releaseEnsureProfile.promise;
+    },
+    async executePlaywright() {
+      this.navigationCalls += 1;
+      return {
+        result: {
+          title: "Provider applications",
+          url: "https://www.strava.com/settings/api",
+          visibleText: "Provider applications",
+        },
+      };
+    },
+    async findManagedAuthConnection() {
+      return null;
+    },
+    async listManagedAuthConnections() {
+      return [];
+    },
+    async osControl() {},
+    async startManagedAuthLogin() {
+      return {
+        flowExpiresAt: new Date("2026-08-13T12:30:00.000Z"),
+        hostedUrl: "https://auth.onkernel.com/login/provider-setup",
+      };
+    },
+  };
 }
 
 async function bounded<T>(
@@ -170,8 +258,115 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
 }
 
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "member-owned provider OAuth/deletion PostgreSQL concurrency",
+  "member-owned provider setup PostgreSQL concurrency",
   () => {
+    it.each(["cancel_first", "binding_first"] as const)(
+      "retires the reserved setup run when %s wins browser admission",
+      async (winner) => {
+        const suffix = randomUUID().replaceAll("-", "");
+        const memberId = `member_provider_cancel_${suffix}`;
+        const setupId = `dps_provider_cancel_${suffix}`;
+        const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+        const admissionReached = createDeferred();
+        const releaseAdmission = createDeferred();
+        const ensureProfileReached = createDeferred();
+        const releaseEnsureProfile = createDeferred();
+        const setupStore = winner === "cancel_first"
+          ? new PausedRunAdmissionStore(prisma, admissionReached, releaseAdmission)
+          : new PrismaDeviceProviderSetupStore(prisma);
+        const kernel = createProviderSetupKernel({
+          ensureProfileReached,
+          releaseEnsureProfile,
+        });
+        const computerStore = new PrismaComputerUseStore(prisma);
+        const computer = new ComputerUseService({
+          env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
+          kernel,
+          now: () => new Date("2026-08-13T12:00:00.000Z"),
+          store: computerStore,
+        });
+        const service = new MemberOwnedProviderSetupService("strava", {
+          computer,
+          store: setupStore,
+        });
+        let begin: Promise<PromiseSettledResult<unknown>[]> | null = null;
+        vi.stubEnv("HOSTED_WEB_BASE_URL", "https://web.example.test");
+
+        try {
+          await prisma.hostedMember.create({ data: { id: memberId } });
+          await prisma.deviceProviderSetup.create({
+            data: {
+              active: true,
+              connectSourceId: "strava",
+              connectTarget: "strava",
+              id: setupId,
+              memberId,
+              provider: "strava",
+              status: "authorized",
+              version: 1,
+            },
+          });
+
+          begin = Promise.allSettled([service.beginBrowserSetup(memberId)]);
+          if (winner === "cancel_first") {
+            await bounded(admissionReached.promise, "reserved run admission");
+          } else {
+            await bounded(ensureProfileReached.promise, "bound run provisioning");
+            await expect(prisma.deviceProviderSetup.findUniqueOrThrow({
+              where: { id: setupId },
+            })).resolves.toMatchObject({
+              browserRunId: expect.any(String),
+              status: "browser_setup",
+            });
+          }
+
+          await expect(service.cancel(memberId, setupId)).resolves.toMatchObject({
+            status: "canceled",
+          });
+          releaseAdmission.resolve();
+          releaseEnsureProfile.resolve();
+          const [beginResult] = await bounded(begin, "provider setup cancellation race");
+          expect(beginResult.status).toBe("rejected");
+
+          const setup = await prisma.deviceProviderSetup.findUniqueOrThrow({
+            where: { id: setupId },
+          });
+          const runs = await prisma.hostedComputerRun.findMany({
+            where: { memberId },
+          });
+          const activeRun = await computerStore.findActiveRunForMember({
+            memberId,
+            now: new Date("2026-08-13T12:00:00.000Z"),
+          });
+
+          expect(setup).toMatchObject({
+            browserRunId: null,
+            status: "canceled",
+          });
+          expect(runs).toHaveLength(1);
+          expect(runs[0]?.status).toBe(
+            winner === "cancel_first" ? "failed" : "canceled",
+          );
+          expect(activeRun).toBeNull();
+          expect(kernel.createdBrowsers).toBe(0);
+          expect(kernel.navigationCalls).toBe(0);
+        } finally {
+          releaseAdmission.resolve();
+          releaseEnsureProfile.resolve();
+          if (begin) {
+            await begin;
+          }
+          vi.unstubAllEnvs();
+          await prisma.hostedComputerHandoff.deleteMany({ where: { memberId } });
+          await prisma.deviceProviderSetup.deleteMany({ where: { memberId } });
+          await prisma.hostedComputerRun.deleteMany({ where: { memberId } });
+          await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+          await prisma.$disconnect();
+        }
+      },
+      30_000,
+    );
+
     it("deactivates a deleted tombstone before creating a successor setup", async () => {
       const suffix = randomUUID().replaceAll("-", "");
       const memberId = `member_provider_reconnect_${suffix}`;

@@ -891,7 +891,11 @@ Last verified: 2026-08-13
   inspecting that same owner binding. When the bound run expires, only the
   computer owner's proven same-setup successor may replace its run id; a
   `capturing` successor remains `capturing`, so its first inspection cannot
-  submit. Re-entering an awaiting setup rotates or
+  submit. A candidate run is CAS-bound to an acquisition-eligible setup before
+  Kernel provisioning, then its browser attaches under that exact binding before
+  navigation. If Cancel wins first, the unadmitted candidate is synchronously
+  retired; if binding wins first, Cancel sees and finishes that exact run.
+  Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
   the exact setup-owned handoff resumes that run without a conversation reply;
   ordinary setup returns to `/connect`; suspended members and generic or foreign

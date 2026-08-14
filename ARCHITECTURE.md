@@ -1025,8 +1025,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `capturing`, so the successor's first inspection is also submit-free. One fully
   loaded exact safe-landing inspection with no marker
   may restore `browser_setup` without submitting; only a later independent
-  invocation may attempt creation again. A persisted `canceling` transition
-  remains the reversible pre-submission fence. Once an exact application binding is
+  invocation may attempt creation again. A reserved new or successor browser run
+  is not usable authority: its setup CAS must bind the exact run before Kernel
+  provisioning, and the browser must attach under that still-eligible binding
+  before provider navigation. Losing admission terminalizes the candidate;
+  winning admission makes the run visible to the persisted `canceling` fence,
+  which finishes it. Once an exact application binding is
   durable, setup finishes that exact browser run and compare-and-set clears its
   run binding before OAuth can continue; an interrupted finish or clear remains
   explicit and retryable. After application deletion, the same terminal-release

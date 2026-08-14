@@ -83,6 +83,9 @@ provider-specific automation layer.
 12. [x] Rebind only the computer owner's proven same-setup successor when a
     `capturing` run expires, preserving the submit fence and recovery-only first
     inspection.
+13. [x] Bind each reserved candidate run before Kernel provisioning, attach it
+    before navigation, and prove both Cancel/admission winner orders against real
+    PostgreSQL without leaving active computer work.
 
 ## Decisions
 
@@ -114,6 +117,11 @@ provider-specific automation layer.
   computer-use owner proves the stale exact binding and same-setup successor;
   the setup CAS changes only `browserRunId` while preserving `capturing`, so
   recovery on the successor remains submit-free.
+- Reservation remains inside the existing computer owner, but it is not browser
+  authority. The setup's existing CAS admits the candidate before Kernel work;
+  a losing candidate is retired, while a winning binding lets the existing
+  `canceling` path finish the exact run. Browser attach precedes navigation so a
+  canceled or otherwise ineligible setup cannot receive provider effects.
 
 ## Verification
 
@@ -128,8 +136,13 @@ provider-specific automation layer.
   zero-marker inspection, and the real computer service proves terminal and
   expired exact-owner replacement plus foreign/active-owner rejection.
 - Corrected round-9 hosted Web lane: 10,024 passed, 415 skipped.
-- Coupled-state audit: two reported findings confirmed and corrected; no
-  additional unresolved state inconsistency remains in the affected owner.
+- ReviewGPT round 10 found the pre-binding Cancel race. The correction composes
+  the setup CAS with computer reservation before Kernel provisioning and requires
+  exact eligible attachment before navigation. Direct service/computer proof:
+  211 passed. Real PostgreSQL proof covers both winners; all 5 cases passed.
+- Coupled-state audit: every reported setup/browser finding was confirmed and
+  corrected; no additional unresolved state inconsistency remains in the
+  affected owner.
 - Corrected-head product-purpose verdict: no findings. The irreducible purpose
   remains a credential-blind member-owned connection that recovers without
   duplicate provider effects. The smallest experience still uses the existing

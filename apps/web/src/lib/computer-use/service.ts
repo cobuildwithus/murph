@@ -232,6 +232,7 @@ export class ComputerUseService {
   }
 
   async acquireOwnedRun(input: {
+    admitRun: (runId: string) => Promise<void>;
     expectedRunId: string | null;
     memberId: string;
     ownerKey: string;
@@ -241,6 +242,7 @@ export class ComputerUseService {
     await this.store.requireMemberOwnedProviderSetupRunAcquisition(input);
     let handle = await this.acquireRunWithStore({
       expectedRunId: input.expectedRunId,
+      admitRun: input.admitRun,
       memberId: input.memberId,
       ownerKey: input.ownerKey,
       ownerPurpose: input.ownerPurpose,
@@ -431,6 +433,7 @@ export class ComputerUseService {
   }
 
   private async acquireRunWithStore(input: {
+    admitRun?: (runId: string) => Promise<void>;
     expectedRunId?: string | null;
     memberId: string;
     ownerKey?: string | null;
@@ -489,6 +492,7 @@ export class ComputerUseService {
           return await this.acquireRunWithStore(input, store);
         }
       }
+      await this.admitReusableOwnedRun(input, activeRun, now, store);
       return runHandle(activeRun, true);
     }
 
@@ -560,10 +564,20 @@ export class ComputerUseService {
           }
           throw browserProvisioningInProgressError();
         }
+        await this.admitReusableOwnedRun(input, createResult.run, now, store);
         return runHandle(createResult.run, true);
       }
       reservedRun = createResult.run;
+      await input.admitRun?.(reservedRun.id);
       await kernel.ensureProfile(kernelProfileName);
+      if (owner) {
+        await store.requireMemberOwnedProviderSetupRunAcquisition({
+          expectedRunId: reservedRun.id,
+          memberId: input.memberId,
+          ownerKey: owner.ownerKey,
+          ownerPurpose: owner.ownerPurpose,
+        });
+      }
       const browserCreateNow = this.now();
       browserDeleteName = kernelBrowserName;
       browser = await kernel.createBrowser({
@@ -573,13 +587,6 @@ export class ComputerUseService {
         timeoutSeconds: requireRemainingKernelTimeoutSeconds(reservedRun, browserCreateNow),
       });
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
-      const initialState = startUrl
-        ? await this.navigateKernelBrowserToUrl({
-            sessionId: browser.sessionId,
-            timeoutMs: COMPUTER_NAVIGATION_TIMEOUT_MS,
-            url: startUrl,
-          })
-        : null;
       const attachInput: AttachRunBrowserInput = {
         kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
           field: "kernel-live-view-url",
@@ -596,18 +603,10 @@ export class ComputerUseService {
       const run = await store.attachRunBrowser(attachInput);
       attachedSessionId = browser.sessionId;
       browser = null;
-      if (initialState) {
-        await store.updateRunBrowserState({
-          expectedKernelSessionId: run.kernelSessionId,
-          lastTitle: initialState.title,
-          lastUrl: sanitizeComputerDisplayUrl(initialState.url),
-          runId: run.id,
-        }).catch(() => {
-          // The browser is attached and usable; initial display state is only a cache.
-        });
-      }
+      await this.initializeAttachedRun(run, startUrl, store);
       return runHandle(run, false);
-    } catch (error) {
+    } catch (caughtError) {
+      let error = caughtError;
       let skipCompensation = false;
       if (
         browser &&
@@ -625,7 +624,13 @@ export class ComputerUseService {
           skipCompensation = true;
         } else if (attachedRun) {
           browser = null;
-          return runHandle(attachedRun, false);
+          attachedSessionId = attachedRun.kernelSessionId;
+          try {
+            await this.initializeAttachedRun(attachedRun, startUrl, store);
+            return runHandle(attachedRun, false);
+          } catch (initializationError) {
+            error = initializationError;
+          }
         }
       }
       let browserCleanupFailed = false;
@@ -660,6 +665,51 @@ export class ComputerUseService {
         }
       }
       if (browserCleanupFailed) {
+        throw browserCleanupFailedError();
+      }
+      throw error;
+    }
+  }
+
+  private async initializeAttachedRun(
+    run: ComputerRunRecord,
+    startUrl: string | null,
+    store: ComputerUseStore,
+  ): Promise<void> {
+    if (!startUrl) {
+      return;
+    }
+    const initialState = await this.navigateKernelBrowserToUrl({
+      sessionId: requireKernelSessionId(run),
+      timeoutMs: COMPUTER_NAVIGATION_TIMEOUT_MS,
+      url: startUrl,
+    });
+    await store.updateRunBrowserState({
+      expectedKernelSessionId: run.kernelSessionId,
+      lastTitle: initialState.title,
+      lastUrl: sanitizeComputerDisplayUrl(initialState.url),
+      runId: run.id,
+    }).catch(() => {
+      // The browser is attached and usable; initial display state is only a cache.
+    });
+  }
+
+  private async admitReusableOwnedRun(
+    input: {
+      admitRun?: (runId: string) => Promise<void>;
+      expectedRunId?: string | null;
+    },
+    run: ComputerRunRecord,
+    now: Date,
+    store: ComputerUseStore,
+  ): Promise<void> {
+    if (!input.admitRun || run.id === (input.expectedRunId ?? null)) {
+      return;
+    }
+    try {
+      await input.admitRun(run.id);
+    } catch (error) {
+      if (await this.expireRunAndDeleteBrowserBestEffort(run, now, store) === "failed") {
         throw browserCleanupFailedError();
       }
       throw error;
