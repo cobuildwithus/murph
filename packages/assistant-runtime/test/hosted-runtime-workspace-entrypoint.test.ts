@@ -19476,18 +19476,6 @@ describe("hosted workspace runtime entrypoint", () => {
           completionCalls += 1;
           events.push(`snapshot.complete:${completionCalls}`);
           if (completionCalls === 1) {
-            mailboxItems.push(createMailboxItem({
-              id: "mailbox_item_entrypoint_snapshot_failure_log_wake_002",
-              laneSeq: "2",
-            }));
-            runtimeWakeSignal.notify({ notifiedAtEpochMs: Date.now() });
-            await waitUntil(() => {
-              assert.equal(activeSnapshotSignal?.aborted, true);
-              assert.ok(
-                activeSnapshotSignal?.reason
-                  instanceof HostedRuntimeCheckpointInterruptedByWakeError,
-              );
-            });
             throw new Error("Synthetic snapshot completion transport failure.");
           }
           return {
@@ -19653,6 +19641,18 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await waitUntil(() => {
         assert.ok(events.includes("snapshot.failure-log:blocked"), events.join(","));
+      }, 10_000);
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_snapshot_failure_log_wake_002",
+        laneSeq: "2",
+      }));
+      runtimeWakeSignal.notify({ notifiedAtEpochMs: Date.now() });
+      await waitUntil(() => {
+        assert.equal(activeSnapshotSignal?.aborted, true);
+        assert.ok(
+          activeSnapshotSignal?.reason
+            instanceof HostedRuntimeCheckpointInterruptedByWakeError,
+        );
         assert.ok(events.includes("mailbox.importItem:2"), events.join(","));
         assert.ok(events.includes("assistant:2"), events.join(","));
       }, 10_000);

@@ -627,19 +627,23 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       }
       return { loggedCount: request.entries.length };
     });
-    calls.completeSnapshotSession.mockImplementationOnce(async () => {
-      controller.abort(interruption);
-      throw completionFailure;
-    });
+    calls.completeSnapshotSession.mockRejectedValueOnce(completionFailure);
     const options = createBridgeOptions({
       platform,
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(
+    const checkpoint = options.createCheckpointSnapshot(
       createCheckpointInput("idle_shutdown"),
       { signal: controller.signal },
-    )).rejects.toBe(interruption);
+    );
+    await vi.waitFor(() => {
+      const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+      expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_failed"))
+        .toBe(true);
+    });
+    controller.abort(interruption);
+    await expect(checkpoint).rejects.toBe(interruption);
     expect(settledFailureLogWrites).toBe(0);
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
@@ -663,6 +667,56 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     releaseFailureLog();
     await vi.waitFor(() => {
       expect(settledFailureLogWrites).toBe(1);
+    });
+  });
+
+  it("returns a late runtime wake before a pre-commit session abort settles", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const controller = new AbortController();
+    const interruption = new HostedRuntimeCheckpointInterruptedByWakeError();
+    const archiveFailure = new Error("snapshot archive failed");
+    let releaseSessionAbort!: () => void;
+    const sessionAbortGate = new Promise<void>((resolve) => {
+      releaseSessionAbort = resolve;
+    });
+    let sessionAbortSettled = false;
+    calls.abortSnapshotSession.mockImplementationOnce(async () => {
+      await sessionAbortGate;
+      sessionAbortSettled = true;
+    });
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async () => {
+        throw archiveFailure;
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    const checkpoint = options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => {
+      expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    });
+    controller.abort(interruption);
+    await expect(checkpoint).rejects.toBe(interruption);
+    expect(sessionAbortSettled).toBe(false);
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.filter((entry) =>
+      entry.eventCode === "checkpoint.snapshot_failed"
+    )).toHaveLength(1);
+    expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
+      .toBe(false);
+
+    releaseSessionAbort();
+    await vi.waitFor(() => {
+      expect(sessionAbortSettled).toBe(true);
     });
   });
 
