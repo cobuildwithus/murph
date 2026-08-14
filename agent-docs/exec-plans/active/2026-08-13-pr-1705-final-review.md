@@ -170,8 +170,9 @@ Local replacement-candidate evidence on 2026-08-13:
   failed file passes 24 tests against a fresh fully migrated PostgreSQL database;
   prepared Web typecheck and focused ESLint pass. This isolated regression-test
   correction adds no production behavior or runtime complexity and does not
-  require another ReviewGPT round. The private workflow still needs an exact
-  final-head rerun.
+  require another ReviewGPT round. The exact-head private rerun on
+  `7ecf12b85bc7` passed all 14 jobs, including every feature E2E lane, the broad
+  PostgreSQL batch, and its aggregate gate.
 
 ## Round-17 requirement retrospective
 
