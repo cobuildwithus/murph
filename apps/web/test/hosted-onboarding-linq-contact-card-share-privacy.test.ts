@@ -20,7 +20,7 @@ describe("hosted Linq contact-card share reservation privacy", () => {
     process.env = { ...SHARED_PROCESS_ENV };
     configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: { ...TEST_KEYRING_ENTRIES },
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
   });
 

@@ -50,6 +50,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  persistAssistantPrivateCompletionContinuityAfterDelivery,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
@@ -704,15 +705,13 @@ async function preflightHostedAssistantDispatch(input: {
 
   if (isHostedPrivateAssistantAskCompletionIntent(input.intent)) {
     try {
-      const proof = requireHostedPrivateAssistantAskCompletionProof(input.intent);
+      requireHostedPrivateAssistantAskCompletionProof(input.intent);
       assertHostedPrivateAssistantAskCompletionPayloadMatchesIntent({
         intent: input.intent,
         payload: input.payload,
       });
-      assertHostedPrivateAssistantAskCompletionLive({
-        expiresAt: proof.assistantAskCompletionExpiresAt,
-        now: input.now,
-      });
+      // Web owns the terminal boundary. Even an expired local attempt must
+      // reach its live authority check so Web can persist the group fallback.
       return { action: "continue" };
     } catch (error) {
       const failed = await markAssistantOutboxIntentMirrorTerminalById({
@@ -949,19 +948,6 @@ function assertHostedPrivateAssistantAskCompletionPayloadMatchesIntent(input: {
     throw new VaultCliError(
       "ASSISTANT_ASK_PRIVATE_COMPLETION_TRANSPORT_INVALID",
       "Private Assistant Ask completion must use its exact direct text-only route.",
-      { retryable: false },
-    );
-  }
-}
-
-function assertHostedPrivateAssistantAskCompletionLive(input: {
-  expiresAt: string;
-  now: Date;
-}): void {
-  if (Date.parse(input.expiresAt) <= input.now.getTime()) {
-    throw new VaultCliError(
-      "ASSISTANT_ASK_PRIVATE_COMPLETION_EXPIRED",
-      "Private Assistant Ask completion expired before provider delivery.",
       { retryable: false },
     );
   }
@@ -3335,6 +3321,26 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             && isHostedPrivateAssistantAskCompletionIntent(mirrorState.intent)
             ? mirrorState.intent
             : null;
+          if (privateCompletion) {
+            await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+              actualRoute: {
+                actorId: input.assistantDeliveryEffect.payload.actorId,
+                channel: "telegram",
+                delivery: { kind: "thread", target: request.target },
+                identityId: input.assistantDeliveryEffect.payload.identityId,
+                threadId: input.assistantDeliveryEffect.payload.threadId,
+                threadIsDirect:
+                  input.assistantDeliveryEffect.payload.threadIsDirect,
+              },
+              effectsPort: input.effectsPort,
+              intentId: privateCompletion.intentId,
+              media: [],
+              message: request.message,
+              now: new Date(),
+              signal: input.signal,
+              vaultRoot: input.vaultRoot,
+            });
+          }
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -3406,6 +3412,26 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             && isHostedPrivateAssistantAskCompletionIntent(mirrorState.intent)
             ? mirrorState.intent
             : null;
+          if (privateCompletion) {
+            await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+              actualRoute: {
+                actorId: input.assistantDeliveryEffect.payload.actorId,
+                channel: "telegram",
+                delivery: { kind: "thread", target: request.target },
+                identityId: input.assistantDeliveryEffect.payload.identityId,
+                threadId: input.assistantDeliveryEffect.payload.threadId,
+                threadIsDirect:
+                  input.assistantDeliveryEffect.payload.threadIsDirect,
+              },
+              effectsPort: input.effectsPort,
+              intentId: privateCompletion.intentId,
+              media: [],
+              message: request.fallbackMessage,
+              now: new Date(),
+              signal: input.signal,
+              vaultRoot: input.vaultRoot,
+            });
+          }
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -3802,6 +3828,32 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         userId: input.userId,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
+      });
+    }
+    try {
+      await persistAssistantPrivateCompletionContinuityAfterDelivery({
+        intent: dispatched.intent,
+        vault: input.vaultRoot,
+      });
+    } catch (error) {
+      // Provider delivery and required transport confirmation are already
+      // durable. The attended direct-turn owner repairs optional continuity.
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectFingerprint: input.assistantDeliveryEffect.fingerprint,
+          effectId: input.assistantDeliveryEffect.effectId,
+          extra: {
+            failureDomain: "private-continuity",
+          },
+          userId: input.userId,
+        }),
+        wake: input.wake,
+        error,
+        level: "warn",
+        message: "Hosted private completion continuity persistence failed.",
+        phase: "outbox",
+        userId: input.userId,
       });
     }
     assertHostedDeliveryLiveness(input.signal);
@@ -4222,6 +4274,45 @@ function createHostedAssistantLinqSendDependency(input: {
     ) === true;
     const includesVaultFile =
       request.media?.some((media) => media.kind === "vault_file") === true;
+    if (privateAssistantAskCompletion) {
+      const routeContext = input.deliveryRouteContext;
+      if (!routeContext) {
+        throw new VaultCliError(
+          "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_UNAVAILABLE",
+          "Private Assistant Ask completion route is unavailable.",
+          { retryable: false },
+        );
+      }
+      const targetKind = request.targetKind ?? "thread";
+      await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+        actualRoute: {
+          actorId: routeContext.actorId,
+          channel: "linq",
+          delivery: {
+            kind: targetKind,
+            ...(targetKind === "participant" && candidateFromPhoneNumber
+              ? {
+                  source: {
+                    fromPhoneNumber: candidateFromPhoneNumber,
+                    kind: "linq" as const,
+                  },
+                }
+              : {}),
+            target: deliveryContext?.target ?? request.target,
+          },
+          identityId: routeContext.identityId,
+          threadId: routeContext.threadId,
+          threadIsDirect: routeContext.threadIsDirect,
+        },
+        effectsPort: input.effectsPort ?? null,
+        intentId: input.intentId ?? null,
+        media: request.media ?? [],
+        message: request.message,
+        now: new Date(),
+        signal: signal ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      });
+    }
     const engagement =
       await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
         answeredMailboxItemIds: request.answeredMailboxItemIds,
@@ -4763,10 +4854,6 @@ async function assertHostedPrivateAssistantAskCompletionAtProviderEntry(input: {
     );
   }
   const proof = requireHostedPrivateAssistantAskCompletionProof(current);
-  assertHostedPrivateAssistantAskCompletionLive({
-    expiresAt: proof.assistantAskCompletionExpiresAt,
-    now: input.now,
-  });
   if (
     input.media.length !== 0
     || current.message !== input.message
@@ -4792,7 +4879,14 @@ async function assertHostedPrivateAssistantAskCompletionAtProviderEntry(input: {
       { retryable: true },
     );
   }
-  await assertAuthority(proof, { signal: input.signal });
+  const authority = await assertAuthority(proof, { signal: input.signal });
+  if (authority?.assistantAskFallbackRequired === true) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_FALLBACK_PERSISTED",
+      "Private Assistant Ask completion changed to its group fallback before provider delivery.",
+      { retryable: false },
+    );
+  }
 }
 
 function hostedPrivateAssistantAskCompletionRoutesEqual(

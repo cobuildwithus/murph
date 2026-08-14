@@ -45,13 +45,6 @@ const pendingSetup = {
     },
   },
 };
-const preparedPendingSetupClaim = {
-  id: pendingSetup.id,
-  ownerMemberId: pendingSetup.ownerMemberId,
-  payloadEncrypted: "prepared-pending-ciphertext",
-  payloadRootKeyId: "root_pending",
-  recipientPhoneLookupKey: pendingSetup.recipientPhoneLookupKey,
-};
 describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -77,7 +70,8 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner"],
-      preparedPendingSetupClaim,
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
       recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
       requiredPendingSetupCandidateId: pendingSetup.id,
       senderMemberId: "member_first_sender",
@@ -93,10 +87,13 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     expect(mocks.claimPendingSetup).toHaveBeenCalledExactlyOnceWith({
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner"],
-      preparedClaim: preparedPendingSetupClaim,
+      prepared: undefined,
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
       recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
       requiredCandidateId: pendingSetup.id,
       senderMemberId: "member_first_sender",
+      threadId: "chat_group",
       tx,
     });
     expect(mocks.ensureThreadContainer).toHaveBeenCalledWith(
@@ -141,6 +138,8 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner", "member_first_sender"],
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
       recipientPhoneLookupKeys: ["hplk_line"],
       senderMemberId: "member_first_sender",
       threadId: "chat_group",
@@ -166,6 +165,8 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner", "member_first_sender"],
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
       recipientPhoneLookupKeys: ["hplk_line"],
       senderMemberId: "member_first_sender",
       threadId: "chat_group",
@@ -194,6 +195,8 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner"],
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
       recipientPhoneLookupKeys: ["hplk_line"],
       senderMemberId: "member_first_sender",
       threadId: "chat_group",
@@ -224,6 +227,8 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_first_sender"],
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
       recipientPhoneLookupKeys: ["hplk_unknown_line"],
       senderMemberId: "member_first_sender",
       threadId: "chat_group",
@@ -251,6 +256,8 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner"],
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
       recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
       requiredPendingSetupCandidateId: pendingSetup.id,
       senderMemberId: "member_first_sender",
@@ -264,5 +271,50 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     expect(mocks.ensureThreadContainer).not.toHaveBeenCalled();
     expect(mocks.upsertPreferences).not.toHaveBeenCalled();
     expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the sender when a required setup payload was permanently invalid", async () => {
+    mocks.claimPendingSetup.mockResolvedValue({
+      kind: "none",
+      reason: "invalid_payload",
+    });
+
+    await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
+      accountLookupKey: "hplk_recovered_line",
+      fallbackOwnerMemberId: "member_first_sender",
+      linqService: "iMessage",
+      mailboxDedupeKey: "event_group",
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
+      participantMemberIds: ["member_prepared_owner"],
+      incomingRecipientPhoneLookupKeys: ["hplk_recovered_line"],
+      recoveredRecipientPhoneLookupKey: "hplk_recovered_line",
+      recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
+      requiredPendingSetupCandidateId: pendingSetup.id,
+      senderMemberId: "member_first_sender",
+      threadId: "chat_group",
+      tx,
+    })).resolves.toMatchObject({
+      kind: "ensured",
+      ownerMemberId: "member_first_sender",
+      ownerResolution: "fallback_sender",
+      pendingSetupApplied: false,
+      pendingSetupResolution: "invalid_payload",
+    });
+
+    expect(mocks.ensureThreadContainer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerMemberId: "member_first_sender",
+      }),
+    );
+    expect(mocks.consumePendingSetup).not.toHaveBeenCalled();
+    expect(mocks.upsertPreferences).not.toHaveBeenCalled();
+    expect(mocks.bindUsageReferral).toHaveBeenCalledExactlyOnceWith({
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
+      ownerMemberId: "member_first_sender",
+      targetChannel: "linq",
+      targetLinqService: "iMessage",
+      targetContainerMemberId: "member_group_container",
+      tx,
+    });
   });
 });

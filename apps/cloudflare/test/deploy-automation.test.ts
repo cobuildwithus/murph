@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
-  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
@@ -15,7 +14,6 @@ import {
   resolveCloudflareDeployPaths,
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
-import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 import { buildHostedRunnerContainerPlatformEnv } from "../src/runner-env.ts";
 import { parseJsoncObject } from "./helpers/jsonc.js";
@@ -277,6 +275,18 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      queues: {
+        consumers: Array<{
+          dead_letter_queue: string;
+          max_batch_size: number;
+          max_batch_timeout: number;
+          max_concurrency: number;
+          max_retries: number;
+          queue: string;
+          retry_delay: number;
+        }>;
+        producers: Array<{ binding: string; queue: string }>;
+      };
       r2_buckets: Array<{
         binding: string;
         bucket_name: string;
@@ -330,6 +340,10 @@ describe("hosted deploy automation helpers", () => {
         name: "DATABASE_HEALTH_MONITOR",
       },
       {
+        class_name: "DeviceWebhookQueueHealthDurableObject",
+        name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
+      },
+      {
         class_name: "RunnerContainer",
         name: "RUNNER_CONTAINER",
       },
@@ -361,6 +375,10 @@ describe("hosted deploy automation helpers", () => {
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
         tag: "v4",
       },
+      {
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+        tag: "v5",
+      },
     ]);
     expect(config).toMatchObject({
       triggers: {
@@ -379,7 +397,29 @@ describe("hosted deploy automation helpers", () => {
         preview_bucket_name: "hosted-bundles-preview",
       },
     ]);
-    expect(config).not.toHaveProperty("queues");
+    expect(config.queues).toEqual({
+      consumers: [
+        {
+          dead_letter_queue: "hosted-worker-device-webhooks-dlq",
+          max_batch_size: 100,
+          max_batch_timeout: 5,
+          max_concurrency: 1,
+          max_retries: 10,
+          queue: "hosted-worker-device-webhooks",
+          retry_delay: 30,
+        },
+      ],
+      producers: [
+        {
+          binding: "DEVICE_WEBHOOK_QUEUE",
+          queue: "hosted-worker-device-webhooks",
+        },
+        {
+          binding: "DEVICE_WEBHOOK_DLQ",
+          queue: "hosted-worker-device-webhooks-dlq",
+        },
+      ],
+    });
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
     expect(config.observability).toEqual({
       enabled: true,
@@ -427,7 +467,6 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
-    expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
@@ -523,6 +562,10 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      queues: {
+        consumers: unknown[];
+        producers: unknown[];
+      };
       r2_buckets: Array<{
         binding: string;
         bucket_name: string;
@@ -567,6 +610,10 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      queues: {
+        consumers: unknown[];
+        producers: unknown[];
+      };
       r2_buckets: Array<{
         binding: string;
         bucket_name: string;
@@ -608,8 +655,7 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
     expect(checkedInConfig.r2_buckets).toEqual(generatedConfig.r2_buckets);
-    expect(checkedInConfig).not.toHaveProperty("queues");
-    expect(generatedConfig).not.toHaveProperty("queues");
+    expect(checkedInConfig.queues).toEqual(generatedConfig.queues);
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
     expect(checkedInConfig.triggers).toEqual(generatedConfig.triggers);
   });
@@ -802,7 +848,6 @@ describe("hosted deploy automation helpers", () => {
 
     expect(buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
-      AGENTMAIL_API_KEY: "agentmail-secret",
       GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
@@ -1103,5 +1148,38 @@ describe("hosted deploy automation helpers", () => {
     expect(deployNoOcWorker).toBeGreaterThan(-1);
     expect(deleteOcBuckets).toBeGreaterThan(deployNoOcWorker);
     expect(removeWebGuard).toBeGreaterThan(deleteOcBuckets);
+  });
+
+  it("keeps the daily-report rollback floor after transient mailbox state drains", async () => {
+    const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
+    const groupChallengeContract = await readFile(
+      new URL("../../../agent-docs/product-specs/group-challenge-data-diagnostics.md", import.meta.url),
+      "utf8",
+    );
+    const sectionStart = deployGuide.indexOf("Member-reported daily metrics add the");
+    const sectionEnd = deployGuide.indexOf("The scheduled Linq authority release", sectionStart);
+    const contractStart = groupChallengeContract.indexOf("Member-reported daily metrics use");
+    const contractEnd = groupChallengeContract.indexOf("## Acceptance cases", contractStart);
+    expect(sectionStart).toBeGreaterThan(-1);
+    expect(sectionEnd).toBeGreaterThan(sectionStart);
+    expect(contractStart).toBeGreaterThan(-1);
+    expect(contractEnd).toBeGreaterThan(contractStart);
+
+    const dailyReportRollout = deployGuide.slice(sectionStart, sectionEnd);
+    const dailyReportContract = groupChallengeContract.slice(contractStart, contractEnd);
+    expect(dailyReportRollout).toContain("hard rollback floor");
+    expect(dailyReportRollout).toContain("after the transient mailbox item drains");
+    expect(dailyReportRollout).toMatch(/never roll the runner below this\s+floor afterward/u);
+    expect(dailyReportRollout).toContain("existing meal-photo import");
+    expect(dailyReportRollout).toContain("projection rebuild");
+    expect(dailyReportRollout).toContain("no event rewrite");
+    expect(dailyReportContract).toContain("`apps/cloudflare/DEPLOY.md` is the authoritative rollout and");
+    expect(dailyReportContract).toContain("permanent contracts/query/runner rollback floor");
+    expect(dailyReportContract).toMatch(/independent of retained, pending, unconsumed, or\s+drained mailbox work/u);
+
+    for (const owner of [dailyReportRollout, dailyReportContract]) {
+      expect(owner).not.toContain("rollback floor while any report is retained or unconsumed");
+      expect(owner).not.toContain("until the retained population has drained");
+    }
   });
 });

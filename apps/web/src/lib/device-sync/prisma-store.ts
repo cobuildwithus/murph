@@ -36,10 +36,14 @@ import {
 } from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
-import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
+import type {
+  CompanionHrvNightReceiptInspection,
+  PreparedHostedDeviceSyncDirtyConnectionUpsert,
+} from "./prisma-store/dirty-connections";
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
+  type HostedConnectionSourceAdmissionCandidate,
   type HostedDeviceConnectionSource,
   type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
@@ -88,9 +92,15 @@ export {
   generateHostedAgentBearerToken,
 } from "./prisma-store/agent-sessions";
 export {
+  HostedDeviceSyncDirtyPreparationMismatchError,
+  hasHostedDeviceSyncDirtyResourcePayload,
+  type PreparedHostedDeviceSyncDirtyConnectionUpsert,
+} from "./prisma-store/dirty-connections";
+export {
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
+  type HostedConnectionSourceAdmissionCandidate,
   type HostedDeviceConnectionSource,
   type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
@@ -258,8 +268,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.webhookTraces.releaseWebhookTrace(provider, traceId, claimToken);
   }
 
-  async markWebhookReceived(accountId: string, now: string): Promise<void> {
-    return this.connections.markWebhookReceived(accountId, now);
+  async markWebhookReceived(
+    accountId: string,
+    now: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
+    return this.connections.markWebhookReceived(accountId, now, tx);
   }
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
@@ -425,6 +439,19 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.upsertDirtyConnection(input);
   }
 
+  async prepareDirtyConnectionUpsert(
+    input: Omit<UpsertHostedDeviceSyncDirtyConnectionInput, "tx">,
+  ): Promise<PreparedHostedDeviceSyncDirtyConnectionUpsert> {
+    return this.dirtyConnections.prepareDirtyConnectionUpsert(input);
+  }
+
+  async upsertDirtyConnectionWithPreparedPlanTx(input: {
+    prepared: PreparedHostedDeviceSyncDirtyConnectionUpsert;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
+    return this.dirtyConnections.upsertDirtyConnectionWithPreparedPlanTx(input);
+  }
+
   async inspectCompanionHrvNightReceipt(input: {
     connectionIds: readonly string[];
     nightDate: string;
@@ -448,6 +475,14 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient,
   ): Promise<boolean> {
     return this.dirtyConnections.hasPendingDirtyConnection(connectionId, tx);
+  }
+
+  async shouldRequestWakeForDirtyConnectionUpsert(input: {
+    connectionId: string;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    return this.dirtyConnections.shouldRequestWakeForDirtyConnectionUpsert(input);
   }
 
   async hasPendingDirtyConnectionForUser(
@@ -527,6 +562,14 @@ export class PrismaDeviceSyncControlPlaneStore
       (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
       && (!input.status || source.status === input.status)
     );
+  }
+
+  async listConnectionSourceAdmissionCandidates(input: {
+    connectionId: string;
+    sourceProviderSlug: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
+    return this.sources.listConnectionSourceAdmissionCandidates(input);
   }
 
   async listConnectionSourcesForConnections(

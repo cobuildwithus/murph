@@ -549,6 +549,16 @@ enum HostedPhysicalNoteStatus {
   failed
 }
 
+enum HostedPhysicalNoteFailureReason {
+  recipient_address
+  artwork
+  service_unavailable
+  request_invalid
+  prior_note_unresolved
+  prior_note_accepted
+  unknown
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -638,6 +648,8 @@ model HostedMember {
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
   threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
   pendingGroupSetup              HostedPendingGroupSetup?
+  groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")
+  groupCurrentSenderClarificationsAsTarget  HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -907,6 +919,7 @@ model HostedPhysicalNote {
   provider                 String                   @default("lob")
   providerLetterId         String?                  @unique @map("provider_letter_id")
   status                   HostedPhysicalNoteStatus @default(starting)
+  failureReason            HostedPhysicalNoteFailureReason? @map("failure_reason")
   complimentaryOfferCode   String?                  @map("complimentary_offer_code")
   providerCostUsdMicros    BigInt                   @map("provider_cost_usd_micros")
   pricingVersion           String                   @map("pricing_version")
@@ -917,6 +930,7 @@ model HostedPhysicalNote {
 
   @@unique([memberId, requestKey])
   @@unique([memberId, complimentaryOfferCode])
+  @@index([memberId, status, failureReason, createdAt])
   @@map("hosted_physical_note")
 }
 
@@ -1081,6 +1095,7 @@ model HostedMailboxItem {
   @@index([userId, expiresAt])
   @@index([expiresAt, id])
   @@index([createdAt, id])
+  @@index([consumedAt, id], map: "hosted_mailbox_item_consumed_at_id_idx")
   @@map("hosted_mailbox_item")
 }
 
@@ -1125,6 +1140,7 @@ model HostedIngressLatencyTrace {
 
   @@unique([userId, mailboxItemId])
   @@index([source, acceptedAt])
+  @@index([source, assistantInputStagedAt], map: "hosted_ingress_latency_trace_source_staged_at_idx")
   @@index([source, providerStartAt])
   @@index([userId, acceptedAt])
   @@index([acceptedAt, id])
@@ -1294,6 +1310,7 @@ model HostedAccountGroupInvite {
   acceptedBy                      HostedMember?       @relation("HostedAccountGroupInviteAcceptor", fields: [acceptedByMemberId], references: [id], onDelete: SetNull)
 
   @@index([groupId, status, createdAt])
+  @@index([groupId, status, expiresAt, id], map: "hagi_group_status_expires_id_idx")
   @@index([targetPhoneLookupKey])
   @@index([targetTelegramUsernameLookupKey], map: "hagi_target_telegram_username_lookup_key_idx")
   @@index([targetEmailLookupKey], map: "hagi_target_email_lookup_key_idx")
@@ -1807,6 +1824,25 @@ model HostedGroupDisclosureGrant {
   @@map("hosted_group_disclosure_grant")
 }
 
+model HostedGroupCurrentSenderClarification {
+  groupRuntimeMemberId       String       @map("group_runtime_member_id")
+  targetMemberId             String       @map("target_member_id")
+  originAssistantInputId     String       @unique @map("origin_assistant_input_id")
+  originSessionId            String       @map("origin_session_id")
+  sourceCausalSeq            BigInt       @map("source_causal_seq")
+  resolvedByAssistantInputId String?      @map("resolved_by_assistant_input_id")
+  resolvedResultDestination  String?      @map("resolved_audience")
+  expiresAt                  DateTime     @map("expires_at")
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  groupRuntimeMember         HostedMember @relation("HostedGroupCurrentSenderClarificationRuntime", fields: [groupRuntimeMemberId], references: [id], onDelete: Cascade)
+  targetMember               HostedMember @relation("HostedGroupCurrentSenderClarificationTarget", fields: [targetMemberId], references: [id], onDelete: Cascade)
+
+  @@id([groupRuntimeMemberId, targetMemberId])
+  @@index([expiresAt])
+  @@map("hosted_group_current_sender_clarification")
+}
+
 model HostedVaultShare {
   id                           String       @id
   grantorMemberId              String       @map("grantor_member_id")
@@ -2071,6 +2107,7 @@ model HostedLinqDelivery {
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
+  @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
   @@map("hosted_linq_delivery")
 }
 

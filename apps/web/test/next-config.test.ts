@@ -371,11 +371,11 @@ test("next.config leaves agent guidance under repository ownership", () => {
   assert.equal(productionNextConfig.agentRules, false);
 });
 
-test("production build uses the bounded Turbopack path", () => {
+test("production build config enables the bounded Webpack worker path", () => {
   assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
-  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, undefined);
-  assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, undefined);
+  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
+  assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);
 });
 
 test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {

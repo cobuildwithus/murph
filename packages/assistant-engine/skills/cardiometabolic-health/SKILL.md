@@ -1,6 +1,6 @@
 ---
 name: cardiometabolic-health
-description: Use for glucose A1c CGM ApoB LDL triglycerides blood pressure home measurement and lifestyle cardiometabolic marker questions.
+description: Use for glucose A1c CGM insulin records ApoB LDL triglycerides blood pressure home measurement and lifestyle cardiometabolic marker questions.
 ---
 
 # Cardiometabolic Health
@@ -22,6 +22,15 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- For a connected insulin-record question, use one bounded day or short-range
+  read: `vault-cli event list --kind intervention_session --from <date> --to <date> --limit 200 --format json`.
+  Retain only items whose `data.source` is `device` and whose
+  `data.interventionType` is `insulin-injection`; read the stored dose from
+  `data.fields.dose-amount` and `data.fields.dose-unit`. Report the matching
+  records returned, not an exhaustive total. Because this read has no
+  continuation signal, no match means only that this bounded read found none;
+  it is not proof that no insulin was recorded. Never turn a record read into
+  advice to start, stop, retime, or change an insulin dose.
 - Check actual lab values with dates, fasting status, meds, weight/waist trend, BP measurement method, sleep, alcohol, activity, and family/history context if known.
 - For home BP, verify seated rest, cuff size, arm position, no caffeine/exercise/nicotine right before, two readings, and multiple days.
 - For CGM, look for repeated meal/context patterns rather than single spikes.

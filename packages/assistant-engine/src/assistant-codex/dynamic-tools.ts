@@ -1,4 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
+import { isStrictIsoDate } from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
@@ -7,7 +8,11 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH,
 } from '@murphai/hosted-execution/contracts'
+import {
+  HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+} from '@murphai/hosted-execution'
 import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
@@ -83,6 +88,7 @@ import {
 import {
   exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
+  telegramRichContentResponseCardV1Schema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -97,6 +103,9 @@ import {
 import type {
   AssistantConversationScope,
 } from '../assistant/conversation-policy.js'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../assistant/active-turn-input-journal.js'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -124,6 +133,7 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
@@ -226,6 +236,7 @@ import {
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
+  buildPhysicalNoteFailureInstruction,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
   resolvePhysicalNoteExplicitOriginInputId,
@@ -257,6 +268,7 @@ import {
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
@@ -307,9 +319,15 @@ const attachExerciseRoutineCardArgumentsSchema = z
   })
   .strict()
 
+const attachTelegramRichContentArgumentsSchema = z
+  .object({
+    card: telegramRichContentResponseCardV1Schema,
+  })
+  .strict()
+
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(40),
+    media: z.array(z.unknown()).max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -424,10 +442,35 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
   z
     .object({
-      action: z.literal('message_current_sender'),
+      action: z.enum([
+        'clarify_current_sender',
+        'continue_current_sender_in_group',
+        'continue_current_sender_privately',
+        'message_current_sender',
+      ]),
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('record_current_sender_daily_metric'),
+      date: z.string().refine(isStrictIsoDate, {
+        message: 'date must be a valid YYYY-MM-DD calendar date',
+      }),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+      metric: z.enum(
+        HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS as [string, ...string[]],
+      ),
+      unit: z
+        .string()
+        .min(1)
+        .max(HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH)
+        .regex(/^[A-Za-z0-9._/%-]+$/u),
+      value: z.number(),
     })
     .strict(),
   z
@@ -921,7 +964,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'group-email' | 'vault-file'
+      owner?: 'current-sender-ask' | 'group-email' | 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -953,6 +996,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  externallyVisibleOutput?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
@@ -966,7 +1010,23 @@ export interface MurphDynamicToolExecutionResult {
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
+type CurrentSenderTurnDecision =
+  | 'clarification'
+  | 'group_continuation'
+  | 'group_new'
+  | 'private_continuation'
+  | 'private_new'
+
+interface CurrentSenderTurnDecisionClaim {
+  decision: CurrentSenderTurnDecision
+  groupNotice: Promise<boolean> | null
+}
+
 export interface MurphGroupSharedReadTurnState {
+  currentSenderDecisionByMessageRef?: Map<
+    string,
+    CurrentSenderTurnDecisionClaim
+  >
   invalid: boolean
   readProjectionScopeKeyBatches: string[][]
   roster: Array<{
@@ -989,7 +1049,7 @@ type MurphGroupToolRequest =
         action:
           | 'ask'
           | 'ask_current_sender'
-          | 'message_current_sender'
+          | 'record_current_sender_daily_metric'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -1018,10 +1078,18 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'ask_current_sender'
+      audience?: 'current_sender' | 'group'
       messageRef: string
+      mode: 'clarification' | 'continuation' | 'new'
     }
   | {
-      action: 'message_current_sender'
+      action: 'record_current_sender_daily_metric'
+      dailyMetric: {
+        date: string
+        metric: string
+        unit: string
+        value: number
+      }
       messageRef: string
     }
   | {
@@ -1274,12 +1342,65 @@ export type MurphDynamicToolRequest =
       tool: string | null
     }
 
+export type CurrentSenderTurnDecisionClaimResult =
+  | 'claimed'
+  | 'conflict'
+  | 'not_current_sender'
+  | 'replay'
+  | 'unavailable'
+
+function currentSenderTurnDecisionForGroupRequest(
+  request: Extract<MurphGroupToolRequest, { action: 'ask_current_sender' }>,
+): CurrentSenderTurnDecision {
+  return request.mode === 'clarification'
+    ? 'clarification'
+    : request.audience === 'group'
+      ? request.mode === 'continuation'
+        ? 'group_continuation'
+        : 'group_new'
+      : request.mode === 'continuation'
+        ? 'private_continuation'
+        : 'private_new'
+}
+
+export function claimCurrentSenderTurnDecision(input: {
+  request: MurphDynamicToolRequest
+  turnState: MurphGroupSharedReadTurnState | null
+}): CurrentSenderTurnDecisionClaimResult {
+  if (
+    input.request.kind !== 'group'
+    || input.request.request.action !== 'ask_current_sender'
+  ) {
+    return 'not_current_sender'
+  }
+  const decisionByMessageRef =
+    input.turnState?.currentSenderDecisionByMessageRef
+  if (!decisionByMessageRef) {
+    return 'unavailable'
+  }
+  const decision = currentSenderTurnDecisionForGroupRequest(
+    input.request.request,
+  )
+  const existing = decisionByMessageRef.get(input.request.request.messageRef)
+  if (existing) {
+    return existing.decision === decision ? 'replay' : 'conflict'
+  }
+  decisionByMessageRef.set(input.request.request.messageRef, {
+    decision,
+    groupNotice: null,
+  })
+  return 'claimed'
+}
+
 function isMurphDynamicToolNamespace(namespace: string | null): boolean {
   return namespace === MURPH_SEND_PROGRESS_UPDATE_TOOL.namespace
 }
 
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
+  input?: {
+    automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+  },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
   if (!request) {
@@ -1296,6 +1417,8 @@ export function readMurphDynamicToolRequest(
 
   const automationRequest = readAutomationDynamicToolRequest({
     arguments: request.arguments,
+    relativeDateReferenceWindow:
+      input?.automationRelativeDateReferenceWindow ?? null,
     tool: request.tool,
   })
   if (automationRequest) {
@@ -1414,6 +1537,20 @@ export function readMurphDynamicToolRequest(
     }
     case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
       const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-card-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'attach-response-card',
+        card: parsed.card,
+      }
+    }
+    case MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name: {
+      const parsed = parseAttachTelegramRichContentArguments(request.arguments)
       if (!parsed.ok) {
         return {
           kind: 'invalid-response-card-arguments',
@@ -1861,8 +1998,41 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
-    case 'invalid-automation-arguments':
-      return toolTextResult(false, 'invalid automation arguments')
+    case 'invalid-automation-arguments': {
+      switch (input.request.safeFailureCode) {
+        case 'local_at_gap':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask for another local time; retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${input.request.localAtTargetKey}, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
+          )
+        case 'local_at_fold':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask whether the earlier or later occurrence is intended; retry with schedule.localAt.date=${input.request.resolvedLocalDate}, schedule.localAt.fold, and localAtRecoveryKey=${input.request.localAtTargetKey} instead of relativeDay, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
+          )
+        case 'local_at_invalid_timezone':
+          return toolTextResult(
+            false,
+            'the reminder timezone is invalid; ask for or infer a valid IANA timezone before retrying',
+          )
+        case 'local_at_reference_unavailable':
+          return toolTextResult(
+            false,
+            'the relative reminder date could not be safely anchored to the accepted message; ask the user for an explicit calendar date before retrying',
+          )
+        case 'local_at_reference_spans_dates':
+          return toolTextResult(
+            false,
+            'the accepted messages span different calendar dates in that timezone; ask the user for an explicit calendar date before retrying',
+          )
+        default:
+          return toolTextResult(false, 'invalid automation arguments')
+      }
+    }
     case 'invalid-device-arguments':
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
@@ -2024,6 +2194,11 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation-local-at-recovery-dismissal':
+      return toolTextResult(
+        false,
+        'local-time recovery dismissal is unavailable outside the active root turn',
+      )
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
       if (!automationTool) {
@@ -2353,6 +2528,18 @@ export async function executeMurphDynamicToolRequest(input: {
         })
         switch (result.status) {
           case 'accepted':
+            if (result.failureReason === 'prior_note_accepted') {
+              return toolTextResult(
+                true,
+                JSON.stringify({
+                  failureReason: result.failureReason,
+                  note:
+                    'Provider records show that this earlier physical-note submission was accepted for printing. This replay did not send another note. Historical billing evidence is unavailable, so do not describe it as paid or complimentary and do not state a cost. Say accepted for printing, not delivered.',
+                  physicalNoteId: result.physicalNoteId,
+                  status: result.status,
+                }),
+              )
+            }
             return toolTextResult(
               true,
               JSON.stringify({
@@ -2405,7 +2592,14 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'The physical note was not accepted for printing.',
+              JSON.stringify({
+                failureReason: result.failureReason ?? 'unknown',
+                note: buildPhysicalNoteFailureInstruction(
+                  result.failureReason,
+                ),
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
             )
         }
       } catch {
@@ -2633,6 +2827,7 @@ export async function executeMurphDynamicToolRequest(input: {
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
+        progressDelivery: input.progressDelivery,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
         vaultRoot: input.vaultRoot ?? null,
@@ -2730,13 +2925,24 @@ export async function executeMurphDynamicToolRequest(input: {
         acceptedInvocationSessionId ??
         userActionScope?.originSessionId ??
         null
+      const usesDetachedImageGeneration = Boolean(
+        imageGenerationLauncher && originAssistantInputId,
+      )
+      if (
+        !usesDetachedImageGeneration
+        && (input.currentResponseMedia?.length ?? 0)
+          >= ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS
+      ) {
+        return toolTextResult(false, 'response media limit reached')
+      }
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
       const generateImageArgs = input.request.args
       if (
-        imageGenerationLauncher
+        usesDetachedImageGeneration
+        && imageGenerationLauncher
         && originAssistantInputId
       ) {
         const launch = imageGenerationLauncher.launch({
@@ -3468,24 +3674,22 @@ function groupSharedUnavailableToolResult(
 /**
  * One read returns every member crossed with every requested scope. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one three-state status. Non-workout record arrays remain
+ * is collapsed to one four-state status. Non-workout record arrays remain
  * byte-identical. `workouts.v0` additionally compacts repeated day identity,
  * time semantics, completion watermark, and activity kinds because its
  * per-workout lists are the one record payload dense enough to need that extra
  * reduction. Encrypted stored records and the complete Web response retain
  * their validated shapes.
- */
-/**
- * `grantStatus` and `dataStatus` only ever encode three states between them, so
- * the model reads one field instead of decoding a pair.
+ * The model reads the four collapsed states from one field instead of decoding
+ * the grant/data pair.
  */
 function groupSharedProjectionStatus(
   projection: AssistantHostedGroupSharedProjection,
-): 'available' | 'missing' | 'not_granted' {
+): 'available' | 'missing' | 'not_granted' | 'pending' {
   if (projection.grantStatus === 'not_granted') {
     return 'not_granted'
   }
-  return projection.dataStatus === 'missing' ? 'missing' : 'available'
+  return projection.dataStatus
 }
 
 function groupSharedWorkoutsModelProjection(
@@ -3901,21 +4105,6 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
-    response.action === 'message_current_sender'
-    && response.result.status === 'unavailable'
-    && response.result.unavailableReason
-      === 'same_channel_direct_route_unavailable'
-  ) {
-    return {
-      ...response,
-      result: {
-        ...response.result,
-        recovery:
-          'Ask the sender to open a direct Murph chat on the same channel, then retry.',
-      },
-    }
-  }
-  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {
@@ -4157,10 +4346,12 @@ async function executeGroupTool(input: {
   groupSharedReadTurnState: MurphGroupSharedReadTurnState | null
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
+  progressDelivery: AssistantProgressDelivery | null
   request: MurphGroupToolRequest
   toolCallId: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  let currentSenderGroupPreviewSent = false
   if (input.request.action === 'read_shared') {
     if (
       'audience' in input.request
@@ -4372,10 +4563,7 @@ async function executeGroupTool(input: {
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
     }
-  } else if (
-    input.request.action === 'ask_current_sender'
-    || input.request.action === 'message_current_sender'
-  ) {
+  } else if (input.request.action === 'ask_current_sender') {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
     if (
@@ -4384,11 +4572,80 @@ async function executeGroupTool(input: {
     ) {
       return toolTextResult(
         false,
-        'current-sender actions require the selected accepted message in this group turn',
+        'current-sender request requires the selected accepted message in this group turn',
+      )
+    }
+    const decisionByMessageRef =
+      input.groupSharedReadTurnState?.currentSenderDecisionByMessageRef
+    if (!decisionByMessageRef) {
+      return toolTextResult(
+        false,
+        'current-sender decision authority is unavailable for this turn',
+      )
+    }
+    const decision = currentSenderTurnDecisionForGroupRequest(input.request)
+    const claim = decisionByMessageRef.get(input.request.messageRef)
+    if (!claim) {
+      return toolTextResult(
+        false,
+        'current-sender decision was not claimed at server request intake',
+      )
+    }
+    if (claim.decision !== decision) {
+      return toolTextResult(
+        false,
+        'current-sender request conflicts with an earlier decision for this Message',
+      )
+    }
+    if (
+      input.request.audience === 'group'
+      && claim.groupNotice === null
+    ) {
+      claim.groupNotice = sendCurrentSenderGroupNotice({
+        deliveryContextOrdinal: input.deliveryContextOrdinal,
+        messageRef: input.request.messageRef,
+        progressDelivery: input.progressDelivery,
+      })
+    }
+    if (input.request.audience === 'group') {
+      const previewSent = claim.groupNotice
+        ? await claim.groupNotice
+        : false
+      if (!previewSent) {
+        return toolTextResult(
+          false,
+          'group sharing is unavailable because the required advance notice could not be delivered',
+        )
+      }
+      currentSenderGroupPreviewSent = true
+    }
+    request = {
+      action: 'ask_current_sender',
+      ...(input.request.audience === undefined
+        ? {}
+        : { audience: input.request.audience }),
+      mode: input.request.mode,
+      origin: {
+        assistantInputId: input.request.messageRef,
+        kind: 'accepted_input',
+        sessionId: userActionScope.originSessionId,
+      },
+    }
+  } else if (input.request.action === 'record_current_sender_daily_metric') {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'group'
+      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+    ) {
+      return toolTextResult(
+        false,
+        'current-sender request requires the selected accepted message in this group turn',
       )
     }
     request = {
-      action: input.request.action,
+      action: 'record_current_sender_daily_metric',
+      dailyMetric: input.request.dailyMetric,
       origin: {
         assistantInputId: input.request.messageRef,
         kind: 'accepted_input',
@@ -4606,8 +4863,24 @@ async function executeGroupTool(input: {
     const payload = generatedAvatarCapture
       ? { ...modelResult, generatedImage: generatedAvatarCapture }
       : modelResult
+    const currentSenderAccepted =
+      input.request.action === 'ask_current_sender'
+      && result.action === 'ask_current_sender'
+      && result.result.status === 'accepted'
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
+      ...(currentSenderAccepted
+        ? {
+            finalActionPatch: {
+              kind: 'none' as const,
+              owner: 'current-sender-ask' as const,
+            },
+          }
+        : {}),
+      ...(input.request.action === 'ask_current_sender'
+        && currentSenderGroupPreviewSent
+        ? { externallyVisibleOutput: true }
+        : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {
@@ -4623,10 +4896,33 @@ async function executeGroupTool(input: {
           ? buildGroupAskRequestFailureText(error)
           : 'group tool request failed',
       ),
+      ...(currentSenderGroupPreviewSent
+        ? { externallyVisibleOutput: true }
+        : {}),
       ...(runtimeIssueInput ? { runtimeIssueInputs: [runtimeIssueInput] } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+async function sendCurrentSenderGroupNotice(input: {
+  deliveryContextOrdinal: number | null
+  messageRef: string
+  progressDelivery: AssistantProgressDelivery | null
+}): Promise<boolean> {
+  if (!input.progressDelivery || input.deliveryContextOrdinal === null) {
+    return false
+  }
+  const preview = await input.progressDelivery.send(
+    'I’ll ask your Murph and share the answer here.',
+    {
+      deliveryContextOrdinal: input.deliveryContextOrdinal,
+      required: true,
+      source: 'system',
+      targetInputId: input.messageRef,
+    },
+  )
+  return preview.kind === 'sent'
 }
 
 type GroupToolFailureCategory =
@@ -6298,12 +6594,32 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'clarify_current_sender'
+    || parsed.data.action === 'continue_current_sender_in_group'
+    || parsed.data.action === 'continue_current_sender_privately'
     || parsed.data.action === 'message_current_sender'
   ) {
+    const decision = readCurrentSenderToolDecision(parsed.data.action)
+    return {
+      ok: true,
+      request: {
+        action: 'ask_current_sender',
+        ...decision,
+        messageRef: parsed.data.message_ref,
+      },
+    }
+  }
+  if (parsed.data.action === 'record_current_sender_daily_metric') {
     return {
       ok: true,
       request: {
         action: parsed.data.action,
+        dailyMetric: {
+          date: parsed.data.date,
+          metric: parsed.data.metric,
+          unit: parsed.data.unit,
+          value: parsed.data.value,
+        },
         messageRef: parsed.data.message_ref,
       },
     }
@@ -6492,6 +6808,30 @@ function parseGroupArguments(
     }
   }
   return { ok: true, request: { action: 'read_current' } }
+}
+
+function readCurrentSenderToolDecision(action:
+  | 'ask_current_sender'
+  | 'clarify_current_sender'
+  | 'continue_current_sender_in_group'
+  | 'continue_current_sender_privately'
+  | 'message_current_sender'
+): {
+  audience?: 'current_sender' | 'group'
+  mode: 'clarification' | 'continuation' | 'new'
+} {
+  switch (action) {
+    case 'ask_current_sender':
+      return { audience: 'group', mode: 'new' }
+    case 'message_current_sender':
+      return { audience: 'current_sender', mode: 'new' }
+    case 'clarify_current_sender':
+      return { mode: 'clarification' }
+    case 'continue_current_sender_in_group':
+      return { audience: 'group', mode: 'continuation' }
+    case 'continue_current_sender_privately':
+      return { audience: 'current_sender', mode: 'continuation' }
+  }
 }
 
 function parseFinishWithoutReplyArguments(
@@ -6748,6 +7088,35 @@ function parseAttachExerciseRoutineCardArguments(
         schemaName,
         schemaRootKeys: readZodObjectRootKeys(
           attachExerciseRoutineCardArgumentsSchema,
+        ),
+        toolName,
+      }),
+    }
+  }
+
+  return {
+    card: parsed.data.card,
+    ok: true,
+  }
+}
+
+function parseAttachTelegramRichContentArguments(
+  value: unknown,
+):
+  | { ok: true; card: AssistantResponseCard }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const schemaName = 'murph.attach_telegram_rich_content.input'
+  const toolName = 'murph.attach_telegram_rich_content'
+  const parsed = attachTelegramRichContentArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachTelegramRichContentArgumentsSchema,
         ),
         toolName,
       }),

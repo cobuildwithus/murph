@@ -1,6 +1,7 @@
 ---
 title: 'CLI test artifact repair lock outlives a timed-out worker'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1662'
 ---
 
 ## Expected Behavior

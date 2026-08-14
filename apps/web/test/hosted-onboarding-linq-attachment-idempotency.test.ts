@@ -486,9 +486,9 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
       label: "retryable send responses whose bodies stall",
     },
   ])("leaves no live provider connection after $label", async ({ arm }) => {
-    // These branches only ever need the status, so nothing reads their bodies
-    // and fetchLinqApi's own timer is already cleared. Without an explicit end
-    // each one holds its connection open behind a settled operation.
+    // The SDK adapter drains every bounded control-plane response before the
+    // operation settles; the raw presigned upload path explicitly drains too.
+    // Either way, a status-only branch must not leave a live connection behind.
     provider.arm(arm);
     const startedAt = Date.now();
 
@@ -570,8 +570,8 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
       error = caught;
     }
 
-    // Headers arrived, so fetchLinqApi's own timer was already done; only the
-    // prepare deadline can stop this. It is provably before the message POST.
+    // The SDK attempt deadline remains active while the bounded body is read.
+    // The tighter prepare deadline is provably before the message POST.
     expect(isHostedLinqAttachmentSendPrepareFailure(error)).toBe(true);
     expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
     expect(Date.now() - startedAt).toBeLessThan(5_000);

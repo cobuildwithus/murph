@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
   signalHostedLinqGroupReactionMailbox: vi.fn(),
-  signalHostedRuntimeMaintenanceRuntime: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -86,7 +86,7 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context", ()
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
@@ -132,6 +132,12 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       },
       messageLookupKey: "hbidx:linq-message:v1:offer",
       membershipId: "membership_1",
+      projectionMaintenanceSignal: {
+        lane: "system",
+        laneSeq: "2",
+        mailboxItemId: "mailbox_projection_1",
+        memberId: "member_reactor",
+      },
       revokedVaultShareProjectionKinds: [],
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
     });
@@ -171,7 +177,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedLinqGroupReactionMailbox.mockResolvedValue(undefined);
-    mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
     mocks.markHostedLinqGroupJoinOfferHandledTx.mockResolvedValue(undefined);
   });
@@ -236,10 +242,16 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
-      userId: "member_reactor",
+      expectedUserId: "member_reactor",
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: "2",
+        userId: "member_reactor",
+      },
+      mailboxItemId: "mailbox_projection_1",
     });
     expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_item_join_confirmation_1",
@@ -273,7 +285,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.appendHostedLinqGroupReactionMailboxTx).toHaveBeenCalledWith(
       expect.objectContaining({ actor: null }),
     );
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort)
       .not.toHaveBeenCalled();
   });
@@ -808,6 +820,12 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       joinCode: "join_1",
       messageLookupKey: "hbidx:linq-message:v1:offer",
       membershipId: "membership_1",
+      projectionMaintenanceSignal: {
+        lane: "system",
+        laneSeq: "2",
+        mailboxItemId: "mailbox_projection_1",
+        memberId: "member_reactor",
+      },
       revokedVaultShareProjectionKinds: [],
       selectedVaultShareProjectionKinds: ["group-email.v0"],
     });
@@ -824,15 +842,21 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "accepted",
     });
 
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
-      userId: "member_reactor",
+      expectedUserId: "member_reactor",
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: "2",
+        userId: "member_reactor",
+      },
+      mailboxItemId: "mailbox_projection_1",
     });
   });
 
   it("accepts the reaction when either best-effort runtime signal fails", async () => {
-    mocks.signalHostedRuntimeMaintenanceRuntime.mockRejectedValueOnce(
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
       new Error("runtime unavailable"),
     );
     mocks.signalHostedLinqGroupReactionMailbox.mockRejectedValueOnce(
@@ -851,9 +875,15 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       reason: "accepted",
       status: "accepted",
     });
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
-      userId: "member_reactor",
+      expectedUserId: "member_reactor",
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: "2",
+        userId: "member_reactor",
+      },
+      mailboxItemId: "mailbox_projection_1",
     });
     expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_item_join_confirmation_1",
@@ -906,10 +936,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalHostedLinqGroupReactionMailbox).not.toHaveBeenCalled();
   });
 
-  it("bounds a stalled maintenance wake after confirmation recovery", async () => {
+  it("starts a bounded projection wake without blocking confirmation recovery", async () => {
     vi.useFakeTimers();
     try {
-      mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
       const prisma = createPrismaStub();
       const result = handleHostedGroupJoinOfferReaction({
         event: parseReactionEvent({ reactionType: "like" }),
@@ -922,9 +952,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         status: "accepted",
       });
       expect(
-        mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+        mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
       ).toBeLessThan(
-        mocks.signalHostedRuntimeMaintenanceRuntime.mock.invocationCallOrder[0],
+        mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
       );
     } finally {
       vi.useRealTimers();
@@ -934,7 +964,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
   it("uses read candidates for rotated offer lookup", async () => {
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: { ...TEST_KEYRING_ENTRIES },
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const storedMessageLookupKey = createHostedLinqMessageLookupKey("msg_offer_123");
     const storedThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
@@ -944,8 +974,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     if (!storedMessageLookupKey || !storedThreadIdentityLookupKey) {
       throw new Error("Expected prior-version lookup keys.");
     }
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-    clearHostedOnboardingEnvCache();
+    restoreKeyring();
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
@@ -1006,7 +1039,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("records revoked offers as a distinct skip reason", async () => {
@@ -1031,7 +1064,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
     expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 });
 

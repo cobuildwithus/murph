@@ -19,7 +19,9 @@ import {
   readDatabaseHealthPlanetScaleRequestCounts,
   resetDatabaseHealthMessageRequests,
   setDatabaseHealthClientWaitSeconds,
+  setDatabaseHealthMissingConnectionErrorScrapesRemaining,
   setDatabaseHealthNowMs,
+  setDatabaseHealthPooledErrors,
   setDatabaseHealthZeroEvidenceScrapesRemaining,
 } from "./database-health-fetch.ts";
 
@@ -60,6 +62,79 @@ describe("database health scheduled Worker path", () => {
       metrics: 2,
     });
     expect(readDatabaseHealthMessageRequests()).toEqual([]);
+  });
+
+  it("retries one safe connection-error-family omission inside the scheduled Durable Object run", async () => {
+    resetDatabaseHealthMessageRequests();
+    const scheduledAtMs = Date.now();
+    setDatabaseHealthNowMs(scheduledAtMs);
+    setDatabaseHealthClientWaitSeconds(0);
+    setDatabaseHealthMissingConnectionErrorScrapesRemaining(1);
+
+    const namespace = readDatabaseHealthNamespace();
+    const monitor = namespace.getByName("direct-counter-retry");
+    await monitor.runScheduledCheck({ scheduledAtMs });
+
+    await expect(
+      monitor.readRecentSamples({ limit: 10 }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        failureCode: null,
+        observedAtMs: scheduledAtMs,
+        scrapeStatus: "ok",
+      }),
+    ]);
+    await expect(
+      monitor.readAlertState(),
+    ).resolves.toMatchObject({
+      consecutiveScrapeFailures: 0,
+      incidentOpen: false,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+    expect(readDatabaseHealthPlanetScaleRequestCounts()).toEqual({
+      discovery: 2,
+      metrics: 2,
+    });
+    expect(readDatabaseHealthMessageRequests()).toEqual([]);
+  });
+
+  it("pages a pooled connection-error delta through a scheduled monitor", async () => {
+    resetDatabaseHealthMessageRequests();
+    const scheduledAtMs = Date.now();
+    setDatabaseHealthNowMs(scheduledAtMs);
+    setDatabaseHealthClientWaitSeconds(0);
+    setDatabaseHealthPooledErrors(5);
+    const monitor = readDatabaseHealthNamespace().getByName("pooled-errors");
+    await monitor.runScheduledCheck({ scheduledAtMs });
+    expect(readDatabaseHealthMessageRequests()).toEqual([]);
+
+    setDatabaseHealthNowMs(scheduledAtMs + FIVE_MINUTES_MS);
+    setDatabaseHealthPooledErrors(7);
+    await monitor.runScheduledCheck({
+      scheduledAtMs: scheduledAtMs + FIVE_MINUTES_MS,
+    });
+
+    const messageRequests = readDatabaseHealthMessageRequests();
+    expect(messageRequests).toHaveLength(2);
+    expect(messageRequests.map((request) => request.idempotencyKey).sort())
+      .toEqual([
+        "murph-db-1-1",
+        "murph-db-1-1-recipient-2",
+      ]);
+    expect(messageRequests[1]?.messageParts)
+      .toEqual(messageRequests[0]?.messageParts);
+    const message = messageRequests[0]?.messageParts[0]?.value;
+    expect(message).toContain(
+      "2 pooled application connection errors (port 6432)",
+    );
+    await expect(
+      monitor.readAlertState(),
+    ).resolves.toMatchObject({
+      incidentOpen: true,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
   });
 
   it("retains a truthful page through recovery and the hourly fence", async () => {

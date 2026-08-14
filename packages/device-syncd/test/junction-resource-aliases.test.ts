@@ -145,6 +145,30 @@ test("Junction webhooks canonicalize resource aliases before category inference"
     ["daily.data.hypnogram.created", "sleep_cycle", "summary"],
     ["daily.data.calories_active.updated", "calories_active", "timeseries"],
     ["daily.data.distance.updated", "distance", "timeseries"],
+    ["daily.data.body_mass_index.created", "body_mass_index", "timeseries"],
+    ["daily.data.carbohydrates.created", "carbohydrates", "timeseries"],
+    ["daily.data.body_fat.created", "fat", "timeseries"],
+    ["daily.data.forced_expiratory_volume_1.created", "forced_expiratory_volume_1", "timeseries"],
+    ["daily.data.forced_vital_capacity.created", "forced_vital_capacity", "timeseries"],
+    ["daily.data.heart_rate_alert.created", "heart_rate_alert", "timeseries"],
+    ["daily.data.inhaler_usage.created", "inhaler_usage", "timeseries"],
+    ["daily.data.insulin_injection.created", "insulin_injection", "timeseries"],
+    ["daily.data.lean_body_mass.created", "lean_body_mass", "timeseries"],
+    ["daily.data.peak_expiratory_flow_rate.created", "peak_expiratory_flow_rate", "timeseries"],
+    ["daily.data.sleep_apnea_alert.created", "sleep_apnea_alert", "timeseries"],
+    ["daily.data.waist_circumference.created", "waist_circumference", "timeseries"],
+    ["daily.data.calories_basal.created", "calories_basal", "timeseries"],
+    ["daily.data.daylight_exposure.created", "daylight_exposure", "timeseries"],
+    ["daily.data.fall.created", "fall", "timeseries"],
+    ["daily.data.floors_climbed.created", "floors_climbed", "timeseries"],
+    ["daily.data.handwashing.created", "handwashing", "timeseries"],
+    ["daily.data.stand_duration.created", "stand_duration", "timeseries"],
+    ["daily.data.stand_hour.created", "stand_hour", "timeseries"],
+    ["daily.data.uv_exposure.created", "uv_exposure", "timeseries"],
+    ["daily.data.wheelchair_push.created", "wheelchair_push", "timeseries"],
+    ["daily.data.workout_distance.created", "workout_distance", "timeseries"],
+    ["daily.data.workout_duration.created", "workout_duration", "timeseries"],
+    ["daily.data.workout_swimming_stroke.created", "workout_swimming_stroke", "timeseries"],
   ] as const;
 
   for (const [eventType, resource, resourceCategory] of cases) {
@@ -168,9 +192,11 @@ test("Junction webhooks canonicalize resource aliases before category inference"
       rawBody: webhook.rawBody,
       now: "2026-04-03T00:00:00.000Z",
     });
-    const payload = parsed.jobs[0]?.payload;
+    const webhookJob = parsed.jobs[0];
+    const payload = webhookJob?.payload;
 
     assert.equal(parsed.resourceCategory, resourceCategory);
+    assert.equal(webhookJob?.kind, "resource");
     assert.ok(payload);
     assert.equal(payload.resource, resource);
     assert.equal(payload.resourceCategory, resourceCategory);
@@ -502,21 +528,21 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
       resource: "body_weight",
       canonicalResource: "weight",
       category: "timeseries",
-      configuredResource: false,
+      configuredResource: true,
       path: /\/v2\/timeseries\/junction-user-1\/body_weight\/grouped/u,
     },
     {
       resource: "calories_active",
       canonicalResource: "calories_active",
       category: "timeseries",
-      configuredResource: false,
+      configuredResource: true,
       path: /\/v2\/timeseries\/junction-user-1\/calories_active\/grouped/u,
     },
     {
       resource: "distance",
       canonicalResource: "distance",
       category: "timeseries",
-      configuredResource: false,
+      configuredResource: true,
       path: /\/v2\/timeseries\/junction-user-1\/distance\/grouped/u,
     },
     {
@@ -549,7 +575,7 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
   }
 });
 
-test("Junction resource jobs re-infer category for dropped canonicalized timeseries aliases", async () => {
+test("Junction resource jobs re-infer category for canonicalized timeseries aliases", async () => {
   const seenUrls: string[] = [];
   const provider = createProvider(async (input) => {
     const url = readUrl(input);
@@ -565,6 +591,22 @@ test("Junction resource jobs re-infer category for dropped canonicalized timeser
             body_weight: true,
           },
         }],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
+      return createJsonResponse({
+        groups: {
+          withings: [{
+            data: [{
+              id: "weight-1",
+              timestamp: "2026-04-02T08:00:00.000Z",
+              unit: "kg",
+              value: 80,
+            }],
+            source: { provider: "withings", type: "scale" },
+          }],
+        },
       });
     }
 
@@ -589,6 +631,14 @@ test("Junction resource jobs re-infer category for dropped canonicalized timeser
   );
 
   assert.equal(seenUrls.some((url) => url.includes("/v2/summary/weight/")), false);
-  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), false);
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.equal(snapshot.timeseries?.weight?.length, 1);
+  assert.equal(snapshot.timeseries?.weight?.[0]?.id, "weight-1");
+  assert.equal(snapshot.timeseries?.weight?.[0]?.timestamp, "2026-04-02T08:00:00.000Z");
+  assert.equal(snapshot.timeseries?.weight?.[0]?.unit, "kg");
+  assert.equal(snapshot.timeseries?.weight?.[0]?.value, 80);
 });

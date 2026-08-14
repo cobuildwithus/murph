@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "reliable-food-lookups",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable food lookups",
+    "summary": "Murph now keeps broad food-label searches responsive instead of letting unusually large matching catalogs time out.",
+    "details": "Exact food IDs and barcodes still use direct lookups. Name searches remain ranked and deduplicated while Murph limits the catalog work behind each request.",
+    "relevanceTags": ["nutrition", "food", "reliability", "performance"],
+    "sourcePullRequests": [1804]
+  }
+}

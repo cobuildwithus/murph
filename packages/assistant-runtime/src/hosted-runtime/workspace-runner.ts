@@ -48,6 +48,9 @@ import type {
   RuntimeWakeNotification,
   RuntimeWakeSignal,
 } from "./runtime-wake.ts";
+import type {
+  HostedVaultShareProjectionOfferResult,
+} from "./vault-share-projection.ts";
 
 import {
   buildHostedMailboxImportRedactedStatus,
@@ -311,11 +314,22 @@ export interface HostedWorkspaceDurableCheckpointEffectResult {
   requiresFollowUpCheckpoint?: boolean;
 }
 
-export type HostedWorkspaceDurableCheckpointEffect =
-  () => Promise<HostedWorkspaceDurableCheckpointEffectResult | null | void>
+export interface HostedWorkspaceDurableCheckpointEffectContext {
+  vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
+}
+
+export interface HostedWorkspaceDurableCheckpointEffect {
+  (
+    context?: HostedWorkspaceDurableCheckpointEffectContext,
+  ): Promise<HostedWorkspaceDurableCheckpointEffectResult | null | void>
     | HostedWorkspaceDurableCheckpointEffectResult
     | null
     | void;
+  /** Consume the invocation-owned projection result; use the fallback wake only when none exists. */
+  readonly requiresVaultShareProjectionResult?: boolean;
+  readonly vaultShareProjectionFailureWake?:
+    HostedWorkspaceDurableCheckpointEffectResult;
+}
 
 export type HostedWorkspaceDurableCheckpointEffects =
   | HostedWorkspaceDurableCheckpointEffect

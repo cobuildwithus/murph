@@ -28,6 +28,7 @@ import type {
   HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
+  HostedExecutionDailyMetricReportedPayload,
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
@@ -164,6 +165,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "environment-voice.captured",
+  "health.daily-metric.reported",
   "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
@@ -999,6 +1001,14 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER =
   "x-murph-assistant-ask-diagnostic-code";
 export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER =
   "x-murph-assistant-ask-request-id";
+/**
+ * Body-only protocol marker. An old strict Web parser rejects this unknown
+ * field, so a new caller cannot silently enter the retired destination-bearing
+ * protocol during an ordered rollout.
+ */
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
+  "currentSenderProtocol";
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v3";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1043,6 +1053,10 @@ export type HostedRuntimeAssistantAskControlResponse =
       action: "prepare" | "complete";
       status: "terminal";
       terminalReason: HostedRuntimeAssistantAskTerminalReason;
+    }
+  | {
+      action: "prepare";
+      status: "already_completed";
     }
   | {
       action: "complete";
@@ -1368,11 +1382,16 @@ export interface HostedRuntimeGroupSharedReadRequest {
 
 export type HostedRuntimeGroupSharedRecord = Pick<
   HostedVaultShareDeliveryRecord,
-  "data" | "occurredAt" | "recordKey"
+  "data" | "occurredAt" | "recordKey" | "source"
 >;
 
 export interface HostedRuntimeGroupSharedProjection {
-  dataStatus: "available" | "missing";
+  /**
+   * `pending` means an active readable grant exists but its first projection
+   * snapshot has not materialized. `missing` is reserved for a completed empty
+   * snapshot or a grant that current access makes unreadable.
+   */
+  dataStatus: "available" | "missing" | "pending";
   /**
    * Canonical UTC time at which the current exact-scope grant became active.
    * Missing means the producer predates this additive evidence field; null is
@@ -1450,13 +1469,16 @@ export type HostedRuntimeGroupToolRequest =
     }
   | {
       action: "ask_current_sender";
+      audience?: "current_sender" | "group";
+      mode: "clarification" | "continuation" | "new";
       origin: Extract<
         HostedExecutionAssistantAskOrigin,
         { kind: "accepted_input" }
       >;
     }
   | {
-      action: "message_current_sender";
+      action: "record_current_sender_daily_metric";
+      dailyMetric: HostedExecutionDailyMetricReportedPayload;
       origin: Extract<
         HostedExecutionAssistantAskOrigin,
         { kind: "accepted_input" }
@@ -1588,7 +1610,12 @@ export type HostedRuntimeGroupMemberAskResult =
   | ({ status: "completed" } & HostedExecutionAssistantAskResult)
   | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
 
-export type HostedRuntimeGroupCurrentSenderMessageResult =
+export type HostedRuntimeGroupCurrentSenderDirectResult =
+  | { status: "accepted" }
+  | { status: "clarification_required" }
+  | { status: "unavailable"; unavailableReason: string };
+
+export type HostedRuntimeGroupDailyMetricReportResult =
   | { status: "accepted" }
   | { status: "unavailable"; unavailableReason: string };
 
@@ -1597,10 +1624,13 @@ export type HostedRuntimeGroupToolResponse =
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
-  | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
   | {
-      action: "message_current_sender";
-      result: HostedRuntimeGroupCurrentSenderMessageResult;
+      action: "ask_current_sender";
+      result: HostedRuntimeGroupCurrentSenderDirectResult;
+    }
+  | {
+      action: "record_current_sender_daily_metric";
+      result: HostedRuntimeGroupDailyMetricReportResult;
     }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
@@ -3228,6 +3258,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.snapshot_failed",
   "checkpoint.snapshot_finished",
   "checkpoint.snapshot_plan",
+  "checkpoint.snapshot_preempted",
   "checkpoint.snapshot_size_progress",
   "checkpoint.snapshot_started",
   "workspace.codex_home_snapshot_failed",

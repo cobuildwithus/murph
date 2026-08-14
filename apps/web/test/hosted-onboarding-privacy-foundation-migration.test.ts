@@ -75,6 +75,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     "deviceProviderApplications DeviceProviderApplication[]",
+    'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
+    'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
@@ -1093,8 +1095,13 @@ describe("hosted Prisma baseline migration", () => {
       "20260810050000_relax_detached_automatic_refill_failure",
       "20260810150000_hosted_usage_credit_grant_slot_release",
       "20260811160000_add_group_sponsorship_funding_alias_publication",
+      "20260811170000_hosted_physical_note_failure_reason",
       "20260811190000_hosted_linq_provider_event_diagnostics_retention_index",
+      "20260812032000_family_owner_snapshot_accepted_invite_index",
+      "20260812033000_family_owner_snapshot_pending_invite_index",
       "20260812070000_hosted_linq_live_invite_source_ref",
+      "20260812120000_hosted_runtime_latency_candidate_indexes",
+      "20260813120000_group_current_sender_clarification",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(

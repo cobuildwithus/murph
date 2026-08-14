@@ -498,6 +498,34 @@ describe("markdown document primitives", () => {
     });
   });
 
+  it("keeps create-only automation upserts atomic and leaves an existing record unchanged", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2031-02-14T12:00:00.000Z"),
+      ...createAutomationPayload({
+        slug: "create-only-reminder",
+        status: "paused",
+      }),
+    });
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-14T12:01:00.000Z"),
+      ...createAutomationPayload({
+        slug: "create-only-reminder",
+        status: "active",
+        title: "Replacement reminder",
+      }),
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+
+    await expect(showAutomation({
+      slug: "create-only-reminder",
+      vaultRoot,
+    })).resolves.toEqual(created.record);
+  });
+
   it("allows first support-series assignment but preserves ownership thereafter", async () => {
     const vaultRoot = await makeVaultRoot();
     const supportSeriesTag = buildAutomationSupportSeriesTag("experiment:exp_sleep");

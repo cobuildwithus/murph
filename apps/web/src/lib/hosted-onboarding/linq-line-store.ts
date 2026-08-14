@@ -474,16 +474,20 @@ export async function listHostedLinqAssignableHomeLines(input: {
  * authority is independent of predictive reputation so an at-risk line can
  * still receive replies and recover.
  */
-export async function hasActiveHostedLinqManagedLine(input: {
+export async function readActiveHostedLinqManagedLineLookupKeys(input: {
   phoneNumberLookupKeys: readonly string[];
   prisma: HostedLinqLineClient;
-}): Promise<boolean> {
-  const phoneNumberLookupKeys = [...input.phoneNumberLookupKeys];
+}): Promise<Set<string>> {
+  const phoneNumberLookupKeys = [...new Set(
+    input.phoneNumberLookupKeys
+      .map(normalizeNullableString)
+      .filter((value): value is string => value !== null),
+  )];
   if (phoneNumberLookupKeys.length === 0) {
-    return false;
+    return new Set();
   }
 
-  const line = await input.prisma.hostedLinqLine.findFirst({
+  const lines = await input.prisma.hostedLinqLine.findMany({
     where: {
       configuredAt: { not: null },
       phoneNumberEncrypted: { not: null },
@@ -496,7 +500,14 @@ export async function hasActiveHostedLinqManagedLine(input: {
     },
   });
 
-  return line !== null;
+  return new Set(lines.map((line) => line.phoneNumberLookupKey));
+}
+
+export async function hasActiveHostedLinqManagedLine(input: {
+  phoneNumberLookupKeys: readonly string[];
+  prisma: HostedLinqLineClient;
+}): Promise<boolean> {
+  return (await readActiveHostedLinqManagedLineLookupKeys(input)).size > 0;
 }
 
 export type HostedLinqIncomingLineState =

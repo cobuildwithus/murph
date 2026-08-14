@@ -7,6 +7,7 @@ import {
   readAssistantAcceptedTurnInputJournal,
   recordAssistantAcceptedTurnInputProviderRequest,
   resolveAssistantAcceptedTurnInputJournalPath,
+  resolveAssistantAcceptedTurnInputReferenceWindow,
   updateAssistantAcceptedTurnInputAdmissionState,
   updateAssistantAcceptedTurnInputProviderRequest,
   updateAssistantAcceptedTurnInputTranscriptRefs,
@@ -32,12 +33,55 @@ afterEach(async () => {
 })
 
 describe('assistant accepted active-turn input journal', () => {
+  it('requires caller-owned accepted times and derives the exact reference window', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-reference-window-',
+    )
+
+    await expect(
+      appendAssistantAcceptedTurnInputItems({
+        inputs: [
+          {
+            id: 'input_missing_reference',
+            source: 'manual',
+          },
+        ],
+        now: new Date('2031-02-15T10:00:00.100Z'),
+        sessionId: 'session_missing_reference',
+        turnId: 'turn_missing_reference',
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow()
+
+    expect(resolveAssistantAcceptedTurnInputReferenceWindow([
+      {
+        acceptedAt: '2031-02-15T09:59:59.900Z',
+        id: 'input_first',
+        source: 'assistant-input',
+      },
+      {
+        acceptedAt: '2031-02-15T10:00:00.100Z',
+        id: 'input_second',
+        source: 'assistant-input',
+      },
+    ])).toEqual({
+      earliestAt: '2031-02-15T09:59:59.900Z',
+      latestAt: '2031-02-15T10:00:00.100Z',
+    })
+    expect(resolveAssistantAcceptedTurnInputReferenceWindow([
+      {
+        id: 'input_missing_reference',
+        source: 'manual',
+      },
+    ])).toBeNull()
+  })
+
   it('persists ordered input metadata without raw prompt fallback text', async () => {
     const { paths, vaultRoot } = await createAssistantPaths(
       'assistant-active-turn-input-journal-',
     )
 
-    const journal = await appendAssistantAcceptedTurnInputItems({
+    const journal = await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           captureIds: ['cap_1'],
@@ -120,7 +164,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-assistant-input-',
     )
 
-    const journal = await appendAssistantAcceptedTurnInputItems({
+    const journal = await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           contentRef: {
@@ -241,7 +285,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-checkpoint-ref-',
     )
 
-    const missing = await appendAssistantAcceptedTurnInputItems({
+    const missing = await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           contentRef: {
@@ -284,9 +328,10 @@ describe('assistant accepted active-turn input journal', () => {
       now: new Date('2026-04-22T10:00:01.000Z'),
       vault: vaultRoot,
     })
-    const stored = await appendAssistantAcceptedTurnInputItems({
+    const stored = await appendTestAcceptedTurnInputItems({
       inputs: [
         {
+          acceptedAt: event.receivedAt ?? event.occurredAt,
           contentRef: {
             kind: 'assistant-input-event',
             refId: event.inputId,
@@ -315,7 +360,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-ref-update-',
     )
 
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_initial',
@@ -431,7 +476,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-provider-request-',
     )
 
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_initial',
@@ -551,7 +596,7 @@ describe('assistant accepted active-turn input journal', () => {
       code: 'ASSISTANT_TURN_INPUT_JOURNAL_INVALID_ADMISSION_TRANSITION',
     })
     await expect(
-      appendAssistantAcceptedTurnInputItems({
+      appendTestAcceptedTurnInputItems({
         inputs: [
           {
             id: 'input_after_commit',
@@ -572,7 +617,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-flat-prompt-',
     )
 
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_initial',
@@ -606,7 +651,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-identity-',
     )
 
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_initial',
@@ -629,7 +674,7 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     await expect(
-      appendAssistantAcceptedTurnInputItems({
+      appendTestAcceptedTurnInputItems({
         inputs: [
           {
             id: 'input_wrong_session',
@@ -670,7 +715,7 @@ describe('assistant accepted active-turn input journal', () => {
         },
       ],
     })
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_more',
@@ -725,7 +770,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-close-with-append-',
     )
 
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_initial',
@@ -738,7 +783,7 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     await expect(
-      appendAssistantAcceptedTurnInputItems({
+      appendTestAcceptedTurnInputItems({
         admissionState: 'passive-input-next-turn',
         inputs: [
           {
@@ -760,7 +805,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-corrupt-provider-',
     )
 
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_initial',
@@ -816,7 +861,7 @@ describe('assistant accepted active-turn input journal', () => {
       'assistant-active-turn-input-corrupt-provider-prefix-',
     )
 
-    await appendAssistantAcceptedTurnInputItems({
+    await appendTestAcceptedTurnInputItems({
       inputs: [
         {
           id: 'input_initial',
@@ -875,6 +920,7 @@ describe('assistant accepted active-turn input journal', () => {
       admissionState: 'current-turn-open',
       inputs: [
         {
+          acceptedAt: '2026-04-22T11:00:00.000Z',
           contentRef: {
             kind: 'manual',
             refId: 'manual_input_1',
@@ -913,10 +959,12 @@ describe('assistant accepted active-turn input journal', () => {
     await service.turns.acceptedInputs.append({
       inputs: [
         {
+          acceptedAt: '2026-04-22T11:10:00.000Z',
           id: 'input_initial',
           source: 'initial',
         },
         {
+          acceptedAt: '2026-04-22T11:10:00.000Z',
           captureIds: ['cap_late'],
           contentRef: {
             kind: 'manual',
@@ -993,6 +1041,7 @@ describe('assistant accepted active-turn input journal', () => {
     await service.turns.acceptedInputs.append({
       inputs: [
         {
+          acceptedAt: '2026-04-22T11:20:00.000Z',
           id: 'input_initial',
           source: 'initial',
         },
@@ -1010,6 +1059,7 @@ describe('assistant accepted active-turn input journal', () => {
     await service.turns.acceptedInputs.append({
       inputs: [
         {
+          acceptedAt: '2026-04-22T11:22:00.000Z',
           id: 'input_late',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Late input',
@@ -1045,6 +1095,19 @@ describe('assistant accepted active-turn input journal', () => {
     })
   })
 })
+
+async function appendTestAcceptedTurnInputItems(
+  input: Parameters<typeof appendAssistantAcceptedTurnInputItems>[0],
+) {
+  const acceptedAt = input.now?.toISOString() ?? '2026-04-22T10:00:00.000Z'
+  return appendAssistantAcceptedTurnInputItems({
+    ...input,
+    inputs: input.inputs.map((item) => ({
+      acceptedAt,
+      ...item,
+    })),
+  })
+}
 
 async function createAssistantPaths(prefix: string) {
   const context = await createTempVaultContext(prefix)

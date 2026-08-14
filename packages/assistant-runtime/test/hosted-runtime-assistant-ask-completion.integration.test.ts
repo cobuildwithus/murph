@@ -33,7 +33,7 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 describe("hosted Assistant Ask completion production", () => {
-  it("terminalizes an expired private completion once without provider work", async () => {
+  it("terminalizes a private completion after Web persists its group fallback", async () => {
     const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
     if (!testTempRoot) {
       throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
@@ -108,7 +108,7 @@ describe("hosted Assistant Ask completion production", () => {
       expect(effects).toHaveLength(1);
       const providerFetch = vi.fn<typeof fetch>();
       const assertAssistantAskPrivateCompletionAuthority = vi.fn(
-        async () => undefined,
+        async () => ({ assistantAskFallbackRequired: true as const }),
       );
       await expect(drainHostedPreparedAssistantDeliveries({
         assistantDeliveryEffects: effects,
@@ -122,7 +122,7 @@ describe("hosted Assistant Ask completion production", () => {
         wake,
       })).resolves.toEqual([
         expect.objectContaining({
-          deliveryErrorCode: "ASSISTANT_ASK_PRIVATE_COMPLETION_EXPIRED",
+          deliveryErrorCode: "ASSISTANT_ASK_PRIVATE_COMPLETION_FALLBACK_PERSISTED",
           deliveryStatus: "failed",
         }),
       ]);
@@ -130,7 +130,7 @@ describe("hosted Assistant Ask completion production", () => {
       expect(await listAssistantOutboxIntents(vault)).toEqual([
         expect.objectContaining({
           lastError: expect.objectContaining({
-            code: "ASSISTANT_ASK_PRIVATE_COMPLETION_EXPIRED",
+            code: "ASSISTANT_ASK_PRIVATE_COMPLETION_FALLBACK_PERSISTED",
           }),
           status: "failed",
         }),
@@ -140,7 +140,7 @@ describe("hosted Assistant Ask completion production", () => {
         preferredIntentIds: pending ? [pending.intentId] : [],
         vaultRoot: vault,
       })).toEqual([]);
-      expect(assertAssistantAskPrivateCompletionAuthority).not.toHaveBeenCalled();
+      expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledOnce();
       expect(providerFetch).not.toHaveBeenCalled();
     } finally {
       await rm(vault, { force: true, recursive: true });

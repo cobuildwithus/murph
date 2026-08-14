@@ -26,6 +26,10 @@
       "types": "./dist/public-ingress.d.ts",
       "default": "./dist/public-ingress.js"
     },
+    "./prepared-webhook": {
+      "types": "./dist/prepared-webhook.d.ts",
+      "default": "./dist/prepared-webhook.js"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
@@ -53,6 +57,10 @@
     "./junction-inline-authority": {
       "types": "./dist/junction-inline-authority.d.ts",
       "default": "./dist/junction-inline-authority.js"
+    },
+    "./junction-historical-backfill-progress": {
+      "types": "./dist/junction-historical-backfill-progress.d.ts",
+      "default": "./dist/junction-historical-backfill-progress.js"
     },
     "./junction-push-source-recovery": {
       "types": "./dist/junction-push-source-recovery.d.ts",
@@ -146,12 +154,10 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@junction-api/sdk": "1.2.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
-  },
-  "devDependencies": {
-    "@junction-api/sdk": "1.2.0"
   },
   "engines": {
     "node": ">=24.14.1"
