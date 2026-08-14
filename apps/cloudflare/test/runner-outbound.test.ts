@@ -4298,7 +4298,230 @@ describe("handleRunnerOutboundRequest", () => {
       secondBody.snapshotId,
       "second workspace snapshot id",
     ))).toBe(true);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.some(
+      ([entry]) => entry.message
+        === "Hosted runner workspace snapshot start diagnostic.",
+    )).toBe(false);
   });
+
+  it("emits bounded fixed-key workspace snapshot start route diagnostics", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const runnerStub = runner.getByName();
+    const originalCreate = runnerStub.createHostedWorkspaceSnapshotUploadSession;
+    if (!originalCreate) {
+      throw new TypeError("Workspace snapshot session create stub is unavailable.");
+    }
+    const timedStub: WorkerUserRunnerStubLike = {
+      ...runnerStub,
+      async createHostedWorkspaceSnapshotUploadSession(
+        session: HostedWorkspaceSnapshotUploadSession,
+      ) {
+        const created = await originalCreate.call(runnerStub, session);
+        vi.setSystemTime(new Date(Date.now() + 90_001));
+        return created;
+      },
+    };
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: { getByName: () => timedStub },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const responseBody = requireTestObject(
+      await response.json(),
+      "bounded workspace snapshot start response",
+    );
+    const responseEncryption = requireTestObject(
+      responseBody.encryption,
+      "bounded workspace snapshot start encryption",
+    );
+    const diagnosticLog = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry: { details?: unknown; level?: string; message?: string }) =>
+          entry.message === "Hosted runner workspace snapshot start diagnostic.",
+      );
+    expect(diagnosticLog).toBeDefined();
+    expect(diagnosticLog?.level).toBe("info");
+    expect(diagnosticLog).toMatchObject({ userId: null });
+    const details = requireTestObject(
+      diagnosticLog?.details,
+      "workspace snapshot start route diagnostic details",
+    );
+    expect(details).toMatchObject({
+      operation: "workspace_snapshot_start",
+      responseStatus: 200,
+      snapshotStartAlarmCandidateCount: 0,
+      snapshotStartAlarmCandidateWorkDurationMs: 0,
+      snapshotStartCandidateCountsObserved: false,
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartDurationsCapped: true,
+      snapshotStartNewWorkspaceCandidateCount: 0,
+      snapshotStartOutcomeKind: "created",
+      snapshotStartSessionCreateStorageDurationMs: 60_000,
+      snapshotStartSubstageKind: "completed",
+      snapshotStartTotalDurationMs: 60_000,
+      userIdPresent: true,
+    });
+    const durationKeys = [
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartTotalDurationMs",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+    ] as const;
+    for (const key of durationKeys) {
+      const value = details[key];
+      if (typeof value !== "number") {
+        throw new TypeError(`${key} must be numeric.`);
+      }
+      expect(Number.isInteger(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(60_000);
+    }
+    expect(Object.keys(details).sort()).toEqual([
+      "operation",
+      "responseStatus",
+      "snapshotStartAlarmCandidateCount",
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCandidateCountsCapped",
+      "snapshotStartCandidateCountsObserved",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartCurrentSessionCandidateCount",
+      "snapshotStartDiagnosticScopeKind",
+      "snapshotStartDurationsCapped",
+      "snapshotStartNewWorkspaceCandidateCount",
+      "snapshotStartOutcomeKind",
+      "snapshotStartRecordedCandidateCount",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartSubstageKind",
+      "snapshotStartTotalDurationMs",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+      "userIdPresent",
+    ]);
+    const serializedDetails = JSON.stringify(details);
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseBody.snapshotId,
+      "bounded workspace snapshot id",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseBody.objectKey,
+      "bounded workspace snapshot object key",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseEncryption.dataKeyBase64,
+      "bounded workspace snapshot data key",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseEncryption.wrappedDataKey,
+      "bounded workspace snapshot wrapped data key",
+    ));
+  });
+
+  it.each([
+    {
+      durationKey: "snapshotStartWriteFenceOwnerValidationDurationMs",
+      stage: "write_fence_owner_validation",
+    },
+    {
+      durationKey: "snapshotStartCryptoDataKeyDurationMs",
+      stage: "crypto_data_key",
+    },
+  ] as const)(
+    "attributes isolated $stage latency to the matching route diagnostic",
+    async ({ durationKey, stage }) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const fixture = await createHostedRuntimeCryptoContextFixture();
+      const runner = createWorkspaceVersionAwareUserRunner();
+      const runnerStub = runner.getByName();
+      const originalValidateRuntimeWriteFence =
+        runnerStub.validateRuntimeWriteFence;
+      if (!originalValidateRuntimeWriteFence) {
+        throw new TypeError("Workspace snapshot write-fence stub is unavailable.");
+      }
+      const timedStub: WorkerUserRunnerStubLike =
+        stage === "write_fence_owner_validation"
+          ? {
+              ...runnerStub,
+              async validateRuntimeWriteFence(request) {
+                const result = await originalValidateRuntimeWriteFence.call(
+                  runnerStub,
+                  request,
+                );
+                vi.setSystemTime(new Date(Date.now() + 1_500));
+                return result;
+              },
+            }
+          : runnerStub;
+      const timedFetch = stage === "crypto_data_key"
+        ? vi.fn<typeof fetch>(async (...args) => {
+            const response = await fixture.fetchMock(...args);
+            vi.setSystemTime(new Date(Date.now() + 1_500));
+            return response;
+          })
+        : fixture.fetchMock;
+      const env = createRunnerOutboundEnv({
+        ...fixture.env,
+        USER_RUNNER: { getByName: () => timedStub },
+      });
+      vi.stubGlobal("fetch", timedFetch);
+
+      const response = await handleRunnerOutboundRequest(
+        createWorkspaceSnapshotStartRequest({
+          expectedWorkspaceVersion: "4",
+          workspaceVersion: "4",
+        }),
+        env,
+        "member_123",
+      );
+
+      expect(response.status).toBe(200);
+      const diagnosticLog =
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+          .map(([entry]) => entry)
+          .find(
+            (entry: { details?: unknown; message?: string }) =>
+              entry.message
+                === "Hosted runner workspace snapshot start diagnostic.",
+          );
+      const details = requireTestObject(
+        diagnosticLog?.details,
+        `${stage} workspace snapshot start route diagnostic details`,
+      );
+      expect(details).toMatchObject({
+        snapshotStartDiagnosticScopeKind: "route",
+        snapshotStartDurationsCapped: false,
+        snapshotStartOutcomeKind: "created",
+        snapshotStartSubstageKind: "completed",
+        snapshotStartTotalDurationMs: 1_500,
+      });
+      expect(details[durationKey]).toBe(1_500);
+      for (const otherDurationKey of [
+        "snapshotStartWriteFenceOwnerValidationDurationMs",
+        "snapshotStartCryptoDataKeyDurationMs",
+        "snapshotStartSessionCreateStorageDurationMs",
+      ] as const) {
+        if (otherDurationKey === durationKey) {
+          continue;
+        }
+        expect(details[otherDurationKey]).toBe(0);
+      }
+    },
+  );
 
   it("refreshes only the write-fence-owned workspace snapshot handoff", async () => {
     vi.useFakeTimers();

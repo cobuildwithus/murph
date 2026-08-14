@@ -19999,6 +19999,255 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground wake processing does not wait for a raced snapshot-failure log", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-snapshot-log-wake-"),
+    );
+    const vaultRoot = path.join(workspaceRoot, "durable", "vault");
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const failureLogRelease = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_entrypoint_snapshot_failure_log_wake_001",
+      laneSeq: "1",
+    })];
+    let activeSnapshotSignal: AbortSignal | null = null;
+    let assistantPhaseCalls = 0;
+    let completionCalls = 0;
+    let failureLogSettled = false;
+    let sessionStarts = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await mkdir(path.join(workspaceRoot, "durable", "home"), { recursive: true });
+      await mkdir(path.join(workspaceRoot, "scratch"), { recursive: true });
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const workspaceSnapshotPort: NonNullable<
+        HostedRuntimePlatform["workspaceSnapshotPort"]
+      > = {
+        async abortSnapshotSession() {
+          throw new Error("A completion-attempted session must not be aborted.");
+        },
+        async completeSnapshotSession(input) {
+          completionCalls += 1;
+          events.push(`snapshot.complete:${completionCalls}`);
+          if (completionCalls === 1) {
+            throw new Error("Synthetic snapshot completion transport failure.");
+          }
+          return {
+            checkpoint: {
+              checkpointed: true,
+              workspace: createWorkspaceState({
+                redactedStatus: input.checkpointRequest.redactedStatus ?? null,
+                snapshotRef: input.ref,
+                version: "5",
+              }),
+            },
+            snapshotRef: input.ref,
+          };
+        },
+        async putSnapshotObjectDirect() {
+          return {
+            snapshotDirectR2PresignElapsedMs: 1,
+            snapshotDirectR2PutElapsedMs: 1,
+          };
+        },
+        async restoreWorkspaceSnapshot() {
+          throw new Error("This test starts from a materialized workspace.");
+        },
+        async startSnapshotSession() {
+          sessionStarts += 1;
+          const snapshotId = `snapshot_failure_log_wake_${sessionStarts}`;
+          const objectKey =
+            `users/${TEST_USER_ID}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+          return {
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey,
+                snapshotId,
+                userId: TEST_USER_ID,
+              }),
+              dataKeyBase64: "synthetic-data-key",
+              ivBase64: "synthetic-iv",
+              rootKeyId: "synthetic-root-key",
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+              wrappedDataKey: "synthetic-wrapped-data-key",
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: 1_024,
+              warnEncryptedBytes: 512,
+            },
+            objectKey,
+            snapshotId,
+          };
+        },
+      };
+      const basePlatform = createPlatform({
+        events,
+        logRequests,
+        mailboxPort: createMailboxPort({
+          events,
+          fetchRequests,
+          items: mailboxItems,
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "4" }),
+        }),
+        workspaceSnapshotPort,
+      });
+      const baseLogPort = basePlatform.logPort;
+      assert.ok(baseLogPort);
+      const platform: HostedRuntimePlatform = {
+        ...basePlatform,
+        logPort: {
+          async write(request, context) {
+            const response = await baseLogPort.write(request, context);
+            if (request.entries.some((entry) =>
+              entry.eventCode === "checkpoint.snapshot_failed"
+            )) {
+              events.push("snapshot.failure-log:blocked");
+              await failureLogRelease.promise;
+              failureLogSettled = true;
+              events.push("snapshot.failure-log:settled");
+            }
+            return response;
+          },
+        },
+      };
+      const runtimeJobInput = createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_snapshot_failure_log_wake",
+          idleCheckpointDelayMs: 1,
+          leaseGeneration: "9",
+          userId: TEST_USER_ID,
+          workspaceVersion: "4",
+        },
+      });
+      const runtimeConfig = runtimeJobInput.runtime;
+      assert.ok(runtimeConfig);
+      const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+        async buildEncryptedSnapshot(input) {
+          activeSnapshotSignal = input.signal ?? null;
+          const temporaryDirectoryPath = await mkdtemp(
+            path.join(input.outputDir, "synthetic-snapshot-"),
+          );
+          const encryptedFilePath = path.join(
+            temporaryDirectoryPath,
+            "snapshot.enc",
+          );
+          await writeFile(encryptedFilePath, "encrypted snapshot", "utf8");
+          return {
+            compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+            encryptedByteSize: 18,
+            encryptedFilePath,
+            encryptedObjectSha256: "a".repeat(64),
+            fileCount: input.archiveEntries.length,
+            plaintextArchiveSha256: "b".repeat(64),
+            temporaryDirectoryPath,
+            totalPlainBytes: 18,
+          };
+        },
+      };
+      const bridgeOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+        decodeMailboxPayload: {
+          async decode() {
+            return {
+              reasonCode: "unused_in_snapshot_control_test",
+              retryable: false,
+              status: "blocked",
+            };
+          },
+        },
+        platform,
+        readCurrentLease: async () => ({
+          attemptId: runtimeJobInput.request.attemptId,
+          leaseGeneration: runtimeJobInput.request.leaseGeneration,
+          providerEgressToken: runtimeJobInput.request.providerEgressToken ?? null,
+          userId: runtimeJobInput.request.userId,
+          workspaceVersion: runtimeJobInput.request.workspaceVersion,
+        }),
+        request: runtimeJobInput.request,
+        runtime: runtimeConfig,
+        snapshotArchiveBuilder,
+        snapshotDiagnosticsHashSecret: "f".repeat(64),
+        vaultRoot,
+        waitForBackgroundAssistantWork: async () => undefined,
+      });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(runtimeJobInput, {
+        createCheckpointSnapshot: bridgeOptions.createCheckpointSnapshot,
+        async importItem(item) {
+          events.push(`mailbox.importItem:${item.item.laneSeq}`);
+          return { status: "imported" };
+        },
+        platform,
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          assistantPhaseCalls += 1;
+          events.push(`assistant:${assistantPhaseCalls}`);
+          return {
+            checkpointReason: "assistant_runtime_commit" as const,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+      });
+
+      await waitUntil(() => {
+        assert.ok(events.includes("snapshot.failure-log:blocked"), events.join(","));
+      }, 10_000);
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_snapshot_failure_log_wake_002",
+        laneSeq: "2",
+      }));
+      runtimeWakeSignal.notify({ notifiedAtEpochMs: Date.now() });
+      await waitUntil(() => {
+        assert.equal(activeSnapshotSignal?.aborted, true);
+        assert.ok(
+          activeSnapshotSignal?.reason
+            instanceof HostedRuntimeCheckpointInterruptedByWakeError,
+        );
+        assert.ok(events.includes("mailbox.importItem:2"), events.join(","));
+        assert.ok(events.includes("assistant:2"), events.join(","));
+      }, 10_000);
+      assert.equal(failureLogSettled, false);
+      assert.ok(
+        requireEventIndex(events, "snapshot.failure-log:blocked")
+          < requireEventIndex(events, "mailbox.importItem:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "mailbox.importItem:2")
+          < requireEventIndex(events, "assistant:2"),
+      );
+
+      failureLogRelease.resolve();
+      const result = await withRealTimeout(
+        resultPromise,
+        10_000,
+        () => `Runtime did not finish after failure-log release: ${events.join(",")}`,
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(failureLogSettled, true);
+      assert.equal(completionCalls, 2);
+      assert.equal(checkpointRequests.length, 0);
+      const failureEntries = logRequests.flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+      assert.equal(failureEntries.length, 1);
+      assert.equal(failureEntries[0]?.errorCode, "runtime_error");
+      assert.equal(failureEntries[0]?.level, "error");
+    } finally {
+      failureLogRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(workspaceRoot);
+    }
+  });
+
   test("unresolved checkpoint wakes keep the foreground window open for a later mailbox wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
