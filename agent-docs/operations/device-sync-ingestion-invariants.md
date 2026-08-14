@@ -302,8 +302,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    store. Junction source-only writes carry the same connection-epoch fence as
    account writes. Hydration and hosted job-time source listing resolve Junction
    sources by semantic provider identity, retain the established local source
-   key and spelling, and let an accepted reconnect epoch replace older local
-   source state, so hosted/local keys or timestamps cannot create competing
+   key and spelling, and use one source-state consolidation rule: the newest
+   valid `lastSeenAt` owns status, errors, and availability, equal-timestamp
+   lifecycle conflicts fail retryably, and `lastDataAt` merges independently as
+   monotonic arrival evidence. An accepted reconnect therefore replaces an
+   older fence before its first new payload without discarding historical
+   arrival evidence, so hosted/local keys or timestamps cannot create competing
    source owners. Future aggregate-progress ownership comes
    from the versioned status scalar rather than today's window fields; opaque
    future progress and evidence remain unchanged while canonical webhook import

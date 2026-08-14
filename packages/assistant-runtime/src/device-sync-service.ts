@@ -25,6 +25,10 @@ import {
   HostedRuntimeArtifactWriteError,
   type HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
+import {
+  consolidateHostedDeviceSyncSourceState,
+  hostedSourceStateUnavailable,
+} from "./hosted-device-sync-source-state.ts";
 
 const storeByService = new WeakMap<DeviceSyncService, SqliteDeviceSyncStore>();
 
@@ -219,64 +223,6 @@ function compareHostedJobSourceIdentity(
 interface HostedJobConnectionSource extends ProviderJobConnectionSource {
   lastDataAt: string | null;
   lastSeenAt: string;
-  resourceCount: number;
-}
-
-function compareHostedJobSourceLifecycle(
-  left: HostedJobConnectionSource,
-  right: HostedJobConnectionSource,
-): number {
-  const leftLastDataAt = parseHostedJobSourceTimestamp(left.lastDataAt);
-  const rightLastDataAt = parseHostedJobSourceTimestamp(right.lastDataAt);
-  if (leftLastDataAt !== rightLastDataAt) {
-    return rightLastDataAt - leftLastDataAt;
-  }
-
-  const leftLastSeenAt = parseHostedJobSourceTimestamp(left.lastSeenAt);
-  const rightLastSeenAt = parseHostedJobSourceTimestamp(right.lastSeenAt);
-  return rightLastSeenAt - leftLastSeenAt;
-}
-
-function parseHostedJobSourceTimestamp(value: string | null): number {
-  if (value === null) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    throw hostedSourceStateUnavailable();
-  }
-  return timestamp;
-}
-
-function haveEqualHostedJobSourceLifecycleState(
-  left: HostedJobConnectionSource,
-  right: HostedJobConnectionSource,
-): boolean {
-  return left.status === right.status
-    && left.lastErrorCode === right.lastErrorCode
-    && left.lastErrorMessage === right.lastErrorMessage
-    && left.resourceCount === right.resourceCount
-    && haveEqualHostedJobSourceAvailability(
-      left.resourceAvailabilitySummary,
-      right.resourceAvailabilitySummary,
-    );
-}
-
-function haveEqualHostedJobSourceAvailability(
-  left: ProviderJobConnectionSource["resourceAvailabilitySummary"],
-  right: ProviderJobConnectionSource["resourceAvailabilitySummary"],
-): boolean {
-  const leftEntries = Object.entries(left ?? {}).sort(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey)
-  );
-  const rightEntries = Object.entries(right ?? {}).sort(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey)
-  );
-  return leftEntries.length === rightEntries.length
-    && leftEntries.every(([key, value], index) => {
-      const rightEntry = rightEntries[index];
-      return rightEntry?.[0] === key && Object.is(rightEntry[1], value);
-    });
 }
 
 function dedupeHostedJobConnectionSources(
@@ -306,21 +252,14 @@ function dedupeHostedJobConnectionSources(
     const identitySource = compareHostedJobSourceIdentity(source, existing) < 0
       ? source
       : existing;
-    const lifecycleComparison = compareHostedJobSourceLifecycle(source, existing);
-    if (
-      lifecycleComparison === 0
-      && !haveEqualHostedJobSourceLifecycleState(source, existing)
-    ) {
-      throw hostedSourceStateUnavailable();
-    }
-    const lifecycleSource = lifecycleComparison < 0
-      ? source
-      : lifecycleComparison > 0
-        ? existing
-        : identitySource;
+    const { lastDataAt, lifecycleSource } = consolidateHostedDeviceSyncSourceState([
+      existing,
+      source,
+    ]);
     deduped[existingIndex] = {
       ...lifecycleSource,
       firstSeenAt: identitySource.firstSeenAt,
+      lastDataAt,
       ...(identitySource.sourceInstanceKey
         ? { sourceInstanceKey: identitySource.sourceInstanceKey }
         : {}),
@@ -328,16 +267,6 @@ function dedupeHostedJobConnectionSources(
     };
   }
   return deduped;
-}
-
-function hostedSourceStateUnavailable(cause?: unknown) {
-  return deviceSyncError({
-    code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
-    message: "Current hosted device source state is unavailable. Retry shortly.",
-    retryable: true,
-    httpStatus: 503,
-    ...(cause === undefined ? {} : { cause }),
-  });
 }
 
 export function requireHostedRuntimeDeviceSyncStore(service: DeviceSyncService): SqliteDeviceSyncStore {

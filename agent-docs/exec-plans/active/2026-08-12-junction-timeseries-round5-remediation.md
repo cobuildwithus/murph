@@ -73,6 +73,9 @@ Updated: 2026-08-13
 23. [ ] Obtain exact-head green CI and a ReviewGPT PASS no later than round
     twenty-two, then merge and retire
     the task worktree.
+24. [x] Stop the review loop at the user-authorized round-twenty-two cap and
+    resolve its final reconnect-authority finding without starting round
+    twenty-three.
 
 ## Decisions
 
@@ -229,6 +232,15 @@ Updated: 2026-08-13
   hosted hydration. Equally authoritative aliases with conflicting state fail
   retryably. The correction stays inside the existing bounded listing owner and
   adds no store, registry, migration, queue, service, or reconciliation loop.
+- Round twenty-two's review-induced finding is accepted. Treating
+  `lastDataAt` as stronger lifecycle authority could preserve an old disconnect
+  fence over a newly accepted reconnect until the reconnect delivered data,
+  which the stale fence itself prevented. Hosted hydration and job-time listing
+  now share one consolidation rule: newest `lastSeenAt` owns lifecycle state,
+  equal-timestamp conflicts fail retryably, and `lastDataAt` merges separately
+  as monotonic arrival evidence. The correction replaces the two divergent
+  rules with one package-local helper and adds no persisted state, manager,
+  queue, scheduler, registry, service, or reconciliation loop.
 
 ## Verification
 
@@ -402,5 +414,11 @@ Updated: 2026-08-13
   remains stable, and that equal-authority state conflicts stay retryable.
   Docs drift, the 204-scenario integrity check, scoped privacy scanning, and
   `git diff --check` also pass.
+- Round twenty-two remediation passes the assistant-runtime typecheck and all
+  92 hosted runtime device-sync tests. The expanded production-path regression
+  proves a fresh disconnect beats older connected data, a reconnect with no new
+  data beats the old fence while retaining historical arrival evidence, both
+  alias orders agree across hydration and job listing, and equal lifecycle
+  conflicts fail before source mutation.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

@@ -17,7 +17,7 @@ import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
-import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
@@ -1606,7 +1606,7 @@ describe("hosted device-sync runtime", () => {
           {
             displayName: "Apple Health established",
             firstSeenAt: "2026-04-01T09:00:00.000Z",
-            lastDataAt: null,
+            lastDataAt: "2026-04-06T09:29:00.000Z",
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:26:00.000Z",
@@ -1619,7 +1619,7 @@ describe("hosted device-sync runtime", () => {
           {
             displayName: "Apple Health disconnected alias",
             firstSeenAt: "2026-04-03T09:00:00.000Z",
-            lastDataAt: "2026-04-06T09:29:00.000Z",
+            lastDataAt: null,
             lastErrorCode: "SOURCE_USER_DISCONNECTED",
             lastErrorMessage: "Disconnected",
             lastSeenAt: "2026-04-06T09:30:00.000Z",
@@ -1631,6 +1631,18 @@ describe("hosted device-sync runtime", () => {
           },
         ],
       });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:30:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(
+        getStore(service).listConnectionSources({ connectionId: localAccountId })
+          .find((source) => source.sourceInstanceKey === establishedSourceInstanceKey)
+          ?.status,
+        "disconnected",
+      );
       jobSources = [];
       const disconnectedJob = getStore(service).enqueueJob({
         accountId: localAccountId,
@@ -1657,17 +1669,17 @@ describe("hosted device-sync runtime", () => {
         },
         externalAccountId,
         provider: "junction",
-        // Deliberately newest-state-first, with a later lastDataAt but an
-        // earlier lastSeenAt than the stale fence. Hydration treats the data
-        // arrival as an authority advance and job-time listing must agree.
+        // Deliberately newest-state-first: the accepted reconnect has no data
+        // yet, so its later lifecycle observation must beat the stale fence's
+        // historical arrival without losing that arrival timestamp.
         sources: [
           {
             displayName: "Apple Health reconnected alias",
             firstSeenAt: "2026-04-03T09:00:00.000Z",
-            lastDataAt: "2026-04-06T09:35:00.000Z",
+            lastDataAt: null,
             lastErrorCode: null,
             lastErrorMessage: null,
-            lastSeenAt: "2026-04-06T09:34:00.000Z",
+            lastSeenAt: "2026-04-06T09:36:00.000Z",
             resourceCount: 1,
             resourceAvailabilitySummary: { water: true },
             sourceInstanceKey: "jxn_src_later_duplicate_apple_health",
@@ -1677,10 +1689,10 @@ describe("hosted device-sync runtime", () => {
           {
             displayName: "Apple Health stale fence",
             firstSeenAt: "2026-04-01T09:00:00.000Z",
-            lastDataAt: "2026-04-06T09:30:00.000Z",
+            lastDataAt: "2026-04-06T09:35:00.000Z",
             lastErrorCode: "SOURCE_USER_DISCONNECTED",
             lastErrorMessage: "Disconnected",
-            lastSeenAt: "2026-04-06T09:36:00.000Z",
+            lastSeenAt: "2026-04-06T09:34:00.000Z",
             resourceCount: 1,
             resourceAvailabilitySummary: { water: true },
             sourceInstanceKey: establishedSourceInstanceKey,
@@ -1689,6 +1701,17 @@ describe("hosted device-sync runtime", () => {
           },
         ],
       });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:36:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const reconnectedSource = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      }).find((source) => source.sourceInstanceKey === establishedSourceInstanceKey);
+      assert.equal(reconnectedSource?.status, "connected");
+      assert.equal(reconnectedSource?.lastDataAt, "2026-04-06T09:35:00.000Z");
       jobSources = [];
       const reconnectedJob = getStore(service).enqueueJob({
         accountId: localAccountId,
@@ -1744,6 +1767,29 @@ describe("hosted device-sync runtime", () => {
           },
         ],
       });
+      await assert.rejects(
+        syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildCronWake("2026-04-06T09:40:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        }),
+        (error: unknown) => {
+          assert.equal(isDeviceSyncError(error), true);
+          if (!isDeviceSyncError(error)) {
+            return false;
+          }
+          assert.equal(error.code, "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE");
+          assert.equal(error.retryable, true);
+          return true;
+        },
+      );
+      assert.equal(
+        getStore(service).listConnectionSources({ connectionId: localAccountId })
+          .find((source) => source.sourceInstanceKey === establishedSourceInstanceKey)
+          ?.status,
+        "connected",
+      );
       jobSources = [];
       const ambiguousJob = getStore(service).enqueueJob({
         accountId: localAccountId,
