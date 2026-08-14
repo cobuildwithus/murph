@@ -2523,11 +2523,32 @@ export function createJunctionDeviceSyncProvider(
               : undefined,
           },
         );
+        const calendarRefreshJobs =
+          JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
+            ? buildJunctionSparseCalendarRefreshJobs({
+                asOf: context.now,
+                priority: job.priority,
+                resource: effectiveResource,
+                targets: timeseriesImport.canonicalSparseCalendarTargets,
+              })
+            : [];
+        const finalizePreciseImportResult = (
+          result: ProviderJobResult,
+        ): ProviderJobResult =>
+          calendarRefreshJobs.length === 0
+            ? result
+            : {
+                ...result,
+                scheduledJobs: [
+                  ...(result.scheduledJobs ?? []),
+                  ...calendarRefreshJobs,
+                ],
+              };
         if (
           extendedHistoricalBackfill
           && timeseriesImport.postFetchSourceAdmission === "fenced"
         ) {
-          return {};
+          return finalizePreciseImportResult({});
         }
         if (
           extendedHistoricalBackfill
@@ -2536,12 +2557,14 @@ export function createJunctionDeviceSyncProvider(
           && job.payload.historicalRecordsSeen !== true
           && timeseriesImport.providerRecordCount === 0
         ) {
-          return withJunctionSkippedResourceMetadata(
-            context,
-            {
-              nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-            },
-            skippedOptionalResources,
+          return finalizePreciseImportResult(
+            withJunctionSkippedResourceMetadata(
+              context,
+              {
+                nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+              },
+              skippedOptionalResources,
+            ),
           );
         }
         const historicalRecordsSeen = extendedHistoricalBackfill
@@ -2560,23 +2583,25 @@ export function createJunctionDeviceSyncProvider(
         if (dailyAggregateNeedsRetry) {
           const retryAttempts = dailyAggregateRetryAttempts + 1;
           const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[retryAttempts - 1] ?? 0;
-          return withJunctionSkippedResourceMetadata(
-            context,
-            {
-              nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-              scheduledJobs: [buildExtendedTimeseriesBackfillJob({
-                availableAt: addMilliseconds(context.now, retryDelayMs),
-                dedupeKey: job.dedupeKey,
-                emptyBackfillAttempts: retryAttempts,
-                historicalRecordsSeen,
-                historicalWindowStart,
-                resource: effectiveResource,
-                sourceProviderSlug,
-                windowEnd: window.windowEnd,
-                windowStart: window.windowStart,
-              })],
-            },
-            skippedOptionalResources,
+          return finalizePreciseImportResult(
+            withJunctionSkippedResourceMetadata(
+              context,
+              {
+                nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+                scheduledJobs: [buildExtendedTimeseriesBackfillJob({
+                  availableAt: addMilliseconds(context.now, retryDelayMs),
+                  dedupeKey: job.dedupeKey,
+                  emptyBackfillAttempts: retryAttempts,
+                  historicalRecordsSeen,
+                  historicalWindowStart,
+                  resource: effectiveResource,
+                  sourceProviderSlug,
+                  windowEnd: window.windowEnd,
+                  windowStart: window.windowStart,
+                })],
+              },
+              skippedOptionalResources,
+            ),
           );
         }
         const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
@@ -2602,15 +2627,6 @@ export function createJunctionDeviceSyncProvider(
           historicalUnresolvedProviderRecordCount === undefined
             ? undefined
             : historicalUnresolvedProviderRecordCount > 0;
-        const calendarRefreshJobs =
-          JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
-            ? buildJunctionSparseCalendarRefreshJobs({
-                asOf: context.now,
-                priority: job.priority,
-                resource: effectiveResource,
-                targets: timeseriesImport.canonicalSparseCalendarTargets,
-              })
-            : [];
         if (timeseriesImport.yieldedAt) {
           const yieldedResult = buildYieldedJunctionJobResult({
             context,
@@ -2626,25 +2642,18 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
             windowStart: timeseriesImport.yieldedAt,
           });
-          return withJunctionSkippedResourceMetadata(
-            context,
-            {
-              ...yieldedResult,
-              scheduledJobs: [
-                ...(yieldedResult.scheduledJobs ?? []),
-                ...calendarRefreshJobs,
-              ],
-            },
-            skippedOptionalResources,
+          return finalizePreciseImportResult(
+            withJunctionSkippedResourceMetadata(
+              context,
+              yieldedResult,
+              skippedOptionalResources,
+            ),
           );
         }
 
         const result = withJunctionSkippedResourceMetadata(
           context,
           {
-            ...(calendarRefreshJobs.length > 0
-              ? { scheduledJobs: calendarRefreshJobs }
-              : {}),
             nextReconcileAt: clampWebhookJobNextReconcileAt(context),
           },
           skippedOptionalResources,
@@ -2658,19 +2667,21 @@ export function createJunctionDeviceSyncProvider(
                 sourceProviderSlug,
               })
             : undefined;
-        return withJunctionHistoricalCoverageVerification(
-          context,
-          job,
-          window,
-          withJunctionExtendedTimeseriesBackfillFollowUp({
+        return finalizePreciseImportResult(
+          withJunctionHistoricalCoverageVerification(
             context,
-            historicalPullReadiness,
-            importResult: timeseriesImport,
             job,
-            resource: effectiveResource,
-            result,
             window,
-          }),
+            withJunctionExtendedTimeseriesBackfillFollowUp({
+              context,
+              historicalPullReadiness,
+              importResult: timeseriesImport,
+              job,
+              resource: effectiveResource,
+              result,
+              window,
+            }),
+          ),
         );
       }
 

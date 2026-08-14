@@ -81,6 +81,9 @@ Updated: 2026-08-14
 26. [x] Resolve round twenty-three's yielded sparse-history repair loss and
     unclosed broad-continuation publication findings without adding another
     queue, frontier, or state owner.
+27. [ ] Resolve round twenty-four's post-import sparse-day ownership recurrence
+    through one shared finalization boundary, prove the accepted day and
+    malformed-row retry leave the executor together, then obtain ReviewGPT PASS.
 
 ## Decisions
 
@@ -260,6 +263,25 @@ Updated: 2026-08-14
   The correction reorders existing result construction and derives one local
   request window; it adds no queue, persisted frontier, scheduler, worker, or
   state owner.
+- Round twenty-four's control-flow recurrence is accepted. The atomic unit is
+  a canonical closed provider day proven by a successful precise-import
+  receipt: after that receipt exists, every successful executor return must
+  transfer the day to the existing retained calendar job owner. For a mixed
+  valid/malformed response, retain the proven day immediately while the
+  malformed precise work keeps its existing delayed retry; withholding the
+  already-committed valid intervals would require widening the canonical import
+  transaction and would discard useful exact evidence. One post-import
+  finalizer therefore covers normal completion, yield, malformed-row retry,
+  retryable partial collection, and authority-transition exits. This reuses the
+  existing receipt, resource-job queue, calendar importer, and atomic
+  completion/enqueue transaction; it adds no queue, state, worker, scheduler,
+  cursor, or frontier.
+  Its proposed disconnect-loss reproduction is rejected after direct store and
+  service proof: the current SQLite disconnect predicate retains the ordinary
+  Junction resource retry as queued, so the claimed dead-retry/shifted-floor
+  path does not occur. The regression therefore stays at the actual boundary
+  and proves the accepted calendar day and malformed-row retry are returned
+  together, without adding a contrived lifecycle test.
 
 ## Verification
 
@@ -466,5 +488,17 @@ Updated: 2026-08-14
   regression advances its clock through the pre-closure full-job continuation.
   The exact three-test reproduction and four-test follow-up pass, both full
   affected files pass 200/200, and the device-sync typecheck passes.
-- Pending: commit/push the CI-only test correction, exact-head CI, ReviewGPT PASS,
-  merge, and worktree retirement.
+- Round twenty-four returned `RETROSPECTIVE_REQUIRED`: the yielded-path fix did
+  not cover the earlier mixed-validity retry return, so a successfully imported
+  sparse day could still lack immediate calendar ownership. Its asserted
+  disconnect-loss path was disproved because the ordinary precise retry remains
+  queued; the accepted correction instead makes the actual executor result
+  return that retry and its calendar repair together. Pending: finish focused
+  proof, integrate current `main`, obtain exact-head green CI and ReviewGPT
+  PASS, then merge and retire the worktree.
+- The round-twenty-four mixed-validity regression passes alone and the full 80
+  test Junction extended-history file passes. The device-sync package
+  typecheck and `git diff --check` pass. A direct service/store reproduction
+  proved the ordinary retry remains queued across disconnect, so the rejected
+  lifecycle scenario was removed instead of adding test-only machinery around
+  a false premise.

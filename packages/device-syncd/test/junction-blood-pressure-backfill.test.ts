@@ -602,6 +602,7 @@ async function executeImmediateBloodPressureContinuations(input: {
 
 async function executeImmediateResourceContinuations(input: {
   context: ProviderJobContext;
+  drainCalendarJobs?: boolean;
   job: DeviceSyncJobRecord;
   provider: ReturnType<typeof createProvider>;
   resource: string;
@@ -647,24 +648,28 @@ async function executeImmediateResourceContinuations(input: {
       !continuation
       || (continuation.availableAt && continuation.availableAt !== input.context.now)
     ) {
-      for (const calendarJob of pendingCalendarJobs.values()) {
-        if (
-          calendarJob.availableAt
-          && calendarJob.availableAt !== input.context.now
-        ) {
-          continue;
+      if (input.drainCalendarJobs !== false) {
+        for (const calendarJob of pendingCalendarJobs.values()) {
+          if (
+            calendarJob.availableAt
+            && calendarJob.availableAt !== input.context.now
+          ) {
+            continue;
+          }
+          const calendarResult = await executor.executeJob(
+            input.context,
+            toJobRecord(calendarJob, nextIndex),
+          );
+          results.push(calendarResult);
+          executionCount += 1;
+          nextIndex += 1;
         }
-        const calendarResult = await executor.executeJob(
-          input.context,
-          toJobRecord(calendarJob, nextIndex),
-        );
-        results.push(calendarResult);
-        executionCount += 1;
-        nextIndex += 1;
       }
-      const remainingScheduledJobs = result.scheduledJobs?.filter((job) =>
-        typeof job.payload?.calendarRefreshDay !== "string"
-      );
+      const remainingScheduledJobs = input.drainCalendarJobs === false
+        ? result.scheduledJobs
+        : result.scheduledJobs?.filter((job) =>
+            typeof job.payload?.calendarRefreshDay !== "string"
+          );
       return {
         executionCount,
         result: result.scheduledJobs
@@ -1478,13 +1483,32 @@ test("a sparse daily aggregate retries a date with a malformed sibling", async (
   const caffeine = findResourceJob(scheduled.jobs, "caffeine");
   const firstPass = await executeImmediateResourceContinuations({
     context: createJobContext({ importedSnapshots }),
+    drainCalendarJobs: false,
     job: toJobRecord(caffeine, 1),
     provider,
     resource: "caffeine",
   });
   const delayedRetry = findResourceJob(firstPass.result.scheduledJobs ?? [], "caffeine");
+  const mixedImportResult = firstPass.results.find((result) =>
+    result.scheduledJobs?.some((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "caffeine"
+      && job.payload.calendarRefreshDay === undefined
+      && job.availableAt === "2026-06-11T12:15:00.000Z"
+    )
+  );
+  assert.ok(mixedImportResult);
+  const retainedCalendarRepair = mixedImportResult.scheduledJobs?.find((job) =>
+    job.kind === "resource"
+    && job.payload?.resource === "caffeine"
+    && job.payload.calendarRefreshDay === "2026-06-09"
+  );
 
   assertHistoryCoverage(firstPass.result.metadataPatch, "omron", "caffeine", false);
+  assert.ok(
+    retainedCalendarRepair,
+    "The mixed precise import must retain its proven day beside the malformed-row retry.",
+  );
   assert.equal(delayedRetry.availableAt, "2026-06-11T12:15:00.000Z");
   assert.equal(delayedRetry.payload?.windowStart, "2026-06-09T00:00:00.000Z");
   assert.equal(delayedRetry.payload?.historicalPullReady, undefined);
