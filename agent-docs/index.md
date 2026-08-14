@@ -64,8 +64,11 @@ This contract is jointly specified by `ARCHITECTURE.md`,
 
 Exact-sender member-reported daily metrics reuse accepted-message authority,
 the encrypted personal mailbox, canonical `manual` observations, and that same
-checkpoint-gated share projection. Admission rechecks explicit health-data
-consent under the sender lock, and the durable receipt consumes the projection
+checkpoint-gated share projection. New admission rechecks explicit health-data
+consent under the sender lock. A deterministic mailbox identity lets the
+existing Cloudflare exact-request replay resolve a committed response loss
+without re-admitting health data, while the generic mailbox append remains the
+only payload/conflict owner. The durable receipt consumes the projection
 owner's exact result. Device observations remain independent, and contradicted
 snapshots are never represented as live values. This contract is
 jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,

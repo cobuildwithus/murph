@@ -15,7 +15,8 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
-  appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithIdentityTx,
+  readHostedMailboxItemById,
 } from "../hosted-mailbox/store";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import { getPrisma } from "../prisma";
@@ -73,6 +74,28 @@ export async function recordHostedGroupCurrentSenderDailyMetric(input: {
   });
 
   return prisma.$transaction(async (tx) => {
+    const existing = await readHostedMailboxItemById({
+      mailboxItemId: reportId,
+      prisma: tx,
+    });
+    if (existing) {
+      if (
+        existing.dedupeKey !== reportId
+        || existing.kind !== "health.daily-metric.reported"
+      ) {
+        return unavailableDailyMetricAdmission("report_conflict");
+      }
+      return appendDailyMetricReportTx({
+        wake: buildHostedExecutionDailyMetricReportedWake({
+          ...input.dailyMetric,
+          eventId: reportId,
+          memberId: existing.userId,
+          occurredAt: existing.occurredAt,
+        }),
+        tx,
+      });
+    }
+
     const authority = await readHostedGroupCurrentSenderAuthorityTx({
       expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
       now,
@@ -95,18 +118,30 @@ export async function recordHostedGroupCurrentSenderDailyMetric(input: {
       memberId: authority.targetMemberId,
       occurredAt: authority.occurredAt,
     });
-    const append = await appendHostedMailboxEnvelopeTx({ envelope: wake, tx });
-    if (append.dedupeConflict) {
-      return unavailableDailyMetricAdmission("report_conflict");
-    }
-    return {
-      mailboxWake: {
-        expectedUserId: authority.targetMemberId,
-        mailboxItemId: append.item.id,
-      },
-      result: { status: "accepted" },
-    };
+    return appendDailyMetricReportTx({ wake, tx });
   });
+}
+
+async function appendDailyMetricReportTx(input: {
+  tx: Parameters<typeof appendHostedMailboxEnvelopeWithIdentityTx>[0]["tx"];
+  wake: ReturnType<typeof buildHostedExecutionDailyMetricReportedWake>;
+}): Promise<HostedGroupCurrentSenderDailyMetricAdmission> {
+  const append = await appendHostedMailboxEnvelopeWithIdentityTx({
+    envelope: input.wake,
+    expiresAt: null,
+    itemId: input.wake.eventId,
+    tx: input.tx,
+  });
+  if (append.dedupeConflict || append.item.id !== input.wake.eventId) {
+    return unavailableDailyMetricAdmission("report_conflict");
+  }
+  return {
+    mailboxWake: {
+      expectedUserId: input.wake.userId,
+      mailboxItemId: input.wake.eventId,
+    },
+    result: { status: "accepted" },
+  };
 }
 
 function unavailableDailyMetricAdmission(

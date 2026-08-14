@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -82,3 +82,13 @@ Updated: 2026-08-13
   violations in untouched Web tests. Its first CLI pass then self-waited when a
   repair subprocess lost the outer workspace-lock marker; rebuilding the
   prepared runtime outside that lock made the full CLI workspace pass.
+- ReviewGPT round 2 required a retrospective because the new durable action was
+  omitted from Cloudflare's existing exact-request replay classifier. The
+  retrospective continued this PR with the existing transport replay and a
+  deterministic mailbox item identity; exact committed requests resolve before
+  changed authority or consent, while new admission still rechecks both and the
+  generic mailbox append remains the sole payload/conflict owner.
+- The correction passes Web typecheck, the full Web suite (9,973 tests), and the
+  full Cloudflare node suite (2,440 tests). Proxy and direct lost-response tests
+  prove byte-identical replay; Web coverage proves one committed report resolves
+  after authority/consent changes and changed values still conflict.

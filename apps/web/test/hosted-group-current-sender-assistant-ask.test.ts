@@ -312,7 +312,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
   });
 
-  it("durably admits an exact sender's daily metric report and rejects changed replay", async () => {
+  it("resolves an exact committed metric across authority changes and rejects changed replay", async () => {
     const dailyMetric = {
       date: "2026-07-27",
       metric: "steps",
@@ -326,15 +326,30 @@ describe("hosted current-sender Assistant Ask authority", () => {
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });
 
-    let admittedWake: unknown = null;
-    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(
-      async (input: { envelope: { eventId: string } }) => {
+    let admittedWake: Record<string, unknown> | null = null;
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        admittedWake && mailboxItemId === reportId
+          ? {
+              dedupeKey: reportId,
+              id: reportId,
+              kind: "health.daily-metric.reported",
+              occurredAt: admittedWake.occurredAt,
+              userId: admittedWake.userId,
+            }
+          : null,
+    );
+    mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
+      async (input: {
+        envelope: Record<string, unknown>;
+        itemId: string;
+      }) => {
         const dedupeConflict = admittedWake !== null
           && JSON.stringify(admittedWake) !== JSON.stringify(input.envelope);
         admittedWake ??= input.envelope;
         return {
           dedupeConflict,
-          item: { id: `item_${input.envelope.eventId}` },
+          item: { id: input.itemId },
         };
       },
     );
@@ -349,12 +364,13 @@ describe("hosted current-sender Assistant Ask authority", () => {
     expect(admission).toEqual({
       mailboxWake: {
         expectedUserId: SENDER_MEMBER_ID,
-        mailboxItemId: `item_${reportId}`,
+        mailboxItemId: reportId,
       },
       result: { status: "accepted" },
     });
-    const appendedWake = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
-      .envelope;
+    const appendedWake =
+      mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[0]?.[0]
+        .envelope;
     expect(appendedWake).toEqual({
       dailyMetric,
       eventId: reportId,
@@ -363,13 +379,16 @@ describe("hosted current-sender Assistant Ask authority", () => {
       userId: SENDER_MEMBER_ID,
     });
 
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     await expect(recordHostedGroupCurrentSenderDailyMetric({
       dailyMetric,
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
     })).resolves.toEqual(admission);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
 
     await expect(recordHostedGroupCurrentSenderDailyMetric({
       dailyMetric: { ...dailyMetric, value: 9_000 },
@@ -414,7 +433,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     expect(
       mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[1],
     ).toBeLessThan(mocks.readHostedHealthDataConsentState.mock.invocationCallOrder[0]);
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
   it("derives sender, exact question, route, and reviewed authority from one stored input", async () => {

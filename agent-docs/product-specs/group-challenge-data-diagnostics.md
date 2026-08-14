@@ -175,7 +175,12 @@ daily observation; it never edits or deletes a wearable observation. Accepted
 means the personal mailbox owns the report. The existing post-checkpoint share
 projection then refreshes already-granted scopes, so a later `read_shared` can
 return the manual record beside any device record. Missing values or dates are
-never inferred, and the action creates no group-owned health-value store.
+never inferred, and the action creates no group-owned health-value store. The
+Cloudflare port exact-replays this action once when a successful response body
+or retryable post-request response is lost. Its deterministic mailbox item
+identity resolves an already committed exact request before mutable sender or
+consent state can misreport it; a new report still requires current authority
+and non-revoked consent, and a changed value remains a generic mailbox conflict.
 
 Persisted unsourced records and the earlier nested source-aware sleep snapshots
 remain parseable during convergence. A new join view or access offer still
