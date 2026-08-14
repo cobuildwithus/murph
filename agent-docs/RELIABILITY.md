@@ -1195,6 +1195,11 @@ Last verified: 2026-08-13
   exact replay cannot reopen a resolved pointer. Continuation accepts only a
   later exact input from the same sender. Claim and ordinary admission share one
   database-only transaction, so unavailable admission rolls the claim back.
+  Within one assistant invocation, the existing stateful dynamic-tool chain
+  runs current-sender clarification and continuation transitions in provider
+  request order; a later continuation cannot start before an earlier
+  clarification settles, while independent new exact-ref requests remain
+  concurrent.
 - Admission persists one `current_sender_personal` read target and a separate
   result destination. `origin_context` selects the existing group completion;
   `requester_direct` also pins the admitted Linq or Telegram channel. The

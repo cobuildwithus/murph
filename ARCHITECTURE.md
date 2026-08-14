@@ -380,7 +380,11 @@ stores one ten-minute group-and-sender clarification pointer containing only
 the exact original input/session, causal sequence, expiry, and resolution. Its
 replacement is causally monotonic, and only a later exact input from the same
 sender may resume the original request. Failed admission rolls the provisional
-claim back.
+claim back. Within one assistant invocation, current-sender clarification and
+continuation transitions use the existing stateful dynamic-tool chain in
+provider request order, so a later continuation cannot start its notice or Web
+effect while an earlier clarification is unsettled. Independent new exact-ref
+requests retain their existing concurrent path.
 
 The canonical deterministic request id binds the group runtime and exact
 accepted input. The mailbox request persists one `current_sender_personal`

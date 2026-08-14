@@ -61,8 +61,10 @@ Murph infers a fixed audience from ordinary language, asks a natural
 clarification when needed, and sends advance notice before a group-bound
 personal read; Web keeps exact-source identity, route, replay, and same-sender
 continuation authority, including causally monotonic clarification replacement
-and resolved-pointer replay closure. One `current_sender_personal` target owns
-the read while a separate result destination owns group or same-channel direct
+and resolved-pointer replay closure. Current-sender clarification and
+continuation reuse the stateful dynamic-tool chain in provider request order,
+so one cannot overtake the other while independent new exact-ref requests stay
+concurrent. One `current_sender_personal` target owns the read while a separate result destination owns group or same-channel direct
 delivery; replay cannot switch that destination. Private delivery has a distinct
 identity from the canonical group completion/fallback, so expiry or a lost
 private route produces only a fresh non-disclosing group `cannot_answer`

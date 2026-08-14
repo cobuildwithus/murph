@@ -965,7 +965,10 @@ self-only permission text before the personal runtime starts. The request id is
 derived from the exact source, not the destination, so replay cannot change the
 stored choice. The clarification pointer copies no question text, expires after
 ten minutes through the bounded hourly retention owner, and is also removed by
-account deletion.
+account deletion. Current-sender clarification and continuation transitions use
+the existing stateful dynamic-tool chain in provider request order, so an
+earlier clarification settles before a later continuation may begin its notice
+or Web effect; independent new exact-ref requests remain concurrent.
 
 Prepare reloads the same source and revalidates membership, group routing,
 permission, fixed result destination, and any required private route immediately before

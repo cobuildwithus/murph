@@ -5763,6 +5763,9 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
+    (request.kind === 'group' &&
+      request.request.action === 'ask_current_sender' &&
+      request.request.mode !== 'new') ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     request.kind === 'computer-open' ||

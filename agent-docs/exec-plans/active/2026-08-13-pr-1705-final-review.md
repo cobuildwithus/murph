@@ -20,6 +20,9 @@ Updated: 2026-08-13
   replay attempting to switch it conflicts without another personal read.
 - Already-admitted `group_sender` and `group_sender_private` shapes retain their
   stored meaning during the bounded deployment drain.
+- A later continuation cannot reach its notice or Web transition before an
+  earlier clarification settles, while independent new exact-ref requests
+  remain concurrent.
 - Durable owner docs describe natural audience inference and clarification instead of retired phrase classification.
 - Focused Web, assistant-runtime, PostgreSQL, type, documentation, and privacy checks pass.
 - The final ReviewGPT gate passes, required exact-head CI is green, and the PR reaches the repository-authorized merge boundary.
@@ -40,6 +43,10 @@ Updated: 2026-08-13
 - Preserve natural model intent inference and conversational clarification.
 - Keep physical group completion and same-channel exact private notification as
   separate effects; only read-target identity is unified.
+- Treat current-sender clarification and continuation calls as stateful
+  transitions ordered by the existing app-server dynamic-tool chain; provider
+  scheduling must not let a later continuation overtake an earlier
+  clarification, while independent new exact-ref requests remain concurrent.
 - Add no context registry, shared memory, queue, service, or workflow owner.
 - Do not add state or retry machinery that cannot provide a real provider-level guarantee.
 - Preserve the already-consumed base-update budget unless the user grants new authority.
@@ -69,5 +76,13 @@ Local replacement-candidate evidence on 2026-08-13:
   lifecycle: 7 tests passed; prepared Web typecheck and focused Web lint passed.
 - Changelog fragment validation: 7 tests passed; agent-doc drift, diff hygiene,
   and identifier privacy scan passed.
-- Exact-head ReviewGPT and required GitHub checks remain pending until the
-  replacement candidate is pushed.
+- ReviewGPT round 14 completed late after its initially interrupted wait. Its
+  causal-transition finding was reproduced at the app-server/Web boundary: two
+  requests reached Web while the earlier clarification was held open. The
+  existing stateful dynamic-tool chain now orders only clarification and
+  continuation; focused proof shows the later continuation and notice wait,
+  while an independent exact-ref request still starts concurrently. The focused
+  runtime test, seven current-sender engine tests, Assistant Engine typecheck,
+  owner-doc contract, and docs drift pass.
+- A fresh full-snapshot ReviewGPT PASS and required GitHub checks remain pending
+  on the remediated exact head.

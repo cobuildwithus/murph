@@ -3508,6 +3508,167 @@ describe('assistant codex runtime', () => {
     expect(sendVaultFile).toHaveBeenCalledOnce()
   })
 
+  it('orders current-sender clarification and continuation without blocking an independent ref', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-order-work-',
+    )
+    const clarificationStarted = createDeferred<void>()
+    const releaseClarification = createDeferred<void>()
+    const earlierInputId = `ain_${'a'.repeat(32)}`
+    const laterInputId = `ain_${'b'.repeat(32)}`
+    const independentInputId = `ain_${'c'.repeat(32)}`
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => {
+      if (
+        request.action === 'ask_current_sender' &&
+        request.mode === 'clarification'
+      ) {
+        clarificationStarted.resolve()
+        await releaseClarification.promise
+      }
+      return {
+        action: 'ask_current_sender' as const,
+        result: { status: 'clarification_required' as const },
+      }
+    })
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      currentUserActionScope: () => ({
+        acceptedInputIds: [
+          earlierInputId,
+          independentInputId,
+          laterInputId,
+        ],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+    let requestsBeforeClarificationReleased = 0
+    let noticesBeforeClarificationReleased = 0
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-order' } },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 91,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'clarify_current_sender',
+                message_ref: earlierInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 93,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'ask_current_sender',
+                message_ref: independentInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 92,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'continue_current_sender_in_group',
+                message_ref: laterInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+
+          await clarificationStarted.promise
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          requestsBeforeClarificationReleased = groupRequest.mock.calls.length
+          noticesBeforeClarificationReleased =
+            progressDelivery.send.mock.calls.length
+          releaseClarification.resolve()
+
+          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+            id: 91,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 92)).resolves.toMatchObject({
+            id: 92,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
+            id: 93,
+            result: { success: true },
+          })
+          expect(groupRequest).toHaveBeenCalledTimes(3)
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-current-sender-order',
+                text: 'I still need a destination.',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'clarify in causal order',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'I still need a destination.',
+    })
+    expect(requestsBeforeClarificationReleased).toBe(2)
+    expect(noticesBeforeClarificationReleased).toBe(1)
+  })
+
   it('allows response media for a later steered message after an approved vault send', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-vault-send-steer-work-',

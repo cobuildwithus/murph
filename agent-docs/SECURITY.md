@@ -787,6 +787,10 @@ Last verified: 2026-08-13
   ambiguity stores only a short-lived group/sender pointer to the original
   input/session and causal sequence; replacement is causally monotonic, another
   sender cannot claim it, and failed admission rolls back its claim.
+  Current-sender clarification and continuation transitions run on the existing
+  stateful dynamic-tool chain in provider request order, so a later continuation
+  cannot overtake an earlier clarification or its required notice boundary;
+  independent new exact-ref requests remain concurrent.
 - A successful current-sender completion cannot change result destination.
   `assistant.ask.completed` is the group path and remains bound to the exact
   origin request and synthetic group runtime. Linq and Telegram carry its exact

@@ -47,7 +47,11 @@ answer requires a current same-channel direct route. When the audience is
 genuinely unclear, the model asks a natural clarification and Web retains only
 a short-lived group-and-sender pointer to the exact original source. The same
 speaker's later accepted input may resolve it, and a failed admission leaves the
-pointer claimable. No exact response format is required from the person.
+pointer claimable. Current-sender clarification and continuation transitions
+use the existing stateful dynamic-tool chain in provider request order, so a
+later continuation cannot overtake an earlier clarification; independent new
+exact-ref requests remain concurrent. No exact response format is required from
+the person.
 
 Web derives the member, route, question, and replay identity from the exact
 stored source; the model never supplies those values. The requested wake

@@ -37,6 +37,8 @@ describe("current-sender durable contract", () => {
 
       expect(ownerDoc).toMatch(/current_sender_personal/u);
       expect(ownerDoc).toMatch(/result\s+destination/iu);
+      expect(ownerDoc).toMatch(/stateful\s+dynamic-tool/iu);
+      expect(ownerDoc).toMatch(/provider\s+request\s+order/iu);
     }
   });
 });
