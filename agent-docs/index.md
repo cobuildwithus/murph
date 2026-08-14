@@ -7,6 +7,15 @@ Last verified: 2026-08-14
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Repository workflow entrypoints keep plan-helper help mutation-free through
+direct and package-script invocation, and skip pre-commit CLI schema generation
+for a merge only when the staged CLI tree exactly matches its incoming parent.
+Generation otherwise requires a clean CLI input worktree and stages all three
+generated artifacts together. The contracts and their synthetic proof are
+specified by `agent-docs/PLANS.md`,
+`agent-docs/operations/agent-workflow-routing.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Private Telegram model-authored rich-content admission, exclusive semantic-card
 ownership, closed HTML, disabled automatic Telegram entities, trusted text
 fallback derivation, and runner rollback ownership are jointly specified by
