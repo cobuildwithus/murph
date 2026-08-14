@@ -86,6 +86,7 @@ import {
 import {
   buildEventImportDecisionRecord,
   buildPublicEventImportRecord,
+  findEventsByRawRefs,
   hasEventKindReferencedRawRef,
   loadEventLedgerShardsById,
   selectLatestMatchedEvent,
@@ -5819,10 +5820,31 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
       );
     }
 
-    if (await statAndHashVaultFile(vaultRoot, sourceRawRef) === null) {
+    const sourceIntegrity = await statAndHashVaultFile(vaultRoot, sourceRawRef);
+    if (sourceIntegrity === null) {
       throw new VaultError(
         "EVENT_BATCH_SOURCE_RAW_REF_MISSING",
         "The guarded raw source does not exist as a vault file; nothing was imported.",
+      );
+    }
+
+    const [sourceDocumentMatches] = await findEventsByRawRefs({
+      vaultRoot,
+      rawRefs: [sourceRawRef],
+    });
+    const liveSourceDocumentOwnsRawRef = sourceDocumentMatches?.some(({ latest }) =>
+      latest.kind === "document"
+      && !isDeletedEventSpineRecord(latest)
+      && latest.attachments?.some((attachment) =>
+        attachment.role === "source_document"
+        && attachment.relativePath === sourceRawRef
+        && attachment.sha256 === sourceIntegrity.sha256
+      )
+    ) === true;
+    if (!liveSourceDocumentOwnsRawRef) {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE",
+        "The guarded raw source is no longer owned by a live source document; nothing was imported.",
       );
     }
 

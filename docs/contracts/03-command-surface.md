@@ -281,17 +281,20 @@ append a fresh event every time the same file is applied.
 `--source-raw-ref-once` is the unfamiliar-workout source guard. Every row must
 be an external-reference-free `activity_session` that references the named raw source. Under the
 canonical write lock, any historical workout reference to that source rejects
-the whole batch without writes; otherwise the batch follows the ordinary
-append-only rules. `document workout-import-status` projects that same
+the whole batch without writes. The apply boundary also requires the current
+live source document to still own the exact raw attachment, so deleting the
+source during transformation or dry-run rejects the batch before append;
+otherwise the batch follows the ordinary append-only rules. `document
+workout-import-status` projects that same
 immutable event-ledger relationship so a later assistant turn can stop before
 regenerating a scratch transform. Edited and deleted workouts still count as a
 completed source import.
 
 `document import --reuse-exact` reuses only a verified live exact document. If
-verified exact bytes exist only behind a deleted document event, it fails with
-a typed conflict and performs no write instead of minting a replacement raw
-identity. Ordinary document import without `--reuse-exact` retains its explicit
-create-new behavior.
+any verified exact identity is deleted, it fences the complete byte-equivalent
+set and fails with a typed conflict without writing, minting, or adopting a
+replacement raw identity. Ordinary document import without `--reuse-exact`
+retains its explicit create-new behavior.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -592,7 +595,7 @@ An explicit recognized `--source strong|hevy` selects that parser dialect. Witho
 
 The `workout-csv-import` assistant skill owns both the dedicated and unfamiliar-layout paths without adding its detailed workflow to every conversation. It may adapt a workout CSV that the Strong/Hevy planner does not recognize by using local Python's standard-library CSV parser, but Python remains a transformation layer rather than a vault writer. The dedicated planner always runs first; a recognized file with an unresolved provider or unit requirement must satisfy that gate instead of bypassing it through the generic path.
 
-For a genuinely unfamiliar layout, the assistant first preserves the CSV through `document import --reuse-exact`, then runs `document workout-import-status` for its returned raw reference. If any historical workout already references that source, the assistant stops before regenerating Python or JSONL. Otherwise it reads the current `activity_session` row contract from `event payload-schema --for import-jsonl`, maps the complete source into one temporary JSONL batch with one row per grouped workout and a reference to the preserved raw artifact, and performs one `event import-jsonl --source-raw-ref-once <raw-ref>` dry run followed by one apply of the byte-identical file. The source guard is checked again atomically under the canonical write lock, preventing concurrent first attempts from both landing. The mapping must resolve grouping, timestamps and timezone, required duration, units, and exercise/set meaning without guessing. Assistant-facing discussion stays bounded to mappings, choices, warnings, and aggregate counts rather than source rows or per-set tool calls.
+For a genuinely unfamiliar layout, the assistant first preserves the CSV through `document import --reuse-exact`, then runs `document workout-import-status` for its returned raw reference. If any historical workout already references that source, the assistant stops before regenerating Python or JSONL. Otherwise it reads the current `activity_session` row contract from `event payload-schema --for import-jsonl`, maps the complete source into one temporary JSONL batch with one row per grouped workout and a reference to the preserved raw artifact, and performs one `event import-jsonl --source-raw-ref-once <raw-ref>` dry run followed by one apply of the byte-identical file. The source guard is checked again atomically under the canonical write lock, preventing concurrent first attempts from both landing and rejecting a source document deleted during transformation or dry-run. The mapping must resolve grouping, timestamps and timezone, required duration, units, and exercise/set meaning without guessing. Offsetless wall times with a known IANA timezone use Python's standard-library `zoneinfo`; ambiguous or nonexistent daylight-saving times stop before write for one targeted clarification. Assistant-facing discussion stays bounded to mappings, choices, warnings, and aggregate counts rather than source rows or per-set tool calls.
 
 The generic transform does not invent `externalRef` identity. Exact-artifact completion derives from the event ledger's immutable raw-reference history, not from reproducing scratch transformer choices across turns. A refreshed export with different bytes is a new source and does not inherit provider correction/edit/deletion semantics; Strong and Hevy retain those richer semantics. The assistant applies at most once in the current request and never blindly retries an ambiguous apply. A later turn resolves the ambiguity through `workout-import-status`: a completed atomic batch stops there, while no workout reference means it can safely proceed. A successful apply is confirmed through a bounded canonical read. Temporary scripts and JSONL files remain scratch and do not count as durable import state.
 

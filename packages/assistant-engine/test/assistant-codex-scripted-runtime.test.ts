@@ -383,11 +383,33 @@ import hashlib
 import json
 import sys
 from collections import OrderedDict
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def canonical_timestamp(value: str, time_zone: str) -> str:
+    parsed = datetime.fromisoformat(value.strip())
+    zone = ZoneInfo(time_zone)
+    if parsed.tzinfo is not None:
+        localized = parsed.astimezone(zone)
+        return localized.isoformat()
+
+    valid_by_offset: dict[object, datetime] = {}
+    for fold in (0, 1):
+        candidate = parsed.replace(tzinfo=zone, fold=fold)
+        round_trip = candidate.astimezone(timezone.utc).astimezone(zone)
+        if round_trip.replace(tzinfo=None) == parsed:
+            valid_by_offset[candidate.utcoffset()] = candidate
+    if len(valid_by_offset) != 1:
+        issue = "nonexistent" if not valid_by_offset else "ambiguous"
+        raise ValueError(f"{issue} local time {value!r} in {time_zone}")
+    localized = next(iter(valid_by_offset.values()))
+    return localized.isoformat()
 
 
 def transform(source: Path, receipt_path: Path, output: Path, digest_path: Path, identity_mode: str) -> None:
@@ -404,10 +426,13 @@ def transform(source: Path, receipt_path: Path, output: Path, digest_path: Path,
             group_key = (row.get(group_column) or "").strip()
             if not group_key:
                 raise ValueError(f"missing {group_column} on source row {source_rows}")
+            time_zone = (row.get("time_zone") or "America/New_York").strip()
+            occurred_at = canonical_timestamp(row["occurred_at"], time_zone)
             group = groups.setdefault(group_key, {
                 "duration": int(row["duration_minutes"]),
                 "exercises": OrderedDict(),
-                "occurred_at": row["occurred_at"],
+                "occurred_at": occurred_at,
+                "time_zone": time_zone,
                 "title": row["workout_title"],
             })
             exercises = group["exercises"]
@@ -434,7 +459,7 @@ def transform(source: Path, receipt_path: Path, output: Path, digest_path: Path,
         payload: dict[str, object] = {
             "kind": "activity_session",
             "occurredAt": group["occurred_at"],
-            "timeZone": "America/New_York",
+            "timeZone": group["time_zone"],
             "source": "import",
             "title": group["title"],
             "activityType": "strength-training",
@@ -556,10 +581,10 @@ describe('real codex app-server with scripted provider', () => {
     )
     await writeWorkoutCsvTransformHelper(workdir)
     const sourceCsv = [
-      'session_key,occurred_at,duration_minutes,workout_title,exercise,reps,weight,weight_unit,note',
-      'session-a,2026-03-13T17:00:00-04:00,45,Lower body,Squat,5,135,lb,ROW_PRIVATE_ALPHA',
-      'session-a,2026-03-13T17:00:00-04:00,45,Lower body,Bench press,8,95,lb,ROW_PRIVATE_BETA',
-      'session-b,2026-03-14T09:00:00-04:00,30,Upper body,Pull-up,6,,,ROW_PRIVATE_GAMMA',
+      'session_key,occurred_at,time_zone,duration_minutes,workout_title,exercise,reps,weight,weight_unit,note',
+      'session-a,2026-01-15 18:30:00,America/Chicago,45,Lower body,Squat,5,135,lb,ROW_PRIVATE_ALPHA',
+      'session-a,2026-01-15 18:30:00,America/Chicago,45,Lower body,Bench press,8,95,lb,ROW_PRIVATE_BETA',
+      'session-b,2026-07-15 18:30:00,America/Chicago,30,Upper body,Pull-up,6,,,ROW_PRIVATE_GAMMA',
       '',
     ].join('\n')
     await writeFile(path.join(workdir, 'workout-history.csv'), sourceCsv, 'utf8')
@@ -611,7 +636,7 @@ if [ "$1 $2" = "event import-jsonl" ]; then
 fi
 if [ "$1 $2" = "event list" ]; then
   test "$(cat "$DURABLE_WORKOUT_IMPORT_STATE/import-state")" = '2'
-  printf '%s\\n' '{"count":2,"items":[{"title":"Lower body"},{"title":"Upper body"}]}'
+  printf '%s\\n' '{"count":2,"items":[{"title":"Lower body","occurredAt":"2026-01-15T18:30:00-06:00","dayKey":"2026-01-15"},{"title":"Upper body","occurredAt":"2026-07-15T18:30:00-05:00","dayKey":"2026-07-15"}]}'
   exit 0
 fi
 printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
@@ -633,7 +658,7 @@ python3 workout-csv-helper.py transform workout-history.csv document.json events
 python3 workout-csv-helper.py verify events.jsonl events.sha256
 ./vault-cli event import-jsonl --input @events.jsonl --source-raw-ref-once raw/documents/workout-source.csv --apply --format json > apply.json
 python3 workout-csv-helper.py verify events.jsonl events.sha256
-./vault-cli event list --kind activity_session --from 2026-03-13 --to 2026-03-14 --limit 10 --format json > readback.json
+./vault-cli event list --kind activity_session --from 2026-01-15 --to 2026-07-15 --limit 10 --format json > readback.json
 ./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > replay-status.json
 test "$(python3 -c 'import json; print(str(json.load(open("replay-status.json"))["imported"]).lower())')" = 'true'
 python3 workout-csv-helper.py summarize transform-summary.json dry-run.json apply.json readback.json
@@ -673,7 +698,7 @@ text(result.output);
         },
       },
       {
-        text: 'Done — I imported 2 workouts from March 13–14. The source had 3 set rows and none were ignored. I validated the full batch, saved and confirmed both workouts, and the exact source file is replay-safe.',
+        text: 'Done — I imported 2 workouts from January 15–July 15. The source had 3 set rows and none were ignored. I applied the Chicago timezone with the correct winter and summer offsets, validated the full batch, saved and confirmed both workouts, and the exact source file is replay-safe.',
       },
     )
 
@@ -710,7 +735,7 @@ text(result.output);
       'event payload-schema --for import-jsonl --kind activity_session --format json',
       'event import-jsonl --input @events.jsonl --source-raw-ref-once raw/documents/workout-source.csv --format json',
       'event import-jsonl --input @events.jsonl --source-raw-ref-once raw/documents/workout-source.csv --apply --format json',
-      'event list --kind activity_session --from 2026-03-13 --to 2026-03-14 --limit 10 --format json',
+      'event list --kind activity_session --from 2026-01-15 --to 2026-07-15 --limit 10 --format json',
       'document workout-import-status raw/documents/workout-source.csv --format json',
     ])
     const digests = (await readFile(path.join(workdir, 'import-digests.log'), 'utf8'))
@@ -730,6 +755,23 @@ text(result.output);
       .map((line) => JSON.parse(line) as Record<string, unknown>)
     expect(payloads).toHaveLength(2)
     expect(payloads.every((payload) => payload.externalRef == null)).toBe(true)
+    expect(payloads.map((payload) => payload.occurredAt)).toEqual([
+      '2026-01-15T18:30:00-06:00',
+      '2026-07-15T18:30:00-05:00',
+    ])
+    expect(payloads.every((payload) => payload.dayKey == null)).toBe(true)
+    expect(payloads.every((payload) => payload.timeZone === 'America/Chicago')).toBe(true)
+    const canonicalReadback = JSON.parse(
+      await readFile(path.join(workdir, 'readback.json'), 'utf8'),
+    ) as { items: Array<{ dayKey: string, occurredAt: string }> }
+    expect(canonicalReadback.items.map((item) => item.occurredAt)).toEqual([
+      '2026-01-15T18:30:00-06:00',
+      '2026-07-15T18:30:00-05:00',
+    ])
+    expect(canonicalReadback.items.map((item) => item.dayKey)).toEqual([
+      '2026-01-15',
+      '2026-07-15',
+    ])
     expect(payloads.every((payload) =>
       Array.isArray(payload.rawRefs)
       && payload.rawRefs[0] === 'raw/documents/workout-source.csv')).toBe(true)
@@ -1028,6 +1070,131 @@ text(result.output);
       '{"status":"apply_result_unknown","retryAllowed":false,"groupedWorkouts":1}',
     )
     expect(toolOutputs).not.toContain('ROW_PRIVATE_')
+  })
+
+  it('stops before event import for a nonexistent daylight-saving wall time', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    await writeWorkoutCsvTransformHelper(workdir)
+    await writeFile(
+      path.join(workdir, 'workout-history.csv'),
+      [
+        'session_key,occurred_at,time_zone,duration_minutes,workout_title,exercise,reps,weight,weight_unit,note',
+        'session-a,2026-03-08 02:30:00,America/Chicago,45,Lower body,Squat,5,135,lb,ROW_PRIVATE_DST_GAP',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":1}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  printf '%s\\n' '{"documentId":"doc_source","rawFile":"raw/documents/workout-source.csv"}'
+  exit 0
+fi
+if [ "$1 $2" = "document workout-import-status" ]; then
+  printf '%s\\n' '{"imported":false}'
+  exit 0
+fi
+if [ "$1 $2" = "event payload-schema" ]; then
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"required":["kind","occurredAt","title","durationMinutes"]}}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"daylight-saving validation must stop before event import"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-dst-gap-check'),
+      `#!/bin/sh
+set -eu
+./vault-cli workout import inspect workout-history.csv --format json > inspect.json
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > document.json
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > status.json
+./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > schema.json
+set +e
+python3 workout-csv-helper.py transform workout-history.csv document.json events.jsonl events.sha256 stable 2> transform-error.txt
+transform_status=$?
+set -e
+test "$transform_status" -ne 0
+grep -q "nonexistent local time '2026-03-08 02:30:00' in America/Chicago" transform-error.txt
+test ! -e events.jsonl
+printf '%s\\n' '{"status":"nonexistent_local_time","writeAttempted":false,"questionRequired":true}'
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./run-dst-gap-check",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The CSV says 2:30 AM in Chicago on March 8, but that local time did not exist because the clock jumped forward. I stopped before importing anything. What was the intended workout time?',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      prompt: 'Import workout-history.csv using its America/Chicago timestamps.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain('that local time did not exist')
+    expect(result.finalMessage).toContain('stopped before importing anything')
+    expect((await readFile(path.join(workdir, 'commands.log'), 'utf8')).trim().split('\n'))
+      .toEqual([
+        'workout import inspect workout-history.csv --format json',
+        'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
+        'document workout-import-status raw/documents/workout-source.csv --format json',
+        'event payload-schema --for import-jsonl --kind activity_session --format json',
+      ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain(
+      '{"status":"nonexistent_local_time","writeAttempted":false,"questionRequired":true}',
+    )
+    expect(toolOutputs).not.toContain('ROW_PRIVATE_DST_GAP')
   })
 
   it('stops before transformation when a deleted exact source also has a live alias', {

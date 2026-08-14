@@ -11,6 +11,7 @@ import {
   findEventByExternalRef,
   findEventsByRawRefs,
   hasEventKindReferencedRawRef,
+  importDocument,
   importEventBatch,
   initializeVault,
   listHistoryEvents,
@@ -32,6 +33,25 @@ async function makeVault(name: string, timezone?: string): Promise<string> {
     ...(timezone ? { timezone } : {}),
   });
   return vaultRoot;
+}
+
+async function importWorkoutSourceDocument(vaultRoot: string, name: string) {
+  const sourceRoot = await makeTempDirectory(`${name}-source`);
+  const sourcePath = path.join(sourceRoot, "workout-source.csv");
+  await fs.writeFile(sourcePath, "session,exercise\na,Squat\n", "utf8");
+  return importDocument({ vaultRoot, sourcePath, reuseExact: true });
+}
+
+async function readAllAuditRecords(vaultRoot: string): Promise<AuditRecord[]> {
+  const auditRoot = path.join(vaultRoot, "audit");
+  const paths = await fs.readdir(auditRoot, { recursive: true });
+  const records = await Promise.all(paths
+    .filter((relativePath) => relativePath.endsWith(".jsonl"))
+    .map((relativePath) => readJsonlRecords({
+      vaultRoot,
+      relativePath: path.posix.join("audit", relativePath),
+    })));
+  return records.flat() as AuditRecord[];
 }
 
 function buildSleepSessionPayload(dayOfMonth: number, overrides: Record<string, unknown> = {}) {
@@ -216,9 +236,8 @@ test("importEventBatch dry-run reports counts without writing", async () => {
 
 test("source-guarded workout batches land once and retain completion through edits and deletion", async () => {
   const vaultRoot = await makeVault("murph-event-batch-source-guard");
-  const rawRef = "raw/documents/workout-source.csv";
-  await fs.mkdir(path.dirname(path.join(vaultRoot, rawRef)), { recursive: true });
-  await fs.writeFile(path.join(vaultRoot, rawRef), "session,exercise\na,Squat\n", "utf8");
+  const source = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-guard");
+  const rawRef = source.raw.relativePath;
 
   const dryRun = await importEventBatch({
     vaultRoot,
@@ -280,11 +299,60 @@ test("source-guarded workout batches land once and retain completion through edi
   );
 });
 
+test("source-guarded apply rejects a source document deleted after dry-run", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-deleted-before-apply");
+  const source = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-deleted-before-apply",
+  );
+  const rawRef = source.raw.relativePath;
+  const payloads = [buildActivitySessionPayload(rawRef)];
+
+  const dryRun = await importEventBatch({
+    vaultRoot,
+    payloads,
+    rejectIfSourceRawRefAlreadyImported: rawRef,
+  });
+  assert.equal(dryRun.applied, false);
+  assert.equal(dryRun.createdCount, 1);
+
+  await deleteEvent({ vaultRoot, eventId: source.event.id });
+  const importAuditCountBeforeApply = (await readAllAuditRecords(vaultRoot))
+    .filter((record) => record.commandName === "core.importEventBatch").length;
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads,
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE");
+      return true;
+    },
+  );
+
+  assert.equal(await hasEventKindReferencedRawRef({
+    vaultRoot,
+    rawRef,
+    kind: "activity_session",
+  }), false);
+  assert.equal(
+    (await readAllAuditRecords(vaultRoot))
+      .filter((record) => record.commandName === "core.importEventBatch").length,
+    importAuditCountBeforeApply,
+  );
+});
+
 test("source-guarded workout batches reject any non-workout or unreferenced row atomically", async () => {
   const vaultRoot = await makeVault("murph-event-batch-source-guard-contract");
-  const rawRef = "raw/documents/workout-source.csv";
-  await fs.mkdir(path.dirname(path.join(vaultRoot, rawRef)), { recursive: true });
-  await fs.writeFile(path.join(vaultRoot, rawRef), "session,exercise\na,Squat\n", "utf8");
+  const source = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-guard-contract",
+  );
+  const rawRef = source.raw.relativePath;
   const activity = buildActivitySessionPayload(rawRef);
   const invalidRow = buildSleepSessionPayload(10, { rawRefs: [rawRef] });
 

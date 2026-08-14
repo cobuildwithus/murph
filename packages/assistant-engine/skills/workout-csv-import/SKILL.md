@@ -38,11 +38,15 @@ batch write. Keep raw rows out of model context and user-facing replies.
    generation and tell the member the source was already imported. This check
    uses immutable event-ledger history, so it remains true after a workout is
    edited or deleted.
-3. Use a small local Python 3 script and only the standard-library `csv`,
-   `datetime`, `hashlib`, and `json` modules. Inspect headers, dialect, bounded
-   samples, row count, and privacy-safe aggregate values locally. Never print
-   the complete source, expand all rows into model context, or make one model or
-   CLI call per row or set.
+3. Use a small local Python 3 script with the standard library only. Typical
+   modules include `csv`, `datetime`, `hashlib`, and `json`; when an offsetless
+   wall-clock timestamp has a known IANA timezone, use `zoneinfo.ZoneInfo` so
+   historical and daylight-saving offsets are applied per date. Reject an
+   ambiguous or nonexistent daylight-saving wall time before writing and ask
+   one targeted question when the source cannot disambiguate it. Inspect
+   headers, dialect, bounded samples, row count, and privacy-safe aggregate
+   values locally. Never print the complete source, expand all rows into model
+   context, or make one model or CLI call per row or set.
 4. Run `vault-cli event payload-schema --for import-jsonl --kind
    activity_session --format json`. Treat that returned schema as authoritative;
    do not rely on a remembered payload shape.

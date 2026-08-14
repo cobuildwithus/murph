@@ -307,6 +307,53 @@ test('deleted exact source fails closed without duplicating workout history', as
   assert.equal(requireData(workoutsAfterAliasReplay).count, 2)
 }, 180_000)
 
+test('source-guarded apply rejects a document deleted after dry-run', async () => {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-delete-race-'))
+  const vaultRoot = path.join(workDir, 'vault')
+  const sourcePath = path.join(workDir, 'workout-history.csv')
+  await writeFile(sourcePath, 'session,exercise,reps\na,Squat,5\n', 'utf8')
+  await runCli(['init', '--vault', vaultRoot])
+
+  const sourceImport = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+  ])
+  assert.equal(sourceImport.ok, true)
+  const source = requireData(sourceImport)
+  const inputPath = path.join(workDir, 'events.jsonl')
+  await writeFile(inputPath, toJsonl([withRawRef(source.rawFile)]), 'utf8')
+
+  const dryRun = await runCli<EventImportJsonlResult>([
+    'event', 'import-jsonl',
+    '--input', `@${inputPath}`,
+    '--source-raw-ref-once', source.rawFile,
+    '--vault', vaultRoot,
+  ])
+  assert.equal(dryRun.ok, true)
+  assert.equal(requireData(dryRun).createdCount, 1)
+
+  const deletedSource = await runCli([
+    'document', 'delete', source.documentId, '--vault', vaultRoot,
+  ])
+  assert.equal(deletedSource.ok, true)
+  const rejectedApply = await runCli<EventImportJsonlResult>([
+    'event', 'import-jsonl',
+    '--input', `@${inputPath}`,
+    '--source-raw-ref-once', source.rawFile,
+    '--apply',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(rejectedApply.ok, false)
+  if (rejectedApply.ok) throw new Error('expected deleted source authority to reject apply')
+  assert.equal(rejectedApply.error.code, 'conflict')
+  assert.match(rejectedApply.error.message ?? '', /no longer owned by a live source document/iu)
+
+  const workouts = await runCli<EventListResult>([
+    'event', 'list', '--kind', 'activity_session', '--vault', vaultRoot,
+  ])
+  assert.equal(workouts.ok, true)
+  assert.equal(requireData(workouts).count, 0)
+}, 180_000)
+
 test('event import-jsonl dry-runs, applies, and stays idempotent', async () => {
   const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-'))
   const vaultRoot = path.join(workDir, 'vault')

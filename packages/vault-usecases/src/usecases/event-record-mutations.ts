@@ -631,6 +631,9 @@ export async function importEventRecordsFromJsonl(input: {
       EVENT_BATCH_SOURCE_RAW_REF_MISSING: {
         code: 'not_found',
       },
+      EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE: {
+        code: 'conflict',
+      },
     })
 
     // The CLI error envelope only surfaces code/message, so fold the first
