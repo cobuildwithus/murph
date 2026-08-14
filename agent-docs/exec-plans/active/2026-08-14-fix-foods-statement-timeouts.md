@@ -7,8 +7,8 @@ Updated: 2026-08-14
 ## Goal
 
 - Prevent broad `/api/foods` searches from crossing the labels database's
-  statement timeout while preserving the existing ranked, deduplicated result
-  contract.
+  statement timeout with an explicit bounded, ranked, and deduplicated private
+  food-name retrieval contract.
 
 ## Success criteria
 
@@ -17,16 +17,17 @@ Updated: 2026-08-14
   configured statement timeout.
 - Private food-label searches bound the candidate rows scored and sorted before
   canonical-key deduplication and final result limiting.
-- Existing exact-id, UPC, generic-origin, source-filter, ranking, and
-  contaminant-summary behavior remains unchanged.
+- Existing exact-id, UPC, generic-origin, source-filter, supplement, public,
+  and contaminant-summary behavior remains unchanged. Private food names rank
+  deterministically within the documented admitted set.
 - Focused hosted-web tests and typecheck pass, and exact-head CI plus the
   applicable ReviewGPT gates complete.
 
 ## Scope
 
-- In scope: the shared product-label generic-search SQL used by `/api/foods`,
-  focused SQL-shape/PostgreSQL regression proof, and the durable query-bound
-  contract.
+- In scope: the private-food branch of the shared product-label generic-search
+  SQL, focused SQL-shape/PostgreSQL regression proof, and the durable
+  query-bound contract.
 - Out of scope: pool sizing, timeout increases, label ingestion, public search
   UX, supplement ranking redesign, and provider-call retry behavior.
 
@@ -40,10 +41,11 @@ Updated: 2026-08-14
 
 ## Risks and mitigations
 
-1. Risk: bounding candidates can exclude lower-ranked canonical products when
-   many aliases share one canonical key.
-   Mitigation: retain a candidate budget materially above the maximum returned
-   result count and add deduplication/ranking coverage at the bound.
+1. Risk: bounded admission is not equivalent to exhaustive whole-catalog
+   ranking when aliases or distinct products exceed the admission limits.
+   Mitigation: document the private-food contract explicitly, retain separate
+   literal exact-name, nearest-name, and canonical-diversity lanes, and keep
+   supplement and public ranking behavior unchanged.
 2. Risk: a structural SQL assertion could pass without proving runtime impact.
    Mitigation: run the old and corrected query against the same indexed,
    production-scale synthetic corpus under an explicit statement timeout.
@@ -69,6 +71,17 @@ Updated: 2026-08-14
   materializes and window-sorts every matching food row before applying the
   requested limit, even though the public projection already bounds candidate
   work.
+- Keep bounded admission private-food-only. Supplement and public queries retain
+  their prior paths, including the public 250-candidate contract.
+- Use literal `lower(name) = lower($1)` equality for the bounded exact-name lane;
+  never interpret `%` or `_` as SQL patterns.
+- Final ReviewGPT round 1 produced three accepted findings: the phrase lane
+  exposed SQL wildcard semantics and unbounded pre-limit work; fixed admission
+  could not preserve exhaustive whole-catalog ranking; and the shared change
+  drifted supplement/public behavior, including the public 250-candidate
+  contract. Remediation deletes the phrase lane, makes the private-food ranking
+  tradeoff explicit, adds a bounded indexed literal-name lane, and restores the
+  original supplement/public query path.
 
 ## Verification
 
@@ -89,10 +102,11 @@ Completed during implementation:
   ms through `createFoodsQueries` with the real pool statement timeout. The
   first bounded implementation was rejected because unordered admission could
   exclude ranking winners and collapse canonical diversity.
-- The corrected ranked-admission query completed a cold two-million-row search
-  through `createFoodsQueries` in about 4.4 seconds under the real eight-second
-  statement timeout, returning the exact phrase winner and 50 unique results.
-- Focused food route/query/pool coverage passed 103 tests. The opt-in local
-  PostgreSQL search regression passed 133 tests, including greater-than-5,000
-  FTS and trigram paths for private foods, private supplements, and the public
-  projection.
+- The final private-food-only query completed a fresh two-million-row search
+  through `createFoodsQueries` in about 0.4 seconds under the real eight-second
+  statement timeout, returning the literal exact-name winner and 50 unique
+  results.
+- Focused food and supplement query-helper coverage passed 67 tests. The
+  opt-in local PostgreSQL search regression passed 132 tests, including
+  greater-than-5,000 private-food admission, SQL wildcard input, and a literal
+  percent-bearing product name.

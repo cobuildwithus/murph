@@ -39,6 +39,12 @@ describe("foods query helpers", () => {
     );
     expect(schemaSql).toContain("USING GIST (name gist_trgm_ops)");
     expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS foods_name_exact_rank_idx",
+    );
+    expect(schemaSql).toContain(
+      "ON foods (lower(name), data_origin_priority, id)",
+    );
+    expect(schemaSql).toContain(
       "CREATE INDEX IF NOT EXISTS foods_canonical_rank_idx",
     );
     expect(schemaSql).toContain(
@@ -341,10 +347,14 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).toMatch(
       /trigram_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 5000/u,
     );
-    expect(searchCall?.text).toContain("fts_phrase_matches AS MATERIALIZED");
     expect(searchCall?.text).toMatch(
-      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_phrase_matches[\s\S]*?SELECT \* FROM fts_nearest_matches[\s\S]*?SELECT \* FROM fts_canonical_matches/u,
+      /fts_matches AS MATERIALIZED \([\s\S]*?SELECT \* FROM fts_exact_name_matches[\s\S]*?SELECT \* FROM fts_nearest_matches[\s\S]*?SELECT \* FROM fts_canonical_matches/u,
     );
+    expect(searchCall?.text).toMatch(
+      /fts_exact_name_matches AS MATERIALIZED \([\s\S]*?lower\(name\) = lower\(\$1::text\)[\s\S]*?LIMIT 250/u,
+    );
+    expect(searchCall?.text).not.toContain("fts_phrase_matches");
+    expect(searchCall?.text).not.toContain("ILIKE");
     expect(searchCall?.text).toContain("name % $1::text");
     expect(searchCall?.text).not.toContain("OR name % $1::text");
     expect(searchCall?.text).toContain("FROM foods");

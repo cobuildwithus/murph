@@ -1487,13 +1487,18 @@ model context.
 
 Current hosted external-data lookup boundary: `apps/web` owns read-only product label lookup on `/api/foods` and `/api/supplements`, authenticated by the shared server-to-server `MURPH_DATA_API_KEY`. The shared labels database is configured by `MURPH_LABELS_DB_URL`, and both `/api/foods` and `/api/supplements` require it; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback. Deployments must configure `MURPH_LABELS_DB_URL` before serving label lookup routes. The `foods` table stores USDA/FDC rows, and the `supplements` table stores DSLD, DailyMed, and official brand-site label rows; each row carries `data_origin`, `data_origin_id`, `data_origin_url`, `data_origin_priority`, optional `serving_grams`, and a `canonical_key` used to dedupe alternate records for the same label/product at query time. `data_origin` is the source type, such as `usda_branded`, `dsld`, `dailymed`, or `brand_site`, not a brand name. Query results use source-qualified ids such as `fdc:<id>`, `dailymed:<id>`, or `blueprint:<handle>` when a source prefix is needed, while API payloads expose provenance through `dataOrigin` and `dataOriginId` and include the stored source label JSON for search and exact lookup results. Product contaminant observations from sources such as PlasticList, NYC DOHMH, King County, and Pure Earth live in `product_tests`, with concentration limits and broad screening guidance in `contaminant_thresholds`; source-only observations keep source product identity without creating label rows, and label responses attach contaminant summaries only for rows linked to the exact selected `food_id` or `supplement_id`, including bounded raw observations plus threshold-exceedance alerts where comparable. Daily-exposure guidance can be scored at read time from the selected label's `serving_grams`, but the lookup layer never infers contaminants from names, brands, ingredients, tags, categories, or fuzzy matches. Hosted runtime callers reach label lookup through the fixed internal `murph-data-api.worker` host; `apps/cloudflare` injects the data API key during allowed `/api/foods` and `/api/supplements` `GET` egress and bounded batch-search `POST` egress, and `packages/cli` exposes those paths through `food search-labels`, `food search-labels-batch`, `supplement search-labels`, and `supplement search-labels-batch` without local key access.
 
-Both private and public generic label search bound indexed matches before
-similarity scoring, canonical-key deduplication, and window sorting. An exact
-query-phrase lane preserves phrase winners, a GiST trigram lane admits nearest
-names, and a canonical-rank btree lane preserves deterministic source-priority
-representatives and result diversity; exact-id and UPC lookups retain their
-direct indexed paths. Existing labels databases must receive the name-rank and
-canonical-rank indexes before this query shape is deployed. The public
+Private food-name search bounds indexed matches before similarity scoring,
+canonical-key deduplication, and window sorting. A literal-equality btree lane
+admits up to 250 exact names without SQL-pattern semantics, a GiST trigram lane
+admits up to 5,000 nearest names, and a canonical-rank btree lane admits up to
+5,000 deterministic source-priority representatives for result diversity.
+Ranking is deterministic within that admitted set rather than exhaustive
+across the full food catalog. Exact-id and UPC lookups retain their direct
+indexed paths;
+supplement generic search and the public projection retain their pre-existing
+ranking and candidate contracts. Existing labels databases must receive the
+foods name-rank and canonical-rank indexes before this private-food query shape
+is deployed. The public
 projection of that database is Murph Safe at `/search` and the
 read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
 to `@murphai/contracts`; one web-owned service maps bounded database records to

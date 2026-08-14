@@ -631,18 +631,20 @@ product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
 The current search path uses built-in Postgres full-text search plus the
-`pg_trgm` extension for indexed name similarity. Both label tables keep GIN
-indexes for full-text/trigram filtering, a GiST trigram index for bounded
-nearest-name admission, and a canonical-rank btree for deterministic source
-representatives. Generic label search admits at most 5,000 nearest-name matches
-plus 5,000 deterministic canonical
-representatives from either its full-text arm or its trigram fallback before
-similarity scoring, canonical-key deduplication, and window sorting. An exact
-query-phrase lane protects the highest-ranked phrase matches within the same
-bounded query.
+`pg_trgm` extension for indexed name similarity. Public food searches retain
+their existing 250-candidate SQL bound, and supplement searches retain their
+existing ranking path. Private food-name search uses a separate bounded
+retrieval contract for the roughly two-million-row foods corpus: it admits at
+most 250 literal exact-name rows, 5,000 nearest-name matches, and 5,000
+deterministic canonical representatives from either its full-text arm or its
+trigram fallback before similarity scoring, canonical-key deduplication, and
+window sorting. Ranking is deterministic within that admitted set; it is
+intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
+continue to use direct lookup paths.
 
-For an existing labels database, create the GiST name-rank and canonical-rank
-indexes concurrently before deploying web code that uses this query shape.
+For an existing labels database, create the foods exact-name-rank, GiST
+name-rank, and canonical-rank indexes concurrently before deploying web code
+that uses this query shape.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new

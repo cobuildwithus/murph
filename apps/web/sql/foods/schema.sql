@@ -56,6 +56,9 @@ CREATE INDEX IF NOT EXISTS foods_name_rank_idx
   ON foods
   USING GIST (name gist_trgm_ops);
 
+CREATE INDEX IF NOT EXISTS foods_name_exact_rank_idx
+  ON foods (lower(name), data_origin_priority, id);
+
 CREATE INDEX IF NOT EXISTS foods_brand_idx
   ON foods (brand)
   WHERE brand IS NOT NULL;
