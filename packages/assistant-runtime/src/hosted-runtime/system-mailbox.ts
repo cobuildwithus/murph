@@ -1014,7 +1014,11 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
           code: HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_ERROR_CODE,
         });
       }
-      if (result.outcome === "error" || result.outcome === "no-port") {
+      if (
+        result.outcome === "error"
+        || result.outcome === "no-port"
+        || result.outcome === "preempted"
+      ) {
         throw new Error(
           "Hosted vault-share projection checkpoint did not complete.",
         );

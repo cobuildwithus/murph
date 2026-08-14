@@ -49,9 +49,9 @@ Updated: 2026-08-13
    shared-projection owners and choose the smallest composable seam.
 2. [x] Implement the exact-sender report action, personal-runtime import,
    projection handoff, and assistant guidance.
-3. [ ] Run focused tests, direct scenario proof, package typechecks, changelog
+3. [x] Run focused tests, direct scenario proof, package typechecks, changelog
    validation, and durable-doc checks.
-4. [ ] Commit and push an exact candidate head, open a PR, and start the
+4. [x] Commit and push an exact candidate head, open a PR, and start the
    preliminary specialist and final ReviewGPT passes concurrently with CI.
 5. [ ] Resolve accepted findings, complete parent review, close this plan via
    `scripts/finish-task`, and prove exact-head CI and mergeability.
@@ -67,3 +67,18 @@ Updated: 2026-08-13
 - Focused contracts, hosted-execution, assistant-runtime, assistant-engine, and
   Web tests pass. All affected package typechecks pass after generated Web
   prerequisites are prepared.
+- ReviewGPT's first exact-head pass found revoked-consent admission, discarded
+  projection results, noncanonical units, and a redundant replay owner. The
+  correction pass now checks consent under the existing sender lock, passes the
+  existing projection owner's exact result into the durable receipt, validates
+  canonical values through `health-metrics`, and leaves replay ownership solely
+  with the mailbox append.
+- Full affected suites pass for assistant engine (3,704 tests), assistant
+  runtime (2,290), CLI (1,166), hosted execution (524), hosted control (57),
+  setup CLI (124), and the focused Web paths (181). All affected typechecks and
+  docs drift pass. The Docker-backed hosted-local journey is committed for CI;
+  this host has no Docker executable, so local startup could not run it.
+- The canonical diff lane also reported two existing workspace-boundary
+  violations in untouched Web tests. Its first CLI pass then self-waited when a
+  repair subprocess lost the outer workspace-lock marker; rebuilding the
+  prepared runtime outside that lock made the full CLI workspace pass.

@@ -197,6 +197,7 @@ import {
 } from "./runtime-logs.ts";
 import type {
   HostedWorkspaceDurableCheckpointEffect,
+  HostedWorkspaceDurableCheckpointEffectContext,
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
@@ -4032,9 +4033,16 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
   followUpWakeAt: string;
 }): DeferredHostedSystemMailboxPostCheckpointRecord {
   const { followUpWakeAt, ...recordInput } = input;
-  return {
-    afterDurableCheckpoint: async () => {
-      const result = await recordHostedSystemMailboxItemAfterCheckpoint(recordInput);
+  const requiresVaultShareProjectionResult =
+    recordInput.item.postCheckpointRecord?.kind === "vault-share.projection";
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
+    async (context?: HostedWorkspaceDurableCheckpointEffectContext) => {
+      const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+        ...recordInput,
+        ...(requiresVaultShareProjectionResult && context?.vaultShareProjectionResult
+          ? { vaultShareProjectionResult: context.vaultShareProjectionResult }
+          : {}),
+      });
       if (result.failed > 0) {
         return {
           nextWakeAt: result.nextWakeAt,
@@ -4048,6 +4056,19 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
         requiresFollowUpCheckpoint: true,
       };
     },
+    requiresVaultShareProjectionResult
+      ? {
+          requiresVaultShareProjectionResult: true,
+          vaultShareProjectionFailureWake: {
+            nextWakeAt: followUpWakeAt,
+            nextWakeReason: "assistant",
+            requiresFollowUpCheckpoint: true,
+          },
+        }
+      : {},
+  );
+  return {
+    afterDurableCheckpoint,
     redactedStatus: {
       hostedSystemMailboxRecordDeferred: true,
     },

@@ -500,6 +500,21 @@ browser replicas, and group snapshots are derived and rebuildable, so this
 correction has no canonical or PostgreSQL migration. Do not add read-triggered
 cross-member fanout, polling, a scheduler, or persisted rollout state.
 
+Member-reported daily metrics use a narrower consumer-first cut because Web's
+new `health.daily-metric.reported` mailbox kind is ordered in the personal
+runtime system lane. Deploy the importing runner with immediate container
+rollout and prove its exact bundle fingerprint across eligible targets before
+deploying the Web producer. After Web deploys, a synthetic granted steps report
+must be accepted once, advance the personal system-lane checkpoint, and appear
+beside—not instead of—the device record as `Manual` on a later `read_shared`.
+Absence of `unsupported_kind` evidence and of an unconsumed report behind the
+system-lane counter is the convergence smoke. The new consumer is the rollback
+floor while any report is retained or unconsumed; Web may roll back first to
+stop production. Signal-loss recovery stays with the existing bounded mailbox
+handoff sweep. Repair means keep the compatible runner, invoke that sweep, and
+verify counter progress—never mutate mailbox rows, create an unrelated message,
+or add a second queue.
+
 ## Acceptance cases
 
 - Five `in` participants with two current scores produce a "2 of 5" partial

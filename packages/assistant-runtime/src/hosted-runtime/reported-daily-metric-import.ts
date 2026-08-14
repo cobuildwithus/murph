@@ -39,19 +39,6 @@ export async function importHostedReportedDailyMetricMailboxItem(input: {
     return blockedReportedDailyMetricImport("daily_metric_report.decode_mismatch", false);
   }
 
-  let eventTimeZone: string;
-  let eventOccurredAt: string;
-  try {
-    const vault = await loadVault({ vaultRoot: input.vaultRoot });
-    eventTimeZone = vault.metadata.timezone;
-    eventOccurredAt = resolveLocalDateAtNoon(
-      input.wake.dailyMetric.date,
-      eventTimeZone,
-    );
-  } catch {
-    return blockedReportedDailyMetricImport("daily_metric_report.vault_read_failed", true);
-  }
-
   const eventId = deterministicContractId(
     ID_PREFIXES.event,
     `reported-daily-metric:${input.wake.eventId}`,
@@ -81,13 +68,24 @@ export async function importHostedReportedDailyMetricMailboxItem(input: {
   if (existing) {
     return reportedDailyMetricMatches({
       eventId,
-      eventOccurredAt,
-      eventTimeZone,
       existing,
       wake: input.wake,
     })
       ? importedReportedDailyMetricOutcome()
       : blockedReportedDailyMetricImport("daily_metric_report.conflict", false);
+  }
+
+  let eventTimeZone: string;
+  let eventOccurredAt: string;
+  try {
+    const vault = await loadVault({ vaultRoot: input.vaultRoot });
+    eventTimeZone = vault.metadata.timezone;
+    eventOccurredAt = resolveLocalDateAtNoon(
+      input.wake.dailyMetric.date,
+      eventTimeZone,
+    );
+  } catch {
+    return blockedReportedDailyMetricImport("daily_metric_report.vault_read_failed", true);
   }
 
   try {
@@ -123,19 +121,28 @@ export async function importHostedReportedDailyMetricMailboxItem(input: {
 
 function reportedDailyMetricMatches(input: {
   eventId: string;
-  eventOccurredAt: string;
-  eventTimeZone: string;
   existing: NonNullable<Awaited<ReturnType<typeof findEventByExternalRef>>>;
   wake: HostedExecutionDailyMetricReportedWake;
 }): boolean {
   const { existing, wake } = input;
+  if (!existing.timeZone) {
+    return false;
+  }
+  let expectedOccurredAt: string;
+  try {
+    expectedOccurredAt = resolveLocalDateAtNoon(
+      wake.dailyMetric.date,
+      existing.timeZone,
+    );
+  } catch {
+    return false;
+  }
   return existing.id === input.eventId
     && existing.kind === "observation"
     && existing.source === "manual"
     && existing.dayKey === wake.dailyMetric.date
-    && existing.occurredAt === input.eventOccurredAt
+    && existing.occurredAt === expectedOccurredAt
     && existing.recordedAt === wake.occurredAt
-    && existing.timeZone === input.eventTimeZone
     && existing.metric === wake.dailyMetric.metric
     && existing.value === wake.dailyMetric.value
     && existing.unit === wake.dailyMetric.unit

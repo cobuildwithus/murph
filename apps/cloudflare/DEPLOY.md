@@ -1500,6 +1500,34 @@ remain available. After convergence, smoke one profile-name label, one
 unverified owner-contact label, and one participant-scoped action selected by
 an opaque accepted-message ref.
 
+Member-reported daily metrics add the
+`health.daily-metric.reported` Web producer to that existing exact-participant
+path. An old runtime quarantines this kind and can stop its ordered system lane,
+so this release is consumer-first:
+
+1. Deploy Cloudflare and the runner with `container_rollout=immediate`. Do not
+   deploy Web until managed-container smoke reports the exact new runner-bundle
+   fingerprint and the immediate rollout has converged across eligible runtime
+   targets.
+2. Deploy Web, then run one synthetic granted `steps-days.v0` correction. The
+   action must return `accepted`; the member's system-lane consumed counter and
+   workspace checkpoint must advance; a later exact-scope `read_shared` must
+   retain the device record and add one `Manual` record. Confirm aggregate
+   runtime evidence contains no `unsupported_kind` route and no unconsumed
+   `health.daily-metric.reported` item behind its system-lane counter.
+3. Keep the new runner as the rollback floor while any such item is retained or
+   unconsumed. Web may roll back first because the old Web does not produce the
+   kind; never roll the consumer below this floor until the retained population
+   has drained.
+
+If the post-commit signal fails, keep the accepted mailbox write and let the
+existing scheduled `/api/internal/device-sync/recovery-sweep` handoff select and
+signal the exact pending item. For a bounded manual repair, keep or redeploy the
+compatible runner, roll Web back to stop new production, invoke that existing
+recovery sweep once, and verify the system-lane counter advances before
+redeploying Web. Do not delete the item, edit a mailbox counter, send an
+unrelated member message, or add another repair queue.
+
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare
 with `container_rollout=immediate`. After that deploy, runner admission rejects

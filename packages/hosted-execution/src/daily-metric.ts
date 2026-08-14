@@ -1,4 +1,9 @@
 import { isStrictIsoDate } from "@murphai/contracts";
+import {
+  normalizeMetricValue,
+  resolveMetricDefinition,
+  unitsEquivalent,
+} from "@murphai/health-metrics";
 
 import {
   HOSTED_EXECUTION_DAILY_METRIC_MAX_METRIC_LENGTH,
@@ -49,13 +54,37 @@ export function parseHostedExecutionDailyMetricReportedPayload(
     throw new TypeError(`${label} unit is invalid.`);
   }
   const metricValue = requireNumber(record.value, `${label} value`);
+  const definition = resolveMetricDefinition(metric);
+  const normalized = normalizeMetricValue({
+    metricKey: metric,
+    unit,
+    value: metricValue,
+  });
+  const canonicalUnit = normalized.canonicalUnit;
+  const canonicalValue = normalized.canonicalValue;
+  if (
+    definition?.key !== metric
+    || definition.canonicalUnit === null
+    || canonicalUnit === null
+    || canonicalValue === null
+    || !unitsEquivalent(unit, definition.canonicalUnit)
+    || !unitsEquivalent(canonicalUnit, definition.canonicalUnit)
+  ) {
+    throw new TypeError(`${label} unit is incompatible with the metric.`);
+  }
   if (metricSpecs.some(
-    (spec) => metricValue < spec.minValue || metricValue > spec.maxValue
+    (spec) => canonicalValue < spec.minValue
+      || canonicalValue > spec.maxValue
   )) {
     throw new TypeError(`${label} value is outside the metric's supported range.`);
   }
 
-  return { date, metric, unit, value: metricValue };
+  return {
+    date,
+    metric,
+    unit: canonicalUnit,
+    value: canonicalValue,
+  };
 }
 
 function assertExactDailyMetricKeys(

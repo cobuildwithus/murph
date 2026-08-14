@@ -12,6 +12,7 @@ import {
   deterministicContractId,
   findEventByExternalRef,
   initializeVault,
+  updateVaultSummary,
 } from "@murphai/core";
 import {
   buildHostedExecutionDailyMetricReportedWake,
@@ -123,6 +124,41 @@ describe("hosted member-reported daily metric import", () => {
       reasonCode: "daily_metric_report.conflict",
       retryable: false,
       status: "blocked",
+    });
+  });
+
+  it("replays against the event's original timezone after the vault timezone changes", async () => {
+    const vaultRoot = await createTestVault("Pacific/Kiritimati");
+    const item = createMailboxItem();
+    const wake = createWake(8_000);
+    await importHostedReportedDailyMetricMailboxItem({ item, vaultRoot, wake });
+    const before = await findEventByExternalRef({
+      resourceId: REPORT_ID,
+      resourceType: "daily-metric-report",
+      system: "manual",
+      vaultRoot,
+    });
+
+    await updateVaultSummary({ vaultRoot, timezone: "America/Los_Angeles" });
+
+    await expect(importHostedReportedDailyMetricMailboxItem({
+      item,
+      vaultRoot,
+      wake,
+    })).resolves.toEqual({
+      reasonCode: "daily_metric_report.imported",
+      status: "imported",
+    });
+    const after = await findEventByExternalRef({
+      resourceId: REPORT_ID,
+      resourceType: "daily-metric-report",
+      system: "manual",
+      vaultRoot,
+    });
+    expect(after).toEqual(before);
+    expect(after).toMatchObject({
+      occurredAt: "2026-08-12T22:00:00.000Z",
+      timeZone: "Pacific/Kiritimati",
     });
   });
 });

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { resolveMetricDefinition } from "@murphai/health-metrics";
 
 import { buildHostedExecutionDailyMetricReportedWake } from "../src/builders.ts";
 import { isHostedSystemWake } from "../src/contracts.ts";
+import {
+  HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+} from "../src/daily-metric.ts";
 import { parseHostedExecutionWake } from "../src/parsers.ts";
 import { isHostedMailboxKind } from "../src/runtime-control.ts";
 
@@ -48,6 +52,99 @@ describe("health.daily-metric.reported hosted execution wake", () => {
         value: -1,
       },
     })).toThrow(/outside the metric's supported range/u);
+  });
+
+  it("accepts every reportable metric in its canonical unit", () => {
+    for (const metric of HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS) {
+      const definition = resolveMetricDefinition(metric);
+      expect(definition?.canonicalUnit, metric).not.toBeNull();
+      const canonicalUnit = definition?.canonicalUnit;
+      if (!canonicalUnit) {
+        throw new Error(`Expected a canonical unit for ${metric}.`);
+      }
+
+      expect(parseHostedExecutionWake({
+        dailyMetric: {
+          date: "2026-08-13",
+          metric,
+          unit: canonicalUnit,
+          value: 25,
+        },
+        eventId: `daily-metric:report:${metric}`,
+        kind: "health.daily-metric.reported",
+        occurredAt: "2026-08-13T18:00:00.000Z",
+        userId: "member_synthetic_001",
+      })).toMatchObject({
+        dailyMetric: { metric, unit: canonicalUnit, value: 25 },
+      });
+    }
+  });
+
+  it("canonicalizes equivalent unit spelling before enforcing projection bounds", () => {
+    const parsed = parseHostedExecutionWake({
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "total-sleep-minutes",
+        unit: "min",
+        value: 480,
+      },
+      eventId: "daily-metric:report:sleep",
+      kind: "health.daily-metric.reported",
+      occurredAt: "2026-08-13T18:00:00.000Z",
+      userId: "member_synthetic_001",
+    });
+    expect(parsed).toMatchObject({
+      dailyMetric: {
+        metric: "total-sleep-minutes",
+        unit: "minutes",
+        value: 480,
+      },
+    });
+
+    expect(() => parseHostedExecutionWake({
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "total-sleep-minutes",
+        unit: "min",
+        value: 1_441,
+      },
+      eventId: "daily-metric:report:sleep:outside-range",
+      kind: "health.daily-metric.reported",
+      occurredAt: "2026-08-13T18:00:00.000Z",
+      userId: "member_synthetic_001",
+    })).toThrow(/outside the metric's supported range/u);
+  });
+
+  it("rejects incompatible metric units, including the display label for steps", () => {
+    const base = {
+      date: "2026-08-13",
+      metric: "steps",
+      value: 8_000,
+    } as const;
+    for (const unit of ["steps", "bpm"]) {
+      expect(() => parseHostedExecutionWake({
+        dailyMetric: { ...base, unit },
+        eventId: `daily-metric:report:steps:${unit}`,
+        kind: "health.daily-metric.reported",
+        occurredAt: "2026-08-13T18:00:00.000Z",
+        userId: "member_synthetic_001",
+      })).toThrow(/unit is incompatible with the metric/u);
+    }
+  });
+
+  it("rejects convertible but noncanonical units", () => {
+    expect(() => parseHostedExecutionWake({
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "total-sleep-minutes",
+        unit: "hours",
+        value: 8,
+      },
+      eventId: "daily-metric:report:sleep:hours",
+      kind: "health.daily-metric.reported",
+      occurredAt: "2026-08-13T18:00:00.000Z",
+      userId: "member_synthetic_001",
+    })).toThrow(/unit is incompatible with the metric/u);
   });
 
   it("rejects malformed metric reports", () => {

@@ -2,14 +2,13 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionDailyMetricReportedWake,
 } from "@murphai/hosted-execution";
 import type {
   HostedExecutionAssistantAskAcceptedInputOrigin,
   HostedExecutionDailyMetricReportedPayload,
-  HostedExecutionDailyMetricReportedWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedRuntimeGroupDailyMetricReportResult,
@@ -17,9 +16,8 @@ import type {
 
 import {
   appendHostedMailboxEnvelopeTx,
-  readHostedMailboxItemByDedupeKey,
-  readHostedMailboxWakeByDedupeKey,
 } from "../hosted-mailbox/store";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import {
   readHostedGroupCurrentSenderAuthorityTx,
@@ -27,8 +25,6 @@ import {
 
 const CURRENT_SENDER_DAILY_METRIC_ID_NAMESPACE =
   "murph.hosted-group-current-sender-daily-metric.v1";
-const CURRENT_SENDER_DAILY_METRIC_LOCK_NAMESPACE =
-  "hosted-group-current-sender-daily-metric";
 
 type HostedCurrentSenderDailyMetricPrismaClient = Pick<PrismaClient, "$transaction">;
 
@@ -77,7 +73,6 @@ export async function recordHostedGroupCurrentSenderDailyMetric(input: {
   });
 
   return prisma.$transaction(async (tx) => {
-    await acquireCurrentSenderDailyMetricLockTx(tx, reportId);
     const authority = await readHostedGroupCurrentSenderAuthorityTx({
       expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
       now,
@@ -87,43 +82,18 @@ export async function recordHostedGroupCurrentSenderDailyMetric(input: {
     if (!authority) {
       return unavailableDailyMetricAdmission("current_sender_unavailable");
     }
-
-    const existingItem = await readHostedMailboxItemByDedupeKey({
-      dedupeKey: reportId,
+    if (await readHostedHealthDataConsentState({
+      memberId: authority.targetMemberId,
       prisma: tx,
-      userId: authority.targetMemberId,
-    });
-    if (existingItem) {
-      const existingWake = await readHostedMailboxWakeByDedupeKey({
-        dedupeKey: reportId,
-        prisma: tx,
-        userId: authority.targetMemberId,
-      });
-      if (
-        !existingWake
-        || existingWake.kind !== "health.daily-metric.reported"
-        || !dailyMetricReportMatches(existingWake, {
-          dailyMetric: input.dailyMetric,
-          reportId,
-          targetMemberId: authority.targetMemberId,
-        })
-      ) {
-        return unavailableDailyMetricAdmission("report_conflict");
-      }
-      return {
-        mailboxWake: {
-          expectedUserId: authority.targetMemberId,
-          mailboxItemId: existingItem.id,
-        },
-        result: { status: "accepted" },
-      };
+    }) === "revoked") {
+      return unavailableDailyMetricAdmission("health_data_consent_revoked");
     }
 
     const wake = buildHostedExecutionDailyMetricReportedWake({
       ...input.dailyMetric,
       eventId: reportId,
       memberId: authority.targetMemberId,
-      occurredAt: now.toISOString(),
+      occurredAt: authority.occurredAt,
     });
     const append = await appendHostedMailboxEnvelopeTx({ envelope: wake, tx });
     if (append.dedupeConflict) {
@@ -139,22 +109,6 @@ export async function recordHostedGroupCurrentSenderDailyMetric(input: {
   });
 }
 
-function dailyMetricReportMatches(
-  wake: HostedExecutionDailyMetricReportedWake,
-  input: {
-    dailyMetric: HostedExecutionDailyMetricReportedPayload;
-    reportId: string;
-    targetMemberId: string;
-  },
-): boolean {
-  return wake.eventId === input.reportId
-    && wake.userId === input.targetMemberId
-    && wake.dailyMetric.date === input.dailyMetric.date
-    && wake.dailyMetric.metric === input.dailyMetric.metric
-    && wake.dailyMetric.unit === input.dailyMetric.unit
-    && wake.dailyMetric.value === input.dailyMetric.value;
-}
-
 function unavailableDailyMetricAdmission(
   unavailableReason: string,
 ): HostedGroupCurrentSenderDailyMetricAdmission {
@@ -162,16 +116,4 @@ function unavailableDailyMetricAdmission(
     mailboxWake: null,
     result: { status: "unavailable", unavailableReason },
   };
-}
-
-async function acquireCurrentSenderDailyMetricLockTx(
-  tx: Prisma.TransactionClient,
-  reportId: string,
-): Promise<void> {
-  await tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext(${CURRENT_SENDER_DAILY_METRIC_LOCK_NAMESPACE}),
-      hashtext(${reportId})
-    )
-  `;
 }

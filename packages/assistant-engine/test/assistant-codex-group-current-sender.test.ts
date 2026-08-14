@@ -358,6 +358,57 @@ describe("murph.group record_current_sender_daily_metric", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       '"action":"record_current_sender_daily_metric"',
     );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"accepted"',
+    );
+  });
+
+  it("returns unavailable without presenting the report as accepted", async () => {
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        request: vi.fn(async () => ({
+          action: "record_current_sender_daily_metric" as const,
+          result: {
+            status: "unavailable" as const,
+            unavailableReason: "daily_metric_report_unavailable",
+          },
+        })),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"unavailable"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      '"status":"accepted"',
+    );
+  });
+
+  it("reports an uncertain transport failure without inventing a result", async () => {
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        request: vi.fn(async () => {
+          throw new Error("synthetic transport failure");
+        }),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "group tool request failed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain("accepted");
   });
 
   it("fails closed for a foreign Message ref", async () => {
