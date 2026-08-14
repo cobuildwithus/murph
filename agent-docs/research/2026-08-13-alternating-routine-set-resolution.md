@@ -83,12 +83,12 @@ Deterministic instruction and discovery tests use a synthetic, non-production sc
 - a multi-set completion creates one occurrence per set under the resolved owner;
 - ordinary non-strength habit handling is unchanged;
 - naming the current exercise authorizes only the current completion, not plan repair;
-- reminder automations cannot select or block a uniquely resolved routine target; and
+- stale reminder prose cannot select or block a uniquely resolved routine target; and
 - group reports receive a private-conversation handoff instead of private reads or writes.
 
 `packages/assistant-engine/test/assistant-codex-real-e2e.test.ts` adds a real-model App Server lane backed by a stateful synthetic `vault-cli`. It checks exact owner and quantity writes, same-owner progress and linked-event rereads before the total, a zero-write ambiguity branch, and a zero-private-access group handoff.
 
-The three real-model scenarios passed locally. The direct success scenario also presents a stale reminder for the other exercise, proving that automation prose cannot redirect the uniquely resolved canonical target.
+The three real-model scenarios passed locally. The direct success scenario also presents stale conversational reminder text for the other exercise, proving that noncanonical recency cannot redirect the uniquely resolved target. The synthetic CLI now validates its regimen, experiment, progress, and event fixtures with the production schemas, emits the production JSON success-envelope shape with contract-valid ids, requires a real post-write progress read, and makes the stale reminder part of the actual model input.
 
 A pinned `gpt-5.6-terra` Codex App Server capture against a local scripted Responses endpoint rendered complete synthetic direct and group initial requests in production code mode. An exact resident-router substitution measured the corrected patch against the prior route in those normalized requests. Using `gpt-tokenizer` 3.4.0 `o200k_harmony`, the direct request moved from 29,660 tokens / 135,107 UTF-8 bytes to 29,696 / 135,305 (+36 tokens, +0.1214%; +198 bytes). The group request moved from 26,559 tokens / 121,605 bytes to 26,595 / 121,803 (+36 tokens, +0.1355%; +198 bytes). The small increase preserves the pre-existing running/cardio and recovery routing contracts while adding an explicit private repeated-set owner and group handoff. The measurement included `include`, `input`, `parallel_tool_calls`, `text`, and `tool_choice`; `tools` and `instructions` were absent from these code-mode request bodies. It excluded model selection, reasoning, storage/streaming, service tier, cache/client metadata, and transport headers identically, and normalized temporary Codex-home and workspace paths. Skill-body guidance is loaded only after routing, so it does not increase the initial request.
 
