@@ -289,6 +289,22 @@ test('deleted exact source fails closed without duplicating workout history', as
   assert.equal(requireData(explicitNewImport).created, true)
   assert.notEqual(requireData(explicitNewImport).documentId, source.documentId)
   assert.notEqual(requireData(explicitNewImport).rawFile, source.rawFile)
+
+  const pathsBeforeAliasReplay = (await readdir(vaultRoot, { recursive: true })).sort()
+  const rejectedAliasReplay = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+  ])
+  assert.equal(rejectedAliasReplay.ok, false)
+  if (rejectedAliasReplay.ok) throw new Error('expected a deleted exact identity to fence its live alias')
+  assert.equal(rejectedAliasReplay.error.code, 'conflict')
+  assert.match(rejectedAliasReplay.error.message ?? '', /exact source document existed but was deleted/iu)
+  assert.deepEqual((await readdir(vaultRoot, { recursive: true })).sort(), pathsBeforeAliasReplay)
+
+  const workoutsAfterAliasReplay = await runCli<EventListResult>([
+    'event', 'list', '--kind', 'activity_session', '--vault', vaultRoot,
+  ])
+  assert.equal(workoutsAfterAliasReplay.ok, true)
+  assert.equal(requireData(workoutsAfterAliasReplay).count, 2)
 }, 180_000)
 
 test('event import-jsonl dry-runs, applies, and stays idempotent', async () => {

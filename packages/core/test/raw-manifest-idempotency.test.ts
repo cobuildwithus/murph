@@ -178,6 +178,17 @@ test("exact document reuse fails closed after its source document is deleted", a
   assert.equal(explicitReplacement.created, true);
   assert.notEqual(explicitReplacement.documentId, imported.documentId);
   assert.notEqual(explicitReplacement.raw.relativePath, imported.raw.relativePath);
+
+  const treeBeforeAliasReplay = (await fs.readdir(vaultRoot, { recursive: true })).sort();
+  await assert.rejects(
+    importDocument({ vaultRoot, sourcePath, reuseExact: true }),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "DOCUMENT_EXACT_SOURCE_DELETED");
+      return true;
+    },
+  );
+  assert.deepEqual((await fs.readdir(vaultRoot, { recursive: true })).sort(), treeBeforeAliasReplay);
 });
 
 test("validateVault reports missing raw manifests by raw directory for immutable manifest files", async () => {

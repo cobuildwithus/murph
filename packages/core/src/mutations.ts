@@ -3710,19 +3710,24 @@ async function findExactDocumentImport(input: {
   }
   const documents = [...latestDocuments.values()]
     .sort((left, right) => left.record.id.localeCompare(right.record.id));
-  let deletedExactSourceExists = false;
+
+  // A deleted identity must fence the whole exact-byte equivalence set. An
+  // ordinary import may have created a live alias later, but returning that
+  // alias would reset raw-reference-scoped workout completion.
+  const deletedExactSourceExists = documents.some((entry) =>
+    isDeletedEventSpineRecord(entry.record)
+    && matchingManifests.has(entry.record.documentId)
+  );
+  if (deletedExactSourceExists) {
+    throw new VaultError(
+      "DOCUMENT_EXACT_SOURCE_DELETED",
+      "An exact source document existed but was deleted. Exact reuse will not create a replacement identity.",
+    );
+  }
 
   for (const entry of documents) {
     const stored = matchingManifests.get(entry.record.documentId);
     if (!stored) {
-      continue;
-    }
-    if (isDeletedEventSpineRecord(entry.record)) {
-      // The verified manifest and raw artifact already prove this document
-      // owned an exact copy. Tombstones intentionally need not preserve every
-      // live compatibility projection, so detect deletion before consulting
-      // rawRefs or attachments.
-      deletedExactSourceExists = true;
       continue;
     }
     if (!entry.record.rawRefs?.includes(stored.rawRef)) {
@@ -3749,13 +3754,6 @@ async function findExactDocumentImport(input: {
       auditPath: null,
       manifestPath: stored.manifestPath,
     };
-  }
-
-  if (deletedExactSourceExists) {
-    throw new VaultError(
-      "DOCUMENT_EXACT_SOURCE_DELETED",
-      "An exact source document existed but was deleted. Exact reuse will not create a replacement identity.",
-    );
   }
 
   return null;

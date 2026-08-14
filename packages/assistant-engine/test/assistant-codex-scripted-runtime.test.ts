@@ -1030,7 +1030,7 @@ text(result.output);
     expect(toolOutputs).not.toContain('ROW_PRIVATE_')
   })
 
-  it('stops before transformation when exact workout source history was deleted', {
+  it('stops before transformation when a deleted exact source also has a live alias', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -1048,6 +1048,11 @@ text(result.output);
       'utf8',
     )
     await writeFile(
+      path.join(workdir, 'source-identity-state.json'),
+      '{"deletedExactIdentity":true,"liveExactAlias":true}\n',
+      'utf8',
+    )
+    await writeFile(
       path.join(workdir, 'vault-cli'),
       `#!/bin/sh
 set -eu
@@ -1057,6 +1062,8 @@ if [ "$1 $2 $3" = "workout import inspect" ]; then
   exit 0
 fi
 if [ "$1 $2" = "document import" ]; then
+  grep -q '"deletedExactIdentity":true' source-identity-state.json
+  grep -q '"liveExactAlias":true' source-identity-state.json
   printf '%s\\n' '{"ok":false,"error":{"code":"conflict","message":"An exact source document existed but was deleted. Exact reuse will not create a replacement identity."}}' >&2
   exit 2
 fi

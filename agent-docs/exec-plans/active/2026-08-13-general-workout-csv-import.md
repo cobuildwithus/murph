@@ -83,3 +83,9 @@ Updated: 2026-08-13
 - Review finding: exact reuse considered only live document events. Deleting the preserved source left its raw artifact and workouts intact, but a later replay silently minted a new document/raw identity whose source guard had no history, admitting a duplicate full batch.
 - Decision: when verified exact bytes exist only behind a tombstoned document, `--reuse-exact` returns a typed no-write conflict. It never creates a replacement identity; ordinary document import without the replay-safe option remains the explicit create-new path.
 - Proof: a real CLI test applies two source-guarded workouts, deletes the source through the public document command, proves exact reuse conflicts with unchanged vault paths and workout count, then proves ordinary import still creates. A real App Server replacement-workspace turn surfaces the deleted-source state and performs no Python or event command.
+
+## Round 6 exact-alias precedence correction
+
+- Review finding: after a source was deleted, explicit ordinary document import could create a live byte-identical alias. Exact reuse returned that alias before honoring the deleted identity, resetting the raw-reference-scoped completion guard and admitting a duplicate batch.
+- Decision: a verified tombstone fences the entire exact-byte equivalence set. Exact reuse examines every latest document identity before selecting a live candidate and returns the existing typed no-write conflict when any matching identity is deleted; ordinary import remains an explicit create-new operation but cannot silently reset replay-safe workout identity.
+- Proof: the public core and CLI regressions now continue through the supported A-deleted/B-live state, then prove another exact reuse conflicts without changing vault paths or the two-workout history. The replacement-workspace App Server fixture requires that same coexisting state and performs no Python or event command.
