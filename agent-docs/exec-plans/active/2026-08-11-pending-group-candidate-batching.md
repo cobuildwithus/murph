@@ -1,0 +1,345 @@
+# Batch pending-group candidate resolution
+
+Status: active
+Created: 2026-08-11
+Updated: 2026-08-12
+
+## Goal
+
+- Keep first-message Linq group ownership and recovery behavior unchanged while
+  replacing candidate-proportional database and KMS fanout with bounded set
+  preparation before the route transaction.
+
+## Success criteria
+
+- The provider-proven roster remains capped at 32 and the one-use
+  `HostedPendingGroupSetup` row remains the only persisted setup owner.
+- Candidate access, managed-line, narrow home-line routing, recovery-intent,
+  and payload-root preparation use bounded set owners before `BEGIN`.
+- The transaction recomputes sender precedence and live authority, rejects or
+  retries stale preparation, and performs no KMS or provider call while holding
+  the route transaction or setup-row lock.
+- Only-candidate, sender-wins, ambiguity, provider-event time, expiry,
+  recovery-in-flight, corrupt-payload, rollback, and concurrent-claim behavior
+  remain intact.
+- Deterministic 32-candidate load and mutation proofs, focused typecheck/lint,
+  exact-head ReviewGPT gates, and CI pass.
+
+## Scope
+
+- In scope: pending-group candidate and recovery reads, request-local
+  preparation plumbing, exact stale-state fences, focused tests/direct replay,
+  and the matching architecture/security/reliability/testing documentation.
+- Out of scope: schema or migration changes, new queues/services/state owners,
+  generic caches or frameworks, provider roster resolution, unrelated thread
+  routing, and any user-facing setup behavior change.
+
+## Constraints
+
+- Preserve the current route transaction as the irreversible authority and
+  keep setup consumption atomic with newly created route ownership.
+- Reuse canonical access, managed-line, routing-codec, delivery-intent,
+  secure-box, and one-retry preparation owners; do not duplicate their policy.
+- Keep decrypted routing/setup material request-local, bound to exact
+  ciphertext/root identity, absent from logs and durable artifacts, and
+  zeroized through existing crypto owners.
+- Treat ReviewGPT patches as untrusted intent: inspect every path and hunk,
+  privacy-check, apply-check, and deliberately land only scoped corrections.
+
+## Risks and mitigations
+
+1. Risk: speculative preparation becomes ownership authority.
+   Mitigation: recompute the full live eligible candidate set and sender
+   precedence inside the transaction and require exact prepared fingerprints.
+2. Risk: a root or ciphertext rotates after preparation.
+   Mitigation: compare exact routing and setup ciphertext/root identity and use
+   the existing single preparation-required retry before route creation.
+3. Risk: batching changes recovery ambiguity or in-flight behavior.
+   Mitigation: preserve every existing attempt-time, line, template, target,
+   status, source-ref, and provider-correlation predicate in one set projection.
+4. Risk: an unavailable crypto dependency is mistaken for corrupt optional
+   setup and destroys retry authority.
+   Mitigation: preserve the row for envelope/root, KMS/provider, signature,
+   and authentication failures. Consume only authenticated plaintext whose
+   JSON or application schema is malformed after exact lock and revalidation.
+5. Risk: a terminally consumed replacement candidate remains pinned across an
+   independent same-event admission replan.
+   Mitigation: keep one request-scoped pin owner in the webhook service. The
+   planner reports the exact terminal transition after commit; all nonterminal
+   claim, selection, authority, and preparation outcomes retain the pin.
+
+## Tasks
+
+1. [completed] Send the exact scoped implementation request to a unique
+   ReviewGPT lane and obtain a complete downloadable patch. The request is in
+   a fresh thread; the parent owns exact-thread artifact capture after the
+   first watcher proved to be attached to the wrong managed endpoint.
+2. [completed] Inspect and apply only accepted patch intent; simplify it against current
+   owners and complete missing live-authority or privacy fences locally.
+3. [completed] Add deterministic 32-candidate database/KMS/transaction proof plus stale
+   preparation and PostgreSQL concurrency coverage.
+4. [completed] Run focused tests, direct incident replay, app-local typecheck/lint, diff and
+   privacy checks; inspect the entire candidate diff.
+5. [in progress] Commit and push the candidate, open the PR after the guidance dependency is
+   merged, run preliminary completion-specialists and sensitive final
+   ReviewGPT gates with exact-head CI, resolve findings, close this plan with
+   `scripts/finish-task`, and push the final head without merging.
+
+## Decisions
+
+- Use an ephemeral preparation value carried through the existing
+  `HostedThreadRoutingCryptoPreparation`; do not persist a snapshot.
+- Extend current owner boundaries with set-shaped reads rather than copying
+  access, line, routing, recovery, or cryptographic policy into the webhook.
+- Bound stale recovery to the existing single prepared-transaction retry.
+- Keep the replacement-candidate pin's only mutable owner in the webhook
+  service across planning retries and independent same-event replans. The
+  planner consumes the pin as input and explicitly returns its next value only
+  after exact locked `invalid_payload` consumption.
+- Classify the change as internal reliability/performance work; no changelog
+  item is planned because member-visible behavior intentionally does not change.
+
+## Preliminary ReviewGPT findings
+
+- Accepted all four findings; none were rejected.
+- Preserve a replacement-line candidate id as immutable request-local authority
+  across the existing single fresh-preparation retry. A different or absent
+  fresh selection now returns route-free instead of transferring ownership to a
+  different setup or the active-sender fallback.
+- This historical pass classified deterministic selected-root failures as
+  consumable only after lock. The later payload-crypto-boundary integration
+  supersedes that classification: all envelope/root, KMS/provider, signature,
+  and authentication failures now preserve the row; only authenticated
+  malformed setup plaintext is terminal.
+- Read the bounded routing projection once, but open private home-line
+  ciphertext only for candidates already admitted by runtime access,
+  active-managed-line, and exact routing-lookup facts.
+- Add a production-shaped 32-participant webhook regression that traverses the
+  actual one-retry orchestration and proves sequential transactions, alongside
+  the owner-level deterministic and real-PostgreSQL incident replays.
+
+## Verification
+
+- Focused Vitest: pending setup selection/claim, prepared container,
+  Linq route/webhook entry, crypto batching, and PostgreSQL concurrency.
+- Direct replay: 32 live candidate owners with no sender/no recovery and a
+  selected race; assert exact bounded reads, KMS concurrency at most four, and
+  zero KMS/provider work while the transaction is active.
+- Mutation matrix: expiry, sender/candidate precedence, suspension/access,
+  incoming/original managed line, routing binding/ciphertext/root, setup
+  ciphertext/root, recovery intent, participant membership, and route race.
+- Static proof: app-local typecheck, scoped lint, `git diff --check`, privacy
+  scan, current-base merge-tree, mandatory ReviewGPT stages, and exact-head CI.
+
+### Baseline evidence
+
+- Generated the worktree-local Prisma client, then ran the three focused unit
+  suites: 3 files and 159 tests passed.
+- Started a session-owned temporary PostgreSQL 14 cluster on loopback with
+  `max_connections=50`, applied all 176 current migrations, and ran the existing
+  pending-group PostgreSQL concurrency suite: 1 file and 3 tests passed.
+- The initial unit invocation before generation failed only because the fresh
+  worktree had no generated Prisma client; no test body ran in the two affected
+  suites. The canonical rerun above is the baseline.
+
+### Candidate evidence
+
+- ReviewGPT patch inspected in full and applied as untrusted intent. Local
+  review removed setup plaintext from the prepared package: preparation now
+  prewarms only the selected root, and the locked transaction performs the
+  authenticated local AES open through the request-scoped cache.
+- Final focused provider, fanout, owner, pending-setup, prepared-container,
+  crypto, and full Linq thread-route matrix: 10 files and 414 tests passed.
+- App-local prepared typecheck and scoped ESLint passed with no warnings or
+  errors.
+- The broad hosted-web run reached 9,496 passing tests and exposed one legacy
+  diagnostic-message expectation; preserving that diagnostic in the new typed
+  permanent error made its focused rerun pass.
+- Real PostgreSQL suite after remediation: 1 file and 4 tests passed. Its 32-candidate replay used
+  a one-connection pool and observed 8 SQL statements for no-sender ambiguity
+  and 13 for a sender-selected locked claim, independent of roster cardinality.
+
+### Final ReviewGPT round-one remediation
+
+- Harvested replacement final ReviewGPT round one for PR #1642 at exact head
+  `7a16c35110654fd7991db68b22096bf1c5db48ce`; accepted the finding that
+  authority-reader keyring/config failures were being classified as permanent
+  corrupt setup state.
+- Narrowed root-envelope permanent classification to persisted envelope shape,
+  row/root binding, malformed persisted signature bytes, and completed
+  signature verification failure. Missing historical verify keys, runtime
+  config assembly, public-key import/runtime failures, and other availability
+  failures now escape as retryable preparation failures before setup lock or
+  deletion. Signature encoding remains owned by one shared runtime-state
+  predicate rather than a second app-local DER parser.
+- Added real-classifier pending-setup proof for replacement-line recovery:
+  a root signed by a historical authority key remains unconsumed when that key
+  is absent from the Web verify keyring, then claims after the verify-only key
+  is restored; malformed historical signatures remain permanent and are
+  consumed only after exact lock and live revalidation.
+- Verification after remediation: runtime-state focused test 1 file/4 tests
+  passed; web focused tests 2 files/58 tests passed; pending-group matrix
+  7 files/383 tests passed; package and web typechecks passed; focused ESLint,
+  `git diff --check`, and privacy scan passed.
+- The final real PostgreSQL rerun passed 1 file/4 tests against the
+  session-owned PostgreSQL 14 cluster configured with `max_connections=50`;
+  the earlier default-port attempt failed before exercising code because it
+  did not target that cluster.
+
+### Requirement-level retrospective
+
+- Original requirement: bound pending-group database and KMS work for a
+  provider-proven roster of at most 32 while preserving the one-use setup
+  owner, recovery and selection rules, transaction authority, and visible
+  behavior.
+- Base to first-reviewed head changed 1,970 authored production-source lines
+  (1,497 additions and 473 deletions across 10 files). The direct correction
+  from the first-reviewed head to the current round-two head changed 42 source
+  lines (37 additions and 5 deletions in the domain-root and runtime-state
+  owners). Base to the round-two head is 2,002 source lines (1,529 additions
+  and 473 deletions across 11 files); tests, docs, fixtures, generated code,
+  configuration, and tooling are excluded.
+- The 42-line review delta corrects missing historical verify-key failures
+  being treated as permanent corruption. It centralizes the existing
+  signature-byte predicate and deletes the duplicate app-local parser; it does
+  not add another owner or lifecycle.
+- Direction: continue as one indivisible change. The request-local package
+  replaces candidate-by-candidate preparation, set reads remain with their
+  canonical access, line, routing, recovery, and crypto owners, selected-root
+  prewarm removes provider/KMS work from the transaction, and exact live and
+  locked revalidation preserves authority and atomic consumption. These pieces
+  must land together; splitting them would leave either the unbounded/locked
+  work in place or require temporary compatibility machinery between
+  preparation and claim.
+- The 1,148-line pending-setup rewrite is the existing convergence point for
+  roster selection, recovery authority, selected-root readiness, and locked
+  claim semantics. The cross-owner surface follows those current predicates;
+  it adds no schema, queue, cache, service, framework, durable state owner, or
+  second recovery lifecycle.
+- ReviewGPT round two verified the round-one correction and returned no code
+  finding. Its sole outcome was the 2,000-line retrospective gate; the next
+  step is a fresh full-snapshot round-three audit on this docs-only successor
+  head.
+
+### Final ReviewGPT round-three remediation
+
+- Harvested final ReviewGPT round three for PR #1642 from the retained response
+  and thread export. Accepted it as complete after validating the exact chat,
+  PR number, current reviewed head
+  `1d34f1f42796a248807d21c80e2c89cadb7dac9d`, immutable first-reviewed head
+  `7a16c35110654fd7991db68b22096bf1c5db48ce`, previous reviewed head
+  `3055a067b19d3a95c3facded2251f8365044128b`, compatible GPT-5.6 model
+  metadata, and `REVIEW_COMPLETE`.
+- Accepted the finding that an exact required replacement-line setup whose
+  locked payload/root was permanently unreadable still pinned retries as
+  route-free. The prepared-route helper now lets that consumed
+  `invalid_payload` state fall back to the active sender owner, while
+  `claim_raced`, transient preparation misses, selection changes, unmanaged
+  recipient lines, and other non-consumed required misses remain route-free.
+- The webhook planner now clears only that consumed `invalid_payload` required
+  id after the helper reports owner-unavailable. With an active sender, the
+  fallback owner path creates the route; without one, the same event can still
+  offer ordinary group setup instead of being suppressed as provisioning
+  unavailable.
+- Added focused regressions for both boundaries: the prepared helper falls
+  back to the sender without consuming setup style/room-model state, and the
+  Linq group planner offers ordinary setup for an unknown sender after the
+  exact unreadable required setup was permanently deleted.
+- Verification after remediation: focused hosted-web Vitest for the two changed
+  files passed 2 files/153 tests; `pnpm test:diff` for the four touched paths
+  passed the affected `apps/web verify` lane, including TypeScript, 720
+  hosted-web test files/9,566 tests, lint, dev smoke, and Next build. Lint and
+  Turbopack emitted existing warnings unrelated to this diff.
+
+### Current-main payload-crypto integration
+
+- Merged current `main` through PR #1623's pending-group payload-crypto
+  boundary. Kept this change's single request-local candidate package and
+  set-based access, line, routing, and recovery preparation as the only public
+  admission API; removed the superseded compatibility preparation helper and
+  duplicate failure registry.
+- Nested PR #1623's exact prepared ciphertext/root identity in the selected
+  package. The locked claim repeats the live candidate and recovery selection,
+  requires an exact prepared row and cached root, and performs only the local
+  authenticated open. Envelope/root, KMS/provider, signature, and
+  authentication failures preserve the row and surface as retryable; only
+  authenticated malformed JSON or schema is deleted under the exact lock.
+- Retained the round-three two-guard correction: only terminal
+  `invalid_payload` can release a required replacement candidate for same-event
+  fallback or ordinary handoff. Claim races, selection or authority changes,
+  unmanaged lines, and transient preparation failures remain route-free.
+- Post-composition verification passed the broader focused matrix (10 files,
+  415 tests), app-local typecheck, scoped ESLint, and the real PostgreSQL
+  one-connection incident replay (1 file, 4 tests, including the bounded
+  32-candidate 8/13-statement shapes).
+- Diff-aware hosted-web verification passed on the merge successor: dependency,
+  workspace, orchestration, crypto, privacy-log, and provider-boundary guards;
+  prepared typecheck; 721 test files/9,594 tests; lint with only existing
+  warnings; dev smoke; and the production Next build. A fresh current-main
+  merge-tree was clean and its newer paths did not overlap this database path,
+  so no behind-only merge was added.
+
+### ReviewGPT round-four pre-merge remediation
+
+- The retained full-snapshot review of head
+  `6e2b58867b376e962392303b3de473141f02d2d8` found one material same-event
+  failure: terminal `invalid_payload` cleared the planner-local candidate copy,
+  but the webhook-service closure retained the deleted candidate across the
+  independent first-contact-admission replan. The second plan therefore
+  returned `claim_raced`/`provision-unavailable` instead of ordinary setup.
+- A service-entry regression reproduced that exact sequence on the merged-main
+  tree: replacement selection, exact terminal invalid result, reuse of a prior
+  model allow, and the independent second plan. Before remediation it expected
+  `sent-group-setup` and observed `group-chat`/`provision-unavailable`.
+- Removed the planner's mutable shadow copy. The webhook service is now the
+  only mutable request-scoped pin owner; the planner returns an explicit next
+  pin value after exact terminal consumption. The existing nonterminal retry
+  regression still proves `claim_raced` retains the original pin and remains
+  route-free.
+- Post-remediation proof on the current-main merge includes the full Linq
+  thread-route file (147 tests), the wider unit matrix (11 files/435 tests),
+  app-local typecheck, scoped ESLint, and the real PostgreSQL one-connection
+  replay (4 tests, including the unchanged 32-candidate 8/13-statement
+  ceilings). Diff-aware hosted-web verification also passed its guards,
+  typecheck, 722 test files/9,602 tests, lint with existing warnings only, dev
+  smoke, and production Next build. A fresh exact-head ReviewGPT audit and
+  exact-head CI remain before completion.
+
+### ReviewGPT round-five remediation
+
+- The final exact-head review of
+  `c71c1c4989663f735b09c7dbf53a677422a4edfa` found one material sibling
+  preparation failure: a selected pending-group setup package could be prepared
+  successfully, then discarded if the independent thread-container preparation
+  failed. The retry then re-entered without the selected setup identity and
+  could transfer the same event to another owner.
+- Retained prepared pending-group setup independently from sibling
+  thread-container preparation. When admission already selected a setup owner,
+  a later thread-container preparation failure is carried as an ephemeral
+  request-local failure; the transaction runner surfaces it only if the planner
+  proves that exact sibling package was required. Pending setup payload
+  failures still keep their existing wrapped error path, and nonterminal
+  candidate claim/selection outcomes remain route-free.
+- Accepted the complexity-collapse finding that the exported permanent crypto
+  error taxonomy no longer controlled production behavior after the
+  payload-crypto boundary. Deleted the app/runtime permanent unwrap and GCP KMS
+  classifier exports, the duplicate signature-encoding export, and
+  classifier-only tests. Persisted envelope shape, row/root binding, and
+  signature verification still fail closed through ordinary errors, while
+  higher-level pending-group ownership decides whether a locked malformed
+  plaintext is terminal.
+- Added a service-entry regression for replacement-line selection followed by
+  sibling container preparation failure and a second no-candidate preparation;
+  the same selected setup id is preserved for both prepared transactions and
+  no route/mailbox side effect transfers ownership.
+- Post-remediation proof: focused affected web/runtime-state tests passed
+  (5 web files/240 tests plus runtime-state 1 file/4 tests); app and
+  runtime-state typechecks passed; scoped ESLint, `git diff --check`,
+  symbol-deletion checks, `no-js`, and privacy scan passed. A session-owned
+  local PostgreSQL cluster with all migrations ran the pending-group
+  one-connection replay (4 tests). Diff-aware workspace verification passed
+  dependency, workspace, orchestration, crypto, privacy-log, provider-boundary,
+  package, web, and Cloudflare gates, including 9,603 hosted-web tests,
+  2,397 Cloudflare node tests, 10 Cloudflare worker tests, lint with existing
+  warnings only, dev smoke, and production Next build. A fresh exact-head
+  ReviewGPT audit and exact-head CI remain before completion.
