@@ -323,6 +323,10 @@ beforeEach(() => {
   vi.mocked(
     memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
   ).mockResolvedValue(null);
+  vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+    .mockReset();
+  vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+    .mockResolvedValue(null);
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
@@ -5713,9 +5717,7 @@ describe("Linq group chat auto-provision", () => {
         ownerMemberId: "member_other_live_setup",
         recipientPhoneLookupKey: requireTestPhoneLookupKey("+15550000000"),
       }]);
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    mockSenderLookup(senderCore);
     prisma.hostedMember.findUnique.mockResolvedValue({
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.active,
@@ -5749,9 +5751,7 @@ describe("Linq group chat auto-provision", () => {
         ownerMemberId: setupOwnerMemberId,
         recipientPhoneLookupKey: requireTestPhoneLookupKey("+15550000000"),
       }]);
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    mockSenderLookup(senderCore);
     prisma.hostedMember.findUnique.mockResolvedValue({
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.canceled,
@@ -5782,9 +5782,7 @@ describe("Linq group chat auto-provision", () => {
         ownerMemberId: setupOwnerMemberId,
         recipientPhoneLookupKey: requireTestPhoneLookupKey("+15550000000"),
       }]);
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    mockSenderLookup(senderCore);
     prisma.hostedMember.findUnique.mockResolvedValue({
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.canceled,
@@ -5809,12 +5807,10 @@ describe("Linq group chat auto-provision", () => {
   it("does not prepare new-container crypto for a suspended sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([{
-      member: {
-        suspendedAt: new Date("2026-06-24T00:00:00.000Z"),
-      },
-      memberId: senderCore.id,
-    }]);
+    mockSenderLookup({
+      ...senderCore,
+      suspendedAt: new Date("2026-06-24T00:00:00.000Z"),
+    });
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
       event: buildLinqMessageReceivedEvent({}),
@@ -5831,9 +5827,7 @@ describe("Linq group chat auto-provision", () => {
   it("does not prepare new-container crypto while group roster authority is unavailable", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    mockSenderLookup(senderCore);
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
       event: buildLinqMessageReceivedEvent({}),
@@ -5909,9 +5903,7 @@ describe("Linq group chat auto-provision", () => {
       healthStatus: "unhealthy",
       providerReputationStatus: "CRITICAL",
     });
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    mockSenderLookup(senderCore);
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
       event: buildLinqMessageReceivedEvent({}),
@@ -5928,9 +5920,7 @@ describe("Linq group chat auto-provision", () => {
       healthStatus: "degraded",
       providerReputationStatus: "AT_RISK",
     });
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    mockSenderLookup(senderCore);
     mockHomeLinqRoute("+15550000000");
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
@@ -5949,9 +5939,7 @@ describe("Linq group chat auto-provision", () => {
   it("prewarms recovered pending-setup authority for an active sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    mockSenderLookup(senderCore);
     pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
       .mockResolvedValue([{
         armedAt: new Date("2026-06-24T00:00:00.000Z"),
@@ -6338,7 +6326,7 @@ describe("Linq group chat auto-provision", () => {
       }) as never);
     mockSenderLookup(senderCore);
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
+      { member: senderCore, memberId: senderCore.id },
     ]);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
@@ -7365,7 +7353,7 @@ describe("Linq group chat auto-provision", () => {
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     mockSenderLookup(senderCore);
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
+      { member: senderCore, memberId: senderCore.id },
     ]);
     prisma.hostedMember.findUnique.mockResolvedValue({
       accountGroupMemberships: [],
@@ -7414,7 +7402,7 @@ describe("Linq group chat auto-provision", () => {
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     mockSenderLookup(senderCore);
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
+      { member: senderCore, memberId: senderCore.id },
     ]);
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
       handles: [
@@ -7621,7 +7609,7 @@ describe("Linq group chat auto-provision", () => {
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     mockSenderLookup(senderCore);
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
+      { member: senderCore, memberId: senderCore.id },
     ]);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
@@ -7729,7 +7717,7 @@ describe("Linq group chat auto-provision", () => {
           : null
       );
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: preparedOwner.id },
+      { member: preparedOwner, memberId: preparedOwner.id },
     ]);
     vi.mocked(linqClient.getHostedLinqChatSummary)
       .mockRejectedValueOnce(new Error("linq roster unavailable"))
