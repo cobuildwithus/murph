@@ -298,13 +298,22 @@ class FakeProviderComputer implements ProviderSetupComputer {
   }));
   readonly hasOwnedRunHandoff = vi.fn(async () => false);
   readonly issueOwnedRunHandoff = vi.fn(async () => "/computer/handoff/synthetic");
+  readonly reconcileOwnedBrowserProvisioningRun = vi.fn(async (
+    input: Parameters<ProviderSetupComputer["reconcileOwnedBrowserProvisioningRun"]>[0],
+  ): Promise<"bound" | "cleanup_pending" | "settled"> => {
+    void input;
+    return "bound";
+  });
   readonly actOwnedRun = vi.fn(async (
-    _input: Parameters<ProviderSetupComputer["actOwnedRun"]>[0],
-  ) => ({
-    result: { kind: "deleted" },
-    title: "Provider applications",
-    url: CUSTOM_REGISTRATION.browser.safeLandingUrl,
-  }));
+    input: Parameters<ProviderSetupComputer["actOwnedRun"]>[0],
+  ) => {
+    void input;
+    return {
+      result: { kind: "deleted" },
+      title: "Provider applications",
+      url: CUSTOM_REGISTRATION.browser.safeLandingUrl,
+    };
+  });
   captureStarted: (() => void) | null = null;
   ambiguousCaptureErrorOnce: Error | null = null;
   missingApplicationCaptureOnce = false;
@@ -427,6 +436,98 @@ describe("member-owned provider setup service", () => {
       setupId: SETUP_ID,
       setupVersion: 2,
     });
+  });
+
+  it.each(["browser_setup", "capturing"] as const)(
+    "recovers a settled %s browser claim and requests its exact successor",
+    async (status) => {
+      const store = new MemorySetupStore();
+      store.setup = buildSetup({ browserRunId: RUN_ID, status, version: 4 });
+      const computer = new FakeProviderComputer();
+      computer.reconcileOwnedBrowserProvisioningRun.mockResolvedValue("settled");
+      const requestContinuation = vi.fn(async () => undefined);
+      const service = createService({ computer, requestContinuation, store });
+
+      await expect(service.read(MEMBER_ID)).resolves.toMatchObject({ status });
+      await expect(service.read(MEMBER_ID)).resolves.toMatchObject({ status });
+
+      expect(store.setup).toMatchObject({
+        browserRunId: null,
+        status,
+        version: 5,
+      });
+      expect(requestContinuation).toHaveBeenCalledTimes(2);
+      expect(requestContinuation).toHaveBeenNthCalledWith(1, {
+        handoffId: null,
+        memberId: MEMBER_ID,
+        provider: "strava",
+        runId: null,
+        setupId: SETUP_ID,
+        setupVersion: 5,
+      });
+      expect(requestContinuation).toHaveBeenNthCalledWith(2, {
+        handoffId: null,
+        memberId: MEMBER_ID,
+        provider: "strava",
+        runId: null,
+        setupId: SETUP_ID,
+        setupVersion: 5,
+      });
+    },
+  );
+
+  it("keeps a fresh timed-out browser cleanup claim bound without another continuation", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      status: "browser_setup",
+      version: 4,
+    });
+    const computer = new FakeProviderComputer();
+    computer.reconcileOwnedBrowserProvisioningRun.mockResolvedValue("cleanup_pending");
+    const requestContinuation = vi.fn(async () => undefined);
+    const service = createService({ computer, requestContinuation, store });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      status: "browser_setup",
+    });
+
+    expect(store.setup.browserRunId).toBe(RUN_ID);
+    expect(store.setup.version).toBe(4);
+    expect(requestContinuation).not.toHaveBeenCalled();
+  });
+
+  it("converges when another setup read clears the settled run first", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      status: "browser_setup",
+      version: 4,
+    });
+    const computer = new FakeProviderComputer();
+    computer.reconcileOwnedBrowserProvisioningRun.mockImplementationOnce(async () => {
+      store.setup = {
+        ...store.setup,
+        browserRunId: null,
+        updatedAt: new Date(store.setup.updatedAt.getTime() + 1_000),
+        version: 5,
+      };
+      throw Object.assign(new Error("Synthetic setup run was already released."), {
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      });
+    });
+    const requestContinuation = vi.fn(async () => undefined);
+    const service = createService({ computer, requestContinuation, store });
+
+    await expect(service.read(MEMBER_ID)).resolves.toMatchObject({
+      status: "browser_setup",
+    });
+
+    expect(store.setup).toMatchObject({ browserRunId: null, version: 5 });
+    expect(requestContinuation).toHaveBeenCalledWith(expect.objectContaining({
+      setupId: SETUP_ID,
+      setupVersion: 5,
+    }));
   });
 
   it("keeps setup retryable when continuation admission is refused before authorization", async () => {

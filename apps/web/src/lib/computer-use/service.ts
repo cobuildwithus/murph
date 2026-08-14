@@ -128,6 +128,10 @@ export interface ComputerExpiredRunCleanupResult {
 type ComputerRunCleanupOutcome = "cleaned" | "expired" | "failed";
 type BrowserlessProvisioningRecovery = "busy" | "changed" | "recovered";
 type ComputerOwnedFinishStatus = HostedComputerFinishOutcome | "cleanup_pending";
+type ComputerOwnedProvisioningReconciliation =
+  | "bound"
+  | "cleanup_pending"
+  | "settled";
 
 export interface ComputerAccountExternalCleanupResult {
   browserSessionsDeleted: number;
@@ -1333,6 +1337,37 @@ export class ComputerUseService {
       ownerKey: input.ownerKey,
       ownerPurpose: input.ownerPurpose,
     });
+  }
+
+  async reconcileOwnedBrowserProvisioningRun(input: {
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<ComputerOwnedProvisioningReconciliation> {
+    const now = this.now();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const run = await this.store.requireMemberOwnedProviderSetupRun(input);
+      if (isTerminalRunStatus(run.status)) {
+        return "settled";
+      }
+      if (run.status !== "cleanup_pending" || run.kernelSessionId !== null) {
+        return "bound";
+      }
+      if (!isStaleCleanupPendingRun(run, now)) {
+        return "cleanup_pending";
+      }
+
+      const recovery = await this.recoverStaleBrowserlessProvisioningRun({
+        now,
+        run,
+        store: this.store,
+      });
+      if (recovery === "recovered") {
+        return "settled";
+      }
+    }
+    throw browserProvisioningInProgressError();
   }
 
   private async finishRunWithStore(

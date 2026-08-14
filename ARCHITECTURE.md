@@ -1035,9 +1035,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `canceling`; a late creator deletes the exact returned browser, and a lost
   response or client timeout without an exact handle reuses the existing
   stale-provisioning delete-by-name boundary. Fresh acquisition cannot clear
-  that claim or admit a successor before the boundary.
-  `/connect` keeps polling that existing setup owner and reports `canceled` only
-  after cleanup is proven. Once an exact application binding is
+  that claim or admit a successor before the boundary. `/connect` keeps polling
+  that existing setup owner. With Cancel it reports `canceled` only after
+  cleanup is proven. Without Cancel, the same read path preserves the fresh
+  claim; at the stale boundary it deletes only the exact deterministic browser,
+  terminalizes the old run, CAS-clears the run binding while preserving
+  `browser_setup` or `capturing`, and appends the existing setup-versioned
+  continuation. Duplicate reads converge on the same mailbox identity, and a
+  `capturing` successor remains submit-free. Once an exact application binding is
   durable, setup finishes that exact browser run and compare-and-set clears its
   run binding before OAuth can continue; an interrupted finish or clear remains
   explicit and retryable. After application deletion, the same terminal-release

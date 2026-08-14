@@ -134,8 +134,10 @@ provider-specific automation layer.
   name until the returning creator deletes its session or the existing
   stale-provisioning boundary repeats cleanup. A provider-client timeout without
   an exact returned handle is the same ambiguity and cannot admit a successor
-  before that boundary. The setup read owner alone then
-  finalizes `canceled`; no queue, scheduler, state, or cleanup owner was added.
+  before that boundary. The setup read owner alone then finalizes `canceled` or,
+  without Cancel, clears the settled exact run while preserving phase and
+  appends the existing versioned continuation. No queue, scheduler, state, or
+  cleanup owner was added.
 
 ## Verification
 
@@ -165,6 +167,16 @@ provider-specific automation layer.
   without an exact handle and blocks a fresh retry until stale deterministic
   cleanup. The real-PostgreSQL file reproduces both Cancel and no-Cancel timeout
   orderings; all 9 cases pass.
+- ReviewGPT round 13 found that no production owner revisited the no-Cancel
+  timeout at the two-minute boundary. The correction reuses ordinary `/connect`
+  setup reads to settle only the exact stale browser, CAS-clear its binding
+  without changing `browser_setup` or `capturing`, and request the existing
+  setup-versioned continuation. Fresh reads remain blocked, duplicate requests
+  retain one event identity, and the real-PostgreSQL file keeps all 9 cases
+  passing while proving the cleanup precedes ordinary run expiry.
+- Round-13 remediation proof: 408 focused Web setup/computer/Connect tests,
+  9 real-PostgreSQL ordering cases, the exact hosted-runtime continuation case,
+  Web typecheck, focused ESLint, docs drift, and diff checks pass.
 - Coupled-state audit: every reported setup/browser finding was confirmed and
   corrected; no additional unresolved state inconsistency remains in the
   affected owner.

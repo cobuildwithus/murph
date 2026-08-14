@@ -7,6 +7,9 @@ import type { ComputerKernelClient } from "@/src/lib/computer-use/kernel-client"
 import { ComputerUseService } from "@/src/lib/computer-use/service";
 import { PrismaComputerUseStore } from "@/src/lib/computer-use/store";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import type {
+  MemberOwnedProviderSetupContinuationInput,
+} from "@/src/lib/device-sync/provider-setup/continuation";
 import { MemberOwnedProviderSetupService } from "@/src/lib/device-sync/provider-setup/service";
 import { PrismaDeviceProviderSetupStore } from "@/src/lib/device-sync/provider-setup/store";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -621,7 +624,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         materializeBrowser,
         releaseCreateBrowser,
       });
-      let now = new Date("2026-08-13T12:00:00.000Z");
+      let now = new Date();
       const computer = new ComputerUseService({
         env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
         kernel,
@@ -708,7 +711,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         createBrowserReached,
         rejectCreateBrowser,
       });
-      let now = new Date("2026-08-13T12:00:00.000Z");
+      let now = new Date();
+      const requestContinuation = vi.fn(async (
+        input: MemberOwnedProviderSetupContinuationInput,
+      ) => {
+        void input;
+      });
       const computer = new ComputerUseService({
         env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
         kernel,
@@ -718,6 +726,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const service = new MemberOwnedProviderSetupService("strava", {
         computer,
         now: () => now,
+        requestContinuation,
         store: new PrismaDeviceProviderSetupStore(prisma),
       });
       let begin: Promise<PromiseSettledResult<unknown>[]> | null = null;
@@ -774,6 +783,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           kernelSessionId: null,
           status: "expired",
         });
+        expect(requestContinuation).not.toHaveBeenCalled();
       } finally {
         rejectCreateBrowser.resolve();
         if (begin) {
@@ -788,7 +798,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     }, 30_000);
 
-    it("blocks a successor until a no-handle create timeout reaches stale cleanup", async () => {
+    it("recovers a no-handle create timeout from setup reads at the stale boundary", async () => {
       const suffix = randomUUID().replaceAll("-", "");
       const memberId = `member_provider_create_timeout_retry_${suffix}`;
       const setupId = `dps_provider_create_timeout_retry_${suffix}`;
@@ -799,7 +809,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         createBrowserReached,
         rejectCreateBrowser,
       });
-      let now = new Date("2026-08-13T12:00:00.000Z");
+      let now = new Date();
+      const requestContinuation = vi.fn(async (
+        input: MemberOwnedProviderSetupContinuationInput,
+      ) => {
+        void input;
+      });
       const computer = new ComputerUseService({
         env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
         kernel,
@@ -809,6 +824,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const service = new MemberOwnedProviderSetupService("strava", {
         computer,
         now: () => now,
+        requestContinuation,
         store: new PrismaDeviceProviderSetupStore(prisma),
       });
       let begin: Promise<PromiseSettledResult<unknown>[]> | null = null;
@@ -843,37 +859,52 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
 
         kernel.materializeTimedOutBrowser();
-        await expect(service.beginBrowserSetup(memberId)).rejects.toMatchObject({
-          code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+        await expect(service.read(memberId)).resolves.toMatchObject({
+          status: "browser_setup",
         });
         expect(kernel.browserLive).toBe(true);
         expect(kernel.createCalls).toBe(1);
         expect(kernel.navigationCalls).toBe(0);
+        expect(requestContinuation).not.toHaveBeenCalled();
 
         now = new Date(cleanupClaim.updatedAt.getTime() + 120_001);
-        await expect(computer.cleanupExpiredRuns()).resolves.toMatchObject({
-          expiredRuns: 1,
+        expect(cleanupClaim.expiresAt.getTime()).toBeGreaterThan(now.getTime());
+        await expect(service.read(memberId)).resolves.toMatchObject({
+          status: "browser_setup",
         });
         expect(kernel.browserLive).toBe(false);
         await expect(prisma.hostedComputerRun.findUniqueOrThrow({
           where: { id: cleanupClaim.id },
         })).resolves.toMatchObject({
           kernelSessionId: null,
-          status: "expired",
+          status: "failed",
         });
-
-        const successor = await service.beginBrowserSetup(memberId);
-        expect(successor.setup.setupId).toBe(setupId);
-        const reboundSetup = await prisma.deviceProviderSetup.findUniqueOrThrow({
+        const recoveredSetup = await prisma.deviceProviderSetup.findUniqueOrThrow({
           where: { id: setupId },
         });
-        expect(reboundSetup).toMatchObject({
-          browserRunId: expect.any(String),
+        expect(recoveredSetup).toMatchObject({
+          browserRunId: null,
+          status: "browser_setup",
+          version: 3,
+        });
+        expect(requestContinuation).toHaveBeenCalledWith({
+          handoffId: null,
+          memberId,
+          provider: "strava",
+          runId: null,
+          setupId,
+          setupVersion: recoveredSetup.version,
+        });
+
+        await expect(service.read(memberId)).resolves.toMatchObject({
           status: "browser_setup",
         });
-        expect(reboundSetup.browserRunId).not.toBe(cleanupClaim.id);
-        expect(kernel.createCalls).toBe(2);
-        expect(kernel.navigationCalls).toBe(1);
+        expect(requestContinuation).toHaveBeenCalledTimes(2);
+        expect(requestContinuation.mock.calls[1]?.[0]).toEqual(
+          requestContinuation.mock.calls[0]?.[0],
+        );
+        expect(kernel.createCalls).toBe(1);
+        expect(kernel.navigationCalls).toBe(0);
       } finally {
         rejectCreateBrowser.resolve();
         if (begin) {
@@ -905,6 +936,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           finishOwnedRun: unreachable,
           hasOwnedRunHandoff: unreachable,
           issueOwnedRunHandoff: unreachable,
+          reconcileOwnedBrowserProvisioningRun: unreachable,
         },
         store,
       });

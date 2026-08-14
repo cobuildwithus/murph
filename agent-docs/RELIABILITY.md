@@ -976,9 +976,18 @@ Last verified: 2026-08-13
   deletes the returned exact browser, while a lost response or client timeout
   without an exact handle converges through the existing two-minute
   stale-provisioning cleanup. A fresh retry remains blocked until that cleanup
-  runs. Setup polling finalizes
-  `canceled` only after one of those paths proves cleanup, and navigation remains
-  impossible because attach revalidates the now-ineligible setup.
+  runs. Setup polling finalizes `canceled` only after one of those paths proves
+  cleanup, and navigation remains impossible because attach revalidates the
+  now-ineligible setup. For `browser_setup` or `capturing` without Cancel, the
+  same `/connect` read owner leaves a fresh claim and setup version unchanged.
+  At the stale boundary it deletes only the exact setup-owned deterministic
+  browser, terminalizes that run even while its ordinary expiry is still in the
+  future, CAS-clears its binding without changing phase, and appends the
+  existing typed continuation for the new version. A crash before clear is
+  retried from the terminal run; a crash before append is retried from the
+  unbound setup; duplicate appends converge on the same event identity.
+  `capturing` recovery remains submit-free, while `canceling` never creates a
+  continuation.
   Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
   the exact setup-owned handoff resumes that run without a conversation reply;

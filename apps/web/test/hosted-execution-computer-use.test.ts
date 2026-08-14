@@ -6951,6 +6951,89 @@ describe("ComputerUseService", () => {
     expect(kernel.createdBrowserInputs).toEqual([]);
   });
 
+  it("preserves a fresh setup-owned browserless cleanup claim", async () => {
+    const now = new Date("2026-06-17T12:01:59.999Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+        status: "cleanup_pending",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.reconcileOwnedBrowserProvisioningRun({
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_run123",
+    })).resolves.toBe("cleanup_pending");
+
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({ status: "cleanup_pending" });
+  });
+
+  it("settles only the exact stale setup-owned browserless cleanup claim", async () => {
+    const now = new Date("2026-06-17T12:02:00.001Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+        status: "cleanup_pending",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.reconcileOwnedBrowserProvisioningRun({
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_run123",
+    })).resolves.toBe("settled");
+
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
+  });
+
+  it("recognizes an already settled exact provisioning claim without another cleanup", async () => {
+    const now = new Date("2026-06-17T12:02:00.001Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T12:02:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+        status: "failed",
+        updatedAt: new Date("2026-06-17T12:02:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.reconcileOwnedBrowserProvisioningRun({
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_run123",
+    })).resolves.toBe("settled");
+
+    expect(kernel.deletedSessionIds).toEqual([]);
+  });
+
   it.each([
     {
       completedAt: new Date("2026-06-17T11:30:00.000Z"),

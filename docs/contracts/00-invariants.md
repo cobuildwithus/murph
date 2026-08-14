@@ -307,7 +307,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   or the existing stale-provisioning boundary repeats deterministic cleanup. A
   provider-client rejection without an exact browser handle remains ambiguous,
   and no fresh acquisition may clear its claim before that boundary;
-  only that proof may clear the claim and report `canceled`.
+  only that proof may clear the claim and report `canceled`. Without Cancel,
+  `/connect` setup reconciliation preserves a fresh exact cleanup claim. At the
+  same stale boundary it may delete only that setup-owned deterministic browser,
+  terminalize the old run, CAS-clear its binding without changing
+  `browser_setup` or `capturing`, and append the existing continuation for the
+  new setup version. Repeated reads reuse that continuation identity, and
+  `capturing` recovery remains submit-free.
   Successful application deletion deactivates the terminal setup only after its exact
   browser run is released, so a fresh setup never overlaps owned browser work.
   Continue and setup-owned handoff completion append exact typed continuation
