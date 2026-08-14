@@ -6,9 +6,11 @@ Updated: 2026-08-14
 
 ## Goal
 
-- Resolve ReviewGPT round 2 on PR #1806 by removing the test-owned legacy
-  snapshot semantics from the incident regression and proving cold recovery at
-  the smallest production-faithful owner boundary.
+- Resolve the accepted ReviewGPT round-2 finding from PR #1806 by removing the
+  test-owned legacy snapshot semantics from the incident regression and proving
+  cold recovery at the smallest production-faithful owner boundary. PR #1806
+  merged at its prior head while the correction was in flight, so the verified
+  correction continues in focused follow-up PR #1812.
 
 ## Success criteria
 
@@ -45,6 +47,8 @@ Updated: 2026-08-14
 
 - ReviewGPT round 2: `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` at
   `c480ce5128ff03d4cf2fcbe1b222d66ba3c203dd`.
+- PR #1806 merged externally at that reviewed head before the accepted
+  correction was pushed; follow-up PR #1812 owns the correction.
 - Static inspection confirmed the changed test's legacy bundle snapshots the
   whole vault, while production v2 archive planning excludes the machine-local
   device-sync subtree and restores through a different owner branch.
