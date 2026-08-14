@@ -274,7 +274,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         try {
           payload = await complete(Math.max(0, deadlineMs - Date.now()));
         } catch (error) {
-          assertHostedWorkspaceSnapshotOperationLive(sessionCancellationSignal);
+          throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+            error,
+            sessionCancellationSignal,
+          );
+          if (sessionCancellationSignal?.aborted) {
+            throw error;
+          }
           const replayTimeoutMs = deadlineMs - Date.now();
           if (
             replayTimeoutMs <= 0
@@ -285,7 +291,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           try {
             payload = await complete(replayTimeoutMs);
           } catch (replayError) {
-            assertHostedWorkspaceSnapshotOperationLive(sessionCancellationSignal);
+            throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+              replayError,
+              sessionCancellationSignal,
+            );
             throw replayError;
           }
         }
@@ -332,7 +341,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           workspaceCheckpointBridge: input.workspaceCheckpointBridge,
         });
       } catch (error) {
-        assertHostedWorkspaceSnapshotOperationLive(request.signal);
+        throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+          error,
+          request.signal,
+        );
         throw error;
       }
       assertHostedWorkspaceSnapshotOperationLive(request.signal);
@@ -387,7 +399,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             url: new URL(presignedPut.putUrl),
           });
         } catch (error) {
-          assertHostedWorkspaceSnapshotOperationLive(request.signal);
+          throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+            error,
+            request.signal,
+          );
           await cancelHostedWorkspaceSnapshotResponseBody(body);
           const terminalError = new Error(
             "Hosted workspace snapshot direct R2 upload is not resumable after a transport failure; "
@@ -395,16 +410,22 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             { cause: error },
           );
           if (
+            request.signal?.aborted
+            ||
             attempt >= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS
             || !isRetryableHostedWorkspaceSnapshotR2TransportFailure(error)
           ) {
             throw terminalError;
           }
-          const retryWithinDeadline =
-            await waitForHostedWorkspaceSnapshotR2PutRetry({
+          let retryWithinDeadline: boolean;
+          try {
+            retryWithinDeadline = await waitForHostedWorkspaceSnapshotR2PutRetry({
               expiresAtMs,
               signal: request.signal,
             });
+          } catch {
+            throw terminalError;
+          }
           if (!retryWithinDeadline) {
             throw terminalError;
           }
@@ -412,8 +433,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           continue;
         }
 
-        assertHostedWorkspaceSnapshotOperationLive(request.signal);
         if (response.ok) {
+          assertHostedWorkspaceSnapshotOperationLive(request.signal);
           timings.snapshotDirectR2PutElapsedMs =
             readHostedRuntimeStepElapsedMs(putStartedAt);
           return timings;
@@ -439,7 +460,6 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
               input.timeoutMs,
             ),
           });
-        assertHostedWorkspaceSnapshotOperationLive(request.signal);
         let responseError: unknown;
         try {
           assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
@@ -458,6 +478,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           },
         );
         if (
+          request.signal?.aborted
+          ||
           attempt >= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS
           || response.status === 412
           || !isRetryableHostedWorkspaceSnapshotR2Response({
@@ -467,11 +489,15 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         ) {
           throw terminalError;
         }
-        const retryWithinDeadline =
-          await waitForHostedWorkspaceSnapshotR2PutRetry({
+        let retryWithinDeadline: boolean;
+        try {
+          retryWithinDeadline = await waitForHostedWorkspaceSnapshotR2PutRetry({
             expiresAtMs,
             signal: request.signal,
           });
+        } catch {
+          throw terminalError;
+        }
         if (!retryWithinDeadline) {
           throw terminalError;
         }
@@ -662,14 +688,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ),
         });
       } catch (error) {
-        if (
-          signal?.aborted
-          && startSignal.signal.aborted
-          && Object.is(startSignal.signal.reason, signal.reason)
-          && isHostedWorkspaceSnapshotAbortFailure(error, signal.reason)
-        ) {
-          assertHostedWorkspaceSnapshotOperationLive(signal);
-        }
+        throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+          error,
+          startSignal.signal,
+        );
         throw error;
       } finally {
         startSignal.dispose();
@@ -1086,8 +1108,10 @@ async function presignWorkspaceSnapshotPut(input: {
       });
       return parseHostedWorkspaceSnapshotPresignedPutPayload(payload);
     } catch (error) {
-      assertHostedWorkspaceSnapshotOperationLive(input.signal);
+      throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(error, input.signal);
       if (
+        input.signal?.aborted
+        ||
         attempt >= WORKSPACE_SNAPSHOT_PRESIGN_PUT_MAX_ATTEMPTS
         || !isRetryableHostedRuntimeReplaySafeReadTransportError(error)
       ) {
@@ -1095,6 +1119,16 @@ async function presignWorkspaceSnapshotPut(input: {
       }
     }
   }
+}
+
+function throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+  error: unknown,
+  signal: AbortSignal | null | undefined,
+): void {
+  if (!signal?.aborted || !isHostedWorkspaceSnapshotAbortFailure(error, signal.reason)) {
+    return;
+  }
+  assertHostedWorkspaceSnapshotOperationLive(signal);
 }
 
 function assertHostedWorkspaceSnapshotOperationLive(

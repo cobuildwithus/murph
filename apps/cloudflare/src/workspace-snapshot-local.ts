@@ -349,12 +349,26 @@ export function isHostedWorkspaceSnapshotAbortFailure(
       return true;
     }
     seen.add(current);
+    const record = current as Record<string, unknown>;
+    if (
+      isHostedWorkspaceSnapshotHttpStatus(record.status)
+      || isHostedWorkspaceSnapshotHttpStatus(record.statusCode)
+    ) {
+      return false;
+    }
     if (current instanceof Error && current.name === "AbortError") {
       return true;
     }
     current = (current as { cause?: unknown }).cause;
   }
   return false;
+}
+
+function isHostedWorkspaceSnapshotHttpStatus(value: unknown): boolean {
+  return typeof value === "number"
+    && Number.isInteger(value)
+    && value >= 100
+    && value <= 599;
 }
 
 function isSameOrDescendantPath(candidate: string, root: string): boolean {
