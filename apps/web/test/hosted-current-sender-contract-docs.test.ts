@@ -42,6 +42,21 @@ describe("current-sender durable contract", () => {
     }
   });
 
+  it("keeps one turn-local decision per exact current-sender ref", () => {
+    for (const url of PROTOCOL_OWNER_DOC_URLS) {
+      const ownerDoc = readFileSync(url, "utf8");
+
+      expect(ownerDoc).toMatch(/turn-local\s+decision\s+claim/iu);
+      expect(ownerDoc).toMatch(/in-flight\s+notice/iu);
+      expect(ownerDoc).toMatch(
+        /different exact refs[\s\S]{0,80}concurrent/iu,
+      );
+      expect(ownerDoc).toMatch(
+        /canonical\s+exact-source\s+request\s+identity/iu,
+      );
+    }
+  });
+
   it("keeps private and group terminal effects mutually exclusive across retry", () => {
     for (const url of PROTOCOL_OWNER_DOC_URLS) {
       const ownerDoc = readFileSync(url, "utf8");

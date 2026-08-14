@@ -386,6 +386,16 @@ provider request order, so a later continuation cannot start its notice or Web
 effect while an earlier clarification is unsettled. Independent new exact-ref
 requests retain their existing concurrent path.
 
+Before any external await, the runtime also records one turn-local decision
+claim per exact accepted ref: clarification, group delivery, or private
+delivery, including whether that action starts or continues a request. A
+different same-ref decision fails before a notice, Web admission, or
+clarification write. Exact repeated group decisions share one in-flight notice;
+notice failure retains the group claim for the rest of the invocation rather
+than permitting a private switch. Different exact refs remain independently
+concurrent. This invocation-local claim adds no persisted state; Web's
+canonical exact-source request identity remains the durable replay fence.
+
 The canonical deterministic request id binds the group runtime and exact
 accepted input. The mailbox request persists one `current_sender_personal`
 read target and a separate fixed result destination: `origin_context` or a

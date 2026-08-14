@@ -53,6 +53,15 @@ later continuation cannot overtake an earlier clarification; independent new
 exact-ref requests remain concurrent. No exact response format is required from
 the person.
 
+Before any external await, the runtime records one turn-local decision claim
+per exact accepted ref. A different same-ref clarification, group, private,
+new, or continuation decision fails before a notice, Web admission, or
+clarification write. Exact repeated group decisions share one in-flight notice,
+and notice failure retains the group claim for the rest of that invocation
+instead of silently switching to private delivery. Different exact refs remain
+independently concurrent. This claim is not persisted; Web's canonical
+exact-source request identity remains the durable replay fence.
+
 Web derives the member, route, question, and replay identity from the exact
 stored source; the model never supplies those values. The requested wake
 persists one `current_sender_personal` read target and a separate fixed result

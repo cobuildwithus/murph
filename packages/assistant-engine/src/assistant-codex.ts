@@ -3114,7 +3114,7 @@ async function runCodexAppServerTurnOnProcess(
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
   const groupSharedReadTurnState = {
-    currentSenderGroupPreviewedMessageRefs: new Set<string>(),
+    currentSenderDecisionByMessageRef: new Map(),
     invalid: false,
     readProjectionScopeKeyBatches: [],
     roster: null,

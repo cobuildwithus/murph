@@ -973,8 +973,23 @@ export interface MurphDynamicToolExecutionResult {
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
+type CurrentSenderTurnDecision =
+  | 'clarification'
+  | 'group_continuation'
+  | 'group_new'
+  | 'private_continuation'
+  | 'private_new'
+
+interface CurrentSenderTurnDecisionClaim {
+  decision: CurrentSenderTurnDecision
+  groupNotice: Promise<boolean> | null
+}
+
 export interface MurphGroupSharedReadTurnState {
-  currentSenderGroupPreviewedMessageRefs?: Set<string>
+  currentSenderDecisionByMessageRef?: Map<
+    string,
+    CurrentSenderTurnDecisionClaim
+  >
   invalid: boolean
   readProjectionScopeKeyBatches: string[][]
   roster: Array<{
@@ -4386,35 +4401,54 @@ async function executeGroupTool(input: {
         'current-sender request requires the selected accepted message in this group turn',
       )
     }
-    const previewedMessageRefs =
-      input.groupSharedReadTurnState?.currentSenderGroupPreviewedMessageRefs
-    let previewSent = previewedMessageRefs?.has(input.request.messageRef) === true
-    if (input.request.audience === 'group' && !previewSent) {
-      if (!input.progressDelivery || input.deliveryContextOrdinal === null) {
-        return toolTextResult(
-          false,
-          'group sharing is unavailable because the required advance notice could not be delivered',
-        )
-      }
-      const preview = await input.progressDelivery.send(
-        'I’ll ask your Murph and share the answer here.',
-        {
-          deliveryContextOrdinal: input.deliveryContextOrdinal,
-          required: true,
-          source: 'system',
-          targetInputId: input.request.messageRef,
-        },
+    const decisionByMessageRef =
+      input.groupSharedReadTurnState?.currentSenderDecisionByMessageRef
+    if (!decisionByMessageRef) {
+      return toolTextResult(
+        false,
+        'current-sender decision authority is unavailable for this turn',
       )
-      if (preview.kind !== 'sent') {
+    }
+    const decision: CurrentSenderTurnDecision =
+      input.request.mode === 'clarification'
+        ? 'clarification'
+        : input.request.audience === 'group'
+          ? input.request.mode === 'continuation'
+            ? 'group_continuation'
+            : 'group_new'
+          : input.request.mode === 'continuation'
+            ? 'private_continuation'
+            : 'private_new'
+    let claim = decisionByMessageRef.get(input.request.messageRef)
+    if (claim && claim.decision !== decision) {
+      return toolTextResult(
+        false,
+        'current-sender request conflicts with an earlier decision for this Message',
+      )
+    }
+    if (!claim) {
+      claim = { decision, groupNotice: null }
+      decisionByMessageRef.set(input.request.messageRef, claim)
+      if (input.request.audience === 'group') {
+        claim.groupNotice = sendCurrentSenderGroupNotice({
+          deliveryContextOrdinal: input.deliveryContextOrdinal,
+          messageRef: input.request.messageRef,
+          progressDelivery: input.progressDelivery,
+        })
+      }
+    }
+    if (input.request.audience === 'group') {
+      const previewSent = claim.groupNotice
+        ? await claim.groupNotice
+        : false
+      if (!previewSent) {
         return toolTextResult(
           false,
           'group sharing is unavailable because the required advance notice could not be delivered',
         )
       }
-      previewedMessageRefs?.add(input.request.messageRef)
-      previewSent = true
+      currentSenderGroupPreviewSent = true
     }
-    currentSenderGroupPreviewSent = previewSent
     request = {
       action: 'ask_current_sender',
       ...(input.request.audience === undefined
@@ -4678,6 +4712,26 @@ async function executeGroupTool(input: {
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+async function sendCurrentSenderGroupNotice(input: {
+  deliveryContextOrdinal: number | null
+  messageRef: string
+  progressDelivery: AssistantProgressDelivery | null
+}): Promise<boolean> {
+  if (!input.progressDelivery || input.deliveryContextOrdinal === null) {
+    return false
+  }
+  const preview = await input.progressDelivery.send(
+    'I’ll ask your Murph and share the answer here.',
+    {
+      deliveryContextOrdinal: input.deliveryContextOrdinal,
+      required: true,
+      source: 'system',
+      targetInputId: input.messageRef,
+    },
+  )
+  return preview.kind === 'sent'
 }
 
 type GroupToolFailureCategory =

@@ -114,5 +114,18 @@ Local replacement-candidate evidence on 2026-08-13:
   capture metadata verifies `gpt-5-6-pro`; the response's inability to
   self-report its model does not override that external evidence. It therefore
   counts as substantive round 15.
-- A fresh full-snapshot ReviewGPT round 16 PASS and required GitHub checks
+- ReviewGPT round 16 found that concurrent same-ref tool calls could choose
+  private, group, or clarification before Web's durable request conflict. Web
+  still prevented a second personal read, but private-first execution could
+  emit a false room notice, duplicate group calls could emit two notices, and
+  clarification could coexist with admitted work. Four focused tests reproduced
+  those races. The existing per-turn group-tool state now claims the first
+  decision synchronously before any external await, rejects a contradictory
+  same-ref decision before notice or Web work, and shares one in-flight notice
+  across exact group repeats. Notice failure retains the group claim for the
+  invocation; different exact refs remain concurrent. This adds no database
+  state, queue, service, or lifecycle owner. Eleven focused engine tests, the
+  production app-server concurrency proof, the 13-test current-sender filter,
+  and Assistant Engine typecheck pass.
+- A fresh full-snapshot ReviewGPT round 17 PASS and required GitHub checks
   remain pending on the remediated exact head.

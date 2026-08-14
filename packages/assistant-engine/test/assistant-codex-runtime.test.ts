@@ -3669,6 +3669,125 @@ describe('assistant codex runtime', () => {
     expect(noticesBeforeClarificationReleased).toBe(1)
   })
 
+  it('claims one current-sender decision before concurrent same-ref tool effects', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-decision-work-',
+    )
+    const privateStarted = createDeferred<void>()
+    const releasePrivate = createDeferred<void>()
+    const inputId = `ain_${'d'.repeat(32)}`
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => {
+      if (
+        request.action === 'ask_current_sender' &&
+        request.audience === 'current_sender'
+      ) {
+        privateStarted.resolve()
+        await releasePrivate.promise
+      }
+      return {
+        action: 'ask_current_sender' as const,
+        result: { status: 'accepted' as const },
+      }
+    })
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      currentUserActionScope: () => ({
+        acceptedInputIds: [inputId],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-decision' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-decision' } },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 94,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'message_current_sender',
+                message_ref: inputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          await privateStarted.promise
+          child.stdout.write(jsonLine({
+            id: 95,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'ask_current_sender',
+                message_ref: inputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
+            id: 95,
+            result: { success: false },
+          })
+          expect(progressDelivery.send).not.toHaveBeenCalled()
+          expect(groupRequest).toHaveBeenCalledTimes(1)
+
+          releasePrivate.resolve()
+          const interrupt = await waitForRpcMethod(child, 'turn/interrupt')
+          child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-decision',
+                status: 'interrupted',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'answer privately',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: '',
+    })
+  })
+
   it('allows response media for a later steered message after an approved vault send', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-vault-send-steer-work-',

@@ -89,6 +89,14 @@ function sentProgressDelivery() {
   };
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("murph.group current-sender intent", () => {
   it("maps natural-intent actions to one exact Message ref", () => {
     expect(parseCurrentSenderRequest().request).toEqual({
@@ -172,7 +180,7 @@ describe("murph.group current-sender intent", () => {
       env: {},
       fetchImpl: fetch,
       groupSharedReadTurnState: {
-        currentSenderGroupPreviewedMessageRefs: new Set(),
+        currentSenderDecisionByMessageRef: new Map(),
         invalid: false,
         readProjectionScopeKeyBatches: [],
         roster: [],
@@ -223,17 +231,37 @@ describe("murph.group current-sender intent", () => {
         source: "system" as const,
       })),
     };
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
     const result = await executeMurphDynamicToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery,
       request: parseCurrentSenderRequest(),
     });
+    const privateResult = await executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
 
     expect(result.rpcResult.success).toBe(false);
+    expect(privateResult.rpcResult.success).toBe(false);
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
@@ -244,7 +272,7 @@ describe("murph.group current-sender intent", () => {
     }));
     const progressDelivery = sentProgressDelivery();
     const sharedState = {
-      currentSenderGroupPreviewedMessageRefs: new Set<string>(),
+      currentSenderDecisionByMessageRef: new Map(),
       invalid: false,
       readProjectionScopeKeyBatches: [],
       roster: [],
@@ -254,11 +282,11 @@ describe("murph.group current-sender intent", () => {
       request: groupRequest,
     });
 
-    for (const [ordinal, messageRef] of [
+    await Promise.all(([
       [0, EARLIER_SENDER_INPUT_ID],
       [1, NEWEST_SENDER_INPUT_ID],
-    ] as const) {
-      await executeMurphDynamicToolRequest({
+    ] as const).map(([ordinal, messageRef]) =>
+      executeMurphDynamicToolRequest({
         deliveryContextOrdinal: ordinal,
         env: {},
         fetchImpl: fetch,
@@ -267,8 +295,8 @@ describe("murph.group current-sender intent", () => {
         nextUsageOrdinal: () => ordinal + 1,
         progressDelivery,
         request: parseCurrentSenderRequest({ messageRef }),
-      });
-    }
+      }),
+    ));
 
     expect(progressDelivery.send).toHaveBeenNthCalledWith(
       1,
@@ -305,7 +333,7 @@ describe("murph.group current-sender intent", () => {
     }));
     const progressDelivery = sentProgressDelivery();
     const sharedState = {
-      currentSenderGroupPreviewedMessageRefs: new Set<string>(),
+      currentSenderDecisionByMessageRef: new Map(),
       invalid: false,
       readProjectionScopeKeyBatches: [],
       roster: [],
@@ -328,17 +356,223 @@ describe("murph.group current-sender intent", () => {
     expect(groupRequest).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps private and clarification paths silent in the group", async () => {
+  it("keeps a private decision from racing a group notice for the same ref", async () => {
+    const privateAdmission = deferred<{
+      action: "ask_current_sender";
+      result: { status: "accepted" };
+    }>();
+    const groupRequest = vi.fn(async (request) => request.audience === "current_sender"
+      ? privateAdmission.promise
+      : {
+          action: "ask_current_sender" as const,
+          result: { status: "accepted" as const },
+        });
+    const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+
+    const privateResult = executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
+    const groupResult = await executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+
+    expect(groupResult.rpcResult.success).toBe(false);
+    expect(progressDelivery.send).not.toHaveBeenCalled();
+    expect(groupRequest).toHaveBeenCalledTimes(1);
+    privateAdmission.resolve({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+    await expect(privateResult).resolves.toMatchObject({
+      rpcResult: { success: true },
+    });
+  });
+
+  it("keeps a group decision from racing private admission for the same ref", async () => {
+    const groupNotice = deferred<{
+      kind: "sent";
+      source: "system";
+    }>();
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = {
+      send: vi.fn(() => groupNotice.promise),
+    };
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+
+    const groupResult = executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+    const privateResult = await executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
+
+    expect(privateResult.rpcResult.success).toBe(false);
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
+    expect(groupRequest).not.toHaveBeenCalled();
+    groupNotice.resolve({ kind: "sent", source: "system" });
+    await expect(groupResult).resolves.toMatchObject({
+      rpcResult: { success: true },
+    });
+    expect(groupRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one in-flight group notice for duplicate same-ref decisions", async () => {
+    const groupNotice = deferred<{
+      kind: "sent";
+      source: "system";
+    }>();
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = {
+      send: vi.fn(() => groupNotice.promise),
+    };
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+    const execute = () => executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+
+    const first = execute();
+    const second = execute();
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
+    expect(groupRequest).not.toHaveBeenCalled();
+    groupNotice.resolve({ kind: "sent", source: "system" });
+    await Promise.all([first, second]);
+    expect(groupRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps clarification mutually exclusive with a same-ref private decision", async () => {
+    const clarificationAdmission = deferred<{
+      action: "ask_current_sender";
+      result: { status: "clarification_required" };
+    }>();
+    const groupRequest = vi.fn(async (request) => request.mode === "clarification"
+      ? clarificationAdmission.promise
+      : {
+          action: "ask_current_sender" as const,
+          result: { status: "accepted" as const },
+        });
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+
+    const clarificationResult = executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: sentProgressDelivery(),
+      request: parseCurrentSenderRequest({ action: "clarify_current_sender" }),
+    });
+    const privateResult = await executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery: sentProgressDelivery(),
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
+
+    expect(privateResult.rpcResult.success).toBe(false);
+    expect(groupRequest).toHaveBeenCalledTimes(1);
+    clarificationAdmission.resolve({
+      action: "ask_current_sender",
+      result: { status: "clarification_required" },
+    });
+    await expect(clarificationResult).resolves.toMatchObject({
+      rpcResult: { success: true },
+    });
+  });
+
+  it("keeps independent private and clarification paths silent in the group", async () => {
     const groupRequest = vi.fn(async () => ({
       action: "ask_current_sender" as const,
       result: { status: "clarification_required" as const },
     }));
     const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({
+      acceptedInputIds: [EARLIER_SENDER_INPUT_ID, NEWEST_SENDER_INPUT_ID],
+      request: groupRequest,
+    });
     await executeMurphDynamicToolRequest({
       deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery,
       request: parseCurrentSenderRequest({ action: "clarify_current_sender" }),
@@ -347,10 +581,14 @@ describe("murph.group current-sender intent", () => {
       deliveryContextOrdinal: 1,
       env: {},
       fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
       nextUsageOrdinal: () => 2,
       progressDelivery,
-      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+      request: parseCurrentSenderRequest({
+        action: "message_current_sender",
+        messageRef: EARLIER_SENDER_INPUT_ID,
+      }),
     });
 
     expect(progressDelivery.send).not.toHaveBeenCalled();
@@ -367,7 +605,7 @@ describe("murph.group current-sender intent", () => {
         audience: "current_sender",
         mode: "new",
         origin: expect.objectContaining({
-          assistantInputId: NEWEST_SENDER_INPUT_ID,
+          assistantInputId: EARLIER_SENDER_INPUT_ID,
         }),
       }],
     ]);

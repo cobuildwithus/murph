@@ -1202,6 +1202,15 @@ Last verified: 2026-08-13
   request order; a later continuation cannot start before an earlier
   clarification settles, while independent new exact-ref requests remain
   concurrent.
+- Before any external await, the runtime records one turn-local decision claim
+  per exact accepted ref. Contradictory clarification, group, private, new, or
+  continuation choices for that ref fail before notice, Web admission, or
+  clarification persistence. Exact repeated group decisions share one in-flight
+  notice promise. The claim remains after notice failure or uncertainty, so a
+  same-turn retry cannot switch to private delivery; different exact refs stay
+  concurrent. This is bounded invocation memory, not another durable owner.
+  Web's canonical exact-source request identity remains the replay fence across
+  invocations and restarts.
 - Admission persists one `current_sender_personal` read target and a separate
   result destination. `origin_context` selects the existing group completion;
   `requester_direct` also pins the admitted Linq or Telegram channel. The

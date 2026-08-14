@@ -970,6 +970,16 @@ the existing stateful dynamic-tool chain in provider request order, so an
 earlier clarification settles before a later continuation may begin its notice
 or Web effect; independent new exact-ref requests remain concurrent.
 
+Before any external await, the runtime records one turn-local decision claim
+per exact accepted ref. A different same-ref clarification, group, private,
+new, or continuation decision fails before a notice, Web admission, or
+clarification write. Exact repeated group decisions share one in-flight notice;
+notice failure retains the group claim for the invocation rather than allowing
+a private switch. Different exact refs remain independently concurrent. The
+claim is invocation-local only. Web's canonical exact-source request identity
+remains the durable replay and destination fence across invocations and
+restarts.
+
 Prepare reloads the same source and revalidates membership, group routing,
 permission, fixed result destination, and any required private route immediately before
 private context is read. The personal read-only child proposes one candidate
