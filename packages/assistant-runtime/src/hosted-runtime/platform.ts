@@ -106,6 +106,18 @@ import type {
   HostedRuntimeLabsToolResponse,
 } from "@murphai/hosted-execution/labs";
 import type {
+  HostedExecutionDeviceSyncConnectLinkResponse,
+  HostedExecutionDeviceSyncDirtyAckRequest,
+  HostedExecutionDeviceSyncDirtyAckResponse,
+  HostedExecutionDeviceSyncDirtyPendingRequest,
+  HostedExecutionDeviceSyncDirtyPendingResponse,
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncReconcileResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotCursor,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+} from "@murphai/device-syncd/hosted-runtime";
+import type {
   HostedEmailSendRequest,
   HostedEmailSendResult,
 } from "../hosted-email.ts";
@@ -113,9 +125,6 @@ import type {
   AssistantConnectedAppsPort,
   AssistantHostedPrivateImageUrlPublisher,
 } from "@murphai/assistant-engine";
-import type {
-  HostedRuntimeDeviceSyncPort,
-} from "./device-sync-port.ts";
 import type {
   RuntimeLivenessPort,
 } from "./liveness.ts";
@@ -157,9 +166,20 @@ export class HostedRuntimeArtifactReadError extends Error {
   }
 }
 
-export {
-  HostedRuntimeArtifactWriteError,
-} from "./artifact-write-error.ts";
+export class HostedRuntimeArtifactWriteError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime artifact write failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeArtifactWriteError";
+    this.retryable = input.retryable;
+  }
+}
 
 export interface HostedRuntimeAssistantConfigurationToolPort {
   request(
@@ -405,10 +425,40 @@ type HostedRuntimeEffectsPortBase = {
 
 export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 
-export type {
-  HostedRuntimeDeviceSyncMessagingReturnTarget,
-  HostedRuntimeDeviceSyncPort,
-} from "./device-sync-port.ts";
+export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
+
+export interface HostedRuntimeDeviceSyncPort {
+  applyUpdates(input: {
+    occurredAt?: string | null;
+    signal?: AbortSignal | null;
+    updates: HostedExecutionDeviceSyncRuntimeApplyRequest["updates"];
+  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
+  createConnectLink(input: {
+    connectTarget: string;
+    messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
+  }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  reconcileAccount?(input: {
+    connectionId: string;
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
+  fetchSnapshot(input?: {
+    connectionId?: string | null;
+    cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
+    includeCredentialMaterial?: boolean | null;
+    limit?: number | null;
+    provider?: string | null;
+    signal?: AbortSignal | null;
+    sourceProviderSlug?: string | null;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+  fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId"> & {
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncDirtyPendingResponse>;
+  ackDirtyStateProcessed(
+    input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId"> & {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedExecutionDeviceSyncDirtyAckResponse>;
+}
 
 export interface HostedRuntimeClinicalRecordsPort {
   createConnectLink?(
